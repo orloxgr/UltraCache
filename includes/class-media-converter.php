@@ -1260,22 +1260,22 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$test_file = $tmp . '.avif';
 			ucwp_safe_unlink($tmp);
 
-			$image = @imagecreatetruecolor(2, 2);
+			$image = imagecreatetruecolor(2, 2);
 			if (!$image) {
 				$gd_avif_supported = false;
 				return false;
 			}
 
 			if (function_exists('imagepalettetotruecolor')) {
-				@imagepalettetotruecolor($image);
+				imagepalettetotruecolor($image);
 			}
 
 			if (function_exists('imagealphablending')) {
-				@imagealphablending($image, true);
+				imagealphablending($image, true);
 			}
 
 			if (function_exists('imagesavealpha')) {
-				@imagesavealpha($image, true);
+				imagesavealpha($image, true);
 			}
 
 			$result = false;
@@ -1328,22 +1328,22 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$test_file = $tmp . '.webp';
 			ucwp_safe_unlink($tmp);
 
-			$image = @imagecreatetruecolor(2, 2);
+			$image = imagecreatetruecolor(2, 2);
 			if (!$image) {
 				$gd_webp_supported = false;
 				return false;
 			}
 
 			if (function_exists('imagepalettetotruecolor')) {
-				@imagepalettetotruecolor($image);
+				imagepalettetotruecolor($image);
 			}
 
 			if (function_exists('imagealphablending')) {
-				@imagealphablending($image, true);
+				imagealphablending($image, true);
 			}
 
 			if (function_exists('imagesavealpha')) {
-				@imagesavealpha($image, true);
+				imagesavealpha($image, true);
 			}
 
 			$result = false;
@@ -1528,15 +1528,15 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			}
 
 			if (function_exists('imagepalettetotruecolor')) {
-				@imagepalettetotruecolor($image);
+				imagepalettetotruecolor($image);
 			}
 
 			if (function_exists('imagealphablending')) {
-				@imagealphablending($image, true);
+				imagealphablending($image, true);
 			}
 
 			if (function_exists('imagesavealpha')) {
-				@imagesavealpha($image, true);
+				imagesavealpha($image, true);
 			}
 
 			$gd_error = '';
