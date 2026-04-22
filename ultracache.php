@@ -3,12 +3,12 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.54.127
+ * Version: 2.54.130
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
- * Hotfix Bundle Version: 2.54.127
+ * Hotfix Bundle Version: 2.54.130
  */
 
 if (!defined('ABSPATH')) {
@@ -16,10 +16,10 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.54.127');
+    define('UCWP_VERSION', '2.54.130');
 }
 if (!defined('UCWP_HOTFIX_BUNDLE_VERSION')) {
-    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.54.127');
+    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.54.130');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -701,7 +701,7 @@ if (!function_exists('ucwp_safe_loopback_remote_request')) {
                 'lastUrl'         => (string) $url,
                 'lastError'       => (string) $response->get_error_message(),
                 'context'         => (string) $context,
-                'message'         => 'Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification.',
+                'message'         => UltraCache_WP::maybe_translate('Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification.'),
                 'updatedAt'       => time(),
             ));
             return $fallback;
@@ -862,14 +862,147 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private static function maybe_translate($text)
         {
-            return (string) $text;
+            $text = (string) $text;
+
+            if ('' === $text || !did_action('init')) {
+                return $text;
+            }
+
+            switch ($text) {
+                case 'PHP Redis extension is not loaded on this server.':
+                    return __('PHP Redis extension is not loaded on this server.', 'ultracache');
+
+                case 'Every minute for UltraCache':
+                    return __('Every minute for UltraCache', 'ultracache');
+
+                case 'No PHP compression support detected on this server.':
+                    return __('No PHP compression support detected on this server.', 'ultracache');
+
+                case 'Brotli and gzip are available. UltraCache will prefer Brotli and fall back to gzip when needed.':
+                    return __('Brotli and gzip are available. UltraCache will prefer Brotli and fall back to gzip when needed.', 'ultracache');
+
+                case 'Brotli is available on this server. UltraCache will prefer Brotli compression.':
+                    return __('Brotli is available on this server. UltraCache will prefer Brotli compression.', 'ultracache');
+
+                case 'Brotli is not available on this server. UltraCache will use gzip compression instead.':
+                    return __('Brotli is not available on this server. UltraCache will use gzip compression instead.', 'ultracache');
+
+                case 'wp-config.php could not be located.':
+                    return __('wp-config.php could not be located.', 'ultracache');
+
+                case 'wp-config.php could not be read.':
+                    return __('wp-config.php could not be read.', 'ultracache');
+
+                case 'WP_CACHE is managed by UltraCache.':
+                    return __('WP_CACHE is managed by UltraCache.', 'ultracache');
+
+                case 'WP_CACHE is already defined as true in wp-config.php.':
+                    return __('WP_CACHE is already defined as true in wp-config.php.', 'ultracache');
+
+                case 'WP_CACHE is currently defined as false in wp-config.php and UltraCache will disable that line safely before enabling page cache.':
+                    return __('WP_CACHE is currently defined as false in wp-config.php and UltraCache will disable that line safely before enabling page cache.', 'ultracache');
+
+                case 'WP_CACHE is not currently defined in wp-config.php. UltraCache can add it automatically.':
+                    return __('WP_CACHE is not currently defined in wp-config.php. UltraCache can add it automatically.', 'ultracache');
+
+                case 'Reverse Proxy Cache':
+                    return __('Reverse Proxy Cache', 'ultracache');
+
+                case 'Read failed':
+                    return __('Read failed', 'ultracache');
+
+                case 'UltraCache':
+                    return __('UltraCache', 'ultracache');
+
+                case 'Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification.':
+                    return __('Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification.', 'ultracache');
+
+                case 'Cron warm start suppressed for this purge.':
+                    return __('Cron warm start suppressed for this purge.', 'ultracache');
+
+                case 'Cron warm up is disabled.':
+                    return __('Cron warm up is disabled.', 'ultracache');
+
+                case 'Cron warm up after scheduled cleanup is disabled.':
+                    return __('Cron warm up after scheduled cleanup is disabled.', 'ultracache');
+
+                case 'Cron warm up is paused because pages per minute is 0.':
+                    return __('Cron warm up is paused because pages per minute is 0.', 'ultracache');
+
+                case 'Cron warm up is not available.':
+                    return __('Cron warm up is not available.', 'ultracache');
+
+                case 'Cron warm up queued.':
+                    return __('Cron warm up queued.', 'ultracache');
+
+                case 'Cron warm up stopped.':
+                    return __('Cron warm up stopped.', 'ultracache');
+
+                case 'Cron warm up queue is idle.':
+                    return __('Cron warm up queue is idle.', 'ultracache');
+
+                case 'Cron warm up tick skipped because another run is active.':
+                    return __('Cron warm up tick skipped because another run is active.', 'ultracache');
+
+                case 'Varnish integration is disabled.':
+                    return __('Varnish integration is disabled.', 'ultracache');
+
+                case 'No Varnish endpoints are configured.':
+                    return __('No Varnish endpoints are configured.', 'ultracache');
+
+                case 'Could not determine site host for Varnish.':
+                    return __('Could not determine site host for Varnish.', 'ultracache');
+
+                case 'Invalid URL for Varnish purge.':
+                    return __('Invalid URL for Varnish purge.', 'ultracache');
+
+                case 'Could not determine site host for Varnish test.':
+                    return __('Could not determine site host for Varnish test.', 'ultracache');
+
+                case 'Redis helper not available.':
+                    return __('Redis helper not available.', 'ultracache');
+
+                case 'Object cache helper not available.':
+                    return __('Object cache helper not available.', 'ultracache');
+            }
+
+            return $text;
         }
 
         private static function maybe_translate_sprintf($text)
         {
             $args = func_get_args();
-            $text = array_shift($args);
-            $translated = self::maybe_translate($text);
+            $text = (string) array_shift($args);
+            $translated = $text;
+
+            if (did_action('init')) {
+                switch ($text) {
+                    case 'Every %d hour(s) for UltraCache':
+                        /* translators: %d: Number of hours between UltraCache cleanup runs. */
+                        $translated = __('Every %d hour(s) for UltraCache', 'ultracache');
+                        break;
+
+                    case '%s detected. UltraCache hit counters reflect only requests that reach PHP/advanced-cache and may under-report public hits served before WordPress.':
+                        /* translators: %s: Reverse proxy or server cache provider name. */
+                        $translated = __('%s detected. UltraCache hit counters reflect only requests that reach PHP/advanced-cache and may under-report public hits served before WordPress.', 'ultracache');
+                        break;
+
+                    case 'UltraCache %1$s · Bundle %2$s':
+                        /* translators: 1: UltraCache plugin version, 2: hotfix bundle version. */
+                        $translated = __('UltraCache %1$s · Bundle %2$s', 'ultracache');
+                        break;
+
+                    case 'Varnish %1$s succeeded on %2$d endpoint(s).':
+                        /* translators: 1: Varnish action label, 2: number of endpoints. */
+                        $translated = __('Varnish %1$s succeeded on %2$d endpoint(s).', 'ultracache');
+                        break;
+
+                    case 'Varnish %s failed on one or more endpoints.':
+                        /* translators: %s: Varnish action label. */
+                        $translated = __('Varnish %s failed on one or more endpoints.', 'ultracache');
+                        break;
+                }
+            }
 
             if (empty($args)) {
                 return $translated;
@@ -2016,12 +2149,12 @@ if (!class_exists('Ultra_Cache_WP')) {
         public static function maybe_start_cron_warmup_after_purge($reason = 'manual_purge', $run_immediately = false)
         {
             if (!empty(self::$suppress_after_purge_warm)) {
-                return array('success' => false, 'message' => 'Cron warm start suppressed for this purge.', 'state' => self::get_cron_warm_status());
+                return array('success' => false, 'message' => self::maybe_translate('Cron warm start suppressed for this purge.'), 'state' => self::get_cron_warm_status());
             }
 
             $settings = self::get_settings();
             if (empty($settings['cron_warm_enabled'])) {
-                return array('success' => false, 'message' => 'Cron warm up is disabled.', 'state' => self::get_cron_warm_status());
+                return array('success' => false, 'message' => self::maybe_translate('Cron warm up is disabled.'), 'state' => self::get_cron_warm_status());
             }
 
             if (!in_array((string) $reason, array('scheduled_cleanup', 'manual_purge', 'manual', 'cli'), true)) {
@@ -2029,12 +2162,12 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             if ('scheduled_cleanup' === $reason && empty($settings['cron_warm_start_after_cleanup'])) {
-                return array('success' => false, 'message' => 'Cron warm up after scheduled cleanup is disabled.', 'state' => self::get_cron_warm_status());
+                return array('success' => false, 'message' => self::maybe_translate('Cron warm up after scheduled cleanup is disabled.'), 'state' => self::get_cron_warm_status());
             }
 
             $pages_per_minute = max(0, (int) $settings['cron_warm_pages_per_minute']);
             if ($pages_per_minute < 1) {
-                return array('success' => false, 'message' => 'Cron warm up is paused because pages per minute is 0.', 'state' => self::get_cron_warm_status());
+                return array('success' => false, 'message' => self::maybe_translate('Cron warm up is paused because pages per minute is 0.'), 'state' => self::get_cron_warm_status());
             }
 
             return self::start_cron_warmup_queue((string) $reason, (bool) $run_immediately);
@@ -2183,7 +2316,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings = self::get_settings();
             $engine = self::get_engine_instance();
             if (!$engine || !method_exists($engine, 'get_crawl_urls_cursor_batch') || !method_exists($engine, 'warm_url')) {
-                return array('success' => false, 'message' => 'Cron warm up is not available.');
+                return array('success' => false, 'message' => self::maybe_translate('Cron warm up is not available.'));
             }
 
             $pages_per_minute = max(0, (int) $settings['cron_warm_pages_per_minute']);
@@ -2207,7 +2340,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'batchHasMore'   => false,
                 'nextCursorPending' => '',
                 'lastError'      => '',
-                'lastMessage'    => 'Cron warm up queued.',
+                'lastMessage'    => self::maybe_translate('Cron warm up queued.'),
                 'lastUrl'        => '',
                 'completed'      => false,
                 'stopped'        => false,
@@ -2220,7 +2353,7 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             return array(
                 'success' => true,
-                'message' => 'Cron warm up queued.',
+                'message' => self::maybe_translate('Cron warm up queued.'),
                 'state'   => self::get_cron_warm_status(),
             );
         }
@@ -2234,13 +2367,13 @@ if (!class_exists('Ultra_Cache_WP')) {
             $state['stopReason'] = sanitize_key((string) $reason);
             $state['finishedAt'] = time();
             $state['updatedAt'] = time();
-            $state['lastMessage'] = 'Cron warm up stopped.';
+            $state['lastMessage'] = self::maybe_translate('Cron warm up stopped.');
             self::save_cron_warm_state($state);
             self::unschedule_cron_warm_events();
 
             return array(
                 'success' => true,
-                'message' => 'Cron warm up stopped.',
+                'message' => self::maybe_translate('Cron warm up stopped.'),
                 'state'   => self::get_cron_warm_status(),
             );
         }
@@ -2252,7 +2385,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 self::unschedule_cron_warm_events();
                 return array(
                     'success' => true,
-                    'message' => 'Cron warm up queue is idle.',
+                    'message' => self::maybe_translate('Cron warm up queue is idle.'),
                     'warmedThisRun' => 0,
                     'state' => self::get_cron_warm_status(),
                 );
@@ -2264,7 +2397,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             if (is_array($current_lock) && !empty($current_lock['token']) && !empty($current_lock['expiresAt']) && (int) $current_lock['expiresAt'] > $now) {
                 return array(
                     'success' => true,
-                    'message' => 'Cron warm up tick skipped because another run is active.',
+                    'message' => self::maybe_translate('Cron warm up tick skipped because another run is active.'),
                     'warmedThisRun' => 0,
                     'state' => self::get_cron_warm_status(),
                 );
@@ -2850,8 +2983,8 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         public function render_dashboard()
         {
-            $version_label = sprintf(
-                'UltraCache %s · Bundle %s',
+            $version_label = self::maybe_translate_sprintf(
+                'UltraCache %1$s · Bundle %2$s',
                 (string) UCWP_VERSION,
                 (string) UCWP_HOTFIX_BUNDLE_VERSION
             );
@@ -2917,9 +3050,9 @@ if (!class_exists('Ultra_Cache_WP')) {
             $admin_bar->add_node(
                 array(
                     'id'    => 'ultracache',
-                    'title' => 'UltraCache',
+                    'title' => __('UltraCache', 'ultracache'),
                     'href'  => admin_url('admin.php?page=ultracache'),
-                    'meta'  => array('title' => 'UltraCache'),
+                    'meta'  => array('title' => __('UltraCache', 'ultracache')),
                 )
             );
 
@@ -3687,7 +3820,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             if (empty($settings['enabled'])) {
                 $result = array(
                     'success' => false,
-                    'message' => 'Varnish integration is disabled.',
+                    'message' => self::maybe_translate('Varnish integration is disabled.'),
                     'time'    => time(),
                     'label'   => $label,
                 );
@@ -3698,7 +3831,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             if (empty($settings['servers'])) {
                 $result = array(
                     'success' => false,
-                    'message' => 'No Varnish endpoints are configured.',
+                    'message' => self::maybe_translate('No Varnish endpoints are configured.'),
                     'time'    => time(),
                     'label'   => $label,
                 );
@@ -3720,8 +3853,8 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             $action_label = ('admin' === ($settings['mode'] ?? 'http')) ? 'admin BAN' : $settings['method'];
             $message = $all_ok
-                ? sprintf('Varnish %s succeeded on %d endpoint(s).', $action_label, count($details))
-                : sprintf('Varnish %s failed on one or more endpoints.', $action_label);
+                ? self::maybe_translate_sprintf('Varnish %1$s succeeded on %2$d endpoint(s).', $action_label, count($details))
+                : self::maybe_translate_sprintf('Varnish %s failed on one or more endpoints.', $action_label);
 
             $result = array(
                 'success' => $all_ok,
@@ -3742,7 +3875,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $parsed = wp_parse_url($home);
             $host = $parsed && !empty($parsed['host']) ? $parsed['host'] : '';
             if ('' === $host) {
-                $result = array('success' => false, 'message' => 'Could not determine site host for Varnish.', 'time' => time());
+                $result = array('success' => false, 'message' => self::maybe_translate('Could not determine site host for Varnish.'), 'time' => time());
                 self::set_varnish_last_result($result);
                 return $result;
             }
@@ -3755,7 +3888,7 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             $parsed = ucwp_safe_wp_parse_url((string) $url, -1, 'varnish_flush_url');
             if (!$parsed || empty($parsed['host'])) {
-                $result = array('success' => false, 'message' => 'Invalid URL for Varnish purge.', 'time' => time(), 'url' => (string) $url);
+                $result = array('success' => false, 'message' => self::maybe_translate('Invalid URL for Varnish purge.'), 'time' => time(), 'url' => (string) $url);
                 self::set_varnish_last_result($result);
                 return $result;
             }
@@ -3765,13 +3898,13 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings = self::get_varnish_cli_settings();
 
             if (empty($settings['enabled'])) {
-                $result = array('success' => false, 'message' => 'Varnish integration is disabled.', 'time' => time(), 'url' => (string) $url);
+                $result = array('success' => false, 'message' => self::maybe_translate('Varnish integration is disabled.'), 'time' => time(), 'url' => (string) $url);
                 self::set_varnish_last_result($result);
                 return $result;
             }
 
             if (empty($settings['servers'])) {
-                $result = array('success' => false, 'message' => 'No Varnish endpoints are configured.', 'time' => time(), 'url' => (string) $url);
+                $result = array('success' => false, 'message' => self::maybe_translate('No Varnish endpoints are configured.'), 'time' => time(), 'url' => (string) $url);
                 self::set_varnish_last_result($result);
                 return $result;
             }
@@ -3825,7 +3958,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $parsed = wp_parse_url($home);
             $host = $parsed && !empty($parsed['host']) ? $parsed['host'] : '';
             if ('' === $host) {
-                $result = array('success' => false, 'message' => 'Could not determine site host for Varnish test.', 'time' => time());
+                $result = array('success' => false, 'message' => self::maybe_translate('Could not determine site host for Varnish test.'), 'time' => time());
                 self::set_varnish_last_result($result);
                 return $result;
             }
@@ -3930,8 +4063,8 @@ if (!class_exists('Ultra_Cache_WP')) {
 
                 if ($status['detected']) {
                     $provider_label = $status['provider'] ? $status['provider'] : self::maybe_translate('Reverse Proxy Cache');
-                    $status['message'] = sprintf(
-                        self::maybe_translate('%s detected. UltraCache hit counters reflect only requests that reach PHP/advanced-cache and may under-report public hits served before WordPress.'),
+                    $status['message'] = self::maybe_translate_sprintf(
+                        '%s detected. UltraCache hit counters reflect only requests that reach PHP/advanced-cache and may under-report public hits served before WordPress.',
                         $provider_label
                     );
                 }
@@ -3951,7 +4084,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             return array(
                 'success' => false,
                 'connected' => false,
-                'message' => 'Redis helper not available.',
+                'message' => self::maybe_translate('Redis helper not available.'),
             );
         }
 
@@ -3960,7 +4093,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             if (!class_exists('Ultra_Cache_Object_Cache_Manager') || !method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
                 return array(
                     'success' => false,
-                    'message' => 'Object cache helper not available.',
+                    'message' => self::maybe_translate('Object cache helper not available.'),
                 );
             }
 

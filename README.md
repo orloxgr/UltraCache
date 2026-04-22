@@ -8,7 +8,7 @@ It is built for sites that want a managed page-cache drop-in, optional Redis-bac
 
 ## Current repository build
 
-- version: `2.54.127`
+- version: `2.54.130`
 - sixth pass fixes: removed hard page reloads after Varnish Test and Flush Varnish All; the dashboard now stays on the page and refreshes through AJAX only
 - fifth pass fixes: reduced `@` suppression in non-critical helper paths and added safer internal debug logging for font CSS reads and Varnish admin socket connects
 - third pass fixes: redacted secrets from `wp ultracache status` settings/all output, added stricter local-site URL validation for single-URL CLI actions, and tightened REST validation for settings enums and URL/scope inputs
