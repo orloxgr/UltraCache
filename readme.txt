@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.54.130
+Stable tag: 2.54.136
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -56,12 +56,11 @@ Yes. UltraCache can manage Redis-backed object caching and includes Varnish-awar
 
 == Changelog ==
 
-= 2.54.130 =
-* UI: Test Redis Connection and Flush Object Cache now use the same green action styling as the other primary dashboard buttons.
+= 2.54.136 =
+* Improved object-cache flush semantics and messaging. Flush results now distinguish stale residual cache entries from entries recreated after flush by live runtime activity.
+* Added last object-cache flush diagnostics data so operators can inspect the most recent flush outcome from the status payload.
 
-* Removed hard page reloads after Run Varnish Test and Flush Varnish All. The dashboard now stays in place and refreshes stats/diagnostics through AJAX only.
-
-= 2.54.130 =
+= 2.54.112 =
 * Hardened same-host HTTPS loopbacks: UltraCache now verifies local SSL certificates first and only falls back without verification after a detected certificate-validation failure.
 * Added loopback SSL fallback diagnostics so the dashboard can report when strict local SSL verification had to be bypassed temporarily.
 

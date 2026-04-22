@@ -231,11 +231,71 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			}
 		}
 
-		public static function flush_cache() {
-			self::recursive_delete(UCWP_OBJECT_CACHE_DIR);
+		public static function flush_cache($force_hard = false, $reset_plugin_state = true) {
+			$report = self::flush_cache_with_report($force_hard, $reset_plugin_state);
+			return !empty($report['success']);
+		}
+
+		public static function flush_cache_with_report($force_hard = false, $reset_plugin_state = true) {
+			$flushed = false;
+			$force_hard = (bool) $force_hard;
+			$reset_plugin_state = (bool) $reset_plugin_state;
+			$pre_files = self::capture_cache_file_state(UCWP_OBJECT_CACHE_DIR);
+			$report = array(
+				'success' => false,
+				'forceHard' => $force_hard,
+				'dropinFlushCalled' => false,
+				'dropinFlushResult' => false,
+				'preFlushEntries' => count($pre_files),
+				'postFlushEntries' => 0,
+				'staleEntries' => 0,
+				'recreatedEntries' => 0,
+				'staleFiles' => array(),
+				'recreatedFiles' => array(),
+				'semanticStatus' => 'unknown',
+				'startedAt' => microtime(true),
+				'completedAt' => 0,
+				'message' => '',
+			);
+			global $wp_object_cache;
+			if (is_object($wp_object_cache) && method_exists($wp_object_cache, 'flush')) {
+				$report['dropinFlushCalled'] = true;
+				$flushed = (bool) $wp_object_cache->flush();
+				$report['dropinFlushResult'] = $flushed;
+			}
+
+			if ($force_hard || !$flushed) {
+				self::recursive_delete(UCWP_OBJECT_CACHE_DIR);
+			}
+
 			self::flush_redis_namespace();
 			self::ensure_cache_directory();
-			return true;
+			self::maybe_sync_redis_secret_config(self::get_plugin_settings());
+			if ($reset_plugin_state) {
+				self::reset_plugin_state_cache();
+			}
+			self::prune_cache_directory();
+			self::flush_stale_temp_files(UCWP_OBJECT_CACHE_DIR);
+			clearstatcache(true);
+			$report['completedAt'] = microtime(true);
+
+			$post_files = self::capture_cache_file_state(UCWP_OBJECT_CACHE_DIR);
+			$classified = self::classify_flush_cache_files($pre_files, $post_files, $report['completedAt']);
+			$report['postFlushEntries'] = count($post_files);
+			$report['staleEntries'] = count($classified['stale']);
+			$report['recreatedEntries'] = count($classified['recreated']);
+			$report['staleFiles'] = self::limit_cache_file_samples($classified['stale']);
+			$report['recreatedFiles'] = self::limit_cache_file_samples($classified['recreated']);
+			$report['semanticStatus'] = self::determine_flush_semantic_status($report['staleEntries'], $report['recreatedEntries']);
+			$report['success'] = (0 === $report['staleEntries']);
+			$report['message'] = self::build_flush_report_message($report);
+			self::store_last_flush_report($report);
+			return $report;
+		}
+
+		public static function get_last_flush_report() {
+			$report = get_option('ucwp_object_cache_last_flush_report', array());
+			return is_array($report) ? $report : array();
 		}
 
 		public static function test_redis_connection($override = array()) {
@@ -319,6 +379,96 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				ucwp_safe_unlink($file);
 			}
 			return true;
+		}
+
+		private static function capture_cache_file_state($dir) {
+			$state = array();
+			$files = self::collect_cache_files($dir, 'cache');
+			foreach ($files as $file) {
+				clearstatcache(true, $file);
+				$state[$file] = array(
+					'mtime' => max(0, (int) ucwp_safe_filemtime($file, 'object_cache_flush_state_filemtime')),
+					'size' => max(0, (int) ucwp_safe_filesize($file, 'object_cache_flush_state_filesize')),
+				);
+			}
+			return $state;
+		}
+
+		private static function classify_flush_cache_files($pre_files, $post_files, $completed_at) {
+			$classified = array(
+				'stale' => array(),
+				'recreated' => array(),
+			);
+			$completed_second = (int) floor((float) $completed_at);
+			foreach ($post_files as $file => $meta) {
+				$post_mtime = isset($meta['mtime']) ? (int) $meta['mtime'] : 0;
+				$post_size = isset($meta['size']) ? (int) $meta['size'] : 0;
+				if (!isset($pre_files[$file])) {
+					$classified['recreated'][] = $file;
+					continue;
+				}
+				$pre_meta = is_array($pre_files[$file]) ? $pre_files[$file] : array();
+				$pre_mtime = isset($pre_meta['mtime']) ? (int) $pre_meta['mtime'] : 0;
+				$pre_size = isset($pre_meta['size']) ? (int) $pre_meta['size'] : 0;
+				if ($post_mtime > $pre_mtime || $post_size !== $pre_size || $post_mtime > $completed_second) {
+					$classified['recreated'][] = $file;
+					continue;
+				}
+				$classified['stale'][] = $file;
+			}
+			return $classified;
+		}
+
+		private static function determine_flush_semantic_status($stale_count, $recreated_count) {
+			$stale_count = max(0, (int) $stale_count);
+			$recreated_count = max(0, (int) $recreated_count);
+			if ($stale_count > 0) {
+				return 'stale_entries_remained';
+			}
+			if ($recreated_count > 0) {
+				return 'recreated_after_flush';
+			}
+			return 'fully_flushed';
+		}
+
+		private static function build_flush_report_message($report) {
+			$stale_count = max(0, (int) ($report['staleEntries'] ?? 0));
+			$recreated_count = max(0, (int) ($report['recreatedEntries'] ?? 0));
+			if ($stale_count > 0) {
+				if ($recreated_count > 0) {
+					return sprintf('Object cache flush completed, but %1$d stale entr%2$s remained. %3$d entr%4$s were recreated after flush by live runtime activity.', $stale_count, 1 === $stale_count ? 'y' : 'ies', $recreated_count, 1 === $recreated_count ? 'y' : 'ies');
+				}
+				return sprintf('Object cache flush completed, but %d stale entr%s remained.', $stale_count, 1 === $stale_count ? 'y' : 'ies');
+			}
+			if ($recreated_count > 0) {
+				return sprintf('Object cache flushed. No stale entries remained. %d entr%s were recreated after flush by live runtime activity.', $recreated_count, 1 === $recreated_count ? 'y' : 'ies');
+			}
+			return 'Object cache flushed. No cache entries remained after flush.';
+		}
+
+		private static function limit_cache_file_samples($files, $limit = 10) {
+			$normalized = array();
+			$limit = max(1, (int) $limit);
+			foreach (array_slice((array) $files, 0, $limit) as $file) {
+				$normalized[] = self::normalize_cache_file_path((string) $file);
+			}
+			return $normalized;
+		}
+
+		private static function normalize_cache_file_path($file) {
+			$file = (string) $file;
+			$root = trailingslashit(UCWP_OBJECT_CACHE_DIR);
+			if ('' !== $root && 0 === strpos($file, $root)) {
+				return ltrim(substr($file, strlen($root)), '/\\');
+			}
+			return $file;
+		}
+
+		private static function store_last_flush_report($report) {
+			if (!is_array($report)) {
+				return;
+			}
+			update_option('ucwp_object_cache_last_flush_report', $report, false);
 		}
 
 		public static function get_stats() {
@@ -567,6 +717,58 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				}
 			}
 			ucwp_safe_rmdir($dir);
+		}
+
+
+		private static function prune_cache_directory() {
+			if (!is_dir(UCWP_OBJECT_CACHE_DIR)) {
+				return;
+			}
+
+			$preserve = array(
+				'index.php',
+				basename((string) self::get_redis_secret_config_path()),
+				'object-cache-metrics.json',
+			);
+
+			$items = ucwp_safe_scandir(UCWP_OBJECT_CACHE_DIR, 'object_cache_prune_root scandir');
+			if (!is_array($items)) {
+				return;
+			}
+
+			foreach ($items as $item) {
+				if ('.' === $item || '..' === $item) {
+					continue;
+				}
+				if (in_array($item, $preserve, true)) {
+					continue;
+				}
+				$path = UCWP_OBJECT_CACHE_DIR . DIRECTORY_SEPARATOR . $item;
+				if (is_dir($path)) {
+					self::recursive_delete($path);
+				} elseif (file_exists($path)) {
+					ucwp_safe_unlink($path);
+				}
+			}
+		}
+
+		private static function reset_plugin_state_cache() {
+			if (function_exists('wp_clean_plugins_cache')) {
+				wp_clean_plugins_cache(true);
+			}
+			if (!function_exists('wp_cache_delete')) {
+				return;
+			}
+			wp_cache_delete('active_plugins', 'options');
+			wp_cache_delete('alloptions', 'options');
+			wp_cache_delete('notoptions', 'options');
+			wp_cache_delete('uninstall_plugins', 'options');
+			wp_cache_delete('update_plugins', 'site-transient');
+			if (function_exists('is_multisite') && is_multisite()) {
+				wp_cache_delete('active_sitewide_plugins', 'site-options');
+				wp_cache_delete('alloptions', 'site-options');
+				wp_cache_delete('notoptions', 'site-options');
+			}
 		}
 
 		private static function redis_supported() {

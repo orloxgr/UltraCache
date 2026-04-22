@@ -61,7 +61,23 @@ if (!function_exists('ucwp_safe_rmdir')) {
 		if ('' === $dir) {
 			return false;
 		}
-		return !file_exists($dir) ? true : rmdir($dir);
+		if (!file_exists($dir)) {
+			return true;
+		}
+		if (!is_dir($dir)) {
+			return false;
+		}
+		$items = ucwp_safe_scandir($dir);
+		if (is_array($items)) {
+			foreach ($items as $item) {
+				if ('.' === $item || '..' === $item) {
+					continue;
+				}
+				return false;
+			}
+		}
+		clearstatcache(true, $dir);
+		return rmdir($dir) || !file_exists($dir);
 	}
 }
 
@@ -96,6 +112,8 @@ if (!class_exists('WP_Object_Cache')) {
 		private $redis_value_max_depth = 2;
 		private $redis_value_max_string_bytes = 16384;
 		private $redis_payload_max_bytes = 32768;
+		private $disk_payload_max_bytes = 8388608;
+		private $signed_envelope_max_bytes = 12582912;
 
 		public function __construct() {
 			$this->blog_id = $this->detect_blog_id();
@@ -327,11 +345,19 @@ if (!class_exists('WP_Object_Cache')) {
 			return $this->set($key, $data, $group, (int) $expire);
 		}
 
+		private function should_suspend_cache_addition() {
+			return function_exists('wp_suspend_cache_addition') && wp_suspend_cache_addition();
+		}
+
 		public function set($key, $data, $group = 'default', $expire = 0) {
 			$group = $this->normalize_group($group);
 			$key   = $this->normalize_key($key);
 
 			$this->set_runtime_value($key, $group, $data);
+
+			if ($this->should_suspend_cache_addition()) {
+				return true;
+			}
 
 			if ($this->is_non_persistent_group($group)) {
 				return true;
@@ -818,28 +844,22 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 
-			try {
-				$envelope = @unserialize($serialized, array('allowed_classes' => false));
-			} catch (Throwable $e) {
+			$envelope = $this->deserialize_signed_envelope($serialized, $this->redis_payload_max_bytes * 2);
+			if (!is_array($envelope)) {
 				return false;
 			}
 
-			if (!is_array($envelope) || !isset($envelope['v'], $envelope['payload'], $envelope['sig']) || 1 !== (int) $envelope['v']) {
-				return false;
-			}
-
-			$payload_serialized = base64_decode((string) $envelope['payload'], true);
+			$payload_serialized = $this->decode_envelope_payload($envelope, $this->redis_payload_max_bytes);
 			if (false === $payload_serialized || !$this->verify_signature($payload_serialized, (string) $envelope['sig'])) {
 				return false;
 			}
 
-			try {
-				$payload = @unserialize($payload_serialized, array('allowed_classes' => false));
-			} catch (Throwable $e) {
+			$payload = $this->deserialize_cache_payload($payload_serialized, false);
+			if (!is_array($payload) || !$this->is_valid_cache_payload($payload, $key, $group)) {
 				return false;
 			}
 
-			return is_array($payload) ? $payload : false;
+			return $payload;
 		}
 
 		private function delete_redis_payload($key, $group) {
@@ -921,10 +941,10 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$path || !file_exists($path)) {
 				return false;
 			}
-			return $this->read_payload($path);
+			return $this->read_payload($path, $key, $group);
 		}
 
-		private function read_payload($path) {
+		private function read_payload($path, $key, $group) {
 			if (!is_string($path) || '' === trim($path) || !$this->is_cache_path($path)) {
 				return false;
 			}
@@ -932,27 +952,100 @@ if (!class_exists('WP_Object_Cache')) {
 			if (false === $data || '' === $data) {
 				return false;
 			}
-			try {
-				$envelope = @unserialize($data, array('allowed_classes' => false));
-			} catch (Throwable $e) {
-				return false;
-			}
+			$envelope = $this->deserialize_signed_envelope($data, $this->signed_envelope_max_bytes);
 			if (!is_array($envelope)) {
 				return false;
 			}
-			if (!isset($envelope['v'], $envelope['payload'], $envelope['sig']) || 1 !== (int) $envelope['v']) {
-				return false;
-			}
-			$serialized = base64_decode((string) $envelope['payload'], true);
+			$serialized = $this->decode_envelope_payload($envelope, $this->disk_payload_max_bytes);
 			if (false === $serialized || !$this->verify_signature($serialized, (string) $envelope['sig'])) {
 				return false;
 			}
+			$payload = $this->deserialize_cache_payload($serialized, true);
+			if (!is_array($payload) || !$this->is_valid_cache_payload($payload, $key, $group)) {
+				return false;
+			}
+			return $payload;
+		}
+
+		private function deserialize_cache_payload($serialized, $allow_objects) {
+			if (!is_string($serialized) || '' === $serialized) {
+				return false;
+			}
+
+			if ($this->serialized_payload_has_disallowed_object_tokens($serialized)) {
+				return false;
+			}
+
 			try {
-				$payload = @unserialize($serialized);
+				if ($allow_objects) {
+					$payload = @unserialize($serialized);
+				} else {
+					$payload = @unserialize($serialized, array('allowed_classes' => false));
+				}
 			} catch (Throwable $e) {
 				return false;
 			}
+
 			return is_array($payload) ? $payload : false;
+		}
+
+		private function serialized_payload_has_disallowed_object_tokens($serialized) {
+			if (!is_string($serialized) || '' === $serialized) {
+				return true;
+			}
+
+			if (preg_match('/(^|[;{}])(C|o|O\+):\d+:/', $serialized)) {
+				return true;
+			}
+
+			return false;
+		}
+
+		private function is_valid_cache_payload($payload, $key, $group) {
+			if (!is_array($payload)) {
+				return false;
+			}
+
+			$required_keys = array('key', 'group', 'blog_id', 'expires_at', 'value');
+			if (count($payload) !== count($required_keys)) {
+				return false;
+			}
+
+			foreach ($required_keys as $required_key) {
+				if (!array_key_exists($required_key, $payload)) {
+					return false;
+				}
+			}
+
+			if (!is_string($payload['key']) || !is_string($payload['group'])) {
+				return false;
+			}
+
+			if (!is_int($payload['blog_id']) && !ctype_digit((string) $payload['blog_id'])) {
+				return false;
+			}
+
+			if (!is_int($payload['expires_at']) && !ctype_digit((string) $payload['expires_at'])) {
+				return false;
+			}
+
+			$expected_key = $this->normalize_key($key);
+			$expected_group = $this->normalize_group($group);
+			$expected_blog_id = $this->get_group_blog_id($expected_group);
+
+			if ($payload['key'] !== $expected_key || $payload['group'] !== $expected_group) {
+				return false;
+			}
+
+			if ((int) $payload['blog_id'] !== (int) $expected_blog_id) {
+				return false;
+			}
+
+			if ((int) $payload['expires_at'] < 0) {
+				return false;
+			}
+
+			return true;
 		}
 
 		private function build_signed_envelope($serialized) {
@@ -965,6 +1058,63 @@ if (!class_exists('WP_Object_Cache')) {
 				'payload' => base64_encode($serialized),
 				'sig'     => $signature,
 			);
+		}
+
+		private function deserialize_signed_envelope($data, $max_bytes) {
+			if (!is_string($data) || '' === $data) {
+				return false;
+			}
+			$max_bytes = (int) $max_bytes;
+			if ($max_bytes > 0 && strlen($data) > $max_bytes) {
+				return false;
+			}
+			try {
+				$envelope = @unserialize($data, array('allowed_classes' => false));
+			} catch (Throwable $e) {
+				return false;
+			}
+			return $this->is_valid_signed_envelope($envelope) ? $envelope : false;
+		}
+
+		private function is_valid_signed_envelope($envelope) {
+			if (!is_array($envelope)) {
+				return false;
+			}
+			if (!isset($envelope['v'], $envelope['payload'], $envelope['sig'])) {
+				return false;
+			}
+			if (count($envelope) !== 3 || 1 !== (int) $envelope['v']) {
+				return false;
+			}
+			if (!is_string($envelope['payload']) || '' === $envelope['payload']) {
+				return false;
+			}
+			if (!is_string($envelope['sig']) || !preg_match('/^[a-f0-9]{64}$/i', $envelope['sig'])) {
+				return false;
+			}
+			return true;
+		}
+
+		private function decode_envelope_payload($envelope, $max_bytes) {
+			if (!$this->is_valid_signed_envelope($envelope)) {
+				return false;
+			}
+			$payload = (string) $envelope['payload'];
+			$max_bytes = (int) $max_bytes;
+			if ($max_bytes > 0) {
+				$max_base64_length = (int) ceil($max_bytes * 4 / 3) + 8;
+				if (strlen($payload) > $max_base64_length) {
+					return false;
+				}
+			}
+			$serialized = base64_decode($payload, true);
+			if (false === $serialized || !is_string($serialized) || '' === $serialized) {
+				return false;
+			}
+			if ($max_bytes > 0 && strlen($serialized) > $max_bytes) {
+				return false;
+			}
+			return $serialized;
 		}
 
 		private function verify_signature($serialized, $signature) {
@@ -1020,10 +1170,42 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function flush_disk_cache() {
-			$this->recursive_delete($this->cache_dir);
+			if (!is_dir($this->cache_dir) || !$this->is_cache_path($this->cache_dir)) {
+				return;
+			}
+			$items = ucwp_safe_scandir($this->cache_dir);
+			if (!is_array($items)) {
+				return;
+			}
+			foreach ($items as $item) {
+				if ('.' === $item || '..' === $item || $this->should_preserve_cache_root_entry($item)) {
+					continue;
+				}
+				$path = $this->cache_dir . DIRECTORY_SEPARATOR . $item;
+				if (!$this->is_cache_path($path)) {
+					continue;
+				}
+				if (is_dir($path)) {
+					$this->recursive_delete($path, true);
+				} else {
+					ucwp_safe_unlink($path);
+				}
+			}
 		}
 
-		private function recursive_delete($dir) {
+		private function should_preserve_cache_root_entry($item) {
+			$item = is_string($item) ? trim($item) : '';
+			if ('' === $item) {
+				return false;
+			}
+			$preserve = array('index.php');
+			if (is_string($this->redis_secret_config) && '' !== trim($this->redis_secret_config)) {
+				$preserve[] = basename($this->redis_secret_config);
+			}
+			return in_array($item, array_values(array_unique(array_filter($preserve))), true);
+		}
+
+		private function recursive_delete($dir, $remove_root = true) {
 			if (!is_string($dir) || '' === trim($dir) || !is_dir($dir) || !$this->is_cache_path($dir)) {
 				return;
 			}
@@ -1036,13 +1218,28 @@ if (!class_exists('WP_Object_Cache')) {
 					continue;
 				}
 				$path = $dir . DIRECTORY_SEPARATOR . $item;
+				if (!$this->is_cache_path($path)) {
+					continue;
+				}
 				if (is_dir($path)) {
-					$this->recursive_delete($path);
+					$this->recursive_delete($path, true);
 				} else {
 					ucwp_safe_unlink($path);
 				}
 			}
-			if (rtrim($dir, '/\\') !== rtrim($this->cache_dir, '/\\')) {
+			$remaining = ucwp_safe_scandir($dir);
+			if (is_array($remaining)) {
+				foreach ($remaining as $item) {
+					if ('.' === $item || '..' === $item) {
+						continue;
+					}
+					$path = $dir . DIRECTORY_SEPARATOR . $item;
+					if ($this->is_cache_path($path) && is_file($path)) {
+						ucwp_safe_unlink($path);
+					}
+				}
+			}
+			if ($remove_root) {
 				ucwp_safe_rmdir($dir);
 			}
 		}

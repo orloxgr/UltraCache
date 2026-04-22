@@ -3,12 +3,12 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.54.130
+ * Version: 2.54.136
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
- * Hotfix Bundle Version: 2.54.130
+ * Hotfix Bundle Version: 2.54.136
  */
 
 if (!defined('ABSPATH')) {
@@ -16,10 +16,10 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.54.130');
+    define('UCWP_VERSION', '2.54.136');
 }
 if (!defined('UCWP_HOTFIX_BUNDLE_VERSION')) {
-    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.54.130');
+    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.54.136');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1077,6 +1077,9 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
                 Ultra_Cache_Object_Cache_Manager::sync_dropin();
+                if (method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
+                    Ultra_Cache_Object_Cache_Manager::flush_cache(true, true);
+                }
             }
         }
 
@@ -1087,8 +1090,13 @@ if (!class_exists('Ultra_Cache_WP')) {
             self::unschedule_cron_warm_events();
             self::sync_browser_cache_rules(false);
 
-            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'maybe_remove_dropin')) {
-                Ultra_Cache_Object_Cache_Manager::maybe_remove_dropin();
+            if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
+                if (method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
+                    Ultra_Cache_Object_Cache_Manager::flush_cache(true, true);
+                }
+                if (method_exists('Ultra_Cache_Object_Cache_Manager', 'maybe_remove_dropin')) {
+                    Ultra_Cache_Object_Cache_Manager::maybe_remove_dropin();
+                }
             }
         }
 
@@ -4087,26 +4095,47 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'message' => self::maybe_translate('Redis helper not available.'),
             );
         }
-
         public static function flush_object_cache()
         {
-            if (!class_exists('Ultra_Cache_Object_Cache_Manager') || !method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
+            if (!class_exists('Ultra_Cache_Object_Cache_Manager') || (!method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache') && !method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache_with_report'))) {
                 return array(
                     'success' => false,
                     'message' => self::maybe_translate('Object cache helper not available.'),
                 );
             }
 
-            $flushed = (bool) Ultra_Cache_Object_Cache_Manager::flush_cache();
-            if (method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_metrics')) {
-                Ultra_Cache_Object_Cache_Manager::reset_metrics();
+            $report = array(
+                'success' => false,
+                'message' => 'Object cache flush failed.',
+            );
+
+            try {
+                if (function_exists('wp_suspend_cache_addition')) {
+                    wp_suspend_cache_addition(true);
+                }
+
+                if (method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache_with_report')) {
+                    $report = Ultra_Cache_Object_Cache_Manager::flush_cache_with_report(true, false);
+                } else {
+                    $flushed = (bool) Ultra_Cache_Object_Cache_Manager::flush_cache(true, false);
+                    $report = array(
+                        'success' => $flushed,
+                        'message' => $flushed ? 'Object cache flushed.' : 'Object cache flush failed.',
+                    );
+                }
+
+                if (method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_metrics')) {
+                    Ultra_Cache_Object_Cache_Manager::reset_metrics();
+                }
+            } finally {
+                if (function_exists('wp_suspend_cache_addition')) {
+                    wp_suspend_cache_addition(false);
+                }
             }
 
-            return array(
-                'success' => $flushed,
-                'message' => $flushed ? 'Object cache flushed.' : 'Object cache flush failed.',
-                'stats' => self::get_engine_stats(),
-                'diagnostics' => self::get_dashboard_diagnostics(),
+            return is_array($report) ? $report : array(
+                'success' => false,
+                'message' => 'Object cache flush failed.',
             );
         }
 
@@ -4160,6 +4189,9 @@ if (!class_exists('Ultra_Cache_WP')) {
                             ),
                             (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_redis_connection'))
                                 ? Ultra_Cache_Object_Cache_Manager::test_redis_connection()
+                                : array(),
+                            (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_last_flush_report'))
+                                ? array('lastFlush' => Ultra_Cache_Object_Cache_Manager::get_last_flush_report())
                                 : array()
                         ),
                     )
