@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.54.097 */
+/** Hotfix Bundle Version: 2.54.108 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -2933,7 +2933,7 @@ HTML;
                 return array();
             }
 
-            $css = @file_get_contents($source_path);
+            $css = ucwp_safe_file_get_contents($source_path, 'build_optimized_font_css_asset', true);
             if (!is_string($css) || '' === $css || false === stripos($css, '@font-face')) {
                 return array();
             }
@@ -3067,7 +3067,7 @@ HTML;
                         continue;
                     }
 
-                    $contents = @file_get_contents($path);
+                    $contents = ucwp_safe_file_get_contents($path, 'find_local_font_css_files_in_root', true);
                     if (!is_string($contents) || '' === $contents || false === stripos($contents, '@font-face')) {
                         continue;
                     }
@@ -4008,26 +4008,7 @@ HTML;
 
         private function should_verify_loopback_ssl($url)
         {
-            $url = is_string($url) ? trim($url) : '';
-            if ('' === $url) {
-                return true;
-            }
-
-            $home_parts = wp_parse_url(home_url('/'));
-            $url_parts  = wp_parse_url($url);
-            $home_host  = isset($home_parts['host']) ? strtolower((string) $home_parts['host']) : '';
-            $url_host   = isset($url_parts['host']) ? strtolower((string) $url_parts['host']) : '';
-            $scheme     = isset($url_parts['scheme']) ? strtolower((string) $url_parts['scheme']) : '';
-
-            if ('https' !== $scheme) {
-                return true;
-            }
-
-            if ('' !== $home_host && '' !== $url_host && $home_host === $url_host) {
-                return false;
-            }
-
-            return true;
+            return !function_exists('ucwp_is_local_https_url') || !ucwp_is_local_https_url($url);
         }
 
         public function warm_url($url, array $args = array())
@@ -4069,9 +4050,10 @@ HTML;
             $last_error = '';
 
             foreach ($buckets as $bucket) {
-                $response = wp_remote_get(
+                $response = ucwp_safe_loopback_remote_request(
                     $url,
                     array(
+                        'method'      => 'GET',
                         'timeout'     => 20,
                         'redirection' => 5,
                         'sslverify'   => $this->should_verify_loopback_ssl($url),
@@ -4082,7 +4064,8 @@ HTML;
                                 'X-UltraCache-Warm'  => '1',
                             )
                         ),
-                    )
+                    ),
+                    'warm_url'
                 );
 
                 if (is_wp_error($response)) {
@@ -4335,9 +4318,10 @@ HTML;
                 $url
             );
 
-            $response = wp_remote_get(
+            $response = ucwp_safe_loopback_remote_request(
                 $scan_url,
                 array(
+                    'method' => 'GET',
                     'timeout' => 25,
                     'redirection' => 5,
                     'sslverify' => $this->should_verify_loopback_ssl($scan_url),
@@ -4346,7 +4330,8 @@ HTML;
                         'Cache-Control' => 'no-cache',
                         'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     ),
-                )
+                ),
+                'frontpage_css_scan'
             );
 
             if (is_wp_error($response)) {
@@ -4517,7 +4502,7 @@ HTML;
                     continue;
                 }
 
-                $signature_parts[] = $url . '|' . (string) @filemtime($path) . '|' . strlen($css);
+                $signature_parts[] = $url . '|' . (string) ucwp_safe_filemtime($path, 'frontpage_css_bundle_signature') . '|' . strlen($css);
                 $bundle_body .= "
 /* UltraCache Frontpage CSS Source: " . $url . " */
 ";

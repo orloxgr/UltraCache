@@ -19,7 +19,9 @@
 	const initialStats = ucwp.stats || {};
 	const avifSupport = ucwp.avifSupport || { supported: false };
 	const initialDiagnostics = ucwp.diagnostics || initialStats.diagnostics || {};
+	const initialDefaults = ucwp.defaults || {};
 	const crawlScopeSummary = ucwp.crawlScopeSummary || {};
+	const frontendProbeUrl = ucwp.frontendProbeUrl || '/';
 
 	const CLEAR_NOTICE_DELAY = 4200;
 	const SYSTEM_NOTICE_DELAY = 7000;
@@ -28,8 +30,6 @@
 	const JOB_STORAGE_KEY = 'ucwp-dashboard-job-state-v3';
 	const DEFAULT_QUEUE_BATCH_SIZE = 100;
 	const MAX_ITEM_RETRIES = 2;
-	const SUPPORT_MODAL_DELAY = 7000;
-	const SUPPORT_MODAL_COOLDOWN = 24 * 60 * 60 * 1000;
 	const SUPPORT_LINKS = {
 		coffee: 'https://www.paypal.com/ncp/payment/LDBFB3RRB3E9J',
 		beer: 'https://www.paypal.com/ncp/payment/G5RNTC3UF58VU',
@@ -87,6 +87,74 @@
 
 	function classNames() {
 		return Array.prototype.slice.call(arguments).filter(Boolean).join(' ');
+	}
+
+	function normalizeContentEncoding(headerValue) {
+		return String(headerValue || '').toLowerCase();
+	}
+
+	function responseHasEncoding(headerValue, token) {
+		return normalizeContentEncoding(headerValue).split(',').map((part) => part.trim()).includes(String(token || '').toLowerCase());
+	}
+
+	async function probeFrontendCompressionViaBrowser() {
+		const probeUrl = new URL(frontendProbeUrl || '/', window.location.origin);
+		probeUrl.searchParams.set('ucwp_probe_browser', String(Date.now()));
+
+		const result = {
+			ready: true,
+			serverCompression: false,
+			gzip: false,
+			brotli: false,
+			brokenGzip: false,
+			brokenBrotli: false,
+			message: '',
+		};
+
+		const response = await window.fetch(probeUrl.toString(), {
+			method: 'GET',
+			credentials: 'same-origin',
+			cache: 'no-store',
+			headers: {
+				'Cache-Control': 'no-cache',
+				'Pragma': 'no-cache',
+				'X-UltraCache-Compression-Probe': 'browser',
+			},
+		});
+
+		const contentEncoding = response.headers.get('content-encoding') || '';
+		const ultraCacheEncoding = String(response.headers.get('x-ultracache-encoding') || '').toLowerCase().trim();
+
+		if (!ultraCacheEncoding) {
+			if (responseHasEncoding(contentEncoding, 'br')) {
+				result.serverCompression = true;
+				result.brotli = true;
+			}
+			if (responseHasEncoding(contentEncoding, 'gzip')) {
+				result.serverCompression = true;
+				result.gzip = true;
+			}
+			if (result.serverCompression) {
+				result.gzip = true;
+				result.brotli = true;
+				result.message = 'Your server or proxy is already using frontend compression by default. UltraCache compression has been disabled to avoid conflicts.';
+			}
+			return result;
+		}
+
+		if ('gzip' === ultraCacheEncoding && !responseHasEncoding(contentEncoding, 'gzip')) {
+			result.brokenGzip = true;
+			result.message = 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. Gzip has been disabled as a safety measure.';
+			return result;
+		}
+
+		if ('brotli' === ultraCacheEncoding && !responseHasEncoding(contentEncoding, 'br')) {
+			result.brokenBrotli = true;
+			result.message = 'UltraCache detected Brotli-compressed output without a matching Content-Encoding header. Brotli has been disabled as a safety measure.';
+			return result;
+		}
+
+		return result;
 	}
 
 	function getLocalStorageSafe() {
@@ -562,13 +630,21 @@
 			return null;
 		}
 
+		const titleId = 'uc-support-modal-title';
+		const descriptionId = 'uc-support-modal-description';
+
 		return h('div', {
 			className: classNames('uc-support-modal', isMobile ? 'uc-support-modal--mobile' : 'uc-support-modal--desktop'),
 			onClick: onClose,
+			role: 'presentation',
 		}, [
 			h('div', {
 				className: 'uc-support-modal__dialog',
 				onClick: (event) => event.stopPropagation(),
+				role: 'dialog',
+				'aria-modal': 'true',
+				'aria-labelledby': titleId,
+				'aria-describedby': descriptionId,
 				key: 'dialog',
 			}, [
 				h('button', {
@@ -579,8 +655,8 @@
 					key: 'close',
 				}, '×'),
 				h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, 'Support this plugin'),
-				h('h3', { className: 'uc-support-modal__title', key: 'title' }, 'Support this plugin'),
-				h('p', { className: 'uc-support-modal__text', key: 'text' }, 'If UltraCache saves you time, you can support future updates or contact Byron directly for paid help.'),
+				h('h3', { className: 'uc-support-modal__title', id: titleId, key: 'title' }, 'Support this plugin'),
+				h('p', { className: 'uc-support-modal__text', id: descriptionId, key: 'text' }, 'If UltraCache saves you time, you can support future updates or contact Byron directly for paid help.'),
 				h('div', { className: 'uc-support-modal__section-label', key: 'support-label' }, 'Support this plugin'),
 				h(SupportLinks, { compact: isMobile, onHireClick, key: 'links' }),
 				h('div', { className: 'uc-support-modal__need-support', key: 'need-support' }, [
@@ -1112,6 +1188,8 @@
 						h('div', { key: 'bucket' }, 'Last bucket: ' + (last.bucket || '—')),
 						h('div', { key: 'time' }, 'Last seen: ' + lastSeen),
 						compressionStatus.message ? h('div', { key: 'compression-note' }, 'Compression: ' + compressionStatus.message) : null,
+						compressionStatus.serverDefault && compressionStatus.serverDefault.message ? h('div', { key: 'compression-server-default-note' }, 'Frontend compression: ' + compressionStatus.serverDefault.message) : null,
+						diagnostics && diagnostics.loopbackSsl && diagnostics.loopbackSsl.fallbackUsed && diagnostics.loopbackSsl.message ? h('div', { key: 'loopback-ssl-note' }, 'Loopback SSL: ' + diagnostics.loopbackSsl.message) : null,
 						wpCacheStatus.message ? h('div', { key: 'wp-cache-note' }, 'WP_CACHE: ' + wpCacheStatus.message) : null,
 						!objectCacheStatus.available && objectCacheStatus.message ? h('div', { key: 'object-cache-note' }, 'File object cache: ' + objectCacheStatus.message) : null,
 						reverseProxy.message ? h('div', { key: 'reverse-proxy-note' }, 'Reverse proxy: ' + reverseProxy.message) : null,
@@ -1418,8 +1496,8 @@
 			]),
 			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
 				h(Button, { onClick: onSave, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Save Object Cache Settings'),
-				h(Button, { onClick: onTest, disabled: busy, variant: 'secondary' }, busy ? 'Working…' : 'Test Redis Connection'),
-				h(Button, { onClick: onFlush, disabled: busy, variant: 'ghost' }, busy ? 'Working…' : 'Flush Object Cache'),
+				h(Button, { onClick: onTest, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Test Redis Connection'),
+				h(Button, { onClick: onFlush, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Flush Object Cache'),
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
 				h('div', { className: 'uc-section-title' }, 'Status'),
@@ -1458,6 +1536,7 @@
 		const [settings, setSettings] = useState(initialSettings);
 		const [stats, setStats] = useState(initialStats);
 		const [diagnostics, setDiagnostics] = useState(initialDiagnostics);
+		const [browserCompressionProbe, setBrowserCompressionProbe] = useState({ ready: false, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: '' });
 		const [busy, setBusy] = useState(false);
 		const [toasts, setToasts] = useState([]);
 		const [isMobile, setIsMobile] = useState(isMobileViewport());
@@ -1506,6 +1585,8 @@
 		const cancelRequestedRef = useRef(false);
 		const importFileInputRef = useRef(null);
 		const statsRefreshInFlightRef = useRef(false);
+		const compressionSyncRef = useRef('');
+		const compressionLocks = useMemo(() => getCompressionLockState(diagnostics, browserCompressionProbe), [diagnostics, browserCompressionProbe]);
 		const [process, setProcess] = useState({
 			active: false,
 			label: '',
@@ -1585,18 +1666,29 @@
 		useEffect(() => {
 			if (isMobile) {
 				setSupportModalOpen(false);
-				return undefined;
 			}
-
-			if (!shouldShowSystemNotice('support-promo', SUPPORT_MODAL_COOLDOWN)) {
-				return undefined;
-			}
-
-			markSystemNoticeShown('support-promo');
-			setSupportModalOpen(true);
-
-			return undefined;
 		}, [isMobile]);
+
+		useEffect(() => {
+			let cancelled = false;
+
+			(async () => {
+				try {
+					const result = await probeFrontendCompressionViaBrowser();
+					if (!cancelled) {
+						setBrowserCompressionProbe(result);
+					}
+				} catch (error) {
+					if (!cancelled) {
+						setBrowserCompressionProbe({ ready: true, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: '' });
+					}
+				}
+			})();
+
+			return () => {
+				cancelled = true;
+			};
+		}, []);
 
 		useEffect(() => {
 			const runRefresh = async () => {
@@ -1690,6 +1782,58 @@
 			settings.redisPasswordConfigured,
 		]);
 
+		useEffect(() => {
+			if (browserCompressionProbe && browserCompressionProbe.ready === false) {
+				return;
+			}
+
+			const patch = {};
+
+			if (compressionLocks.gzipLocked && settings.gzipEnabled) {
+				patch.gzipEnabled = false;
+			}
+			if (compressionLocks.brotliLocked && settings.brotliEnabled) {
+				patch.brotliEnabled = false;
+			}
+
+			const patchKeys = Object.keys(patch).sort();
+			if (!patchKeys.length) {
+				compressionSyncRef.current = '';
+				return;
+			}
+
+			const signature = patchKeys.join('|');
+			if (busy || compressionSyncRef.current === signature) {
+				return;
+			}
+
+			compressionSyncRef.current = signature;
+			setSettings((current) => Object.assign({}, current, patch));
+
+			(async () => {
+				setBusy(true);
+				try {
+					const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
+					if (response && response.settings) {
+						setSettings(response.settings);
+					}
+					if (response && response.stats) {
+						setStats(response.stats);
+					}
+					if (response && response.diagnostics) {
+						setDiagnostics(response.diagnostics);
+					}
+					pushToast({ type: 'warning', text: 'UltraCache automatically turned off compression that is already handled by your server or proxy.' });
+				} catch (error) {
+					compressionSyncRef.current = '';
+					pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to synchronize compression safety settings.' });
+				} finally {
+					setBusy(false);
+				}
+			})();
+		}, [busy, browserCompressionProbe.ready, compressionLocks.gzipLocked, compressionLocks.brotliLocked, settings.gzipEnabled, settings.brotliEnabled, pushToast]);
+
+
 		const etaText = useMemo(() => {
 			if (!process.active || !process.current || !process.total || !process.startTime) {
 				return '';
@@ -1714,6 +1858,42 @@
 
 		function updateRedisField(key, value) {
 			setRedisForm((current) => Object.assign({}, current, { [key]: value }));
+		}
+
+		function getCompressionLockState(sourceDiagnostics, browserProbe) {
+			const serverDefault = sourceDiagnostics && sourceDiagnostics.compression && sourceDiagnostics.compression.serverDefault
+				? sourceDiagnostics.compression.serverDefault
+				: {};
+			const browser = browserProbe || {};
+
+			if (browser.serverCompression) {
+				return {
+					gzipLocked: true,
+					brotliLocked: true,
+					gzipDescription: browser.message || 'Your server or proxy is already using frontend compression by default. UltraCache compression has been disabled to avoid conflicts.',
+					brotliDescription: browser.message || 'Your server or proxy is already using frontend compression by default. UltraCache compression has been disabled to avoid conflicts.',
+				};
+			}
+
+			const gzipLocked = !!(browser.brokenGzip || serverDefault.brokenGzip || serverDefault.gzip);
+			const brotliLocked = !!(browser.brokenBrotli || serverDefault.brokenBrotli || serverDefault.brotli);
+			const gzipDescription = browser.brokenGzip
+				? (browser.message || 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. Gzip has been disabled as a safety measure.')
+				: (serverDefault.brokenGzip
+					? 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. Gzip has been disabled as a safety measure.'
+					: (serverDefault.gzip ? 'Your server is already using gzip compression by default.' : 'Serve gzip sidecar cache files when supported.'));
+			const brotliDescription = browser.brokenBrotli
+				? (browser.message || 'UltraCache detected Brotli-compressed output without a matching Content-Encoding header. Brotli has been disabled as a safety measure.')
+				: (serverDefault.brokenBrotli
+					? 'UltraCache detected Brotli-compressed output without a matching Content-Encoding header. Brotli has been disabled as a safety measure.'
+					: (serverDefault.brotli ? 'Your server is already using Brotli compression by default.' : 'Serve Brotli sidecar cache files when available.'));
+
+			return {
+				gzipLocked,
+				brotliLocked,
+				gzipDescription,
+				brotliDescription,
+			};
 		}
 
 		async function saveRedisSettings() {
@@ -1751,9 +1931,15 @@
 				return;
 			}
 
+			const payload = Object.assign({}, redisForm || {});
+			const passwordValue = String(payload.redisPassword || '').trim();
+			if (!passwordValue) {
+				delete payload.redisPassword;
+			}
+
 			setBusy(true);
 			try {
-				const result = await apiRequest('redis_test', Object.assign({}, redisForm || {}));
+				const result = await apiRequest('redis_test', payload);
 				setDiagnostics((current) => Object.assign({}, current || {}, {
 					objectCache: Object.assign({}, (current && current.objectCache) || {}, {
 						redis: Object.assign({}, (((current && current.objectCache) || {}).redis) || {}, result || {}),
@@ -1820,14 +2006,6 @@
 				setBusy(false);
 			}
 		}
-
-		function reloadDashboardPage(delay) {
-			const timeout = typeof delay === 'number' ? delay : 450;
-			window.setTimeout(function() {
-				window.location.reload();
-			}, timeout);
-		}
-
 		async function runVarnishTest() {
 			if (busy) {
 				return;
@@ -1838,10 +2016,6 @@
 				await refreshStats();
 				const success = !!(result && result.success);
 				pushToast({ type: success ? 'success' : 'error', text: result && result.message ? result.message : 'Varnish test completed.' });
-				if (success) {
-					reloadDashboardPage();
-					return;
-				}
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Varnish test failed.' });
 			} finally {
@@ -1859,10 +2033,6 @@
 				await refreshStats();
 				const success = !!(result && result.success);
 				pushToast({ type: success ? 'success' : 'error', text: result && result.message ? result.message : 'Varnish flush finished.' });
-				if (success) {
-					reloadDashboardPage();
-					return;
-				}
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Varnish flush failed.' });
 			} finally {
@@ -2434,6 +2604,43 @@
 			}
 		}
 
+		async function resetSettingsToDefaults() {
+			if (busy) {
+				return;
+			}
+
+			const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
+			if (!Object.keys(defaultsPayload).length) {
+				pushToast({ type: 'error', text: 'Default settings are not available in this build.' });
+				return;
+			}
+
+			const confirmed = window.confirm('Reset all UltraCache settings to defaults? This also clears saved Redis and Varnish secrets.');
+			if (!confirmed) {
+				return;
+			}
+
+			setBusy(true);
+			try {
+				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(defaultsPayload) });
+				if (response && response.settings) {
+					setSettings(response.settings);
+				}
+				if (response && response.stats) {
+					setStats(response.stats);
+				}
+				if (response && response.diagnostics) {
+					setDiagnostics(response.diagnostics);
+				}
+				setInspectResult(null);
+				pushToast({ type: 'success', text: 'UltraCache settings were reset to defaults.' });
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to reset UltraCache settings.' });
+			} finally {
+				setBusy(false);
+			}
+		}
+
 		async function purgeCache() {
 			if (busy) {
 				return;
@@ -2745,7 +2952,7 @@
 						}),
 						h(ToggleRow, {
 							label: 'Local Google Fonts Optimization',
-							description: 'Download Google Fonts CSS and WOFF2 files into the UltraCache cache, rewrite the frontend to serve local copies, and keep font-display: swap on the localized CSS.',
+							description: 'Opt-in feature. Download Google Fonts CSS and WOFF2 files into the UltraCache cache, rewrite the frontend to serve local copies, and keep font-display: swap on the localized CSS. This feature makes outbound requests to Google Fonts when building the local cache.',
 							checked: settings.googleFontsLocalOptimizationEnabled,
 							onChange: (value) => updateSetting('googleFontsLocalOptimizationEnabled', value),
 							disabled: busy,
@@ -2819,20 +3026,20 @@
 							disabled: busy || !(diagnostics.objectCache && diagnostics.objectCache.available),
 							key: 'object-cache',
 						}),
-						h(ToggleRow, {
+							h(ToggleRow, {
 							label: 'Gzip',
-							description: 'Serve gzip sidecar cache files when supported.',
+							description: compressionLocks.gzipDescription,
 							checked: settings.gzipEnabled,
 							onChange: (value) => updateSetting('gzipEnabled', value),
-							disabled: busy,
+							disabled: busy || compressionLocks.gzipLocked,
 							key: 'gzip',
 						}),
 						h(ToggleRow, {
 							label: 'Brotli',
-							description: 'Serve Brotli sidecar cache files when available.',
+							description: compressionLocks.brotliDescription,
 							checked: settings.brotliEnabled,
 							onChange: (value) => updateSetting('brotliEnabled', value),
-							disabled: busy,
+							disabled: busy || compressionLocks.brotliLocked,
 							key: 'brotli',
 						}),
 						h(ToggleRow, {
@@ -3029,6 +3236,7 @@
 					h('div', { className: 'mt-4 flex gap-3 flex-wrap' }, [
 						h(Button, { onClick: exportSettingsFile, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Export Settings'),
 						h(Button, { onClick: openImportSettingsDialog, disabled: busy, variant: 'light' }, busy ? 'Working…' : 'Import Settings'),
+					h(Button, { onClick: resetSettingsToDefaults, disabled: busy, variant: 'light' }, busy ? 'Working…' : 'Reset Settings'),
 					]),
 					h('div', { className: 'mt-4 text-xs text-zinc-500', key: 'hint' }, 'Recommended flow: export from the known-good site, then import into the target site and review Diagnostics once.'),
 				]
@@ -3050,7 +3258,7 @@
 				},
 				[
 					h('p', { className: 'mb-2 font-bold text-zinc-300' }, 'Quick start & examples'),
-					h('p', { className: 'm-0' }, 'Enable Page Caching, then Flush All Cache once. Use Warm Up Frontpage HTML Cache for a single homepage warm, Warm Up Frontpage HTML Cache + Frontpage CSS for homepage HTML + bundle rebuild, Warm Up Menu HTML Cache for menu URLs only, Warm Up Menu HTML Cache + Frontpage CSS for menu URLs plus one homepage CSS bundle build, Warm Up Full Site HTML Cache for a full crawl, or Warm Up Full Site HTML Cache + Frontpage CSS for the full crawl followed by one homepage CSS bundle build. In WP-CLI run `wp ultracache help` for commands, `wp ultracache warm-html-all --purge-first` for the full crawl, `wp ultracache warm-html-all-css --purge-first` for the full crawl plus frontpage CSS, `wp ultracache warm-frontpage-html` for the homepage only, `wp ultracache warm-frontpage-html-css` for homepage HTML + CSS, `wp ultracache cron_warm start` to start the minute-by-minute warm queue, and `wp ultracache cron_warm tick` from a server cron each minute when you want deterministic warming. Use `wp ultracache purge` after major theme or plugin changes. Keep WooCommerce Safe Mode enabled on shops, enable Local Google Fonts Optimization when you want to proxy Google Fonts locally, turn on Speculation Rules Prefetch only after basic cache behavior looks stable, and review Cache diagnostics after testing.'),
+					h('p', { className: 'm-0' }, 'Enable Page Caching, then Flush All Cache once. Use Warm Up Frontpage HTML Cache for a single homepage warm, Warm Up Frontpage HTML Cache + Frontpage CSS for homepage HTML + bundle rebuild, Warm Up Menu HTML Cache for menu URLs only, Warm Up Menu HTML Cache + Frontpage CSS for menu URLs plus one homepage CSS bundle build, Warm Up Full Site HTML Cache for a full crawl, or Warm Up Full Site HTML Cache + Frontpage CSS for the full crawl followed by one homepage CSS bundle build. In WP-CLI run `wp ultracache help` for commands, `wp ultracache warm-html-all --purge-first` for the full crawl, `wp ultracache warm-html-all-css --purge-first` for the full crawl plus frontpage CSS, `wp ultracache warm-frontpage-html` for the homepage only, `wp ultracache warm-frontpage-html-css` for homepage HTML + CSS, `wp ultracache cron_warm start` to start the minute-by-minute warm queue, and `wp ultracache cron_warm tick` from a server cron each minute when you want deterministic warming. Use `wp ultracache purge` after major theme or plugin changes. Keep WooCommerce Safe Mode enabled on shops, enable Local Google Fonts Optimization only when you explicitly want UltraCache to fetch Google Fonts assets and proxy them locally, turn on Speculation Rules Prefetch only after basic cache behavior looks stable, and review Cache diagnostics after testing.'),
 				]
 			),
 		]);

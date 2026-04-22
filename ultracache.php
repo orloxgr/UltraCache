@@ -3,12 +3,12 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.54.097
+ * Version: 2.54.126
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
- * Hotfix Bundle Version: 2.54.097
+ * Hotfix Bundle Version: 2.54.126
  */
 
 if (!defined('ABSPATH')) {
@@ -16,10 +16,10 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.54.097');
+    define('UCWP_VERSION', '2.54.126');
 }
 if (!defined('UCWP_HOTFIX_BUNDLE_VERSION')) {
-    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.54.097');
+    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.54.126');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -249,14 +249,63 @@ if (!function_exists('ucwp_is_allowed_socket_target')) {
 
 if (!function_exists('ucwp_safe_file_get_contents')) {
 
-    function ucwp_safe_file_get_contents($path, $context = '')
+    function ucwp_safe_file_get_contents($path, $context = '', $suppress_warnings = false)
     {
-        $data = file_get_contents($path);
+        $path = (string) $path;
+        $context = (string) $context;
+        $suppress_warnings = (bool) $suppress_warnings;
+        $data = false;
+
+        $filesystem = ucwp_get_wp_filesystem();
+        if ($filesystem && $filesystem->exists($path) && $filesystem->is_file($path)) {
+            $data = $filesystem->get_contents($path);
+        } else {
+            $exists = file_exists($path);
+            $is_file = $exists && is_file($path);
+            $readable = $is_file && is_readable($path);
+
+            if (!$suppress_warnings || $readable) {
+                $data = file_get_contents($path);
+            }
+        }
+
         if (false === $data) {
-            ucwp_debug_log('file_get_contents failed', array('path' => $path, 'context' => (string) $context));
+            $log_context = array('path' => $path, 'context' => $context);
+            ucwp_debug_log('file_get_contents failed', $log_context);
         }
 
         return $data;
+    }
+}
+
+if (!function_exists('ucwp_safe_fsockopen')) {
+    function ucwp_safe_fsockopen($host, $port, &$errno, &$errstr, $timeout = 0, $context = '')
+    {
+        $host = (string) $host;
+        $port = (int) $port;
+        $timeout = (float) $timeout;
+        $context = (string) $context;
+        $errno = 0;
+        $errstr = '';
+
+        $remote_socket = 'tcp://' . $host . ':' . $port;
+        $stream = @stream_socket_client($remote_socket, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT);
+
+        if (false === $stream) {
+            $log_context = array(
+                'host' => $host,
+                'port' => $port,
+                'timeout' => $timeout,
+                'context' => $context,
+                'errno' => (int) $errno,
+            );
+            if ('' !== (string) $errstr) {
+                $log_context['error'] = (string) $errstr;
+            }
+            ucwp_debug_log('stream_socket_client failed', $log_context);
+        }
+
+        return $stream;
     }
 }
 
@@ -407,11 +456,84 @@ if (!function_exists('ucwp_safe_filemtime')) {
     }
 }
 
+if (!function_exists('ucwp_safe_filesize')) {
+    function ucwp_safe_filesize($path, $context = '')
+    {
+        $path = (string) $path;
+        if ('' === $path || !file_exists($path) || !is_file($path) || !is_readable($path)) {
+            return false;
+        }
+
+        $result = filesize($path);
+        if (false === $result && file_exists($path)) {
+            ucwp_debug_log('filesize failed', array('path' => $path, 'context' => (string) $context));
+        }
+
+        return $result;
+    }
+}
+
+if (!function_exists('ucwp_safe_tempnam')) {
+    function ucwp_safe_tempnam($dir, $prefix = 'ucwp', $context = '')
+    {
+        $dir = (string) $dir;
+        $prefix = (string) $prefix;
+        if ('' === $dir || !is_dir($dir) || !ucwp_path_is_writable($dir)) {
+            ucwp_debug_log('tempnam directory unavailable', array('dir' => $dir, 'context' => (string) $context));
+            return false;
+        }
+
+        $sanitized_prefix = preg_replace('/[^A-Za-z0-9._-]/', '', $prefix);
+        if (!is_string($sanitized_prefix) || '' === $sanitized_prefix) {
+            $sanitized_prefix = 'ucwp';
+        }
+
+        $result = tempnam($dir, substr($sanitized_prefix, 0, 32));
+        if (false === $result) {
+            ucwp_debug_log('tempnam failed', array('dir' => $dir, 'prefix' => $sanitized_prefix, 'context' => (string) $context));
+        }
+
+        return $result;
+    }
+}
+
+if (!function_exists('ucwp_safe_fread')) {
+    function ucwp_safe_fread($stream, $length, $context = '')
+    {
+        $length = max(0, (int) $length);
+        if ($length <= 0) {
+            return '';
+        }
+
+        if (!is_resource($stream)) {
+            ucwp_debug_log('fread failed: invalid stream', array('context' => (string) $context, 'length' => $length));
+            return false;
+        }
+
+        $result = stream_get_contents($stream, $length);
+        if (false === $result) {
+            ucwp_debug_log('stream_get_contents failed', array('context' => (string) $context, 'length' => $length));
+        }
+
+        return $result;
+    }
+}
+
 if (!function_exists('ucwp_safe_scandir')) {
     function ucwp_safe_scandir($dir, $context = '')
     {
+        $dir = (string) $dir;
+        if ('' === $dir || !is_dir($dir)) {
+            return false;
+        }
+
+        if (!is_readable($dir)) {
+            ucwp_debug_log('scandir failed: directory not readable', array('dir' => $dir, 'context' => (string) $context));
+            return false;
+        }
+
         $result = scandir($dir);
-        if (false === $result && is_dir($dir)) {
+        if (false === $result) {
             ucwp_debug_log('scandir failed', array('dir' => $dir, 'context' => (string) $context));
         }
 
@@ -449,6 +571,140 @@ if (!function_exists('ucwp_safe_remote_request')) {
                 'context' => (string) $context,
                 'error' => $response->get_error_message(),
             ));
+        }
+
+        return $response;
+    }
+}
+
+
+if (!function_exists('ucwp_get_loopback_ssl_status')) {
+    function ucwp_get_loopback_ssl_status()
+    {
+        $status = get_transient('ucwp_loopback_ssl_status_v1');
+        if (!is_array($status)) {
+            $status = array();
+        }
+
+        return wp_parse_args($status, array(
+            'strictByDefault' => true,
+            'fallbackUsed'    => false,
+            'lastUrl'         => '',
+            'lastError'       => '',
+            'context'         => '',
+            'message'         => '',
+            'updatedAt'       => 0,
+        ));
+    }
+}
+
+if (!function_exists('ucwp_set_loopback_ssl_status')) {
+    function ucwp_set_loopback_ssl_status(array $status)
+    {
+        set_transient('ucwp_loopback_ssl_status_v1', $status, DAY_IN_SECONDS);
+    }
+}
+
+if (!function_exists('ucwp_reset_loopback_ssl_status')) {
+    function ucwp_reset_loopback_ssl_status()
+    {
+        delete_transient('ucwp_loopback_ssl_status_v1');
+    }
+}
+
+if (!function_exists('ucwp_is_local_https_url')) {
+    function ucwp_is_local_https_url($url)
+    {
+        $url = is_string($url) ? trim($url) : '';
+        if ('' === $url) {
+            return false;
+        }
+
+        $parts = wp_parse_url($url);
+        if (!is_array($parts)) {
+            return false;
+        }
+
+        $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) : '';
+        $host   = isset($parts['host']) ? ucwp_normalize_host((string) $parts['host']) : '';
+        if ('https' !== $scheme || '' === $host) {
+            return false;
+        }
+
+        $trusted_hosts = ucwp_get_trusted_hosts();
+        return !empty($trusted_hosts[$host]);
+    }
+}
+
+if (!function_exists('ucwp_is_ssl_verification_wp_error')) {
+    function ucwp_is_ssl_verification_wp_error($error)
+    {
+        if (!($error instanceof WP_Error)) {
+            return false;
+        }
+
+        $message = strtolower(trim((string) $error->get_error_message()));
+        if ('' === $message) {
+            return false;
+        }
+
+        $needles = array(
+            'ssl certificate',
+            'certificate verify failed',
+            'peer certificate',
+            'self signed certificate',
+            'unable to get local issuer certificate',
+            'unable to verify the first certificate',
+            'tlsv1 alert',
+            'certificate has expired',
+            'hostname mismatch',
+            'curl error 60',
+            'curl error 51',
+        );
+
+        foreach ($needles as $needle) {
+            if (false !== strpos($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('ucwp_safe_loopback_remote_request')) {
+    function ucwp_safe_loopback_remote_request($url, array $args = array(), $context = '')
+    {
+        $is_local_https = ucwp_is_local_https_url($url);
+        if (!$is_local_https) {
+            return ucwp_safe_remote_request($url, $args, $context);
+        }
+
+        $strict_args = $args;
+        $strict_args['sslverify'] = true;
+        $response = ucwp_safe_remote_request($url, $strict_args, $context . ':strict');
+        if (!is_wp_error($response)) {
+            return $response;
+        }
+
+        if (!ucwp_is_ssl_verification_wp_error($response)) {
+            return $response;
+        }
+
+        $fallback_args = $args;
+        $fallback_args['sslverify'] = false;
+        $fallback = ucwp_safe_remote_request($url, $fallback_args, $context . ':fallback');
+        if (!is_wp_error($fallback)) {
+            ucwp_set_loopback_ssl_status(array(
+                'strictByDefault' => true,
+                'fallbackUsed'    => true,
+                'lastUrl'         => (string) $url,
+                'lastError'       => (string) $response->get_error_message(),
+                'context'         => (string) $context,
+                'message'         => 'Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification.',
+                'updatedAt'       => time(),
+            ));
+            return $fallback;
         }
 
         return $response;
@@ -584,7 +840,7 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private function register_hooks()
         {
-            add_action('plugins_loaded', array($this, 'bootstrap_components'), 5);
+                        add_action('plugins_loaded', array($this, 'bootstrap_components'), 5);
             add_action('plugins_loaded', array($this, 'reconcile_page_cache_dropin'), 19);
             add_action('plugins_loaded', array($this, 'reconcile_object_cache_dropin'), 20);
             add_action('plugins_loaded', array($this, 'reconcile_runtime_config'), 21);
@@ -606,9 +862,7 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private static function maybe_translate($text)
         {
-            $text = (string) $text;
-
-            return $text;
+            return (string) $text;
         }
 
         private static function maybe_translate_sprintf($text)
@@ -729,6 +983,7 @@ if (!class_exists('Ultra_Cache_WP')) {
         public static function get_dashboard_defaults()
         {
             $compression_support = self::get_compression_support_status();
+            $frontend_compression = self::get_frontend_compression_probe_status();
             $media_support = self::get_media_support_status();
             $crawl_scope_summary = self::get_crawl_scope_summary();
             $default_scheduled_warm_limit = max(1, (int) ($crawl_scope_summary['defaultScheduledWarmLimit'] ?? 0));
@@ -746,8 +1001,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'redisPersistent'            => false,
                 'redisConnectTimeoutMs'      => 200,
                 'redisReadTimeoutMs'         => 200,
-                'brotliEnabled'              => !empty($compression_support['brotli']),
-                'gzipEnabled'                => !empty($compression_support['gzip']),
+                'brotliEnabled'              => !empty($compression_support['brotli']) && empty($frontend_compression['brotli']),
+                'gzipEnabled'                => !empty($compression_support['gzip']) && empty($frontend_compression['gzip']),
                 'avifConversionEnabled'      => !empty($media_support['supported']),
                 'deferJsEnabled'             => true,
                 'delayThirdPartyJsEnabled'   => true,
@@ -756,7 +1011,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'asyncCssEnabled'            => true,
                 'lcpImagePriorityEnabled'    => true,
                 'googleFontsSwapEnabled'     => true,
-                'googleFontsLocalOptimizationEnabled' => true,
+                'googleFontsLocalOptimizationEnabled' => false,
                 'selfHostedFontCssOptimizationEnabled' => true,
                 'speculationRulesEnabled'    => true,
                 'browserCacheRulesEnabled'   => true,
@@ -1292,6 +1547,14 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['gzipEnabled'] = false;
             }
 
+            $frontend_compression = self::get_frontend_compression_probe_status();
+            if (!empty($frontend_compression['brotli']) || !empty($frontend_compression['brokenBrotli'])) {
+                $settings['brotliEnabled'] = false;
+            }
+            if (!empty($frontend_compression['gzip']) || !empty($frontend_compression['brokenGzip'])) {
+                $settings['gzipEnabled'] = false;
+            }
+
             $object_cache_support = self::get_object_cache_support_status();
             if (empty($object_cache_support['available'])) {
                 $settings['objectCacheEnabled'] = false;
@@ -1317,6 +1580,8 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             self::$dashboard_settings_cache = null;
             self::$settings_cache = null;
+            delete_transient('ucwp_frontend_compression_probe_v1');
+            ucwp_reset_loopback_ssl_status();
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_settings_cache')) {
                 Ultra_Cache_Object_Cache_Manager::reset_settings_cache();
@@ -1389,6 +1654,22 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $flag = isset($flag_map[$key]) ? $flag_map[$key] : '';
                 if ('' !== $flag) {
                     $settings[$flag] = ('' !== trim((string) ($settings[$key] ?? '')));
+                }
+                $settings[$key] = '';
+            }
+
+            return $settings;
+        }
+
+        public static function get_dashboard_defaults_for_client()
+        {
+            $settings = self::sanitize_dashboard_settings(self::get_dashboard_defaults());
+            $flag_map = self::get_secret_configuration_flag_map();
+
+            foreach (self::get_secret_setting_keys() as $key) {
+                $flag = isset($flag_map[$key]) ? $flag_map[$key] : '';
+                if ('' !== $flag) {
+                    $settings[$flag] = false;
                 }
                 $settings[$key] = '';
             }
@@ -2469,7 +2750,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             usort($matches, static function ($a, $b) {
-                return (int) @filemtime($b) <=> (int) @filemtime($a);
+                return (int) ucwp_safe_filemtime($b, 'cleanup_wp_config_backups') <=> (int) ucwp_safe_filemtime($a, 'cleanup_wp_config_backups');
             });
 
             foreach (array_slice($matches, max(0, (int) $keep)) as $old_backup) {
@@ -2598,9 +2879,11 @@ if (!class_exists('Ultra_Cache_WP')) {
                 array(
                     'restBase'     => esc_url_raw(rest_url('ultracache/v1/')),
                     'restNonce'    => wp_create_nonce('wp_rest'),
+                    'frontendProbeUrl' => esc_url_raw(home_url('/')),
                     'version'      => UCWP_VERSION,
                     'stats'        => self::get_engine_stats(),
                     'settings'     => self::get_dashboard_settings_for_client(),
+                    'defaults'     => self::get_dashboard_defaults_for_client(),
                     'avifSupport'  => self::get_media_support_status(),
                     'diagnostics'  => self::get_dashboard_diagnostics(),
                     'crawlScopeSummary' => self::get_crawl_scope_summary(),
@@ -2791,6 +3074,99 @@ if (!class_exists('Ultra_Cache_WP')) {
             );
         }
 
+        private static function get_frontend_compression_probe_status()
+        {
+            $cached = get_transient('ucwp_frontend_compression_probe_v1');
+            if (is_array($cached)) {
+                return $cached;
+            }
+
+            $status = array(
+                'detected'      => false,
+                'gzip'          => false,
+                'brotli'        => false,
+                'brokenGzip'    => false,
+                'brokenBrotli'  => false,
+                'message'       => '',
+            );
+
+            $probe_base = home_url('/');
+            if ('' === (string) $probe_base) {
+                set_transient('ucwp_frontend_compression_probe_v1', $status, 5 * MINUTE_IN_SECONDS);
+                return $status;
+            }
+
+            $probe_url = add_query_arg('ucwp_probe_compression', (string) time(), $probe_base);
+            $encodings = array(
+                'brotli' => 'br',
+                'gzip'   => 'gzip',
+            );
+
+            foreach ($encodings as $bucket => $accept_encoding) {
+                $response = ucwp_safe_loopback_remote_request($probe_url, array(
+                    'method'              => 'GET',
+                    'timeout'             => 5,
+                    'redirection'         => 2,
+                    'decompress'          => false,
+                    'limit_response_size' => 1,
+                    'headers'             => array(
+                        'Cache-Control'           => 'no-cache',
+                        'Pragma'                  => 'no-cache',
+                        'Accept-Encoding'         => $accept_encoding,
+                        'X-UltraCache-Compression-Probe' => '1',
+                    ),
+                ), 'frontend_compression_probe');
+
+                if (is_wp_error($response)) {
+                    continue;
+                }
+
+                $headers = wp_remote_retrieve_headers($response);
+                $content_encoding = strtolower(trim((string) ($headers['content-encoding'] ?? '')));
+                $ultracache_encoding = strtolower(trim((string) ($headers['x-ultracache-encoding'] ?? '')));
+                $body = (string) wp_remote_retrieve_body($response);
+                $gzip_magic = (strlen($body) >= 2 && 0x1f === ord($body[0]) && 0x8b === ord($body[1]));
+
+                if ('' !== $ultracache_encoding) {
+                    if ('gzip' === $ultracache_encoding && false === strpos($content_encoding, 'gzip') && $gzip_magic) {
+                        $status['brokenGzip'] = true;
+                        $status['detected'] = true;
+                    }
+                    if ('brotli' === $ultracache_encoding && false === strpos($content_encoding, 'br') && '' !== $body) {
+                        $status['brokenBrotli'] = true;
+                        $status['detected'] = true;
+                    }
+                    continue;
+                }
+
+                if ('brotli' === $bucket && false !== strpos($content_encoding, 'br')) {
+                    $status['brotli'] = true;
+                    $status['detected'] = true;
+                }
+                if ('gzip' === $bucket && false !== strpos($content_encoding, 'gzip')) {
+                    $status['gzip'] = true;
+                    $status['detected'] = true;
+                }
+            }
+
+            if ($status['brokenBrotli'] && $status['brokenGzip']) {
+                $status['message'] = 'UltraCache detected Brotli and gzip compressed output without matching Content-Encoding headers. Plugin compression has been disabled as a safety measure.';
+            } elseif ($status['brokenBrotli']) {
+                $status['message'] = 'UltraCache detected Brotli compressed output without a matching Content-Encoding header. Brotli has been disabled as a safety measure.';
+            } elseif ($status['brokenGzip']) {
+                $status['message'] = 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. Gzip has been disabled as a safety measure.';
+            } elseif ($status['brotli'] && $status['gzip']) {
+                $status['message'] = 'Your server is already using Brotli and gzip compression by default.';
+            } elseif ($status['brotli']) {
+                $status['message'] = 'Your server is already using Brotli compression by default.';
+            } elseif ($status['gzip']) {
+                $status['message'] = 'Your server is already using gzip compression by default.';
+            }
+
+            set_transient('ucwp_frontend_compression_probe_v1', $status, 5 * MINUTE_IN_SECONDS);
+            return $status;
+        }
+
         private static function get_wp_cache_define_status()
         {
             $config = self::get_wp_config_path();
@@ -2906,7 +3282,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return;
             }
 
-            if (file_exists($file) && @filesize($file) > 1048576) {
+            if (file_exists($file) && (int) ucwp_safe_filesize($file, 'varnish_log_rotate') > 1048576) {
                 ucwp_safe_unlink($file . '.1', 'varnish_log_rotate');
                 ucwp_safe_rename($file, $file . '.1', 'varnish_log_rotate');
             }
@@ -3058,11 +3434,10 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $headers['X-UltraCache-Token'] = (string) $settings['key'];
             }
 
-            $response = ucwp_safe_remote_request($target_url, array(
+            $response = ucwp_safe_loopback_remote_request($target_url, array(
                 'method'      => (string) $method,
                 'timeout'     => max(1, (int) $timeout_s),
                 'redirection' => 0,
-                'sslverify'   => false,
                 'headers'     => $headers,
                 'body'        => '',
             ), 'varnish_http_request');
@@ -3122,7 +3497,7 @@ if (!class_exists('Ultra_Cache_WP')) {
         // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.WP.AlternativeFunctions.file_system_operations_fsockopen,WordPress.WP.AlternativeFunctions.file_system_operations_fclose,WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
         private static function read_varnish_admin_response($fp)
         {
-            $header = @fread($fp, 13);
+            $header = ucwp_safe_fread($fp, 13, 'read_varnish_admin_response header');
             if (false === $header || strlen($header) < 13) {
                 return array('ok' => false, 'code' => 0, 'body' => 'Failed to read Varnish admin response header.');
             }
@@ -3131,7 +3506,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $length = (int) substr($header, 4, 6) + 1;
             $body = '';
             while (strlen($body) < $length && !feof($fp)) {
-                $chunk = @fread($fp, $length - strlen($body));
+                $chunk = ucwp_safe_fread($fp, $length - strlen($body), 'read_varnish_admin_response body');
                 if (false === $chunk || '' === $chunk) {
                     break;
                 }
@@ -3182,7 +3557,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $connect = static function () use ($host, $port, $timeout_s) {
                 $errno  = 0;
                 $errstr = '';
-                $fp = @fsockopen($host, $port, $errno, $errstr, max(1, (int) $timeout_s));
+                $fp = ucwp_safe_fsockopen($host, $port, $errno, $errstr, max(1, (int) $timeout_s), 'send_varnish_admin_ban');
                 if (!is_resource($fp)) {
                     return array(false, 'Connection failed: ' . trim($errstr !== '' ? $errstr : ('Error ' . $errno)));
                 }
@@ -3488,15 +3863,15 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'message'            => '',
             );
 
-            $response = wp_safe_remote_head(home_url('/'), array(
+            $response = ucwp_safe_loopback_remote_request(home_url('/'), array(
+                'method'      => 'HEAD',
                 'timeout'     => 5,
                 'redirection' => 2,
-                'sslverify'   => (bool) apply_filters('https_local_ssl_verify', false) /* phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound */,
                 'headers'     => array(
                     'Cache-Control' => 'no-cache',
                     'Pragma'        => 'no-cache',
                 ),
-            ));
+            ), 'reverse_proxy_status');
 
             if (!is_wp_error($response)) {
                 $headers = wp_remote_retrieve_headers($response);
@@ -3671,6 +4046,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     ),
                     'preferred' => (string) $compression['preferred'],
                     'message'   => (string) $compression['message'],
+                    'serverDefault' => self::get_frontend_compression_probe_status(),
                 ),
                 'wpCache' => self::get_wp_cache_define_status(),
                 'browserCache' => array(
@@ -3690,6 +4066,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     )
                 ),
                 'reverseProxy' => self::get_reverse_proxy_status(),
+                'loopbackSsl' => ucwp_get_loopback_ssl_status(),
                 'cronWarm' => self::get_cron_warm_status(),
                 'paths' => array(
                     'cacheDir'          => self::get_path_diagnostic(UCWP_CACHE_DIR, 'dir'),
@@ -3723,7 +4100,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             if ($exists) {
                 $modified = ucwp_safe_filemtime($path, 'path_diagnostic');
                 if (!$is_dir) {
-                    $size = @filesize($path);
+                    $size = (int) ucwp_safe_filesize($path, 'path_diagnostic');
                 }
 
                 if (!$is_dir && $managed_marker && $readable) {

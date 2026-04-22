@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.54.097
+Stable tag: 2.54.126
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -14,6 +14,8 @@ Static HTML page caching, cache warming, Redis object cache, Varnish-aware purgi
 
 UltraCache is a production-oriented performance plugin for WordPress sites that want practical caching controls, fast warm-up tools, Redis-backed object caching, optional Varnish integration, media conversion, and a diagnostics-heavy admin dashboard.
 
+Google Fonts localization is optional and, when enabled, downloads Google Fonts CSS/font assets into the local UltraCache cache so the frontend can serve local copies instead of the original Google-hosted URLs.
+
 Main capabilities include:
 
 * Full-page HTML caching through a managed advanced-cache drop-in
@@ -22,6 +24,7 @@ Main capabilities include:
 * Menu-only warm-up actions for fast wins
 * Optional Redis object cache drop-in management
 * Optional Varnish-aware purge workflows
+* Optional Google Fonts localization with outbound fetches only when explicitly enabled
 * AVIF generation with WebP fallback
 * Frontpage CSS bundle generation
 * Gzip and Brotli sidecars when supported
@@ -53,6 +56,32 @@ Yes. UltraCache can manage Redis-backed object caching and includes Varnish-awar
 
 == Changelog ==
 
+= 2.54.126 =
+* UI: Test Redis Connection and Flush Object Cache now use the same green action styling as the other primary dashboard buttons.
+
+* Removed hard page reloads after Run Varnish Test and Flush Varnish All. The dashboard now stays in place and refreshes stats/diagnostics through AJAX only.
+
+= 2.54.126 =
+* Hardened same-host HTTPS loopbacks: UltraCache now verifies local SSL certificates first and only falls back without verification after a detected certificate-validation failure.
+* Added loopback SSL fallback diagnostics so the dashboard can report when strict local SSL verification had to be bypassed temporarily.
+
+= 2.54.111 =
+* Automatically turns off Gzip/Brotli in the dashboard when frontend compression is already handled by the server/proxy, and adds a Reset Settings button beside Export/Import.
+* Reduced low-value `@` error suppression in non-critical helper paths.
+* Switched font CSS scan and optimization reads to safe file wrappers with internal debug logging.
+* Switched Varnish admin socket connect to a safe wrapper with internal debug logging.
+
+= 2.54.104 =
+* Fixed the cron warm settings save path so `cronWarmPagesPerMinute` and `scheduledWarmLimit` no longer overwrite each other.
+* Normalized `--cache-url` validation messages across WP-CLI purge, warm, and Varnish flush-url commands.
+
+= 2.54.100 =
+* Stopped the support modal from opening automatically in the admin dashboard.
+* Redacted Redis and Varnish secrets from WP-CLI settings output.
+* Added textdomain loading and started routing helper strings through the UltraCache text domain.
+* Changed Local Google Fonts Optimization to opt-in by default for fresh installs.
+* Added clearer disclosure that Google Fonts localization makes outbound requests only when enabled.
+
 = 2.54.097 =
 * Follow-up plugin-check cleanup for the query fallback helper.
 * Repository follow-up cleanup for WordPress.org checks.
@@ -68,6 +97,15 @@ Yes. UltraCache can manage Redis-backed object caching and includes Varnish-awar
 * Cleaned several debug/report issues in the repository build.
 
 == Upgrade Notice ==
+
+= 2.54.111 =
+Cleaner non-critical diagnostics paths with less silent suppression and safer internal debug logging.
+
+= 2.54.104 =
+Safer cron warm settings persistence plus consistent `--cache-url` validation messages.
+
+= 2.54.100 =
+Safer admin behavior, WP-CLI secret redaction, textdomain loading, and clearer opt-in handling for Google Fonts localization.
 
 = 2.54.097 =
 Repository compatibility cleanup and metadata fixes.

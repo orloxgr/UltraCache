@@ -41,6 +41,96 @@ if (!function_exists('ucwp_safe_mkdir')) {
     }
 }
 
+
+if (!function_exists('ucwp_safe_filemtime')) {
+    function ucwp_safe_filemtime($file) {
+        return is_file($file) ? filemtime($file) : false;
+    }
+}
+
+if (!function_exists('ucwp_safe_readfile')) {
+    function ucwp_safe_readfile($file) {
+        return is_readable($file) ? readfile($file) : false;
+    }
+}
+
+if (!function_exists('ucwp_safe_stream_socket_client')) {
+    function ucwp_safe_stream_socket_client($remote_socket, $timeout, &$errno = null, &$errstr = null) {
+        $timeout = max(0.1, (float) $timeout);
+        return stream_socket_client($remote_socket, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT);
+    }
+}
+
+if (!function_exists('ucwp_normalize_cache_path')) {
+    function ucwp_normalize_cache_path($path) {
+        $path = is_string($path) ? trim($path) : '';
+        if ('' === $path) {
+            return '';
+        }
+        $path = str_replace('\\', '/', $path);
+        $path = preg_replace('#/+#', '/', $path);
+        return is_string($path) ? rtrim($path, '/') : '';
+    }
+}
+
+if (!function_exists('ucwp_is_cache_path')) {
+    function ucwp_is_cache_path($path, $base_dir) {
+        $path = ucwp_normalize_cache_path($path);
+        $base_dir = ucwp_normalize_cache_path($base_dir);
+        if ('' === $path || '' === $base_dir) {
+            return false;
+        }
+        return $path === $base_dir || 0 === strpos($path, $base_dir . '/');
+    }
+}
+
+if (!function_exists('ucwp_clean_server_text')) {
+    function ucwp_clean_server_text($value) {
+        if (is_array($value) || is_object($value)) {
+            return '';
+        }
+        $value = (string) $value;
+        $value = preg_replace('/[\x00-\x1F\x7F]/', '', $value);
+        return is_string($value) ? trim($value) : '';
+    }
+}
+
+if (!function_exists('ucwp_server_var')) {
+    function ucwp_server_var($key, $default = '') {
+        if (!isset($_SERVER[$key])) {
+            return $default;
+        }
+        $value = ucwp_clean_server_text($_SERVER[$key]);
+        return '' === $value ? $default : $value;
+    }
+}
+
+if (!function_exists('ucwp_normalize_request_uri')) {
+    function ucwp_normalize_request_uri($uri) {
+        $uri = ucwp_clean_server_text($uri);
+        if ('' === $uri) {
+            return '';
+        }
+        if (strlen($uri) > 8192) {
+            $uri = substr($uri, 0, 8192);
+        }
+        if (false !== strpos($uri, '://')) {
+            $parsed = parse_url($uri);
+            if (!is_array($parsed)) {
+                return '';
+            }
+            $uri = (!empty($parsed['path']) ? (string) $parsed['path'] : '/');
+            if (!empty($parsed['query'])) {
+                $uri .= '?' . (string) $parsed['query'];
+            }
+        }
+        if ('/' !== substr($uri, 0, 1)) {
+            $uri = '/' . ltrim($uri, '/');
+        }
+        return $uri;
+    }
+}
+
 $ucwp_read_file = static function ($file) {
     return is_readable($file) ? file_get_contents($file) : false;
 };
@@ -59,22 +149,33 @@ $ucwp_make_dir = static function ($dir, $mode = 0755, $recursive = true) {
     }
     return mkdir($dir, $mode, $recursive) || is_dir($dir);
 };
+$ucwp_get_filemtime = static function ($file) {
+    return ucwp_safe_filemtime($file);
+};
+$ucwp_safe_readfile = static function ($file) {
+    return ucwp_safe_readfile($file);
+};
+$ucwp_cache_base_dir = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache';
+$ucwp_is_cache_path = static function ($path) use ($ucwp_cache_base_dir) {
+    return ucwp_is_cache_path($path, $ucwp_cache_base_dir);
+};
 
-$method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+$method = strtoupper((string) ucwp_server_var('REQUEST_METHOD', 'GET'));
 if (!in_array($method, array('GET', 'HEAD'), true)) {
     return;
 }
 
-if (empty($_SERVER['HTTP_HOST']) || empty($_SERVER['REQUEST_URI'])) {
+$raw_http_host = ucwp_server_var('HTTP_HOST', '');
+$request_uri = ucwp_normalize_request_uri(ucwp_server_var('REQUEST_URI', ''));
+if ('' === $raw_http_host || '' === $request_uri) {
     return;
 }
-
-$request_uri = (string) $_SERVER['REQUEST_URI'];
 if (strpos($request_uri, '/wp-admin/') === 0 || strpos($request_uri, '/wp-login.php') === 0) {
     return;
 }
 
-foreach ((array) ($_COOKIE ?? array()) as $cookie_name => $cookie_value) {
+foreach (array_keys((array) ($_COOKIE ?? array())) as $cookie_name) {
+    $cookie_name = ucwp_clean_server_text($cookie_name);
     foreach (array(
         'wordpress_logged_in_',
         'comment_author_',
@@ -126,7 +227,7 @@ $runtime_config = array(
 
 $runtime_config_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/runtime-config.json';
 if (file_exists($runtime_config_file) && is_readable($runtime_config_file)) {
-    $loaded_runtime_raw = @file_get_contents($runtime_config_file);
+    $loaded_runtime_raw = $ucwp_read_file($runtime_config_file);
     if (is_string($loaded_runtime_raw) && '' !== $loaded_runtime_raw) {
         $loaded_runtime = json_decode($loaded_runtime_raw, true);
         if (is_array($loaded_runtime)) {
@@ -135,10 +236,13 @@ if (file_exists($runtime_config_file) && is_readable($runtime_config_file)) {
     }
 }
 
+$revalidate_flag = isset($_GET['ucwp_revalidate']) ? (string) $_GET['ucwp_revalidate'] : '';
+$revalidate_header = ucwp_server_var('HTTP_X_ULTRACACHE_REVALIDATE', '');
+$revalidate_token = isset($_GET['ucwp_rt']) ? (string) $_GET['ucwp_rt'] : ucwp_server_var('HTTP_X_ULTRACACHE_TOKEN', '');
 $is_revalidate_request = (
-    ('1' === (string) ($_GET['ucwp_revalidate'] ?? '') || '1' === (string) ($_SERVER['HTTP_X_ULTRACACHE_REVALIDATE'] ?? ''))
+    ('1' === $revalidate_flag || '1' === $revalidate_header)
     && !empty($runtime_config['revalidate_secret'])
-    && hash_equals((string) $runtime_config['revalidate_secret'], (string) ($_GET['ucwp_rt'] ?? ($_SERVER['HTTP_X_ULTRACACHE_TOKEN'] ?? '')))
+    && hash_equals((string) $runtime_config['revalidate_secret'], $revalidate_token)
 );
 if ($is_revalidate_request) {
     return;
@@ -164,9 +268,9 @@ $ucwp_default_analytics = static function () {
         'warmFailed' => 0,
     );
 };
-$ucwp_read_analytics = static function () use ($ucwp_analytics_file, $ucwp_default_analytics, $ucwp_read_file) {
+$ucwp_read_analytics = static function () use ($ucwp_analytics_file, $ucwp_default_analytics, $ucwp_read_file, $ucwp_is_cache_path) {
     $data = $ucwp_default_analytics();
-    if (!file_exists($ucwp_analytics_file) || !is_readable($ucwp_analytics_file)) {
+    if (!$ucwp_is_cache_path($ucwp_analytics_file) || !file_exists($ucwp_analytics_file) || !is_readable($ucwp_analytics_file)) {
         return $data;
     }
     $raw = $ucwp_read_file($ucwp_analytics_file);
@@ -179,7 +283,10 @@ $ucwp_read_analytics = static function () use ($ucwp_analytics_file, $ucwp_defau
     }
     return array_replace_recursive($data, $decoded);
 };
-$ucwp_write_analytics = static function ($data) use ($ucwp_analytics_file, $ucwp_make_dir, $ucwp_write_file) {
+$ucwp_write_analytics = static function ($data) use ($ucwp_analytics_file, $ucwp_make_dir, $ucwp_write_file, $ucwp_is_cache_path) {
+    if (!$ucwp_is_cache_path($ucwp_analytics_file)) {
+        return;
+    }
     $dir = dirname($ucwp_analytics_file);
     if (!file_exists($dir)) {
         $ucwp_make_dir($dir, 0755, true);
@@ -217,18 +324,21 @@ $ucwp_record_background_revalidation = static function () use ($ucwp_read_analyt
 $ucwp_get_revalidate_lock_path = static function ($cache_file) {
     return (string) $cache_file . '.revalidate.lock';
 };
-$ucwp_can_queue_revalidate = static function ($lock_file, $max_stale_seconds) {
-    if (!file_exists($lock_file)) {
+$ucwp_can_queue_revalidate = static function ($lock_file, $max_stale_seconds) use ($ucwp_get_filemtime, $ucwp_is_cache_path) {
+    if (!$ucwp_is_cache_path($lock_file) || !file_exists($lock_file)) {
         return true;
     }
-    $mtime = filemtime($lock_file);
+    $mtime = $ucwp_get_filemtime($lock_file);
     if (!$mtime) {
         return true;
     }
     $lock_ttl = max(30, min(300, (int) $max_stale_seconds));
     return (time() - (int) $mtime) > $lock_ttl;
 };
-$ucwp_write_revalidate_lock = static function ($lock_file) use ($ucwp_make_dir, $ucwp_write_file) {
+$ucwp_write_revalidate_lock = static function ($lock_file) use ($ucwp_make_dir, $ucwp_write_file, $ucwp_is_cache_path) {
+    if (!$ucwp_is_cache_path($lock_file)) {
+        return;
+    }
     $dir = dirname($lock_file);
     if (!file_exists($dir)) {
         $ucwp_make_dir($dir, 0755, true);
@@ -271,9 +381,11 @@ $ucwp_queue_revalidate = static function ($target_url, $secret) {
     $host = (string) $parts['host'];
     $port = isset($parts['port']) ? (int) $parts['port'] : ('https' === $scheme ? 443 : 80);
     $path = (!empty($parts['path']) ? (string) $parts['path'] : '/') . (!empty($parts['query']) ? '?' . (string) $parts['query'] : '');
-    $remote = 'https' === $scheme ? 'ssl://' . $host : $host;
+    $remote = ('https' === $scheme ? 'ssl://' : 'tcp://') . $host . ':' . $port;
 
-    $fp = fsockopen($remote, $port, $errno, $errstr, 0.5);
+    $errno = 0;
+    $errstr = '';
+    $fp = ucwp_safe_stream_socket_client($remote, 0.5, $errno, $errstr);
     if (!$fp) {
         return false;
     }
@@ -288,8 +400,11 @@ $ucwp_queue_revalidate = static function ($target_url, $secret) {
     $out .= "X-UltraCache-Revalidate: 1
 
 ";
-    fwrite($fp, $out);
-    @fclose($fp);
+    if (false === fwrite($fp, $out)) {
+        fclose($fp);
+        return false;
+    }
+    fclose($fp);
     return true;
 };
 
@@ -378,7 +493,13 @@ $ucwp_normalize_query_vars = static function ($query_vars, $allowlist) use ($ucw
     return $filtered;
 };
 
+$ucwp_normalize_query_key = static function ($query_key) {
+    $query_key = preg_replace('/[^a-z0-9_-]/', '', strtolower((string) $query_key));
+    return is_string($query_key) ? $query_key : '';
+};
+
 $ucwp_normalize_host = static function ($host) {
+
     $host = trim((string) $host);
     if ('' === $host) {
         return '';
@@ -413,15 +534,17 @@ foreach ((array) ($runtime_config['trusted_hosts'] ?? array()) as $trusted_host)
         $ucwp_trusted_hosts[$trusted_host] = true;
     }
 }
-$incoming_host = $ucwp_normalize_host((string) $_SERVER['HTTP_HOST']);
+$incoming_host = $ucwp_normalize_host($raw_http_host);
 if ('' === $incoming_host || empty($ucwp_trusted_hosts) || !isset($ucwp_trusted_hosts[$incoming_host])) {
     return;
 }
 
-$is_ssl = (!empty($_SERVER['HTTPS']) && 'off' !== strtolower((string) $_SERVER['HTTPS']))
-    || (isset($_SERVER['SERVER_PORT']) && '443' === (string) $_SERVER['SERVER_PORT']);
+$https_value = strtolower((string) ucwp_server_var('HTTPS', ''));
+$server_port = ucwp_server_var('SERVER_PORT', '');
+$is_ssl = ('' !== $https_value && 'off' !== $https_value)
+    || ('443' === $server_port);
 $scheme = $is_ssl ? 'https' : 'http';
-$url = $scheme . '://' . $incoming_host . (string) $_SERVER['REQUEST_URI'];
+$url = $scheme . '://' . $incoming_host . $request_uri;
 $parts = parse_url($url);
 if (empty($parts['host'])) {
     return;
@@ -439,8 +562,16 @@ if (!empty($parts['query'])) {
     parse_str((string) $parts['query'], $query_vars);
 }
 
+$excluded_query_args_lookup = array();
+foreach ((array) ($runtime_config['excluded_query_args'] ?? array()) as $excluded_query_arg) {
+    $excluded_query_arg = $ucwp_normalize_query_key($excluded_query_arg);
+    if ('' !== $excluded_query_arg) {
+        $excluded_query_args_lookup[$excluded_query_arg] = true;
+    }
+}
 foreach (array_keys($query_vars) as $query_key) {
-    if (in_array((string) $query_key, (array) ($runtime_config['excluded_query_args'] ?? array()), true)) {
+    $query_key = $ucwp_normalize_query_key($query_key);
+    if ('' !== $query_key && isset($excluded_query_args_lookup[$query_key])) {
         return;
     }
 }
@@ -470,7 +601,7 @@ if ('' === $cache_key_path) {
     $cache_key_path = 'index';
 }
 
-$accept = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+$accept = strtolower((string) ucwp_server_var('HTTP_ACCEPT', ''));
 $bucket = 'orig';
 if (false !== strpos($accept, 'image/avif')) {
     $bucket = 'avif';
@@ -488,22 +619,24 @@ if (!file_exists($cache_file)) {
     return;
 }
 
-$encoding = strtolower((string) ($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''));
+$encoding = strtolower((string) ucwp_server_var('HTTP_ACCEPT_ENCODING', ''));
 $serve_file = $cache_file;
 $encoding_bucket = 'identity';
-if (false !== strpos($encoding, 'br') && file_exists($cache_file . '.br')) {
+if (false !== strpos($encoding, 'br') && $ucwp_is_cache_path($cache_file . '.br') && file_exists($cache_file . '.br') && is_readable($cache_file . '.br')) {
     $serve_file = $cache_file . '.br';
     $encoding_bucket = 'brotli';
+    header('X-UltraCache-Encoding: brotli');
     header('Content-Encoding: br');
-} elseif (false !== strpos($encoding, 'gzip') && file_exists($cache_file . '.gz')) {
+} elseif (false !== strpos($encoding, 'gzip') && $ucwp_is_cache_path($cache_file . '.gz') && file_exists($cache_file . '.gz') && is_readable($cache_file . '.gz')) {
     $serve_file = $cache_file . '.gz';
     $encoding_bucket = 'gzip';
+    header('X-UltraCache-Encoding: gzip');
     header('Content-Encoding: gzip');
 }
 
 $fresh_ttl = max(60, (int) ($runtime_config['cache_fresh_ttl_minutes'] ?? 15) * 60);
 $max_stale = max($fresh_ttl, (int) ($runtime_config['cache_max_stale_minutes'] ?? 60) * 60);
-$mtime = @filemtime($cache_file);
+$mtime = $ucwp_get_filemtime($cache_file);
 $age = $mtime ? max(0, time() - (int) $mtime) : 0;
 
 if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_ttl && $age <= $max_stale) {
@@ -525,7 +658,7 @@ if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_t
     header('X-Ultra-Cache: STALE');
     header('X-Ultra-Cache-Age: ' . (string) $age);
     header('X-Ultra-Cache-Revalidate: ' . ($queued ? 'queued' : 'pending'));
-    readfile($serve_file);
+    $ucwp_safe_readfile($serve_file);
     exit;
 }
 
@@ -535,5 +668,5 @@ header('Content-Type: text/html; charset=UTF-8');
 header('Vary: Accept, Accept-Encoding', false);
 header('X-Ultra-Cache: HIT');
 header('X-Ultra-Cache-Age: ' . (string) $age);
-readfile($serve_file);
+$ucwp_safe_readfile($serve_file);
 exit;

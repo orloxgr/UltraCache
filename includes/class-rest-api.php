@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.54.097 */
+/** Hotfix Bundle Version: 2.54.108 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -61,6 +61,127 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             return array_values($clean);
         }
 
+        public function sanitize_object_cache_backend_param($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('disk', 'redis'), true) ? $value : 'disk';
+        }
+
+        public function validate_object_cache_backend_param($value)
+        {
+            return in_array(strtolower(trim((string) $value)), array('disk', 'redis'), true);
+        }
+
+        public function sanitize_varnish_mode_param($value)
+        {
+            return ('admin' === strtolower(trim((string) $value))) ? 'admin' : 'http';
+        }
+
+        public function validate_varnish_mode_param($value)
+        {
+            return in_array(strtolower(trim((string) $value)), array('http', 'admin'), true);
+        }
+
+        public function sanitize_varnish_method_param($value)
+        {
+            return ('PURGE' === strtoupper(trim((string) $value))) ? 'PURGE' : 'BAN';
+        }
+
+        public function validate_varnish_method_param($value)
+        {
+            return in_array(strtoupper(trim((string) $value)), array('BAN', 'PURGE'), true);
+        }
+
+        public function sanitize_crawl_scope_param($value)
+        {
+            return ('menu' === strtolower(trim((string) $value))) ? 'menu' : 'full';
+        }
+
+        public function validate_crawl_scope_param($value)
+        {
+            return in_array(strtolower(trim((string) $value)), array('full', 'menu'), true);
+        }
+
+        public function sanitize_url_param($value)
+        {
+            return esc_url_raw((string) $value);
+        }
+
+        public function validate_non_empty_url_param($value)
+        {
+            return '' !== trim((string) esc_url_raw((string) $value));
+        }
+
+        private function get_settings_update_args()
+        {
+            return array(
+                'pageCacheEnabled'                     => array('type' => 'boolean', 'required' => false),
+                'objectCacheEnabled'                   => array('type' => 'boolean', 'required' => false),
+                'objectCacheBackend'                   => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_object_cache_backend_param'), 'validate_callback' => array($this, 'validate_object_cache_backend_param')),
+                'redisHost'                            => array('type' => 'string', 'required' => false),
+                'redisPort'                            => array('type' => 'integer', 'required' => false),
+                'redisPassword'                        => array('type' => 'string', 'required' => false),
+                'redisDatabase'                        => array('type' => 'integer', 'required' => false),
+                'redisPrefix'                          => array('type' => 'string', 'required' => false),
+                'redisUseTls'                          => array('type' => 'boolean', 'required' => false),
+                'redisPersistent'                      => array('type' => 'boolean', 'required' => false),
+                'redisConnectTimeoutMs'                => array('type' => 'integer', 'required' => false),
+                'redisReadTimeoutMs'                   => array('type' => 'integer', 'required' => false),
+                'brotliEnabled'                        => array('type' => 'boolean', 'required' => false),
+                'gzipEnabled'                          => array('type' => 'boolean', 'required' => false),
+                'avifConversionEnabled'                => array('type' => 'boolean', 'required' => false),
+                'deferJsEnabled'                       => array('type' => 'boolean', 'required' => false),
+                'delayThirdPartyJsEnabled'             => array('type' => 'boolean', 'required' => false),
+                'asyncExternalScriptsEnabled'          => array('type' => 'boolean', 'required' => false),
+                'clsDimensionsEnabled'                 => array('type' => 'boolean', 'required' => false),
+                'asyncCssEnabled'                      => array('type' => 'boolean', 'required' => false),
+                'lcpImagePriorityEnabled'              => array('type' => 'boolean', 'required' => false),
+                'googleFontsSwapEnabled'               => array('type' => 'boolean', 'required' => false),
+                'googleFontsLocalOptimizationEnabled'  => array('type' => 'boolean', 'required' => false),
+                'selfHostedFontCssOptimizationEnabled' => array('type' => 'boolean', 'required' => false),
+                'speculationRulesEnabled'              => array('type' => 'boolean', 'required' => false),
+                'browserCacheRulesEnabled'             => array('type' => 'boolean', 'required' => false),
+                'varnishCliEnabled'                    => array('type' => 'boolean', 'required' => false),
+                'varnishCliMode'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_mode_param'), 'validate_callback' => array($this, 'validate_varnish_mode_param')),
+                'varnishCliServers'                    => array('type' => 'string', 'required' => false),
+                'varnishCliKey'                        => array('type' => 'string', 'required' => false),
+                'varnishCliTimeoutSeconds'             => array('type' => 'integer', 'required' => false),
+                'varnishCliMethod'                     => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_method_param'), 'validate_callback' => array($this, 'validate_varnish_method_param')),
+                'varnishCliDebug'                      => array('type' => 'boolean', 'required' => false),
+                'preRenderOnSave'                      => array('type' => 'boolean', 'required' => false),
+                'woocommerceSafeModeEnabled'           => array('type' => 'boolean', 'required' => false),
+                'cacheCleanupEnabled'                  => array('type' => 'boolean', 'required' => false),
+                'cronWarmEnabled'                      => array('type' => 'boolean', 'required' => false),
+                'cronWarmStartAfterCleanup'            => array('type' => 'boolean', 'required' => false),
+                'warmAfterScheduledCleanup'            => array('type' => 'boolean', 'required' => false),
+                'cacheCleanupIntervalHours'            => array('type' => 'integer', 'required' => false),
+                'cronWarmPagesPerMinute'               => array('type' => 'integer', 'required' => false),
+                'scheduledWarmLimit'                   => array('type' => 'integer', 'required' => false),
+                'staleWhileRevalidateEnabled'          => array('type' => 'boolean', 'required' => false),
+                'cacheFreshTtlMinutes'                 => array('type' => 'integer', 'required' => false),
+                'cacheMaxStaleMinutes'                 => array('type' => 'integer', 'required' => false),
+                'cacheExceptionPaths'                  => array('type' => 'string', 'required' => false),
+                'cacheExceptionQueryArgs'              => array('type' => 'string', 'required' => false),
+                'cacheQueryStringAllowlist'            => array('type' => 'string', 'required' => false),
+            );
+        }
+
+        private function get_redis_test_args()
+        {
+            return array(
+                'redisHost'             => array('type' => 'string', 'required' => false),
+                'redisPort'             => array('type' => 'integer', 'required' => false),
+                'redisPassword'         => array('type' => 'string', 'required' => false),
+                'redisPasswordConfigured' => array('type' => 'boolean', 'required' => false),
+                'redisDatabase'         => array('type' => 'integer', 'required' => false),
+                'redisPrefix'           => array('type' => 'string', 'required' => false),
+                'redisUseTls'           => array('type' => 'boolean', 'required' => false),
+                'redisPersistent'       => array('type' => 'boolean', 'required' => false),
+                'redisConnectTimeoutMs' => array('type' => 'integer', 'required' => false),
+                'redisReadTimeoutMs'    => array('type' => 'integer', 'required' => false),
+            );
+        }
+
         private function get_route_definitions()
         {
             return array(
@@ -97,6 +218,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'methods'             => WP_REST_Server::CREATABLE,
                         'callback'            => array($this, 'redis_test'),
                         'permission_callback' => array($this, 'check_permission'),
+                        'args'                => $this->get_redis_test_args(),
                     ),
                 ),
                 '/object-cache/flush' => array(
@@ -125,6 +247,13 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'methods'             => WP_REST_Server::CREATABLE,
                         'callback'            => array($this, 'cron_warm_tick'),
                         'permission_callback' => array($this, 'check_permission'),
+                        'args'                => array(
+                            'pagesPerMinute' => array(
+                                'type'              => 'integer',
+                                'required'          => false,
+                                'sanitize_callback' => 'absint',
+                            ),
+                        ),
                     ),
                 ),
                 '/settings' => array(
@@ -137,54 +266,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'methods'             => WP_REST_Server::EDITABLE,
                         'callback'            => array($this, 'update_settings'),
                         'permission_callback' => array($this, 'check_permission'),
-                        'args'                => array(
-                            'pageCacheEnabled'                  => array('type' => 'boolean', 'required' => false),
-                            'objectCacheEnabled'                => array('type' => 'boolean', 'required' => false),
-                            'objectCacheBackend'               => array('type' => 'string', 'required' => false),
-                            'redisHost'                        => array('type' => 'string', 'required' => false),
-                            'redisPort'                        => array('type' => 'integer', 'required' => false),
-                            'redisPassword'                    => array('type' => 'string', 'required' => false),
-                            'redisDatabase'                    => array('type' => 'integer', 'required' => false),
-                            'redisPrefix'                      => array('type' => 'string', 'required' => false),
-                            'redisUseTls'                      => array('type' => 'boolean', 'required' => false),
-                            'redisPersistent'                  => array('type' => 'boolean', 'required' => false),
-                            'redisConnectTimeoutMs'            => array('type' => 'integer', 'required' => false),
-                            'redisReadTimeoutMs'               => array('type' => 'integer', 'required' => false),
-                            'brotliEnabled'                     => array('type' => 'boolean', 'required' => false),
-                            'gzipEnabled'                       => array('type' => 'boolean', 'required' => false),
-                            'avifConversionEnabled'             => array('type' => 'boolean', 'required' => false),
-                            'deferJsEnabled'                    => array('type' => 'boolean', 'required' => false),
-                            'delayThirdPartyJsEnabled'          => array('type' => 'boolean', 'required' => false),
-                            'asyncExternalScriptsEnabled'     => array('type' => 'boolean', 'required' => false),
-                            'clsDimensionsEnabled'             => array('type' => 'boolean', 'required' => false),
-                            'asyncCssEnabled'                  => array('type' => 'boolean', 'required' => false),
-                            'lcpImagePriorityEnabled'           => array('type' => 'boolean', 'required' => false),
-                            'googleFontsSwapEnabled'            => array('type' => 'boolean', 'required' => false),
-                            'googleFontsLocalOptimizationEnabled' => array('type' => 'boolean', 'required' => false),
-                            'selfHostedFontCssOptimizationEnabled' => array('type' => 'boolean', 'required' => false),
-                            'speculationRulesEnabled'          => array('type' => 'boolean', 'required' => false),
-                            'browserCacheRulesEnabled'          => array('type' => 'boolean', 'required' => false),
-                            'varnishCliEnabled'                 => array('type' => 'boolean', 'required' => false),
-                            'varnishCliDebug'                   => array('type' => 'boolean', 'required' => false),
-                            'preRenderOnSave'                   => array('type' => 'boolean', 'required' => false),
-                            'woocommerceSafeModeEnabled'        => array('type' => 'boolean', 'required' => false),
-                            'cacheCleanupEnabled'               => array('type' => 'boolean', 'required' => false),
-                            'cronWarmEnabled'                   => array('type' => 'boolean', 'required' => false),
-                            'cronWarmStartAfterCleanup'         => array('type' => 'boolean', 'required' => false),
-                            'warmAfterScheduledCleanup'         => array('type' => 'boolean', 'required' => false),
-                            'cacheCleanupIntervalHours'         => array('type' => 'integer', 'required' => false),
-                            'varnishCliTimeoutSeconds'          => array('type' => 'integer', 'required' => false),
-                            'cronWarmPagesPerMinute'           => array('type' => 'integer', 'required' => false),
-                            'scheduledWarmLimit'                => array('type' => 'integer', 'required' => false),
-                            'cacheFreshTtlMinutes'              => array('type' => 'integer', 'required' => false),
-                            'cacheMaxStaleMinutes'              => array('type' => 'integer', 'required' => false),
-                            'cacheExceptionPaths'               => array('type' => 'string', 'required' => false),
-                            'cacheExceptionQueryArgs'           => array('type' => 'string', 'required' => false),
-                            'cacheQueryStringAllowlist'         => array('type' => 'string', 'required' => false),
-                            'varnishCliServers'                 => array('type' => 'string', 'required' => false),
-                            'varnishCliKey'                     => array('type' => 'string', 'required' => false),
-                            'varnishCliMethod'                  => array('type' => 'string', 'required' => false),
-                        ),
+                        'args'                => $this->get_settings_update_args(),
                     ),
                 ),
                 '/crawl-urls' => array(
@@ -211,7 +293,8 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                             'scope' => array(
                                 'type'              => 'string',
                                 'required'          => false,
-                                'sanitize_callback' => 'sanitize_text_field',
+                                'sanitize_callback' => array($this, 'sanitize_crawl_scope_param'),
+                                'validate_callback' => array($this, 'validate_crawl_scope_param'),
                             ),
                         ),
                     ),
@@ -225,7 +308,8 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                             'url' => array(
                                 'type'              => 'string',
                                 'required'          => true,
-                                'sanitize_callback' => 'esc_url_raw',
+                                'sanitize_callback' => array($this, 'sanitize_url_param'),
+                                'validate_callback' => array($this, 'validate_non_empty_url_param'),
                             ),
                         ),
                     ),
@@ -258,8 +342,10 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'permission_callback' => array($this, 'check_permission'),
                         'args'                => array(
                             'url' => array(
-                                'type'     => 'string',
-                                'required' => true,
+                                'type'              => 'string',
+                                'required'          => true,
+                                'sanitize_callback' => array($this, 'sanitize_url_param'),
+                                'validate_callback' => array($this, 'validate_non_empty_url_param'),
                             ),
                         ),
                     ),
@@ -283,7 +369,8 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                             'scope' => array(
                                 'type'              => 'string',
                                 'required'          => false,
-                                'sanitize_callback' => 'sanitize_text_field',
+                                'sanitize_callback' => array($this, 'sanitize_crawl_scope_param'),
+                                'validate_callback' => array($this, 'validate_crawl_scope_param'),
                             ),
                         ),
                     ),
@@ -438,8 +525,10 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             return true;
         }
 
-        public function check_permission()
+        public function check_permission($request = null)
         {
+            unset($request);
+
             return current_user_can('manage_options');
         }
 
@@ -494,56 +583,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
 
         public function update_settings(WP_REST_Request $request)
         {
-            $allowed_keys = array(
-                'pageCacheEnabled',
-                'objectCacheEnabled',
-                'objectCacheBackend',
-                'redisHost',
-                'redisPort',
-                'redisPassword',
-                'redisDatabase',
-                'redisPrefix',
-                'redisUseTls',
-                'redisPersistent',
-                'redisConnectTimeoutMs',
-                'redisReadTimeoutMs',
-                'brotliEnabled',
-                'gzipEnabled',
-                'avifConversionEnabled',
-                'deferJsEnabled',
-                'delayThirdPartyJsEnabled',
-                'asyncExternalScriptsEnabled',
-                'clsDimensionsEnabled',
-                'asyncCssEnabled',
-                'lcpImagePriorityEnabled',
-                'googleFontsSwapEnabled',
-                'googleFontsLocalOptimizationEnabled',
-                'selfHostedFontCssOptimizationEnabled',
-                'speculationRulesEnabled',
-                'browserCacheRulesEnabled',
-                'varnishCliEnabled',
-                'varnishCliMode',
-                'varnishCliServers',
-                'varnishCliKey',
-                'varnishCliTimeoutSeconds',
-                'varnishCliMethod',
-                'varnishCliDebug',
-                'preRenderOnSave',
-                'woocommerceSafeModeEnabled',
-                'cacheCleanupEnabled',
-                'cronWarmEnabled',
-                'cronWarmStartAfterCleanup',
-                'warmAfterScheduledCleanup',
-                'cacheCleanupIntervalHours',
-                'cronWarmPagesPerMinute',
-                'scheduledWarmLimit',
-                'staleWhileRevalidateEnabled',
-                'cacheFreshTtlMinutes',
-                'cacheMaxStaleMinutes',
-                'cacheExceptionPaths',
-                'cacheExceptionQueryArgs',
-                'cacheQueryStringAllowlist',
-            );
+            $allowed_keys = array_keys($this->get_settings_update_args());
 
             $current = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')
                 ? Ultra_Cache_WP::get_dashboard_settings()
@@ -554,13 +594,6 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                     $current[$key] = $request->get_param($key);
                 }
             }
-
-            if (null !== $request->get_param('cronWarmPagesPerMinute') && null === $request->get_param('scheduledWarmLimit')) {
-                $current['scheduledWarmLimit'] = $request->get_param('cronWarmPagesPerMinute');
-            } elseif (null !== $request->get_param('scheduledWarmLimit') && null === $request->get_param('cronWarmPagesPerMinute')) {
-                $current['cronWarmPagesPerMinute'] = $request->get_param('scheduledWarmLimit');
-            }
-
             if (null !== $request->get_param('cronWarmStartAfterCleanup') && null === $request->get_param('warmAfterScheduledCleanup')) {
                 $current['warmAfterScheduledCleanup'] = $request->get_param('cronWarmStartAfterCleanup');
             } elseif (null !== $request->get_param('warmAfterScheduledCleanup') && null === $request->get_param('cronWarmStartAfterCleanup')) {
@@ -659,6 +692,10 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 if (null !== $request->get_param($key)) {
                     $settings[$key] = $request->get_param($key);
                 }
+            }
+
+            if (array_key_exists('redisPassword', $settings) && '' === trim((string) $settings['redisPassword']) && !empty($request->get_param('redisPasswordConfigured'))) {
+                unset($settings['redisPassword']);
             }
 
             $result = Ultra_Cache_WP::test_redis_connection($settings);

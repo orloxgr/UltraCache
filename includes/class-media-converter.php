@@ -301,7 +301,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				return false;
 			}
 
-			if (!file_exists($dest_file) || (int) @filesize($dest_file) <= 0) {
+			if (!file_exists($dest_file) || (int) ucwp_safe_filesize($dest_file, 'media_converter_dest_verify') <= 0) {
 				if (file_exists($dest_file)) {
 					ucwp_safe_unlink($dest_file);
 				}
@@ -363,7 +363,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				return false;
 			}
 
-			if (!file_exists($dest_file) || (int) @filesize($dest_file) <= 0) {
+			if (!file_exists($dest_file) || (int) ucwp_safe_filesize($dest_file, 'media_converter_dest_verify') <= 0) {
 				if (file_exists($dest_file)) {
 					ucwp_safe_unlink($dest_file);
 				}
@@ -1292,7 +1292,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$gd_avif_supported = (
 				$result &&
 				file_exists($test_file) &&
-				(int) @filesize($test_file) > 0
+				(int) ucwp_safe_filesize($test_file, 'media_converter_format_support_test') > 0
 			);
 
 			if (file_exists($test_file)) {
@@ -1360,7 +1360,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$gd_webp_supported = (
 				$result &&
 				file_exists($test_file) &&
-				(int) @filesize($test_file) > 0
+				(int) ucwp_safe_filesize($test_file, 'media_converter_format_support_test') > 0
 			);
 
 			if (file_exists($test_file)) {
@@ -1398,7 +1398,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				$sanitized_prefix = 'ucwp';
 			}
 
-			$tmp = @tempnam($dir, substr($sanitized_prefix, 0, 32));
+			$tmp = ucwp_safe_tempnam($dir, substr($sanitized_prefix, 0, 32), 'media_converter_tempnam');
 			return (is_string($tmp) && '' !== $tmp) ? $tmp : false;
 		}
 
@@ -1450,7 +1450,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				return false;
 			}
 
-			return !empty($saved['path']) && file_exists($saved['path']) && (int) @filesize($saved['path']) > 0;
+			return !empty($saved['path']) && file_exists($saved['path']) && (int) ucwp_safe_filesize($saved['path'], 'media_converter_image_editor_save') > 0;
 		}
 
 		/**
@@ -1560,7 +1560,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$ok = (
 				$result &&
 				file_exists($dest_file) &&
-				(int) @filesize($dest_file) > 0
+				(int) ucwp_safe_filesize($dest_file, 'media_converter_gd_save') > 0
 			);
 
 			if (!$ok) {

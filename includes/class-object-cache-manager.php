@@ -92,23 +92,103 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			}
 		}
 
+
+		private static function get_dropin_path() {
+			return trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+		}
+
+		private static function get_redis_secret_config_path() {
+			return trailingslashit(UCWP_OBJECT_CACHE_DIR) . '.redis-auth.php';
+		}
+
+		private static function apply_restrictive_file_permissions($path, $mode = 0600) {
+			$path = (string) $path;
+			$mode = (int) $mode;
+			if ('' === $path || !file_exists($path)) {
+				return false;
+			}
+
+			$filesystem = function_exists('ucwp_get_wp_filesystem') ? ucwp_get_wp_filesystem() : false;
+			if ($filesystem && method_exists($filesystem, 'chmod')) {
+				$filesystem->chmod($path, $mode);
+				clearstatcache(true, $path);
+				$perms = (is_file($path) && is_readable($path)) ? fileperms($path) : false;
+				if (false !== $perms && (($perms & 0777) === $mode)) {
+					return true;
+				}
+			}
+
+
+			return false;
+		}
+
+		private static function maybe_sync_redis_secret_config(array $settings) {
+			$config = self::get_redis_secret_config_path();
+			$backend = self::get_selected_backend();
+			$enabled = !empty($settings['object_cache_enabled']);
+			$password = isset($settings['redis_password']) ? (string) $settings['redis_password'] : '';
+
+			if (!$enabled || 'redis' !== $backend || '' === $password) {
+				if (file_exists($config)) {
+					ucwp_safe_unlink($config, 'object_cache_secret_config_remove');
+				}
+				return true;
+			}
+
+			$payload = "<?php
+";
+			$payload .= "/**
+ * UltraCache generated Redis auth config for object-cache.php.
+ * Safe to overwrite.
+ */
+";
+			$payload .= "defined('ABSPATH') || exit;
+
+";
+			$payload .= "return array(
+";
+			$payload .= "	'redis_password' => " . ucwp_php_string_literal($password) . ",
+";
+			$payload .= ");
+";
+
+			$existing = file_exists($config) ? ucwp_safe_file_get_contents($config, 'object_cache_secret_config_read', true) : false;
+			if (is_string($existing) && $existing === $payload) {
+				self::apply_restrictive_file_permissions($config, 0600);
+				return true;
+			}
+
+			$result = ucwp_safe_file_put_contents($config, $payload, LOCK_EX, 'object_cache_secret_config_write');
+			if (false === $result) {
+				return false;
+			}
+
+			self::apply_restrictive_file_permissions($config, 0600);
+			return true;
+		}
+
 		public static function setup_dropin() {
 			self::ensure_cache_directory();
 
-			$dropin = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+			$dropin = self::get_dropin_path();
 
 			if (file_exists($dropin) && !self::is_our_dropin($dropin)) {
 				return false;
 			}
 
 			$settings = self::get_plugin_settings();
+			if (!self::maybe_sync_redis_secret_config($settings)) {
+				return false;
+			}
+
 			$placeholders = array(
 				'__UCWP_DROPIN_BUILD__' => UCWP_VERSION,
 				'__UCWP_OBJECT_CACHE_DIR__' => ucwp_php_string_literal(UCWP_OBJECT_CACHE_DIR),
 				'__UCWP_SELECTED_BACKEND__' => ucwp_php_string_literal(self::get_selected_backend()),
+				'__UCWP_REDIS_SECRET_CONFIG__' => ucwp_php_string_literal(self::get_redis_secret_config_path()),
 				'__UCWP_REDIS_HOST__'       => ucwp_php_string_literal((string) ($settings['redis_host'] ?? '127.0.0.1')),
 				'__UCWP_REDIS_PORT__'       => (string) max(1, absint($settings['redis_port'] ?? 6379)),
-				'__UCWP_REDIS_PASSWORD__'   => ucwp_php_string_literal((string) ($settings['redis_password'] ?? '')),
+				'__UCWP_REDIS_PASSWORD__'   => ucwp_php_string_literal(''),
 				'__UCWP_REDIS_DATABASE__'   => (string) max(0, absint($settings['redis_database'] ?? 0)),
 				'__UCWP_REDIS_PREFIX__'     => ucwp_php_string_literal(self::get_redis_prefix($settings)),
 				'__UCWP_REDIS_USE_TLS__'    => !empty($settings['redis_use_tls']) ? 'true' : 'false',
@@ -136,13 +216,18 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				}
 			}
 
-			return false !== ucwp_safe_file_put_contents($dropin, $code, LOCK_EX);
+			$written = ucwp_safe_file_put_contents($dropin, $code, LOCK_EX, 'object_cache_dropin_write');
+			return false !== $written;
 		}
 
 		public static function maybe_remove_dropin() {
-			$dropin = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+			$dropin = self::get_dropin_path();
 			if (self::is_our_dropin($dropin)) {
-				ucwp_safe_unlink($dropin);
+				ucwp_safe_unlink($dropin, 'object_cache_dropin_remove');
+			}
+			$config = self::get_redis_secret_config_path();
+			if (file_exists($config)) {
+				ucwp_safe_unlink($config, 'object_cache_secret_config_remove');
 			}
 		}
 
@@ -196,7 +281,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			}
 
 			try {
-				$pong = @$redis->ping();
+				$pong = $redis->ping();
 				$result['connected'] = false !== $pong;
 				$result['success'] = $result['connected'];
 				$result['message'] = $result['connected'] ? 'Connected to Redis successfully.' : 'Redis connected but did not respond to ping.';
@@ -246,7 +331,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			$files = self::collect_cache_files(UCWP_OBJECT_CACHE_DIR, 'cache');
 			$entry_count = count($files);
 			foreach ($files as $file) {
-				$size = @filesize($file);
+				$size = ucwp_safe_filesize($file, 'object_cache_manager_stats');
 				if (false !== $size) {
 					$bytes += (int) $size;
 				}
@@ -466,7 +551,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			if (!is_dir($dir)) {
 				return;
 			}
-			$items = @scandir($dir);
+			$items = ucwp_safe_scandir($dir, 'object_cache_recursive_delete scandir');
 			if (!is_array($items)) {
 				return;
 			}

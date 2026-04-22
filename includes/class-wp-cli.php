@@ -40,6 +40,61 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             return is_array($settings) ? $settings : array();
         }
 
+        private function get_secret_setting_keys()
+        {
+            return array(
+                'redisPassword',
+                'varnishCliKey',
+            );
+        }
+
+        private function get_secret_configuration_flag_map()
+        {
+            return array(
+                'redisPassword' => 'redisPasswordConfigured',
+                'varnishCliKey' => 'varnishCliKeyConfigured',
+            );
+        }
+
+        private function redact_dashboard_settings_for_output(array $settings)
+        {
+            $flag_map = $this->get_secret_configuration_flag_map();
+
+            foreach ($this->get_secret_setting_keys() as $key) {
+                $flag = isset($flag_map[$key]) ? $flag_map[$key] : '';
+                if ('' !== $flag) {
+                    $settings[$flag] = ('' !== trim((string) ($settings[$key] ?? '')));
+                }
+
+                if (array_key_exists($key, $settings)) {
+                    $settings[$key] = '[redacted]';
+                }
+            }
+
+            return $settings;
+        }
+
+        private function redact_single_setting_for_output($key, array $settings)
+        {
+            $key = (string) $key;
+            $value = array_key_exists($key, $settings) ? $settings[$key] : null;
+
+            if (in_array($key, $this->get_secret_setting_keys(), true)) {
+                $flag_map = $this->get_secret_configuration_flag_map();
+                $payload = array(
+                    $key => '[redacted]',
+                );
+
+                if (!empty($flag_map[$key])) {
+                    $payload[$flag_map[$key]] = ('' !== trim((string) $value));
+                }
+
+                return $payload;
+            }
+
+            return array($key => $value);
+        }
+
         private function get_dashboard_stats()
         {
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
@@ -58,6 +113,40 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             }
 
             return array();
+        }
+
+        private function is_local_site_url($url, $engine = null)
+        {
+            $url = esc_url_raw((string) $url);
+            if ('' === $url) {
+                return false;
+            }
+
+            if ($engine && method_exists($engine, 'is_cacheable_local_url')) {
+                return (bool) $engine->is_cacheable_local_url($url);
+            }
+
+            $parts = wp_parse_url($url);
+            $home_parts = wp_parse_url(home_url('/'));
+            if (empty($parts['scheme']) || empty($parts['host']) || empty($home_parts['host'])) {
+                return false;
+            }
+
+            if (!in_array(strtolower((string) $parts['scheme']), array('http', 'https'), true)) {
+                return false;
+            }
+
+            return strtolower((string) $parts['host']) === strtolower((string) $home_parts['host']);
+        }
+
+        private function require_local_site_url($url, $engine = null, $error_message = 'Please provide a valid local site URL.')
+        {
+            $url = esc_url_raw((string) $url);
+            if (!$this->is_local_site_url($url, $engine)) {
+                WP_CLI::error($error_message);
+            }
+
+            return $url;
         }
 
         private function is_assoc_array($value)
@@ -229,8 +318,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
          *
          * ## OPTIONS
          *
-         * [--url=<url>]
+         * [--cache-url=<url>]
          * : Purge a single local URL instead of the entire cache.
+         *
+         * Note: `--url` is reserved by WP-CLI as a global parameter. Use `--cache-url` here.
          */
         public function purge($args, $assoc_args)
         {
@@ -239,12 +330,13 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 WP_CLI::error('Cache engine not available.');
             }
 
-            if (!empty($assoc_args['url'])) {
-                $url = esc_url_raw((string) $assoc_args['url']);
-                if (!$url || !method_exists($engine, 'purge_url')) {
+            $target_url = !empty($assoc_args['cache-url']) ? $assoc_args['cache-url'] : '';
+            if (!empty($target_url)) {
+                if (!method_exists($engine, 'purge_url')) {
                     WP_CLI::error('Single-URL purge is not available.');
                 }
 
+                $url = $this->require_local_site_url($target_url, $engine, 'Please provide a valid local site URL for --cache-url.');
                 $purged = (bool) $engine->purge_url($url);
                 if (!$purged) {
                     WP_CLI::warning('No cache files matched that URL.');
@@ -315,8 +407,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
          *
          * ## OPTIONS
          *
-         * [--url=<url>]
+         * [--cache-url=<url>]
          * : Warm a single local URL.
+         *
+         * Note: `--url` is reserved by WP-CLI as a global parameter. Use `--cache-url` here.
          *
          * [--limit=<number>]
          * : Limit how many crawl URLs will be warmed.
@@ -336,8 +430,9 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
 
             $buckets = $this->get_warm_buckets_from_assoc_args($assoc_args);
 
-            if (!empty($assoc_args['url'])) {
-                $urls = array(esc_url_raw((string) $assoc_args['url']));
+            $target_url = !empty($assoc_args['cache-url']) ? $assoc_args['cache-url'] : '';
+            if (!empty($target_url)) {
+                $urls = array($this->require_local_site_url($target_url, $engine, 'Please provide a valid local site URL for --cache-url.'));
             } else {
                 if (!method_exists($engine, 'get_crawl_urls')) {
                     WP_CLI::error('URL discovery is not available.');
@@ -653,7 +748,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             $payload = array();
             switch ($section) {
                 case 'settings':
-                    $payload = $settings;
+                    $payload = $this->redact_dashboard_settings_for_output($settings);
                     break;
                 case 'diagnostics':
                     $payload = $diagnostics;
@@ -664,7 +759,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                     break;
                 case 'all':
                     $payload = array(
-                        'settings' => $settings,
+                        'settings' => $this->redact_dashboard_settings_for_output($settings),
                         'diagnostics' => $diagnostics,
                         'stats' => $stats,
                     );
@@ -772,7 +867,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             $current = $this->get_dashboard_settings();
 
             if ('list' === $action) {
-                $this->output_assoc($current, $format);
+                $this->output_assoc($this->redact_dashboard_settings_for_output($current), $format);
                 return;
             }
 
@@ -786,7 +881,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                     WP_CLI::error('Unknown setting key: ' . $key);
                 }
 
-                $this->output_assoc(array($key => $current[$key]), $format);
+                $this->output_assoc($this->redact_single_setting_for_output($key, $current), $format);
                 return;
             }
 
@@ -813,7 +908,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
 
                 $updated = $this->get_dashboard_settings();
                 WP_CLI::success(sprintf('Updated %s.', $key));
-                $this->output_assoc(array($key => $updated[$key]), $format);
+                $this->output_assoc($this->redact_single_setting_for_output($key, $updated), $format);
                 return;
             }
 
@@ -954,8 +1049,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
          * <action>
          * : One of test, flush-all, or flush-url.
          *
-         * [--url=<url>]
+         * [--cache-url=<url>]
          * : Local URL to purge when using flush-url.
+         *
+         * Note: `--url` is reserved by WP-CLI as a global parameter. Use `--cache-url` here.
          */
         public function varnish($args, $assoc_args)
         {
@@ -990,9 +1087,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             }
 
             if ('flush-url' === $action) {
-                $url = !empty($assoc_args['url']) ? esc_url_raw((string) $assoc_args['url']) : '';
+                $target_url = !empty($assoc_args['cache-url']) ? $assoc_args['cache-url'] : '';
+                $url = '' !== $target_url ? $this->require_local_site_url($target_url, $this->get_engine(), 'Please provide a valid local site URL for --cache-url.') : '';
                 if ('' === $url) {
-                    WP_CLI::error('Please provide --url=<url>.');
+                    WP_CLI::error('Please provide a valid local site URL for --cache-url.');
                 }
                 if (!method_exists('Ultra_Cache_WP', 'varnish_flush_url')) {
                     WP_CLI::error('Varnish helper is not available.');
@@ -1076,6 +1174,24 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             }
 
             WP_CLI::error('Invalid action. Use start, stop, tick, or status.');
+        }
+
+
+        /**
+         * Flush the object cache.
+         */
+        public function flush_object_cache($args, $assoc_args)
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_object_cache')) {
+                WP_CLI::error('Object cache helper is not available.');
+            }
+
+            $result = Ultra_Cache_WP::flush_object_cache();
+            if (empty($result['success'])) {
+                WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Object cache flush failed.');
+            }
+
+            WP_CLI::success((string) ($result['message'] ?? 'Object cache flushed.'));
         }
 
 

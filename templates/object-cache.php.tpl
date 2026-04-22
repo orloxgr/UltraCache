@@ -34,10 +34,34 @@ if (!function_exists('ucwp_safe_rename')) {
 
 if (!function_exists('ucwp_safe_mkdir')) {
 	function ucwp_safe_mkdir($dir, $mode = 0755, $recursive = true) {
+		$dir = is_string($dir) ? trim($dir) : '';
+		if ('' === $dir) {
+			return false;
+		}
 		if (is_dir($dir)) {
 			return true;
 		}
 		return mkdir($dir, $mode, $recursive) || is_dir($dir);
+	}
+}
+
+if (!function_exists('ucwp_safe_scandir')) {
+	function ucwp_safe_scandir($dir) {
+		$dir = is_string($dir) ? trim($dir) : '';
+		if ('' === $dir || !is_dir($dir) || !is_readable($dir)) {
+			return false;
+		}
+		return scandir($dir);
+	}
+}
+
+if (!function_exists('ucwp_safe_rmdir')) {
+	function ucwp_safe_rmdir($dir) {
+		$dir = is_string($dir) ? trim($dir) : '';
+		if ('' === $dir) {
+			return false;
+		}
+		return !file_exists($dir) ? true : rmdir($dir);
 	}
 }
 
@@ -60,6 +84,7 @@ if (!class_exists('WP_Object_Cache')) {
 		private $redis_host = __UCWP_REDIS_HOST__;
 		private $redis_port = __UCWP_REDIS_PORT__;
 		private $redis_password = __UCWP_REDIS_PASSWORD__;
+		private $redis_secret_config = __UCWP_REDIS_SECRET_CONFIG__;
 		private $redis_database = __UCWP_REDIS_DATABASE__;
 		private $redis_prefix = __UCWP_REDIS_PREFIX__;
 		private $redis_use_tls = __UCWP_REDIS_USE_TLS__;
@@ -99,6 +124,34 @@ if (!class_exists('WP_Object_Cache')) {
 					'error'    => (string) $this->redis_error,
 				),
 			);
+		}
+
+
+		private function load_redis_secret_config() {
+			$config = is_string($this->redis_secret_config) ? trim($this->redis_secret_config) : '';
+			if ('' === $config || !is_string($this->cache_dir)) {
+				return;
+			}
+
+			$base = rtrim((string) $this->cache_dir, '/\\');
+			$normalized = str_replace('\\', '/', $config);
+			$normalized_base = str_replace('\\', '/', $base);
+			if ('' === $normalized_base || 0 !== strpos($normalized, $normalized_base . '/')) {
+				return;
+			}
+
+			if (!is_readable($config)) {
+				return;
+			}
+
+			$data = require $config;
+			if (!is_array($data)) {
+				return;
+			}
+
+			if (isset($data['redis_password']) && is_scalar($data['redis_password'])) {
+				$this->redis_password = (string) $data['redis_password'];
+			}
 		}
 
 		private function bootstrap_backend() {
@@ -220,6 +273,9 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$this->metrics_file || !file_exists($this->metrics_file) || !is_readable($this->metrics_file)) {
 				return $data;
 			}
+			if (!$this->is_cache_path($this->metrics_file)) {
+				return $data;
+			}
 			$raw = ucwp_safe_file_get_contents($this->metrics_file);
 			if (false === $raw || '' === $raw) {
 				return $data;
@@ -233,6 +289,9 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function write_metrics($data) {
 			if (!$this->metrics_file) {
+				return;
+			}
+			if (!$this->is_cache_path($this->metrics_file)) {
 				return;
 			}
 			$dir = dirname($this->metrics_file);
@@ -555,6 +614,29 @@ if (!class_exists('WP_Object_Cache')) {
 			return $dir . '/' . sha1($key) . '.cache';
 		}
 
+		private function normalize_cache_dir($dir) {
+			$dir = is_string($dir) ? trim($dir) : '';
+			if ('' === $dir) {
+				return '';
+			}
+			$normalized = str_replace('\\', '/', $dir);
+			$normalized = preg_replace('#/+#', '/', $normalized);
+			return rtrim((string) $normalized, '/');
+		}
+
+		private function is_cache_path($path) {
+			$path = is_string($path) ? trim($path) : '';
+			if ('' === $path) {
+				return false;
+			}
+			$normalized_path = $this->normalize_cache_dir($path);
+			$normalized_base = $this->normalize_cache_dir($this->cache_dir);
+			if ('' === $normalized_path || '' === $normalized_base) {
+				return false;
+			}
+			return $normalized_path === $normalized_base || 0 === strpos($normalized_path, $normalized_base . '/');
+		}
+
 		private function ensure_base_dir() {
 			if (!is_dir($this->cache_dir)) {
 				ucwp_safe_mkdir($this->cache_dir, 0755, true);
@@ -659,7 +741,10 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function delete_disk_payload($key, $group) {
 			$path = $this->get_file_path($key, $group);
-			return (!$path || !file_exists($path)) ? true : ucwp_safe_unlink($path);
+			if (!$path || !$this->is_cache_path($path) || !file_exists($path)) {
+				return true;
+			}
+			return ucwp_safe_unlink($path);
 		}
 
 		private function write_redis_payload($key, $group, $payload, $expire) {
@@ -805,6 +890,9 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function write_file_payload($path, $payload) {
+			if (!is_string($path) || '' === trim($path) || !$this->is_cache_path($path)) {
+				return false;
+			}
 			$dir = dirname($path);
 			if (!is_dir($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
 				return false;
@@ -837,6 +925,9 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function read_payload($path) {
+			if (!is_string($path) || '' === trim($path) || !$this->is_cache_path($path)) {
+				return false;
+			}
 			$data = ucwp_safe_file_get_contents($path);
 			if (false === $data || '' === $data) {
 				return false;
@@ -933,10 +1024,10 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function recursive_delete($dir) {
-			if (!is_dir($dir)) {
+			if (!is_string($dir) || '' === trim($dir) || !is_dir($dir) || !$this->is_cache_path($dir)) {
 				return;
 			}
-			$items = @scandir($dir);
+			$items = ucwp_safe_scandir($dir);
 			if (!is_array($items)) {
 				return;
 			}
@@ -952,7 +1043,7 @@ if (!class_exists('WP_Object_Cache')) {
 				}
 			}
 			if (rtrim($dir, '/\\') !== rtrim($this->cache_dir, '/\\')) {
-				@rmdir($dir);
+				ucwp_safe_rmdir($dir);
 			}
 		}
 	}

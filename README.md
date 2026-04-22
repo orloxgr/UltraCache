@@ -6,6 +6,17 @@ It is built for sites that want a managed page-cache drop-in, optional Redis-bac
 
 ---
 
+## Current repository build
+
+- version: `2.54.126`
+- sixth pass fixes: removed hard page reloads after Varnish Test and Flush Varnish All; the dashboard now stays on the page and refreshes through AJAX only
+- fifth pass fixes: reduced `@` suppression in non-critical helper paths and added safer internal debug logging for font CSS reads and Varnish admin socket connects
+- third pass fixes: redacted secrets from `wp ultracache status` settings/all output, added stricter local-site URL validation for single-URL CLI actions, and tightened REST validation for settings enums and URL/scope inputs
+- first pass fixes: removed auto-opening support modal, redacted secrets from WP-CLI settings output, added textdomain loading, and changed Local Google Fonts Optimization to opt-in by default for fresh installs
+- second pass fixes: tightened REST schema coverage for settings/Redis/cron inputs and improved support modal accessibility metadata
+
+---
+
 ## What UltraCache WP does
 
 UltraCache includes:
@@ -75,7 +86,7 @@ The current codebase also includes optional frontend optimization switches such 
 - image dimension injection for CLS reduction
 - LCP image prioritization
 - Google Fonts `display=swap`
-- localized Google Fonts stylesheet caching
+- localized Google Fonts stylesheet caching (opt-in; fetches Google Fonts assets only when enabled)
 - self-hosted font CSS normalization
 - speculation rules output
 - browser cache rules for `.htaccess`
@@ -186,10 +197,10 @@ Typical examples:
 
 ```bash
 wp ultracache purge
-wp ultracache purge --url=https://example.com/some-page/
+wp ultracache purge --cache-url=https://example.com/some-page/
 
 wp ultracache warm
-wp ultracache warm --url=https://example.com/
+wp ultracache warm --cache-url=https://example.com/
 wp ultracache warm --limit=100
 wp ultracache warm --buckets=orig,webp,avif
 
@@ -288,3 +299,13 @@ For production sites, a conservative rollout is recommended:
 UltraCache is licensed under the **GNU General Public License v2, or any later version**.
 
 In short, you may use, modify, and redistribute this plugin under the terms of **GPLv2 or later**. This is the same license model recommended for WordPress plugins and is fully compatible with the WordPress ecosystem.
+
+- Added frontend compression detection so Gzip/Brotli toggles stay disabled when the server already applies them by default.
+
+- Automatically turns off Gzip/Brotli in the dashboard when frontend compression is already handled by the server or proxy.
+- Added a Reset Settings button beside Export/Import.
+
+- Reduced additional @ suppression in non-dropin helper paths.
+- Added safe wrappers for filesize(), tempnam(), and fread() in non-critical helpers.
+
+- latest patch: moved Redis auth out of generated `object-cache.php` into a protected sidecar config file with restrictive permissions
