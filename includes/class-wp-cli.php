@@ -1,0 +1,1130 @@
+<?php
+/**
+ * WP-CLI integration for UltraCache.
+ */
+
+defined('ABSPATH') || exit;
+
+if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
+    class UCWP_CLI_Command extends WP_CLI_Command
+    {
+        private function get_engine()
+        {
+            foreach (array('Ultra_Cache_Engine') as $class) {
+                if (class_exists($class) && method_exists($class, 'get_instance')) {
+                    return call_user_func(array($class, 'get_instance'));
+                }
+            }
+
+            return null;
+        }
+
+        private function get_media()
+        {
+            foreach (array('Ultra_Cache_Media_Converter') as $class) {
+                if (class_exists($class) && method_exists($class, 'get_instance')) {
+                    return $class::get_instance();
+                }
+            }
+
+            return null;
+        }
+
+        private function get_dashboard_settings()
+        {
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')) {
+                return Ultra_Cache_WP::get_dashboard_settings();
+            }
+
+            $settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
+            return is_array($settings) ? $settings : array();
+        }
+
+        private function get_dashboard_stats()
+        {
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
+                $stats = Ultra_Cache_WP::get_engine_stats();
+                return is_array($stats) ? $stats : array();
+            }
+
+            return array();
+        }
+
+        private function get_dashboard_diagnostics()
+        {
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
+                $diagnostics = Ultra_Cache_WP::get_dashboard_diagnostics();
+                return is_array($diagnostics) ? $diagnostics : array();
+            }
+
+            return array();
+        }
+
+        private function is_assoc_array($value)
+        {
+            if (!is_array($value)) {
+                return false;
+            }
+
+            return array_keys($value) !== range(0, count($value) - 1);
+        }
+
+        private function scalarize_value($value)
+        {
+            if (is_bool($value)) {
+                return $value ? 'yes' : 'no';
+            }
+
+            if (null === $value) {
+                return '';
+            }
+
+            if (is_scalar($value)) {
+                return (string) $value;
+            }
+
+            return wp_json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+
+        private function flatten_assoc(array $data, $prefix = '')
+        {
+            $flat = array();
+
+            foreach ($data as $key => $value) {
+                $composed = '' !== $prefix ? $prefix . '.' . $key : (string) $key;
+
+                if (is_array($value) && $this->is_assoc_array($value)) {
+                    $flat = array_merge($flat, $this->flatten_assoc($value, $composed));
+                    continue;
+                }
+
+                if (is_array($value)) {
+                    $flat[$composed] = wp_json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    continue;
+                }
+
+                $flat[$composed] = $this->scalarize_value($value);
+            }
+
+            return $flat;
+        }
+
+        private function output_assoc($payload, $format = 'table')
+        {
+            $format = strtolower((string) $format);
+            if (!in_array($format, array('table', 'json'), true)) {
+                WP_CLI::error('Invalid format. Use table or json.');
+            }
+
+            if ('json' === $format) {
+                WP_CLI::line(wp_json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+                return;
+            }
+
+            $rows = array();
+            foreach ($this->flatten_assoc((array) $payload) as $key => $value) {
+                $rows[] = array(
+                    'key'   => (string) $key,
+                    'value' => (string) $value,
+                );
+            }
+
+            if (empty($rows)) {
+                WP_CLI::warning('No data available.');
+                return;
+            }
+
+            \WP_CLI\Utils\format_items('table', $rows, array('key', 'value'));
+        }
+
+        private function parse_bool_cli_value($value)
+        {
+            $value = strtolower(trim((string) $value));
+
+            if (in_array($value, array('1', 'true', 'yes', 'on', 'enabled'), true)) {
+                return true;
+            }
+
+            if (in_array($value, array('0', 'false', 'no', 'off', 'disabled'), true)) {
+                return false;
+            }
+
+            WP_CLI::error('Invalid boolean value. Use 1/0, true/false, yes/no, on/off.');
+        }
+
+        private function coerce_setting_value($key, $value)
+        {
+            $boolean_keys = array(
+                'pageCacheEnabled',
+                'objectCacheEnabled',
+                'brotliEnabled',
+                'gzipEnabled',
+                'avifConversionEnabled',
+                'deferJsEnabled',
+                'delayThirdPartyJsEnabled',
+                'asyncExternalScriptsEnabled',
+                'clsDimensionsEnabled',
+                'asyncCssEnabled',
+                'lcpImagePriorityEnabled',
+                'googleFontsSwapEnabled',
+                'googleFontsLocalOptimizationEnabled',
+                'selfHostedFontCssOptimizationEnabled',
+                'speculationRulesEnabled',
+                'browserCacheRulesEnabled',
+                'varnishCliEnabled',
+                'varnishCliDebug',
+                'preRenderOnSave',
+                'woocommerceSafeModeEnabled',
+                'cacheCleanupEnabled',
+                'cronWarmEnabled',
+                'cronWarmStartAfterCleanup',
+                'warmAfterScheduledCleanup',
+                'staleWhileRevalidateEnabled',
+                'redisUseTls',
+                'redisPersistent',
+            );
+
+            $integer_keys = array(
+                'cacheCleanupIntervalHours',
+                'redisPort',
+                'redisDatabase',
+                'redisConnectTimeoutMs',
+                'redisReadTimeoutMs',
+                'varnishCliTimeoutSeconds',
+                'cronWarmPagesPerMinute',
+                'scheduledWarmLimit',
+                'cacheFreshTtlMinutes',
+                'cacheMaxStaleMinutes',
+            );
+
+            $textarea_keys = array(
+                'cacheExceptionPaths',
+                'cacheExceptionQueryArgs',
+                'varnishCliServers',
+                'varnishCliKey',
+                'varnishCliMethod',
+                'objectCacheBackend',
+                'redisHost',
+                'redisPassword',
+                'redisPrefix',
+            );
+
+            if (in_array($key, $boolean_keys, true)) {
+                return $this->parse_bool_cli_value($value);
+            }
+
+            if (in_array($key, $integer_keys, true)) {
+                return absint($value);
+            }
+
+            if (in_array($key, $textarea_keys, true)) {
+                return str_replace(array('\\r\\n', '\\n', '\\r'), array("\n", "\n", "\n"), (string) $value);
+            }
+
+            return (string) $value;
+        }
+
+        /**
+         * Purge the cache.
+         *
+         * ## OPTIONS
+         *
+         * [--url=<url>]
+         * : Purge a single local URL instead of the entire cache.
+         */
+        public function purge($args, $assoc_args)
+        {
+            $engine = $this->get_engine();
+            if (!$engine) {
+                WP_CLI::error('Cache engine not available.');
+            }
+
+            if (!empty($assoc_args['url'])) {
+                $url = esc_url_raw((string) $assoc_args['url']);
+                if (!$url || !method_exists($engine, 'purge_url')) {
+                    WP_CLI::error('Single-URL purge is not available.');
+                }
+
+                $purged = (bool) $engine->purge_url($url);
+                if (!$purged) {
+                    WP_CLI::warning('No cache files matched that URL.');
+                    return;
+                }
+
+                WP_CLI::success('Purged cache for ' . $url);
+                return;
+            }
+
+            if (!method_exists($engine, 'purge_all')) {
+                WP_CLI::error('Full purge is not available.');
+            }
+
+            $engine->purge_all();
+            WP_CLI::success('Purged the full cache.');
+        }
+
+        private function get_warm_buckets_from_assoc_args($assoc_args)
+        {
+            $buckets = array('orig', 'webp', 'avif');
+            if (!empty($assoc_args['buckets'])) {
+                $buckets = array_values(array_unique(array_intersect(
+                    array('orig', 'webp', 'avif'),
+                    array_map('trim', explode(',', (string) $assoc_args['buckets']))
+                )));
+                if (empty($buckets)) {
+                    WP_CLI::error('Invalid bucket list. Use orig,webp,avif.');
+                }
+            }
+
+            return $buckets;
+        }
+
+        private function warm_url_list($engine, array $urls, array $buckets, $purge_first = false)
+        {
+            $urls = array_values(array_filter($urls));
+            if (empty($urls)) {
+                WP_CLI::warning('No URLs to warm.');
+                return;
+            }
+
+            $progress = \WP_CLI\Utils\make_progress_bar('Warming cache', count($urls));
+            $warmed = 0;
+            $failed = 0;
+
+            foreach ($urls as $url) {
+                if ($purge_first && method_exists($engine, 'purge_url')) {
+                    $engine->purge_url($url);
+                }
+
+                $result = $engine->warm_url($url, array('buckets' => $buckets));
+                if (!empty($result['success'])) {
+                    $warmed++;
+                } else {
+                    $failed++;
+                    WP_CLI::warning($url . ' -> ' . (!empty($result['message']) ? $result['message'] : 'Warm failed.'));
+                }
+                $progress->tick();
+            }
+
+            $progress->finish();
+            WP_CLI::success(sprintf('Warm finished. Success: %d, failed: %d.', $warmed, $failed));
+        }
+
+        /**
+         * Warm cache files.
+         *
+         * ## OPTIONS
+         *
+         * [--url=<url>]
+         * : Warm a single local URL.
+         *
+         * [--limit=<number>]
+         * : Limit how many crawl URLs will be warmed.
+         *
+         * [--buckets=<list>]
+         * : Comma-separated buckets: orig,webp,avif.
+         *
+         * [--purge-first]
+         * : Purge each URL before warming it.
+         */
+        public function warm($args, $assoc_args)
+        {
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'warm_url')) {
+                WP_CLI::error('Cache warming is not available.');
+            }
+
+            $buckets = $this->get_warm_buckets_from_assoc_args($assoc_args);
+
+            if (!empty($assoc_args['url'])) {
+                $urls = array(esc_url_raw((string) $assoc_args['url']));
+            } else {
+                if (!method_exists($engine, 'get_crawl_urls')) {
+                    WP_CLI::error('URL discovery is not available.');
+                }
+                $urls = (array) $engine->get_crawl_urls();
+            }
+
+            $limit = isset($assoc_args['limit']) ? max(0, absint($assoc_args['limit'])) : 0;
+            if ($limit > 0) {
+                $urls = array_slice($urls, 0, $limit);
+            }
+
+            $this->warm_url_list($engine, $urls, $buckets, isset($assoc_args['purge-first']));
+        }
+
+        /**
+         * Warm up HTML cache for all crawlable public URLs.
+         *
+         * ## OPTIONS
+         *
+         * [--limit=<number>]
+         * : Limit how many crawl URLs will be warmed.
+         *
+         * [--buckets=<list>]
+         * : Comma-separated buckets: orig,webp,avif.
+         *
+         * [--purge-first]
+         * : Purge each URL before warming it.
+         */
+        public function warm_html_all($args, $assoc_args)
+        {
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'get_crawl_urls') || !method_exists($engine, 'warm_url')) {
+                WP_CLI::error('Cache warming is not available.');
+            }
+
+            $urls = (array) $engine->get_crawl_urls();
+            $limit = isset($assoc_args['limit']) ? max(0, absint($assoc_args['limit'])) : 0;
+            if ($limit > 0) {
+                $urls = array_slice($urls, 0, $limit);
+            }
+
+            $this->warm_url_list($engine, $urls, $this->get_warm_buckets_from_assoc_args($assoc_args), isset($assoc_args['purge-first']));
+        }
+
+        /**
+         * Warm up HTML cache for the front page only.
+         *
+         * ## OPTIONS
+         *
+         * [--buckets=<list>]
+         * : Comma-separated buckets: orig,webp,avif.
+         *
+         * [--purge-first]
+         * : Purge the front page before warming it.
+         */
+        public function warm_frontpage_html($args, $assoc_args)
+        {
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'warm_frontpage_html')) {
+                WP_CLI::error('Front page HTML warming is not available.');
+            }
+
+            $frontpage_url = home_url('/');
+            if (isset($assoc_args['purge-first']) && method_exists($engine, 'purge_url')) {
+                $engine->purge_url($frontpage_url);
+            }
+
+            $result = $engine->warm_frontpage_html(array('buckets' => $this->get_warm_buckets_from_assoc_args($assoc_args)));
+            if (!empty($result['success'])) {
+                WP_CLI::success(!empty($result['message']) ? $result['message'] : 'Front page HTML cache warmed.');
+                return;
+            }
+
+            WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Front page HTML warm failed.');
+        }
+
+        /**
+         * Warm up front page HTML cache and rebuild the front page CSS bundle.
+         *
+         * ## OPTIONS
+         *
+         * [--purge-first]
+         * : Purge the front page before warming it.
+         */
+        public function warm_frontpage_html_css($args, $assoc_args)
+        {
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'warm_frontpage_html_with_css')) {
+                WP_CLI::error('Front page HTML + CSS warming is not available.');
+            }
+
+            $frontpage_url = home_url('/');
+            if (isset($assoc_args['purge-first']) && method_exists($engine, 'purge_url')) {
+                $engine->purge_url($frontpage_url);
+            }
+
+            $result = $engine->warm_frontpage_html_with_css();
+            if (!empty($result['success']) || !empty($result['skipped'])) {
+                WP_CLI::success(!empty($result['message']) ? $result['message'] : 'Front page HTML + CSS warm completed.');
+                return;
+            }
+
+            WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Front page HTML + CSS warm failed.');
+        }
+
+        /**
+         * Warm up HTML cache for all crawlable public URLs, then rebuild the front page CSS bundle.
+         *
+         * ## OPTIONS
+         *
+         * [--limit=<number>]
+         * : Limit how many crawl URLs will be warmed.
+         *
+         * [--buckets=<list>]
+         * : Comma-separated buckets: orig,webp,avif.
+         *
+         * [--purge-first]
+         * : Purge each URL before warming it.
+         */
+        public function warm_html_all_css($args, $assoc_args)
+        {
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'get_crawl_urls') || !method_exists($engine, 'warm_url') || !method_exists($engine, 'build_frontpage_css_bundle')) {
+                WP_CLI::error('Site-wide HTML + CSS warming is not available.');
+            }
+
+            $urls = (array) $engine->get_crawl_urls();
+            $limit = isset($assoc_args['limit']) ? max(0, absint($assoc_args['limit'])) : 0;
+            if ($limit > 0) {
+                $urls = array_slice($urls, 0, $limit);
+            }
+
+            $this->warm_url_list($engine, $urls, $this->get_warm_buckets_from_assoc_args($assoc_args), isset($assoc_args['purge-first']));
+
+            $result = $engine->build_frontpage_css_bundle();
+            if (!empty($result['success']) || !empty($result['skipped'])) {
+                WP_CLI::success(!empty($result['message']) ? $result['message'] : 'All URLs warmed and front page CSS bundle rebuilt.');
+                return;
+            }
+
+            WP_CLI::error(!empty($result['message']) ? $result['message'] : 'All URLs were warmed, but front page CSS rebuild failed.');
+        }
+
+        /**
+         * Generate AVIF/WebP files.
+         *
+         * ## OPTIONS
+         *
+         * [--ids=<ids>]
+         * : Comma-separated attachment IDs.
+         *
+         * [--limit=<number>]
+         * : Limit how many discovered media IDs are processed.
+         *
+         * [--format=<format>]
+         * : One of best, avif, webp, both. Default: both.
+         *
+         * [--only-missing]
+         * : Skip variants that already exist.
+         */
+        public function media($args, $assoc_args)
+        {
+            $media = $this->get_media();
+            if (!$media || !method_exists($media, 'generate_attachment_formats')) {
+                WP_CLI::error('Media converter is not available.');
+            }
+
+            $format = !empty($assoc_args['format']) ? strtolower((string) $assoc_args['format']) : 'both';
+            if (!in_array($format, array('best', 'avif', 'webp', 'both'), true)) {
+                WP_CLI::error('Invalid format. Use best, avif, webp, or both.');
+            }
+
+            $only_missing = isset($assoc_args['only-missing']);
+            $limit = isset($assoc_args['limit']) ? max(0, absint($assoc_args['limit'])) : 0;
+
+            if (!empty($assoc_args['ids'])) {
+                $ids = array_values(array_filter(array_map('absint', explode(',', (string) $assoc_args['ids']))));
+                if ($limit > 0) {
+                    $ids = array_slice($ids, 0, $limit);
+                }
+
+                if (empty($ids)) {
+                    WP_CLI::warning('No attachments to process.');
+                    return;
+                }
+
+                $progress = \WP_CLI\Utils\make_progress_bar('Generating media variants', count($ids));
+                $attachments = 0;
+                $avif = 0;
+                $webp = 0;
+
+                foreach ($ids as $attachment_id) {
+                    $result = $media->generate_attachment_formats((int) $attachment_id, $format, $only_missing);
+                    if (!empty($result['success'])) {
+                        $attachments++;
+                        $avif += (int) $result['avif'];
+                        $webp += (int) $result['webp'];
+                    }
+                    $progress->tick();
+                }
+
+                $progress->finish();
+                WP_CLI::success(sprintf('Processed %d attachments. Generated %d AVIF and %d WebP files.', $attachments, $avif, $webp));
+                return;
+            }
+
+            if (!method_exists($media, 'get_media_ids_batch')) {
+                $ids = method_exists($media, 'get_all_media_ids') ? (array) $media->get_all_media_ids() : array();
+                if ($limit > 0) {
+                    $ids = array_slice($ids, 0, $limit);
+                }
+
+                if (empty($ids)) {
+                    WP_CLI::warning('No attachments to process.');
+                    return;
+                }
+
+                $progress = \WP_CLI\Utils\make_progress_bar('Generating media variants', count($ids));
+                $attachments = 0;
+                $avif = 0;
+                $webp = 0;
+
+                foreach ($ids as $attachment_id) {
+                    $result = $media->generate_attachment_formats((int) $attachment_id, $format, $only_missing);
+                    if (!empty($result['success'])) {
+                        $attachments++;
+                        $avif += (int) $result['avif'];
+                        $webp += (int) $result['webp'];
+                    }
+                    $progress->tick();
+                }
+
+                $progress->finish();
+                WP_CLI::success(sprintf('Processed %d attachments. Generated %d AVIF and %d WebP files.', $attachments, $avif, $webp));
+                return;
+            }
+
+            $first_batch = $media->get_media_ids_batch(0, 1);
+            $total = (int) ($first_batch['total'] ?? 0);
+            if ($limit > 0 && ($total <= 0 || $limit < $total)) {
+                $total = $limit;
+            }
+
+            if ($total <= 0) {
+                WP_CLI::warning('No attachments to process.');
+                return;
+            }
+
+            $progress = \WP_CLI\Utils\make_progress_bar('Generating media variants', $total);
+            $attachments = 0;
+            $avif = 0;
+            $webp = 0;
+            $processed = 0;
+            $offset = 0;
+            $batch_size = 250;
+
+            do {
+                $remaining = $limit > 0 ? max(0, $limit - $processed) : $batch_size;
+                if ($limit > 0 && 0 === $remaining) {
+                    break;
+                }
+
+                $request_size = $limit > 0 ? min($batch_size, $remaining) : $batch_size;
+                $batch = $media->get_media_ids_batch($offset, $request_size);
+                $items = array_map('intval', (array) ($batch['items'] ?? array()));
+                if (empty($items)) {
+                    break;
+                }
+
+                foreach ($items as $attachment_id) {
+                    $result = $media->generate_attachment_formats((int) $attachment_id, $format, $only_missing);
+                    if (!empty($result['success'])) {
+                        $attachments++;
+                        $avif += (int) $result['avif'];
+                        $webp += (int) $result['webp'];
+                    }
+                    $processed++;
+                    $progress->tick();
+                }
+
+                $offset = (int) ($batch['nextOffset'] ?? ($offset + count($items)));
+            } while (!empty($batch['hasMore']) && ($limit <= 0 || $processed < $limit));
+
+            $progress->finish();
+            WP_CLI::success(sprintf('Processed %d attachments. Generated %d AVIF and %d WebP files.', $attachments, $avif, $webp));
+        }
+
+        /**
+         * Show UltraCache status.
+         *
+         * ## OPTIONS
+         *
+         * [--format=<format>]
+         * : Output format: table or json. Default: table.
+         *
+         * [--section=<section>]
+         * : One of summary, settings, diagnostics, stats, all. Default: summary.
+         */
+        public function status($args, $assoc_args)
+        {
+            $format = !empty($assoc_args['format']) ? (string) $assoc_args['format'] : 'table';
+            $section = !empty($assoc_args['section']) ? strtolower((string) $assoc_args['section']) : 'summary';
+            if (!in_array($section, array('summary', 'settings', 'diagnostics', 'stats', 'analytics', 'all'), true)) {
+                WP_CLI::error('Invalid section. Use summary, settings, diagnostics, stats, analytics, or all.');
+            }
+
+            $settings = $this->get_dashboard_settings();
+            $stats = $this->get_dashboard_stats();
+            $diagnostics = $this->get_dashboard_diagnostics();
+            unset($stats['diagnostics']);
+
+            $payload = array();
+            switch ($section) {
+                case 'settings':
+                    $payload = $settings;
+                    break;
+                case 'diagnostics':
+                    $payload = $diagnostics;
+                    break;
+                case 'stats':
+                case 'analytics':
+                    $payload = $stats;
+                    break;
+                case 'all':
+                    $payload = array(
+                        'settings' => $settings,
+                        'diagnostics' => $diagnostics,
+                        'stats' => $stats,
+                    );
+                    break;
+                case 'summary':
+                default:
+                    $last = !empty($diagnostics['lastEvent']) && is_array($diagnostics['lastEvent']) ? $diagnostics['lastEvent'] : array();
+                    $payload = array(
+                        'pageCacheEnabled' => !empty($settings['pageCacheEnabled']),
+                        'pageCacheActive' => !empty($diagnostics['pageCache']['active']),
+                        'objectCacheEnabled' => !empty($settings['objectCacheEnabled']),
+                        'objectCacheActive' => !empty($diagnostics['objectCache']['active']),
+                        'objectCacheAvailable' => !empty($diagnostics['objectCache']['available']),
+                        'gzipEnabled' => !empty($settings['gzipEnabled']),
+                        'brotliEnabled' => !empty($settings['brotliEnabled']),
+                        'avifConversionEnabled' => !empty($settings['avifConversionEnabled']),
+                        'cacheSizeHuman' => (string) ($stats['cacheSizeHuman'] ?? ''),
+                        'pagesCached' => (int) ($stats['pagesCached'] ?? ($stats['pageCacheFiles'] ?? 0)),
+                        'pageCacheHits' => (int) ($stats['pageCacheHits'] ?? 0),
+                        'pageCacheMisses' => (int) ($stats['pageCacheMisses'] ?? 0),
+                        'pageCacheBypasses' => (int) ($stats['pageCacheBypasses'] ?? 0),
+                        'pageCacheHitRatio' => (float) ($stats['pageCacheHitRatio'] ?? 0),
+                        'pageCacheStaleHits' => (int) ($stats['pageCacheStaleHits'] ?? 0),
+                        'pageCacheBackgroundRevalidations' => (int) ($stats['pageCacheBackgroundRevalidations'] ?? 0),
+                        'objectCacheEntries' => (int) ($stats['objectCacheEntries'] ?? 0),
+                        'objectCacheHits' => (int) ($stats['objectCacheHits'] ?? 0),
+                        'objectCacheMisses' => (int) ($stats['objectCacheMisses'] ?? 0),
+                        'objectCacheHitRatio' => (float) ($stats['objectCacheHitRatio'] ?? 0),
+                        'optimizedImages' => (int) ($stats['imagesOptimized'] ?? ($stats['optimizedImages'] ?? 0)),
+                        'avifImages' => (int) ($stats['avifImagesOptimized'] ?? ($stats['avifFiles'] ?? 0)),
+                        'webpImages' => (int) ($stats['webpImagesOptimized'] ?? ($stats['webpFiles'] ?? 0)),
+                        'lastEventStatus' => (string) ($last['status'] ?? ''),
+                        'lastEventReason' => (string) ($last['reason'] ?? ''),
+                        'lastEventBucket' => (string) ($last['bucket'] ?? ''),
+                        'lastEventTime' => (string) ($last['time_mysql'] ?? ($last['time'] ?? '')),
+                        'lastPurgeTime' => (string) (($stats['lastPurge']['time_mysql'] ?? ($stats['lastPurge']['time'] ?? ''))),
+                        'lastWarmTime' => (string) (($stats['lastWarm']['time_mysql'] ?? ($stats['lastWarm']['time'] ?? ''))),
+                    );
+                    break;
+            }
+
+            $this->output_assoc($payload, $format);
+        }
+
+        /**
+         * Inspect cacheability for a URL.
+         *
+         * ## OPTIONS
+         *
+         * <url>
+         * : URL to inspect.
+         *
+         * [--format=<format>]
+         * : Output format: table or json. Default: table.
+         */
+        public function inspect($args, $assoc_args)
+        {
+            if (empty($args[0])) {
+                WP_CLI::error('Please provide a URL to inspect.');
+            }
+
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'inspect_url')) {
+                WP_CLI::error('URL inspection is not available.');
+            }
+
+            $format = !empty($assoc_args['format']) ? (string) $assoc_args['format'] : 'table';
+            $result = $engine->inspect_url((string) $args[0]);
+            if (!is_array($result)) {
+                WP_CLI::error('Unexpected inspect response.');
+            }
+
+            $this->output_assoc($result, $format);
+        }
+
+        /**
+         * Read or update dashboard settings.
+         *
+         * ## OPTIONS
+         *
+         * <action>
+         * : One of list, get, set.
+         *
+         * [<key>]
+         * : Setting key for get/set.
+         *
+         * [<value>]
+         * : New value for set.
+         *
+         * [--format=<format>]
+         * : Output format for list/get: table or json. Default: table.
+         *
+         * ## EXAMPLES
+         *
+         *     wp ultracache settings list
+         *     wp ultracache settings get pageCacheEnabled
+         *     wp ultracache settings set gzipEnabled 1
+         *     wp ultracache settings set cacheCleanupIntervalHours 24
+         *     wp ultracache settings set cacheExceptionPaths "/cart/\n/checkout/"
+         */
+        public function settings($args, $assoc_args)
+        {
+            $action = !empty($args[0]) ? strtolower((string) $args[0]) : 'list';
+            $format = !empty($assoc_args['format']) ? (string) $assoc_args['format'] : 'table';
+            $current = $this->get_dashboard_settings();
+
+            if ('list' === $action) {
+                $this->output_assoc($current, $format);
+                return;
+            }
+
+            if ('get' === $action) {
+                if (empty($args[1])) {
+                    WP_CLI::error('Please provide a setting key.');
+                }
+
+                $key = (string) $args[1];
+                if (!array_key_exists($key, $current)) {
+                    WP_CLI::error('Unknown setting key: ' . $key);
+                }
+
+                $this->output_assoc(array($key => $current[$key]), $format);
+                return;
+            }
+
+            if ('set' === $action) {
+                if (empty($args[1]) || !array_key_exists((string) $args[1], $current)) {
+                    WP_CLI::error('Please provide a valid setting key.');
+                }
+                if (!array_key_exists(2, $args)) {
+                    WP_CLI::error('Please provide a value.');
+                }
+                if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'persist_dashboard_settings')) {
+                    WP_CLI::error('Settings persistence is not available.');
+                }
+
+                $key = (string) $args[1];
+                $value = $this->coerce_setting_value($key, $args[2]);
+                $next = $current;
+                $next[$key] = $value;
+                $response = Ultra_Cache_WP::persist_dashboard_settings($next);
+
+                if (is_wp_error($response)) {
+                    WP_CLI::error($response->get_error_message());
+                }
+
+                $updated = $this->get_dashboard_settings();
+                WP_CLI::success(sprintf('Updated %s.', $key));
+                $this->output_assoc(array($key => $updated[$key]), $format);
+                return;
+            }
+
+            WP_CLI::error('Invalid action. Use list, get, or set.');
+        }
+
+        /**
+         * Read or reset persistent cache analytics counters.
+         *
+         * ## OPTIONS
+         *
+         * [<action>]
+         * : One of show or reset. Default: show.
+         *
+         * [--format=<format>]
+         * : Output format for show: table or json. Default: table.
+         *
+         * ## EXAMPLES
+         *
+         *     wp ultracache stats
+         *     wp ultracache stats --format=json
+         *     wp ultracache stats reset
+         */
+        public function stats($args, $assoc_args)
+        {
+            $action = !empty($args[0]) ? strtolower((string) $args[0]) : 'show';
+            $format = !empty($assoc_args['format']) ? (string) $assoc_args['format'] : 'table';
+
+            if ('reset' === $action) {
+                $reset = false;
+
+                foreach (array('Ultra_Cache_Engine') as $class) {
+                    if (class_exists($class) && method_exists($class, 'reset_analytics')) {
+                        call_user_func(array($class, 'reset_analytics'));
+                        $reset = true;
+                        break;
+                    }
+                }
+
+                if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_metrics')) {
+                    Ultra_Cache_Object_Cache_Manager::reset_metrics();
+                    $reset = true;
+                }
+
+                if (!$reset) {
+                    WP_CLI::error('Analytics reset is not available.');
+                }
+
+                WP_CLI::success('UltraCache analytics counters were reset.');
+                return;
+            }
+
+            if ('show' !== $action) {
+                WP_CLI::error('Invalid action. Use show or reset.');
+            }
+
+            $payload = array(
+                'pageCacheFiles' => 0,
+                'pageCacheHits' => 0,
+                'pageCacheMisses' => 0,
+                'pageCacheBypasses' => 0,
+                'pageCacheStores' => 0,
+                'pageCacheStoreSkips' => 0,
+                'pageCacheHitRatio' => 0.0,
+                'pageCacheStaleHits' => 0,
+                'pageCacheBackgroundRevalidations' => 0,
+                'pageCacheBucketHits' => array('orig' => 0, 'webp' => 0, 'avif' => 0),
+                'pageCacheEncodingHits' => array('identity' => 0, 'gzip' => 0, 'brotli' => 0),
+                'topBypassReasons' => array(),
+                'lastPurge' => array(),
+                'lastWarm' => array(),
+                'warmSuccessCount' => 0,
+                'warmFailureCount' => 0,
+                'objectCacheEntries' => 0,
+                'objectCacheSizeBytes' => 0,
+                'objectCacheSizeHuman' => '',
+                'objectCacheHits' => 0,
+                'objectCacheMisses' => 0,
+                'objectCacheHitRatio' => 0.0,
+            );
+
+            foreach (array('Ultra_Cache_Engine') as $class) {
+                if (!class_exists($class)) {
+                    continue;
+                }
+
+                if (method_exists($class, 'get_stats')) {
+                    $engine_stats = call_user_func(array($class, 'get_stats'));
+                    if (is_array($engine_stats)) {
+                        $payload['pageCacheFiles'] = (int) ($engine_stats['pageCacheFiles'] ?? $payload['pageCacheFiles']);
+                    }
+                }
+
+                if (method_exists($class, 'get_analytics_stats')) {
+                    $analytics = call_user_func(array($class, 'get_analytics_stats'));
+                    if (is_array($analytics)) {
+                        $payload['pageCacheHits'] = (int) ($analytics['pageCacheHits'] ?? 0);
+                        $payload['pageCacheMisses'] = (int) ($analytics['pageCacheMisses'] ?? 0);
+                        $payload['pageCacheBypasses'] = (int) ($analytics['pageCacheBypasses'] ?? 0);
+                        $payload['pageCacheStores'] = (int) ($analytics['pageCacheStores'] ?? 0);
+                        $payload['pageCacheStoreSkips'] = (int) ($analytics['pageCacheStoreSkips'] ?? 0);
+                        $payload['pageCacheHitRatio'] = (float) ($analytics['pageCacheHitRatio'] ?? 0);
+                        $payload['pageCacheStaleHits'] = (int) ($analytics['pageCacheStaleHits'] ?? 0);
+                        $payload['pageCacheBackgroundRevalidations'] = (int) ($analytics['pageCacheBackgroundRevalidations'] ?? 0);
+                        $payload['pageCacheBucketHits'] = (array) ($analytics['pageCacheBucketHits'] ?? $payload['pageCacheBucketHits']);
+                        $payload['pageCacheEncodingHits'] = (array) ($analytics['pageCacheEncodingHits'] ?? $payload['pageCacheEncodingHits']);
+                        $payload['topBypassReasons'] = (array) ($analytics['topBypassReasons'] ?? array());
+                        $payload['lastPurge'] = (array) ($analytics['lastPurge'] ?? array());
+                        $payload['lastWarm'] = (array) ($analytics['lastWarm'] ?? array());
+                        $payload['warmSuccessCount'] = (int) ($analytics['warmSuccessCount'] ?? 0);
+                        $payload['warmFailureCount'] = (int) ($analytics['warmFailureCount'] ?? 0);
+                    }
+                    break;
+                }
+            }
+
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_stats')) {
+                $object_stats = Ultra_Cache_Object_Cache_Manager::get_stats();
+                if (is_array($object_stats)) {
+                    $payload['objectCacheEntries'] = (int) ($object_stats['objectCacheEntries'] ?? 0);
+                    $payload['objectCacheSizeBytes'] = (int) ($object_stats['objectCacheSizeBytes'] ?? 0);
+                    $payload['objectCacheSizeHuman'] = (string) ($object_stats['objectCacheSizeHuman'] ?? '');
+                    $payload['objectCacheHits'] = (int) ($object_stats['objectCacheHits'] ?? 0);
+                    $payload['objectCacheMisses'] = (int) ($object_stats['objectCacheMisses'] ?? 0);
+                    $payload['objectCacheHitRatio'] = (float) ($object_stats['objectCacheHitRatio'] ?? 0);
+                }
+            }
+
+            $this->output_assoc($payload, $format);
+        }
+
+
+        /**
+         * Test or trigger Varnish CLI helpers.
+         *
+         * ## OPTIONS
+         *
+         * <action>
+         * : One of test, flush-all, or flush-url.
+         *
+         * [--url=<url>]
+         * : Local URL to purge when using flush-url.
+         */
+        public function varnish($args, $assoc_args)
+        {
+            $action = !empty($args[0]) ? strtolower((string) $args[0]) : 'test';
+
+            if (!class_exists('Ultra_Cache_WP')) {
+                WP_CLI::error('UltraCache runtime is not available.');
+            }
+
+            if ('test' === $action) {
+                if (!method_exists('Ultra_Cache_WP', 'varnish_test_connection')) {
+                    WP_CLI::error('Varnish helper is not available.');
+                }
+                $result = Ultra_Cache_WP::varnish_test_connection();
+                if (empty($result['success'])) {
+                    WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Varnish test failed.');
+                }
+                WP_CLI::success((string) ($result['message'] ?? 'Varnish test succeeded.'));
+                return;
+            }
+
+            if ('flush-all' === $action) {
+                if (!method_exists('Ultra_Cache_WP', 'varnish_flush_all_current_host')) {
+                    WP_CLI::error('Varnish helper is not available.');
+                }
+                $result = Ultra_Cache_WP::varnish_flush_all_current_host();
+                if (empty($result['success'])) {
+                    WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Varnish flush-all failed.');
+                }
+                WP_CLI::success((string) ($result['message'] ?? 'Varnish flush-all succeeded.'));
+                return;
+            }
+
+            if ('flush-url' === $action) {
+                $url = !empty($assoc_args['url']) ? esc_url_raw((string) $assoc_args['url']) : '';
+                if ('' === $url) {
+                    WP_CLI::error('Please provide --url=<url>.');
+                }
+                if (!method_exists('Ultra_Cache_WP', 'varnish_flush_url')) {
+                    WP_CLI::error('Varnish helper is not available.');
+                }
+                $result = Ultra_Cache_WP::varnish_flush_url($url);
+                if (empty($result['success'])) {
+                    WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Varnish flush-url failed.');
+                }
+                WP_CLI::success((string) ($result['message'] ?? 'Varnish flush-url succeeded.'));
+                return;
+            }
+
+            WP_CLI::error('Invalid action. Use test, flush-all, or flush-url.');
+        }
+
+        /**
+         * Manage the cron warm up queue.
+         *
+         * ## OPTIONS
+         *
+         * <action>
+         * : One of start, stop, tick, status.
+         *
+         * [--pages-per-minute=<number>]
+         * : Override the saved pages per minute for this tick.
+         */
+        public function cron_warm($args, $assoc_args)
+        {
+            $action = !empty($args[0]) ? strtolower((string) $args[0]) : 'status';
+            if (!class_exists('Ultra_Cache_WP')) {
+                WP_CLI::error('UltraCache core is not available.');
+            }
+
+            if ('start' === $action) {
+                if (!method_exists('Ultra_Cache_WP', 'start_cron_warmup_queue')) {
+                    WP_CLI::error('Cron warm helper is not available.');
+                }
+                $result = Ultra_Cache_WP::start_cron_warmup_queue('cli', false);
+                if (empty($result['success'])) {
+                    WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Cron warm queue could not start.');
+                }
+                WP_CLI::success((string) ($result['message'] ?? 'Cron warm queue started.'));
+                return;
+            }
+
+            if ('stop' === $action) {
+                if (!method_exists('Ultra_Cache_WP', 'stop_cron_warmup_queue')) {
+                    WP_CLI::error('Cron warm helper is not available.');
+                }
+                $result = Ultra_Cache_WP::stop_cron_warmup_queue('cli');
+                if (empty($result['success'])) {
+                    WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Cron warm queue could not stop.');
+                }
+                WP_CLI::success((string) ($result['message'] ?? 'Cron warm queue stopped.'));
+                return;
+            }
+
+            if ('tick' === $action) {
+                if (!method_exists('Ultra_Cache_WP', 'run_cron_warm_tick')) {
+                    WP_CLI::error('Cron warm helper is not available.');
+                }
+                $result = Ultra_Cache_WP::run_cron_warm_tick(array(
+                    'invokedBy' => 'cli',
+                    'pagesPerMinute' => isset($assoc_args['pages-per-minute']) ? absint($assoc_args['pages-per-minute']) : null,
+                ));
+                if (empty($result['success'])) {
+                    WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Cron warm tick failed.');
+                }
+                $state = isset($result['state']) && is_array($result['state']) ? $result['state'] : array();
+                WP_CLI::success(sprintf('%s Processed %d/%d, warmed %d this run.', (string) ($result['message'] ?? 'Cron warm tick complete.'), (int) ($state['processed'] ?? 0), (int) ($state['total'] ?? 0), (int) ($result['warmedThisRun'] ?? 0)));
+                return;
+            }
+
+            if ('status' === $action) {
+                if (!method_exists('Ultra_Cache_WP', 'get_cron_warm_status')) {
+                    WP_CLI::error('Cron warm helper is not available.');
+                }
+                $status = Ultra_Cache_WP::get_cron_warm_status();
+                WP_CLI::line(wp_json_encode($status));
+                return;
+            }
+
+            WP_CLI::error('Invalid action. Use start, stop, tick, or status.');
+        }
+
+
+        /**
+         * Run the scheduled cleanup job immediately.
+         */
+        public function cleanup($args, $assoc_args)
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'run_scheduled_cache_cleanup')) {
+                WP_CLI::error('Scheduled cleanup is not available.');
+            }
+
+            $result = Ultra_Cache_WP::run_scheduled_cache_cleanup();
+            if (empty($result['success'])) {
+                WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Cleanup failed.');
+            }
+
+            WP_CLI::success(sprintf('Scheduled cleanup finished. Warmed %d URL(s).', (int) ($result['warmed'] ?? 0)));
+        }
+    }
+}
+
+if (!class_exists('Ultra_Cache_WP_CLI')) {
+    final class Ultra_Cache_WP_CLI
+    {
+        public static function register()
+        {
+            if (!defined('WP_CLI') || !WP_CLI || !class_exists('WP_CLI')) {
+                return;
+            }
+
+            if (!class_exists('UCWP_CLI_Command')) {
+                return;
+            }
+
+            if (defined('UCWP_WP_CLI_REGISTERED')) {
+                return;
+            }
+
+            define('UCWP_WP_CLI_REGISTERED', true);
+            WP_CLI::add_command('ultracache', 'UCWP_CLI_Command');
+        }
+    }
+}
+
+if (!class_exists('UltraCache_V246_WP_CLI_Command') && class_exists('UCWP_CLI_Command')) {
+    class_alias('UCWP_CLI_Command', 'UltraCache_V246_WP_CLI_Command');
+}
+
+if (!class_exists('UltraCache_V246_WP_CLI') && class_exists('Ultra_Cache_WP_CLI')) {
+    class_alias('Ultra_Cache_WP_CLI', 'UltraCache_V246_WP_CLI');
+}
