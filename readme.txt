@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.54.136
+Stable tag: 2.55.02
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -56,6 +56,26 @@ Yes. UltraCache can manage Redis-backed object caching and includes Varnish-awar
 
 == Changelog ==
 
+= 2.55.02 =
+
+* Removed the manual `load_plugin_textdomain()` call to align with modern WordPress.org translation loading expectations.
+* Kept standard translation metadata (`Text Domain`, `Domain Path`, `languages/`) in place.
+
+= 2.55.01 =
+* Added the standard plugin Domain Path header and a runtime textdomain loading hook so translations can load from the plugin languages directory.
+* Synced internal hotfix bundle header comments to the current release version for cleaner repository metadata.
+* Cleaned repository metadata for the new 2.55.01 release series.
+
+= 2.54.140 =
+* Hardened advanced-cache path validation with realpath-aware checks before loading runtime config, runtime secret candidates, or serving cache files.
+* Added an explicit serve-file readability and cache-boundary check before advanced-cache outputs a cache hit or stale response.
+* Replaced the runtime secret PHP generator's var_export() call with the existing PHP string literal helper to keep the generated secret file behavior while avoiding the PHPCS development-function warning.
+
+= 2.54.139 =
+* Changed the outside-web-root runtime secret file to a per-site name derived from the site root folder, avoiding collisions when multiple sites share the same account home directory.
+* Added migration fallback loading from the prior shared outside-web-root secret path and from the legacy wp-content secret path.
+* Automatically removes old shared or public runtime secret files after the new per-site secret file is written successfully.
+
 = 2.54.136 =
 * Improved object-cache flush semantics and messaging. Flush results now distinguish stale residual cache entries from entries recreated after flush by live runtime activity.
 * Added last object-cache flush diagnostics data so operators can inspect the most recent flush outcome from the status payload.
@@ -96,6 +116,9 @@ Yes. UltraCache can manage Redis-backed object caching and includes Varnish-awar
 * Cleaned several debug/report issues in the repository build.
 
 == Upgrade Notice ==
+
+= 2.55.01 =
+Repository-clean release polish: textdomain loading, Domain Path metadata, and version/header cleanup.
 
 = 2.54.111 =
 Cleaner non-critical diagnostics paths with less silent suppression and safer internal debug logging.

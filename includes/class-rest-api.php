@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.54.108 */
+/** Hotfix Bundle Version: 2.55.02 */
 if (!defined('ABSPATH')) {
     exit;
 }

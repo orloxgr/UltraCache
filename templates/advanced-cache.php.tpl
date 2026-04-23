@@ -73,14 +73,56 @@ if (!function_exists('ucwp_normalize_cache_path')) {
     }
 }
 
+if (!function_exists('ucwp_resolve_cache_path_for_compare')) {
+    function ucwp_resolve_cache_path_for_compare($path, $must_exist = false) {
+        $path = is_string($path) ? trim($path) : '';
+        if ('' === $path) {
+            return '';
+        }
+
+        if (function_exists('realpath')) {
+            $real = realpath($path);
+            if (is_string($real) && '' !== $real) {
+                return ucwp_normalize_cache_path($real);
+            }
+
+            if (!$must_exist) {
+                $parent = dirname($path);
+                $leaf = basename($path);
+                $real_parent = realpath($parent);
+                if (is_string($real_parent) && '' !== $real_parent && '' !== $leaf && '.' !== $leaf && '..' !== $leaf) {
+                    return ucwp_normalize_cache_path(rtrim($real_parent, '/\\') . DIRECTORY_SEPARATOR . $leaf);
+                }
+            }
+
+            if ($must_exist) {
+                return '';
+            }
+        }
+
+        return ucwp_normalize_cache_path($path);
+    }
+}
+
+if (!function_exists('ucwp_is_path_within_base')) {
+    function ucwp_is_path_within_base($path, $base_dir, $must_exist = false) {
+        $resolved_path = ucwp_resolve_cache_path_for_compare($path, (bool) $must_exist);
+        $resolved_base = ucwp_resolve_cache_path_for_compare($base_dir, true);
+        if ('' === $resolved_path || '' === $resolved_base) {
+            return false;
+        }
+        return $resolved_path === $resolved_base || 0 === strpos($resolved_path, $resolved_base . '/');
+    }
+}
+
 if (!function_exists('ucwp_is_cache_path')) {
-    function ucwp_is_cache_path($path, $base_dir) {
-        $path = ucwp_normalize_cache_path($path);
-        $base_dir = ucwp_normalize_cache_path($base_dir);
+    function ucwp_is_cache_path($path, $base_dir, $must_exist = false) {
+        $path = is_string($path) ? trim($path) : '';
+        $base_dir = is_string($base_dir) ? trim($base_dir) : '';
         if ('' === $path || '' === $base_dir) {
             return false;
         }
-        return $path === $base_dir || 0 === strpos($path, $base_dir . '/');
+        return ucwp_is_path_within_base($path, $base_dir, (bool) $must_exist);
     }
 }
 
@@ -226,13 +268,63 @@ $runtime_config = array(
 );
 
 $runtime_config_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/runtime-config.json';
-if (file_exists($runtime_config_file) && is_readable($runtime_config_file)) {
+if ($ucwp_is_cache_path($runtime_config_file, $ucwp_cache_base_dir, true) && file_exists($runtime_config_file) && is_readable($runtime_config_file)) {
     $loaded_runtime_raw = $ucwp_read_file($runtime_config_file);
     if (is_string($loaded_runtime_raw) && '' !== $loaded_runtime_raw) {
         $loaded_runtime = json_decode($loaded_runtime_raw, true);
         if (is_array($loaded_runtime)) {
             $runtime_config = array_merge($runtime_config, $loaded_runtime);
         }
+    }
+}
+
+$runtime_secret_candidates = array();
+$runtime_secret_base = dirname(rtrim(ABSPATH, '/\\'));
+$runtime_secret_site_token = basename(rtrim(ABSPATH, '/\\'));
+$runtime_secret_site_token = is_string($runtime_secret_site_token) ? strtolower($runtime_secret_site_token) : '';
+$runtime_secret_site_token = preg_replace('/[^a-z0-9._-]+/', '-', $runtime_secret_site_token);
+$runtime_secret_site_token = trim((string) $runtime_secret_site_token, '.-_');
+if ('' === $runtime_secret_site_token) {
+    $runtime_secret_site_token = 'site';
+}
+if (is_string($runtime_secret_base) && '' !== trim($runtime_secret_base) && '.' !== $runtime_secret_base && '/' !== $runtime_secret_base) {
+    $runtime_secret_candidates[] = rtrim($runtime_secret_base, '/\\') . '/.' . $runtime_secret_site_token . '-ultracache-runtime-secrets.php';
+    $runtime_secret_candidates[] = rtrim($runtime_secret_base, '/\\') . '/.ultracache-runtime-secrets.php';
+}
+$runtime_secret_candidates[] = rtrim(WP_CONTENT_DIR, '/\\') . '/ultracache-runtime-secrets.php';
+$runtime_secret_candidates = array_values(array_unique($runtime_secret_candidates));
+$runtime_secret_legacy_public = rtrim(WP_CONTENT_DIR, '/\\') . '/ultracache-runtime-secrets.php';
+$ucwp_is_allowed_runtime_secret = static function ($path) use ($runtime_secret_base, $runtime_secret_legacy_public) {
+    $path = is_string($path) ? trim($path) : '';
+    if ('' === $path) {
+        return false;
+    }
+
+    $resolved_path = ucwp_resolve_cache_path_for_compare($path, true);
+    if ('' === $resolved_path) {
+        return false;
+    }
+
+    $resolved_legacy = ucwp_resolve_cache_path_for_compare($runtime_secret_legacy_public, true);
+    if ('' !== $resolved_legacy && $resolved_path === $resolved_legacy) {
+        return true;
+    }
+
+    return is_string($runtime_secret_base)
+        && '' !== trim($runtime_secret_base)
+        && '.' !== $runtime_secret_base
+        && '/' !== $runtime_secret_base
+        && ucwp_is_path_within_base($path, $runtime_secret_base, true);
+};
+foreach ($runtime_secret_candidates as $runtime_secret_file) {
+    if (!is_string($runtime_secret_file) || '' === trim($runtime_secret_file) || !file_exists($runtime_secret_file) || !is_readable($runtime_secret_file) || !$ucwp_is_allowed_runtime_secret($runtime_secret_file)) {
+        continue;
+    }
+
+    $loaded_runtime_secret = require $runtime_secret_file;
+    if (is_array($loaded_runtime_secret) && isset($loaded_runtime_secret['revalidate_secret']) && is_scalar($loaded_runtime_secret['revalidate_secret'])) {
+        $runtime_config['revalidate_secret'] = (string) $loaded_runtime_secret['revalidate_secret'];
+        break;
     }
 }
 
@@ -615,7 +707,7 @@ if (!empty($normalized_query_vars)) {
 }
 $hash = md5($normalized);
 $cache_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/' . $host . '/' . $cache_key_path . '/index-' . $bucket . '-' . $hash . '.html';
-if (!file_exists($cache_file)) {
+if (!$ucwp_is_cache_path($cache_file) || !file_exists($cache_file) || !is_readable($cache_file)) {
     return;
 }
 
@@ -632,6 +724,10 @@ if (false !== strpos($encoding, 'br') && $ucwp_is_cache_path($cache_file . '.br'
     $encoding_bucket = 'gzip';
     header('X-UltraCache-Encoding: gzip');
     header('Content-Encoding: gzip');
+}
+
+if (!$ucwp_is_cache_path($serve_file) || !is_readable($serve_file)) {
+    return;
 }
 
 $fresh_ttl = max(60, (int) ($runtime_config['cache_fresh_ttl_minutes'] ?? 15) * 60);

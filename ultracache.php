@@ -3,12 +3,13 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.54.136
+ * Version: 2.55.02
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
- * Hotfix Bundle Version: 2.54.136
+ * Domain Path: /languages
+ * Hotfix Bundle Version: 2.55.02
  */
 
 if (!defined('ABSPATH')) {
@@ -16,10 +17,10 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.54.136');
+    define('UCWP_VERSION', '2.55.02');
 }
 if (!defined('UCWP_HOTFIX_BUNDLE_VERSION')) {
-    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.54.136');
+    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.55.02');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -63,7 +64,6 @@ if (!defined('UCWP_WEBP_URL')) {
 if (!defined('UCWP_OBJECT_CACHE_DIR')) {
     define('UCWP_OBJECT_CACHE_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/');
 }
-
 
 if (!function_exists('ucwp_debug_log')) {
     function ucwp_debug_log($message, array $context = array())
@@ -632,7 +632,7 @@ if (!function_exists('ucwp_is_local_https_url')) {
         }
 
         $trusted_hosts = ucwp_get_trusted_hosts();
-        return !empty($trusted_hosts[$host]);
+        return in_array($host, $trusted_hosts, true);
     }
 }
 
@@ -771,7 +771,7 @@ if (!function_exists('ucwp_get_trusted_hosts')) {
             }
         }
 
-        return array_keys($hosts);
+        return array_values(array_keys($hosts));
     }
 }
 
@@ -1119,6 +1119,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                     ucwp_safe_file_put_contents($index, "<?php\n// Silence is golden.\n", 0, 'ensure_directories index');
                 }
             }
+
+            self::ensure_runtime_config_protection_files();
         }
 
         public static function get_dashboard_defaults()
@@ -1901,6 +1903,114 @@ if (!class_exists('Ultra_Cache_WP')) {
             return trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.json';
         }
 
+        private static function get_legacy_runtime_secret_path()
+        {
+            return trailingslashit(WP_CONTENT_DIR) . 'ultracache-runtime-secrets.php';
+        }
+
+        private static function get_previous_runtime_secret_path()
+        {
+            $base = dirname(untrailingslashit(ABSPATH));
+            if (!is_string($base) || '' === trim($base) || '.' === $base || '/' === $base) {
+                $base = dirname(untrailingslashit(WP_CONTENT_DIR));
+            }
+
+            return rtrim($base, '/\\') . '/.ultracache-runtime-secrets.php';
+        }
+
+        private static function get_runtime_secret_site_token()
+        {
+            $site_root = wp_normalize_path(untrailingslashit(ABSPATH));
+            $token = wp_basename($site_root);
+            $token = is_string($token) ? strtolower($token) : '';
+            $token = preg_replace('/[^a-z0-9._-]+/', '-', $token);
+            $token = trim((string) $token, '.-_');
+
+            if ('' === $token) {
+                $token = 'site';
+            }
+
+            return $token;
+        }
+
+        private static function get_runtime_secret_path()
+        {
+            $base = dirname(untrailingslashit(ABSPATH));
+            if (!is_string($base) || '' === trim($base) || '.' === $base || '/' === $base) {
+                $base = dirname(untrailingslashit(WP_CONTENT_DIR));
+            }
+
+            return rtrim($base, '/\\') . '/.' . self::get_runtime_secret_site_token() . '-ultracache-runtime-secrets.php';
+        }
+
+        private static function ensure_runtime_config_protection_files()
+        {
+            $runtime_dir = dirname(self::get_runtime_config_path());
+            if (!file_exists($runtime_dir) && !ucwp_safe_mkdir($runtime_dir, 0755, true, 'ensure_runtime_config_protection_files mkdir') && !file_exists($runtime_dir)) {
+                return;
+            }
+
+            $htaccess = trailingslashit($runtime_dir) . '.htaccess';
+            $htaccess_rules = "<Files \"runtime-config.json\">\nRequire all denied\n</Files>\n<IfModule !mod_authz_core.c>\n<Files \"runtime-config.json\">\nDeny from all\n</Files>\n</IfModule>\n";
+            if (!file_exists($htaccess)) {
+                ucwp_safe_file_put_contents($htaccess, $htaccess_rules, 0, 'runtime_config htaccess');
+            } else {
+                $existing_htaccess = ucwp_safe_file_get_contents($htaccess, 'runtime_config htaccess read');
+                if (is_string($existing_htaccess) && false === strpos($existing_htaccess, 'runtime-config.json')) {
+                    ucwp_safe_file_put_contents($htaccess, rtrim($existing_htaccess) . "\n\n" . $htaccess_rules, 0, 'runtime_config htaccess append');
+                }
+            }
+
+            $web_config = trailingslashit($runtime_dir) . 'web.config';
+            $web_config_rules = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n  <location path=\"runtime-config.json\">\n    <system.webServer>\n      <security>\n        <authorization>\n          <clear />\n          <add accessType=\"Deny\" users=\"*\" />\n        </authorization>\n      </security>\n    </system.webServer>\n  </location>\n</configuration>\n";
+            if (!file_exists($web_config)) {
+                ucwp_safe_file_put_contents($web_config, $web_config_rules, 0, 'runtime_config web_config');
+            }
+        }
+
+        private static function render_runtime_secret_php(array $runtime)
+        {
+            $secret = isset($runtime['revalidate_secret']) ? (string) $runtime['revalidate_secret'] : '';
+            return "<?php\n/** UltraCache managed runtime secrets. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn array(\n    'revalidate_secret' => " . ucwp_php_string_literal($secret) . ",\n);\n";
+        }
+
+        private static function load_runtime_secret_file($path = null)
+        {
+            $candidates = array();
+            if (is_string($path) && '' !== trim($path)) {
+                $candidates[] = $path;
+            } else {
+                $candidates[] = self::get_runtime_secret_path();
+            }
+
+            $previous = self::get_previous_runtime_secret_path();
+            if (!in_array($previous, $candidates, true)) {
+                $candidates[] = $previous;
+            }
+
+            $legacy = self::get_legacy_runtime_secret_path();
+            if (!in_array($legacy, $candidates, true)) {
+                $candidates[] = $legacy;
+            }
+
+            foreach ($candidates as $candidate) {
+                if (!is_string($candidate) || '' === trim($candidate) || !file_exists($candidate) || !is_readable($candidate)) {
+                    continue;
+                }
+
+                $loaded = require $candidate;
+                if (!is_array($loaded)) {
+                    continue;
+                }
+
+                return array(
+                    'revalidate_secret' => isset($loaded['revalidate_secret']) ? (string) $loaded['revalidate_secret'] : '',
+                );
+            }
+
+            return array();
+        }
+
         private static function build_runtime_config()
         {
             $settings = self::get_settings();
@@ -1935,12 +2045,17 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return new WP_Error('ucwp_runtime_config_invalid', 'runtime-config.json did not contain a valid JSON object.');
             }
 
+            $loaded = array_merge($loaded, self::load_runtime_secret_file());
+
             return self::normalize_runtime_config($loaded);
         }
 
         private static function render_runtime_config_json(array $runtime)
         {
-            $encoded = wp_json_encode(self::normalize_runtime_config($runtime), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            $public_runtime = self::normalize_runtime_config($runtime);
+            unset($public_runtime['revalidate_secret']);
+
+            $encoded = wp_json_encode($public_runtime, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
             if (!is_string($encoded) || '' === $encoded) {
                 return "{}\n";
             }
@@ -2009,11 +2124,34 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             self::ensure_directories();
 
-            $runtime  = self::build_runtime_config();
-            $target   = self::get_runtime_config_path();
-            $contents = self::render_runtime_config_json($runtime);
+            $runtime         = self::build_runtime_config();
+            $config_target   = self::get_runtime_config_path();
+            $config_contents = self::render_runtime_config_json($runtime);
+            $secret_target   = self::get_runtime_secret_path();
+            $secret_contents = self::render_runtime_secret_php($runtime);
 
-            return self::write_file_atomically($target, $contents, 'sync_runtime_config');
+            $secret_written = self::write_file_atomically($secret_target, $secret_contents, 'sync_runtime_config secret');
+            $config_written = self::write_file_atomically($config_target, $config_contents, 'sync_runtime_config');
+
+            if ($secret_written) {
+                $cleanup_candidates = array(
+                    self::get_previous_runtime_secret_path(),
+                    self::get_legacy_runtime_secret_path(),
+                );
+
+                foreach ($cleanup_candidates as $cleanup_secret) {
+                    if (!is_string($cleanup_secret) || '' === trim($cleanup_secret) || $cleanup_secret === $secret_target || !file_exists($cleanup_secret)) {
+                        continue;
+                    }
+
+                    $cleanup_contents = ucwp_safe_file_get_contents($cleanup_secret, 'sync_runtime_config secret cleanup read');
+                    if (is_string($cleanup_contents) && false !== strpos($cleanup_contents, 'revalidate_secret')) {
+                        ucwp_safe_unlink($cleanup_secret, 'sync_runtime_config secret cleanup');
+                    }
+                }
+            }
+
+            return $secret_written && $config_written;
         }
 
         private static function get_cache_cleanup_schedule_name($hours)
@@ -4304,24 +4442,42 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function get_runtime_config_diagnostic($path)
         {
             $diag = self::get_path_diagnostic($path, 'file');
-            $diag['valid']   = false;
-            $diag['keys']    = array();
-            $diag['inSync']  = false;
-            $diag['loaded']  = array();
+            $diag['valid'] = false;
+            $diag['keys'] = array();
+            $diag['inSync'] = false;
+            $diag['loaded'] = array();
+            $diag['secretPath'] = self::get_runtime_secret_path();
+            $diag['previousSecretPath'] = self::get_previous_runtime_secret_path();
+            $diag['legacySecretPath'] = self::get_legacy_runtime_secret_path();
+            $diag['secretStorage'] = 'file_outside_webroot_per_site';
+            $diag['secretPresent'] = false;
+
             $expected_runtime = self::build_runtime_config();
-            $diag['expected'] = self::redact_runtime_config_for_diagnostics($expected_runtime);
+            $expected_public_runtime = $expected_runtime;
+            unset($expected_public_runtime['revalidate_secret']);
+            $diag['expected'] = $expected_public_runtime;
 
             if (!empty($diag['exists']) && !empty($diag['readable'])) {
-                $loaded = self::load_runtime_config_file($path);
-                if (is_wp_error($loaded)) {
-                    $diag['readError'] = $loaded->get_error_message();
-                } elseif (is_array($loaded)) {
-                    $diag['valid']  = true;
-                    $diag['keys']   = array_values(array_keys($loaded));
-                    $diag['loaded'] = self::redact_runtime_config_for_diagnostics($loaded);
-                    $diag['inSync'] = ($loaded === $expected_runtime);
+                $raw = ucwp_safe_file_get_contents($path, 'dashboard runtime config raw diagnostic');
+                if (false === $raw || '' === $raw) {
+                    $diag['readError'] = self::maybe_translate('Read failed');
+                } else {
+                    $loaded = json_decode($raw, true);
+                    if (!is_array($loaded)) {
+                        $diag['readError'] = self::maybe_translate('Invalid JSON');
+                    } else {
+                        $normalized_public = self::normalize_runtime_config(array_merge($expected_public_runtime, $loaded));
+                        unset($normalized_public['revalidate_secret']);
+                        $diag['valid'] = true;
+                        $diag['keys'] = array_values(array_keys($loaded));
+                        $diag['loaded'] = $normalized_public;
+                        $diag['inSync'] = ($normalized_public === $expected_public_runtime);
+                    }
                 }
             }
+
+            $secret_runtime = self::load_runtime_secret_file();
+            $diag['secretPresent'] = !empty($secret_runtime['revalidate_secret']);
 
             return $diag;
         }

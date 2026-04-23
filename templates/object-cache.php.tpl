@@ -152,9 +152,7 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 
 			$base = rtrim((string) $this->cache_dir, '/\\');
-			$normalized = str_replace('\\', '/', $config);
-			$normalized_base = str_replace('\\', '/', $base);
-			if ('' === $normalized_base || 0 !== strpos($normalized, $normalized_base . '/')) {
+			if (!$this->is_path_within_base($config, $base, true)) {
 				return;
 			}
 
@@ -634,6 +632,9 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function get_file_path($key, $group) {
 			$dir = $this->get_group_dir($group);
+			if (!$this->is_cache_path($dir)) {
+				return false;
+			}
 			if (!is_dir($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
 				return false;
 			}
@@ -650,17 +651,48 @@ if (!class_exists('WP_Object_Cache')) {
 			return rtrim((string) $normalized, '/');
 		}
 
+		private function resolve_path_for_comparison($path, $must_exist) {
+			$path = is_string($path) ? trim($path) : '';
+			if ('' === $path) {
+				return '';
+			}
+
+			if (function_exists('realpath')) {
+				$real = @realpath($path);
+				if (is_string($real) && '' !== $real) {
+					return $this->normalize_cache_dir($real);
+				}
+				if (!$must_exist) {
+					$parent = dirname($path);
+					$leaf = basename($path);
+					$real_parent = @realpath($parent);
+					if (is_string($real_parent) && '' !== $real_parent && '' !== $leaf && '.' !== $leaf && '..' !== $leaf) {
+						return $this->normalize_cache_dir(rtrim($real_parent, '/\\') . DIRECTORY_SEPARATOR . $leaf);
+					}
+				}
+				if ($must_exist) {
+					return '';
+				}
+			}
+
+			return $this->normalize_cache_dir($path);
+		}
+
+		private function is_path_within_base($path, $base, $must_exist) {
+			$resolved_path = $this->resolve_path_for_comparison($path, (bool) $must_exist);
+			$resolved_base = $this->resolve_path_for_comparison($base, true);
+			if ('' === $resolved_path || '' === $resolved_base) {
+				return false;
+			}
+			return $resolved_path === $resolved_base || 0 === strpos($resolved_path, $resolved_base . '/');
+		}
+
 		private function is_cache_path($path) {
 			$path = is_string($path) ? trim($path) : '';
 			if ('' === $path) {
 				return false;
 			}
-			$normalized_path = $this->normalize_cache_dir($path);
-			$normalized_base = $this->normalize_cache_dir($this->cache_dir);
-			if ('' === $normalized_path || '' === $normalized_base) {
-				return false;
-			}
-			return $normalized_path === $normalized_base || 0 === strpos($normalized_path, $normalized_base . '/');
+			return $this->is_path_within_base($path, $this->cache_dir, false);
 		}
 
 		private function ensure_base_dir() {
@@ -994,7 +1026,7 @@ if (!class_exists('WP_Object_Cache')) {
 				return true;
 			}
 
-			if (preg_match('/(^|[;{}])(C|o|O\+):\d+:/', $serialized)) {
+			if (preg_match('/(^|[;{}])(C|O|o|O\+):\d+:/', $serialized)) {
 				return true;
 			}
 
