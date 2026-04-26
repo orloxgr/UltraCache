@@ -24,6 +24,20 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		private $final_buffering = false;
 
 		/**
+		 * Number of frontend on-demand conversions started during this request.
+		 *
+		 * @var int
+		 */
+		private $on_demand_conversions_started = 0;
+
+		/**
+		 * Request start timestamp used for frontend on-demand conversion budgeting.
+		 *
+		 * @var float|null
+		 */
+		private $on_demand_request_started_at = null;
+
+		/**
 		 * Background conversion queue option name.
 		 */
 		const BACKGROUND_QUEUE_OPTION = 'ucwp_media_conversion_queue';
@@ -39,6 +53,16 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		const BACKGROUND_QUEUE_LOCK = 'ucwp_media_conversion_queue_lock';
 
 		/**
+		 * Cached media work summary transient.
+		 */
+		const MEDIA_WORK_SUMMARY_TRANSIENT = 'ucwp_media_work_summary_v1';
+
+		/**
+		 * Stores the most recent media conversion diagnostics.
+		 */
+		const MEDIA_DIAGNOSTICS_OPTION = 'ucwp_media_diagnostics_v1';
+
+		/**
 		 * Get singleton instance.
 		 *
 		 * @return Ultra_Cache_Media_Converter
@@ -52,6 +76,126 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		}
 		private function get_default_batch_size() {
 			return 250;
+		}
+
+		private function invalidate_media_work_summary_cache() {
+			delete_transient(self::MEDIA_WORK_SUMMARY_TRANSIENT);
+		}
+
+		private function update_media_diagnostic_state(array $updates) {
+			$current = get_option(self::MEDIA_DIAGNOSTICS_OPTION, array());
+			if (!is_array($current)) {
+				$current = array();
+			}
+			$state = array_merge($current, $updates);
+			$state['updatedAt'] = time();
+			update_option(self::MEDIA_DIAGNOSTICS_OPTION, $state, false);
+		}
+
+		private function get_media_diagnostic_state() {
+			$state = get_option(self::MEDIA_DIAGNOSTICS_OPTION, array());
+			return is_array($state) ? $state : array();
+		}
+
+		private function reset_media_diagnostic_state() {
+			$this->update_media_diagnostic_state(array(
+				'lastAvifEncodeError' => '',
+				'lastAvifEncodeEngine' => '',
+				'lastAvifEncodeFile' => '',
+				'lastAvifEncodeAt' => 0,
+				'lastImageEditorClass' => '',
+			));
+		}
+
+		private function get_preferred_avif_diagnostic_engine() {
+			$preferred = $this->detect_preferred_image_editor_class();
+			if ('WP_Image_Editor_Imagick' === $preferred || $this->supports_imagick_avif()) {
+				return array('engine' => 'imagick', 'class' => 'WP_Image_Editor_Imagick');
+			}
+			if ('WP_Image_Editor_GD' === $preferred || $this->supports_gd_avif()) {
+				return array('engine' => 'gd', 'class' => 'WP_Image_Editor_GD');
+			}
+			return array('engine' => 'existing', 'class' => $preferred ?: '');
+		}
+
+		private function mark_existing_avif_variant_available($source_file) {
+			$source_file = (string) $source_file;
+			if ('' === $source_file) {
+				return;
+			}
+			$avif_path = $this->get_avif_path_from_source($source_file);
+			if (!$avif_path || !file_exists($avif_path)) {
+				return;
+			}
+			$preferred = $this->get_preferred_avif_diagnostic_engine();
+			$this->update_media_diagnostic_state(array(
+				'lastImageEditorClass' => (string) $preferred['class'],
+				'lastAvifEncodeEngine' => (string) $preferred['engine'],
+				'lastAvifEncodeError' => '',
+				'lastAvifEncodeFile' => $source_file,
+				'lastAvifEncodeAt' => time(),
+			));
+		}
+
+		private function detect_preferred_image_editor_class() {
+			if (!function_exists('wp_get_image_editor')) {
+				$maybe = ABSPATH . 'wp-admin/includes/image.php';
+				if (file_exists($maybe)) {
+					require_once $maybe;
+				}
+			}
+
+			if ($this->supports_imagick_avif() || $this->supports_imagick_webp()) {
+				return 'WP_Image_Editor_Imagick';
+			}
+
+			if ($this->supports_gd_avif() || $this->supports_gd_webp()) {
+				return 'WP_Image_Editor_GD';
+			}
+
+			$editors = apply_filters('wp_image_editors', array('WP_Image_Editor_Imagick', 'WP_Image_Editor_GD'));
+			if (!is_array($editors)) {
+				return '';
+			}
+			foreach ($editors as $editor_class) {
+				$editor_class = is_string($editor_class) ? $editor_class : '';
+				if ('' !== $editor_class && class_exists($editor_class)) {
+					return $editor_class;
+				}
+			}
+			return '';
+		}
+
+		private function count_attachment_source_files($attachment_id) {
+			return count($this->get_attachment_source_files($attachment_id));
+		}
+
+		private function get_media_work_summary() {
+			$cached = get_transient(self::MEDIA_WORK_SUMMARY_TRANSIENT);
+			if (is_array($cached) && isset($cached['attachmentsTotal'], $cached['workTotal'])) {
+				return $cached;
+			}
+
+			$attachments_total = 0;
+			$work_total = 0;
+			$offset = 0;
+			$limit = $this->get_default_batch_size();
+			do {
+				$batch = $this->get_media_ids_batch($offset, $limit, false);
+				$items = array_map('intval', (array) ($batch['items'] ?? array()));
+				foreach ($items as $attachment_id) {
+					$attachments_total++;
+					$work_total += max(1, $this->count_attachment_source_files($attachment_id));
+				}
+				$offset = (int) ($batch['nextOffset'] ?? ($offset + count($items)));
+			} while (!empty($batch['hasMore']) && !empty($items));
+
+			$summary = array(
+				'attachmentsTotal' => (int) $attachments_total,
+				'workTotal' => (int) max($attachments_total, $work_total),
+			);
+			set_transient(self::MEDIA_WORK_SUMMARY_TRANSIENT, $summary, 10 * MINUTE_IN_SECONDS);
+			return $summary;
 		}
 
 
@@ -82,7 +226,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return array
 		 */
 		public function maybe_generate_avif_on_upload($metadata, $attachment_id) {
-			if (!$this->is_avif_feature_enabled()) {
+			if (!$this->is_avif_feature_enabled() || !$this->is_generate_on_upload_enabled()) {
 				return $metadata;
 			}
 
@@ -115,6 +259,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$queue = $this->get_background_generation_queue();
 			$queue[(string) $attachment_id] = time();
 			$this->persist_background_generation_queue($queue);
+			$this->invalidate_media_work_summary_cache();
 			$this->schedule_background_generation_queue();
 		}
 
@@ -205,7 +350,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return void
 		 */
 		public function process_background_generation_queue() {
-			if (!$this->is_avif_feature_enabled() || !$this->is_supported()) {
+			if (!$this->is_avif_feature_enabled() || !$this->is_generate_on_upload_enabled() || !$this->is_supported()) {
 				return;
 			}
 
@@ -283,14 +428,18 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			}
 
 			$success = false;
+			$this->reset_media_diagnostic_state();
+			$prefer_imagick = $this->supports_imagick_avif();
 
-			$success = $this->convert_with_wp_image_editor($source_file, $dest_file, 'image/avif', 60);
-
-			if (!$success && $this->supports_imagick_avif()) {
+			if ($prefer_imagick) {
 				$success = $this->convert_with_imagick($source_file, $dest_file, 'avif', 60);
 			}
 
-			if (!$success && $this->supports_gd_avif()) {
+			if (!$success && !$prefer_imagick) {
+				$success = $this->convert_with_wp_image_editor($source_file, $dest_file, 'image/avif', 60);
+			}
+
+			if (!$success && !$prefer_imagick && $this->supports_gd_avif()) {
 				$success = $this->convert_with_gd($source_file, $dest_file, 'avif', 60);
 			}
 
@@ -380,6 +529,13 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return string|false
 		 */
 		private function generate_best_format($source_file) {
+			$mode = $this->get_media_output_mode();
+			if ('avif' === $mode) {
+				return $this->to_avif($source_file);
+			}
+			if ('webp' === $mode) {
+				return $this->to_webp($source_file);
+			}
 			$avif = $this->to_avif($source_file);
 			if ($avif) {
 				return $avif;
@@ -453,19 +609,35 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				'processed'     => 0,
 				'avif'          => 0,
 				'webp'          => 0,
+				'skippedExisting' => 0,
+				'sourceFiles'   => 0,
+				'workTotal'     => 0,
+				'workCompleted' => 0,
 			);
 
 			if (!in_array($format, array('best', 'avif', 'webp', 'both'), true)) {
 				$format = 'best';
 			}
 
-			foreach ($this->get_attachment_source_files($attachment_id) as $source_file) {
+			$source_files = $this->get_attachment_source_files($attachment_id);
+			$summary['sourceFiles'] = count($source_files);
+			$work_multiplier = ('both' === $format) ? 2 : 1;
+			$summary['workTotal'] = (int) ($summary['sourceFiles'] * $work_multiplier);
+
+			foreach ($source_files as $source_file) {
 				if ('best' === $format) {
 					if ($only_missing && ($this->generated_variant_exists($source_file, 'avif') || $this->generated_variant_exists($source_file, 'webp'))) {
+						$summary['workCompleted']++;
+						$summary['skippedExisting']++;
+						if ($this->generated_variant_exists($source_file, 'avif')) {
+							$this->mark_existing_avif_variant_available($source_file);
+						}
+						$summary['success'] = true;
 						continue;
 					}
 
 					$result = $this->generate_best_format($source_file);
+					$summary['workCompleted']++;
 					if ($result) {
 						$summary['success'] = true;
 						$summary['processed']++;
@@ -483,12 +655,19 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				$formats = ('both' === $format) ? array('avif', 'webp') : array($format);
 				foreach ($formats as $single_format) {
 					if ($only_missing && $this->generated_variant_exists($source_file, $single_format)) {
+						$summary['workCompleted']++;
+						$summary['skippedExisting']++;
+						if ('avif' === $single_format) {
+							$this->mark_existing_avif_variant_available($source_file);
+						}
+						$summary['success'] = true;
 						continue;
 					}
 
 					$result = ('avif' === $single_format)
 						? $this->to_avif($source_file)
 						: $this->to_webp($source_file);
+					$summary['workCompleted']++;
 
 					if ($result) {
 						$summary['success'] = true;
@@ -568,6 +747,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return void
 		 */
 		public function delete_avif_by_attachment_id($attachment_id) {
+			$this->invalidate_media_work_summary_cache();
 			$attachment_id = absint($attachment_id);
 
 			if ($attachment_id <= 0) {
@@ -611,6 +791,17 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$imagick_webp = $this->supports_imagick_webp();
 			$gd_avif      = $this->supports_gd_avif();
 			$gd_webp      = $this->supports_gd_webp();
+			$diag         = $this->get_media_diagnostic_state();
+			$preferred    = $this->detect_preferred_image_editor_class();
+			$last_error   = (string) ($diag['lastAvifEncodeError'] ?? '');
+			$last_engine  = (string) ($diag['lastAvifEncodeEngine'] ?? '');
+			$last_class   = (string) ($diag['lastImageEditorClass'] ?? '');
+
+			if ('WP_Image_Editor_Imagick' === $preferred && $imagick_avif && !$gd_avif && '' !== $last_error && false !== stripos($last_engine, 'gd')) {
+				$last_error = '';
+				$last_engine = 'imagick';
+				$last_class = 'WP_Image_Editor_Imagick';
+			}
 
 			return array(
 				'imagick'      => $imagick,
@@ -618,6 +809,12 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				'imagick_webp' => $imagick_webp,
 				'gd_avif'      => $gd_avif,
 				'gd_webp'      => $gd_webp,
+				'preferred_editor' => $preferred,
+				'last_avif_encode_error' => $last_error,
+				'last_avif_encode_engine' => $last_engine,
+				'last_avif_encode_file' => (string) ($diag['lastAvifEncodeFile'] ?? ''),
+				'last_avif_encode_at' => (int) ($diag['lastAvifEncodeAt'] ?? 0),
+				'last_image_editor_class' => $last_class,
 				'supported'    => ($imagick_avif || $gd_avif || $imagick_webp || $gd_webp),
 			);
 		}
@@ -691,7 +888,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			return $ids;
 		}
 
-		public function get_media_ids_batch( $offset = 0, $limit = 100 ) {
+		public function get_media_ids_batch( $offset = 0, $limit = 100, $include_work_summary = true ) {
 			$offset = max( 0, (int) $offset );
 			$limit  = max( 1, min( 500, (int) $limit ) );
 
@@ -720,7 +917,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$total       = (int) $query->found_posts;
 			$next_offset = min( $total, $offset + count( $items ) );
 
-			return array(
+			$response = array(
 				'items'      => $items,
 				'total'      => $total,
 				'offset'     => $offset,
@@ -728,6 +925,14 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				'nextOffset' => $next_offset,
 				'hasMore'    => $next_offset < $total,
 			);
+
+			if ($include_work_summary) {
+				$summary = $this->get_media_work_summary();
+				$response['attachmentTotal'] = (int) ($summary['attachmentsTotal'] ?? $total);
+				$response['workTotal'] = (int) ($summary['workTotal'] ?? $total);
+			}
+
+			return $response;
 		}
 
 		/**
@@ -873,10 +1078,12 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			}
 
 			if (class_exists('WP_HTML_Tag_Processor')) {
-				return $this->rewrite_html_image_urls_with_tag_processor($html);
+				$html = $this->rewrite_html_image_urls_with_tag_processor($html);
 			}
 
-			return $this->rewrite_html_image_urls_with_regex($html);
+			$html = $this->rewrite_html_image_urls_with_regex($html);
+
+			return $this->rewrite_html_upload_urls_globally($html);
 		}
 
 		/**
@@ -1094,12 +1301,56 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		}
 
 		/**
+		 * Final safety-net pass: rewrite plain uploads URLs that may still remain in HTML.
+		 *
+		 * This intentionally scans only uploads URLs and leaves other public URLs untouched.
+		 * It is used after the structured/tag/srcset passes so it can catch stubborn encoded
+		 * or inline occurrences without depending on a specific tag shape.
+		 *
+		 * @param string $html Rendered HTML.
+		 * @return string
+		 */
+		private function rewrite_html_upload_urls_globally($html) {
+			$html = (string) $html;
+			if ('' === $html) {
+				return $html;
+			}
+
+			$uploads = wp_get_upload_dir();
+			if (empty($uploads['baseurl'])) {
+				return $html;
+			}
+
+			$baseurl = untrailingslashit($this->normalize_public_url($uploads['baseurl']));
+			if ('' === $baseurl) {
+				return $html;
+			}
+
+			$pattern = "/" . preg_quote($baseurl, "/") . "\/[^\"'\s<>()]+/u";
+			$rewritten = preg_replace_callback(
+				$pattern,
+				function ($matches) {
+					$current = isset($matches[0]) ? (string) $matches[0] : '';
+					if ('' === $current) {
+						return $current;
+					}
+
+					$replacement = $this->get_best_url_from_public_url($current);
+					return $replacement ? $replacement : $current;
+				},
+				$html
+			);
+
+			return is_string($rewritten) ? $rewritten : $html;
+		}
+
+		/**
 		 * Determine if AVIF can be served for this request.
 		 *
 		 * @return bool
 		 */
 		private function can_serve_avif() {
-			if (!$this->is_avif_feature_enabled()) {
+			if (!$this->is_avif_feature_enabled() || !$this->media_output_mode_allows('avif')) {
 				return false;
 			}
 
@@ -1112,7 +1363,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return bool
 		 */
 		private function can_serve_webp() {
-			if (!$this->is_avif_feature_enabled()) {
+			if (!$this->is_avif_feature_enabled() || !$this->media_output_mode_allows('webp')) {
 				return false;
 			}
 
@@ -1144,7 +1395,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		}
 
 		/**
-		 * Determine if AVIF generation is enabled in plugin settings.
+		 * Determine if next-gen media generation is enabled in plugin settings.
 		 *
 		 * @return bool
 		 */
@@ -1154,13 +1405,63 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				return !empty($settings['avif_enabled']);
 			}
 
-			$settings = get_option('ultra_cache_settings', array());
-
-			if (isset($settings['avifConversionEnabled'])) {
-				return !empty($settings['avifConversionEnabled']);
+			$settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
+			if (isset($settings['mediaOptimizationEnabled']) || isset($settings['avifConversionEnabled'])) {
+				return !empty($settings['mediaOptimizationEnabled']) || !empty($settings['avifConversionEnabled']);
 			}
 
 			return false;
+		}
+
+		private function get_media_output_mode() {
+			if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
+				$settings = Ultra_Cache_WP::get_settings();
+				$mode = isset($settings['media_output_mode']) ? strtolower(trim((string) $settings['media_output_mode'])) : 'auto';
+				return in_array($mode, array('auto', 'avif', 'webp'), true) ? $mode : 'auto';
+			}
+
+			$settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
+			$mode = isset($settings['mediaOutputMode']) ? strtolower(trim((string) $settings['mediaOutputMode'])) : 'auto';
+			return in_array($mode, array('auto', 'avif', 'webp'), true) ? $mode : 'auto';
+		}
+
+		private function is_generate_on_upload_enabled() {
+			if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
+				$settings = Ultra_Cache_WP::get_settings();
+				if (array_key_exists('media_generate_on_upload', $settings)) {
+					return !empty($settings['media_generate_on_upload']);
+				}
+			}
+
+			$settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
+			if (array_key_exists('mediaGenerateOnUploadEnabled', $settings)) {
+				return !empty($settings['mediaGenerateOnUploadEnabled']);
+			}
+			return true;
+		}
+
+		private function is_generate_on_demand_enabled() {
+			if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
+				$settings = Ultra_Cache_WP::get_settings();
+				if (array_key_exists('media_generate_on_demand', $settings)) {
+					return !empty($settings['media_generate_on_demand']);
+				}
+			}
+
+			$settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
+			if (array_key_exists('mediaGenerateOnDemandEnabled', $settings)) {
+				return !empty($settings['mediaGenerateOnDemandEnabled']);
+			}
+			return true;
+		}
+
+		private function media_output_mode_allows($format) {
+			$format = strtolower((string) $format);
+			$mode = $this->get_media_output_mode();
+			if ('auto' === $mode) {
+				return in_array($format, array('avif', 'webp'), true);
+			}
+			return $mode === $format;
 		}
 
 		/**
@@ -1438,19 +1739,70 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 
 			$editor = wp_get_image_editor($source_file);
 			if (is_wp_error($editor) || !is_object($editor)) {
+				if ('image/avif' === $mime_type) {
+					$this->update_media_diagnostic_state(array(
+						'lastImageEditorClass' => '',
+						'lastAvifEncodeEngine' => 'wp_image_editor',
+						'lastAvifEncodeError' => is_wp_error($editor) ? $editor->get_error_message() : 'Image editor unavailable',
+						'lastAvifEncodeFile' => (string) $source_file,
+						'lastAvifEncodeAt' => time(),
+					));
+				}
 				return false;
+			}
+
+			$editor_class = get_class($editor);
+			if ('image/avif' === $mime_type) {
+				$this->update_media_diagnostic_state(array('lastImageEditorClass' => $editor_class));
 			}
 
 			if (method_exists($editor, 'set_quality')) {
 				$editor->set_quality((int) $quality);
 			}
 
-			$saved = $editor->save($dest_file, $mime_type);
+			$php_error = '';
+			set_error_handler(static function($severity, $message) use (&$php_error) {
+				$php_error = (string) $message;
+				return true;
+			});
+			try {
+				$saved = $editor->save($dest_file, $mime_type);
+			} finally {
+				restore_error_handler();
+			}
 			if (is_wp_error($saved)) {
+				if ('image/avif' === $mime_type) {
+					$this->update_media_diagnostic_state(array(
+						'lastAvifEncodeEngine' => 'wp_image_editor:' . $editor_class,
+						'lastAvifEncodeError' => $saved->get_error_message() ?: $php_error,
+						'lastAvifEncodeFile' => (string) $source_file,
+						'lastAvifEncodeAt' => time(),
+					));
+				}
 				return false;
 			}
 
-			return !empty($saved['path']) && file_exists($saved['path']) && (int) ucwp_safe_filesize($saved['path'], 'media_converter_image_editor_save') > 0;
+			$ok = !empty($saved['path']) && file_exists($saved['path']) && (int) ucwp_safe_filesize($saved['path'], 'media_converter_image_editor_save') > 0;
+			if ('image/avif' === $mime_type && !$ok) {
+				$this->update_media_diagnostic_state(array(
+					'lastAvifEncodeEngine' => 'wp_image_editor:' . $editor_class,
+					'lastAvifEncodeError' => $php_error ?: 'Image editor save did not produce a valid AVIF file',
+					'lastAvifEncodeFile' => (string) $source_file,
+					'lastAvifEncodeAt' => time(),
+				));
+			}
+
+			if ('image/avif' === $mime_type && $ok) {
+				$this->update_media_diagnostic_state(array(
+					'lastImageEditorClass' => $editor_class,
+					'lastAvifEncodeEngine' => 'wp_image_editor:' . $editor_class,
+					'lastAvifEncodeError' => '',
+					'lastAvifEncodeFile' => (string) $source_file,
+					'lastAvifEncodeAt' => time(),
+				));
+			}
+
+			return $ok;
 		}
 
 		/**
@@ -1476,9 +1828,27 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				$image->clear();
 				$image->destroy();
 
+				if ('avif' === $format && $result) {
+					$this->update_media_diagnostic_state(array(
+						'lastImageEditorClass' => 'Imagick',
+						'lastAvifEncodeEngine' => 'imagick',
+						'lastAvifEncodeError' => '',
+						'lastAvifEncodeFile' => (string) $source_file,
+						'lastAvifEncodeAt' => time(),
+					));
+				}
+
 				return (bool) $result;
 			} catch (Exception $e) {
 				ucwp_debug_log('imagick conversion failed', array('format' => strtoupper($format), 'error' => $e->getMessage()));
+				if ('avif' === $format) {
+					$this->update_media_diagnostic_state(array(
+						'lastAvifEncodeEngine' => 'imagick',
+						'lastAvifEncodeError' => $e->getMessage(),
+						'lastAvifEncodeFile' => (string) $source_file,
+						'lastAvifEncodeAt' => time(),
+					));
+				}
 				return false;
 			}
 		}
@@ -1572,7 +1942,27 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 					ucwp_debug_log('gd conversion failed', array('format' => strtoupper($format), 'error' => $gd_error));
 				}
 
+				if ('avif' === $format) {
+					$this->update_media_diagnostic_state(array(
+						'lastImageEditorClass' => 'GD',
+						'lastAvifEncodeEngine' => 'gd',
+						'lastAvifEncodeError' => $gd_error ?: 'GD AVIF conversion did not produce a valid file',
+						'lastAvifEncodeFile' => (string) $source_file,
+						'lastAvifEncodeAt' => time(),
+					));
+				}
+
 				return false;
+			}
+
+			if ('avif' === $format) {
+				$this->update_media_diagnostic_state(array(
+					'lastImageEditorClass' => 'GD',
+					'lastAvifEncodeEngine' => 'gd',
+					'lastAvifEncodeError' => '',
+					'lastAvifEncodeFile' => (string) $source_file,
+					'lastAvifEncodeAt' => time(),
+				));
 			}
 
 			return true;
@@ -1788,6 +2178,186 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		}
 
 		/**
+		 * Return the current request start time for frontend on-demand generation limits.
+		 *
+		 * @return float
+		 */
+		private function get_on_demand_request_started_at() {
+			if (null !== $this->on_demand_request_started_at) {
+				return $this->on_demand_request_started_at;
+			}
+
+			if (isset($_SERVER['REQUEST_TIME_FLOAT'])) {
+				$this->on_demand_request_started_at = (float) $_SERVER['REQUEST_TIME_FLOAT'];
+			} else {
+				$this->on_demand_request_started_at = microtime(true);
+			}
+
+			return $this->on_demand_request_started_at;
+		}
+
+		/**
+		 * Maximum number of frontend on-demand conversions allowed per request.
+		 *
+		 * @return int
+		 */
+		private function get_on_demand_max_conversions_per_request() {
+			$default = defined('UCWP_MEDIA_ON_DEMAND_MAX_PER_REQUEST') ? (int) UCWP_MEDIA_ON_DEMAND_MAX_PER_REQUEST : 3;
+			$limit = (int) apply_filters('ucwp_media_on_demand_max_conversions_per_request', $default);
+			return max(0, min(25, $limit));
+		}
+
+		/**
+		 * Maximum request-time budget for frontend on-demand conversion starts.
+		 *
+		 * @return float
+		 */
+		private function get_on_demand_timeout_seconds() {
+			$default = defined('UCWP_MEDIA_ON_DEMAND_TIMEOUT_SECONDS') ? (float) UCWP_MEDIA_ON_DEMAND_TIMEOUT_SECONDS : 3.0;
+			$timeout = (float) apply_filters('ucwp_media_on_demand_timeout_seconds', $default);
+			return max(0.1, min(30.0, $timeout));
+		}
+
+		/**
+		 * Stale lock TTL for frontend on-demand conversion lock files.
+		 *
+		 * @return int
+		 */
+		private function get_on_demand_lock_ttl_seconds() {
+			$default = defined('UCWP_MEDIA_ON_DEMAND_LOCK_TTL') ? (int) UCWP_MEDIA_ON_DEMAND_LOCK_TTL : 120;
+			$ttl = (int) apply_filters('ucwp_media_on_demand_lock_ttl_seconds', $default);
+			return max(10, min(DAY_IN_SECONDS, $ttl));
+		}
+
+		/**
+		 * Determine whether the current request is allowed to start frontend conversions.
+		 *
+		 * @return bool
+		 */
+		private function is_frontend_on_demand_request() {
+			if (is_admin() || wp_doing_ajax() || (defined('REST_REQUEST') && REST_REQUEST)) {
+				return false;
+			}
+
+			if ((defined('XMLRPC_REQUEST') && XMLRPC_REQUEST) || is_feed() || is_robots() || is_trackback()) {
+				return false;
+			}
+
+			$method = strtoupper(ucwp_server_value('REQUEST_METHOD'));
+			return in_array($method, array('GET', 'HEAD'), true);
+		}
+
+		/**
+		 * Check request-level safeguards before starting a frontend on-demand conversion.
+		 *
+		 * @return bool
+		 */
+		private function can_start_on_demand_conversion() {
+			if (!$this->is_frontend_on_demand_request()) {
+				return false;
+			}
+
+			$max = $this->get_on_demand_max_conversions_per_request();
+			if ($max <= 0 || $this->on_demand_conversions_started >= $max) {
+				return false;
+			}
+
+			$elapsed = microtime(true) - $this->get_on_demand_request_started_at();
+			return $elapsed < $this->get_on_demand_timeout_seconds();
+		}
+
+		/**
+		 * Directory used for frontend on-demand image conversion locks.
+		 *
+		 * @return string|false
+		 */
+		private function get_on_demand_lock_dir() {
+			if (!defined('UCWP_CACHE_DIR') || '' === (string) UCWP_CACHE_DIR) {
+				return false;
+			}
+
+			$dir = trailingslashit(UCWP_CACHE_DIR) . 'media-locks/';
+			if (!file_exists($dir)) {
+				wp_mkdir_p($dir);
+			}
+
+			if (!is_dir($dir) || !is_writable($dir)) {
+				return false;
+			}
+
+			$index = trailingslashit($dir) . 'index.php';
+			if (!file_exists($index)) {
+				ucwp_safe_file_put_contents($index, "<?php\n// Silence is golden.\n", 0, 'media_on_demand_lock_index');
+			}
+
+			return trailingslashit($dir);
+		}
+
+		/**
+		 * Acquire a per-image/per-format frontend conversion lock.
+		 *
+		 * @param string $source_file Source image path.
+		 * @param string $format      Target format.
+		 * @return string|false Lock file path on success.
+		 */
+		private function acquire_on_demand_image_lock($source_file, $format) {
+			$lock_dir = $this->get_on_demand_lock_dir();
+			if (!$lock_dir) {
+				return false;
+			}
+
+			$source_real = realpath($source_file);
+			if (!is_string($source_real) || '' === $source_real) {
+				return false;
+			}
+
+			$key = hash('sha256', strtolower((string) $format) . '|' . $this->normalize_local_path_for_compare($source_real));
+			$lock_file = $lock_dir . 'image-' . $key . '.lock';
+			$ttl = $this->get_on_demand_lock_ttl_seconds();
+
+			if (file_exists($lock_file)) {
+				$mtime = (int) @filemtime($lock_file);
+				if ($mtime > 0 && (time() - $mtime) > $ttl) {
+					ucwp_safe_unlink($lock_file);
+				}
+			}
+
+			$handle = @fopen($lock_file, 'x');
+			if (!is_resource($handle)) {
+				return false;
+			}
+
+			@fwrite($handle, json_encode(array(
+				'pid' => function_exists('getmypid') ? (int) getmypid() : 0,
+				'time' => time(),
+				'format' => strtolower((string) $format),
+				'source' => $source_real,
+			)) . "\n");
+			@fclose($handle);
+
+			return $lock_file;
+		}
+
+		/**
+		 * Release a frontend on-demand image conversion lock.
+		 *
+		 * @param string|false $lock_file Lock file path.
+		 * @return void
+		 */
+		private function release_on_demand_image_lock($lock_file) {
+			if (!is_string($lock_file) || '' === $lock_file || !file_exists($lock_file)) {
+				return;
+			}
+
+			$lock_dir = $this->get_on_demand_lock_dir();
+			if (!$lock_dir || !$this->path_is_within_root($lock_file, $lock_dir)) {
+				return;
+			}
+
+			ucwp_safe_unlink($lock_file);
+		}
+
+		/**
 		 * Ensure a generated next-gen variant exists for a source image.
 		 *
 		 * @param string $source_file Source file path.
@@ -1798,29 +2368,56 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$source_file = (string) $source_file;
 			$format      = strtolower((string) $format);
 
-			if ('' === $source_file || '' === $format || !file_exists($source_file) || !is_readable($source_file)) {
+			if (!$this->is_avif_feature_enabled() || !$this->is_generate_on_demand_enabled() || !$this->media_output_mode_allows($format)) {
 				return false;
 			}
 
-			if ('avif' === $format) {
-				$existing = $this->get_avif_path_from_source($source_file);
-				if ($existing && file_exists($existing)) {
+			if ('' === $source_file || !in_array($format, array('avif', 'webp'), true) || !file_exists($source_file) || !is_readable($source_file)) {
+				return false;
+			}
+
+			if (!$this->is_allowed_source_file($source_file)) {
+				return false;
+			}
+
+			$existing = ('avif' === $format)
+				? $this->get_avif_path_from_source($source_file)
+				: $this->get_webp_path_from_source($source_file);
+
+			if (!$existing) {
+				return false;
+			}
+
+			if (file_exists($existing)) {
+				return true;
+			}
+
+			if (!$this->can_start_on_demand_conversion()) {
+				return false;
+			}
+
+			$lock_file = $this->acquire_on_demand_image_lock($source_file, $format);
+			if (!$lock_file) {
+				return false;
+			}
+
+			try {
+				if (file_exists($existing)) {
 					return true;
 				}
 
-				return (bool) $this->to_avif($source_file);
-			}
-
-			if ('webp' === $format) {
-				$existing = $this->get_webp_path_from_source($source_file);
-				if ($existing && file_exists($existing)) {
-					return true;
+				if (!$this->can_start_on_demand_conversion()) {
+					return false;
 				}
 
-				return (bool) $this->to_webp($source_file);
-			}
+				$this->on_demand_conversions_started++;
 
-			return false;
+				return ('avif' === $format)
+					? (bool) $this->to_avif($source_file)
+					: (bool) $this->to_webp($source_file);
+			} finally {
+				$this->release_on_demand_image_lock($lock_file);
+			}
 		}
 
 		private function normalize_local_path_for_compare($path) {
@@ -1876,11 +2473,44 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				return false;
 			}
 
-			if ($public_url !== $baseurl && 0 !== strpos($public_url, $baseurl . '/')) {
+			$public_parts = wp_parse_url($public_url);
+			$base_parts   = wp_parse_url($baseurl);
+			if (!is_array($public_parts) || empty($public_parts['path']) || !is_array($base_parts) || empty($base_parts['path'])) {
 				return false;
 			}
 
-			$relative_path = ltrim(substr($public_url, strlen($baseurl)), '/');
+			$public_path = rawurldecode((string) $public_parts['path']);
+			$base_path   = rawurldecode((string) $base_parts['path']);
+			$public_path = '/' . ltrim(str_replace('\\', '/', $public_path), '/');
+			$base_path   = '/' . ltrim(str_replace('\\', '/', $base_path), '/');
+			$base_path   = rtrim($base_path, '/');
+			if ('' === $public_path || '' === $base_path) {
+				return false;
+			}
+
+			$public_host = isset($public_parts['host']) ? strtolower((string) $public_parts['host']) : '';
+			$base_host   = isset($base_parts['host']) ? strtolower((string) $base_parts['host']) : '';
+			$home_host   = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+			$site_host   = strtolower((string) wp_parse_url(site_url('/'), PHP_URL_HOST));
+			$allowed_hosts = array_filter(array_unique(array($base_host, $home_host, $site_host)));
+			if ('' !== $public_host && !empty($allowed_hosts)) {
+				$normalized_public_host = preg_replace('/^www\./', '', $public_host);
+				$normalized_allowed = array_map(
+					static function ($host) {
+						return preg_replace('/^www\./', '', (string) $host);
+					},
+					$allowed_hosts
+				);
+				if (!in_array($normalized_public_host, $normalized_allowed, true)) {
+					return false;
+				}
+			}
+
+			if ($public_path !== $base_path && 0 !== strpos($public_path, $base_path . '/')) {
+				return false;
+			}
+
+			$relative_path = ltrim(substr($public_path, strlen($base_path)), '/');
 			if ('' === $relative_path) {
 				return false;
 			}
@@ -1907,7 +2537,42 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			}
 
 			$public_url = preg_replace('/[#?].*$/', '', $public_url);
-			return is_string($public_url) ? $public_url : '';
+			if (!is_string($public_url) || '' === $public_url) {
+				return '';
+			}
+
+			$parts = wp_parse_url($public_url);
+			if (!is_array($parts) || empty($parts['path'])) {
+				return $public_url;
+			}
+
+			$decoded_path = rawurldecode((string) $parts['path']);
+			if ('' === $decoded_path) {
+				return $public_url;
+			}
+
+			$normalized = '';
+			if (!empty($parts['scheme'])) {
+				$normalized .= $parts['scheme'] . '://';
+			} elseif (0 === strpos($public_url, '//')) {
+				$normalized .= '//';
+			}
+			if (!empty($parts['user'])) {
+				$normalized .= $parts['user'];
+				if (isset($parts['pass'])) {
+					$normalized .= ':' . $parts['pass'];
+				}
+				$normalized .= '@';
+			}
+			if (!empty($parts['host'])) {
+				$normalized .= $parts['host'];
+			}
+			if (!empty($parts['port'])) {
+				$normalized .= ':' . $parts['port'];
+			}
+			$normalized .= $decoded_path;
+
+			return $normalized ?: $public_url;
 		}
 
 		/**

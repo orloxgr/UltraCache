@@ -119,6 +119,7 @@ if (!class_exists('WP_Object_Cache')) {
 			$this->blog_id = $this->detect_blog_id();
 			$this->metrics_file = rtrim($this->cache_dir, '/\\') . '/object-cache-metrics.json';
 			$this->ensure_base_dir();
+			$this->load_redis_secret_config();
 			$this->bootstrap_backend();
 			register_shutdown_function(array($this, 'persist_metrics'));
 		}
@@ -350,12 +351,11 @@ if (!class_exists('WP_Object_Cache')) {
 		public function set($key, $data, $group = 'default', $expire = 0) {
 			$group = $this->normalize_group($group);
 			$key   = $this->normalize_key($key);
-
-			$this->set_runtime_value($key, $group, $data);
-
 			if ($this->should_suspend_cache_addition()) {
 				return true;
 			}
+
+			$this->set_runtime_value($key, $group, $data);
 
 			if ($this->is_non_persistent_group($group)) {
 				return true;
@@ -1004,7 +1004,7 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 
-			if ($this->serialized_payload_has_disallowed_object_tokens($serialized)) {
+			if (!$allow_objects && $this->serialized_payload_has_disallowed_object_tokens($serialized)) {
 				return false;
 			}
 

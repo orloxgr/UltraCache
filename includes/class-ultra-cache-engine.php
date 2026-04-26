@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.55.02 */
+/** Hotfix Bundle Version: 2.55.72 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -55,6 +55,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('update_option_posts_per_page', array($this, 'handle_front_page_option_change'), 20, 2);
             add_action('update_option_permalink_structure', array($this, 'handle_global_frontend_change'), 20, 2);
             add_action('wp_head', array($this, 'print_delayed_script_loader'), 1);
+            add_action('wp_enqueue_scripts', array($this, 'cleanup_asset_chain_enqueue_assets'), 9999);
             add_filter('script_loader_tag', array($this, 'defer_scripts'), 10, 3);
             add_filter('style_loader_src', array($this, 'add_display_swap_to_google_fonts'), 20, 2);
         }
@@ -94,6 +95,219 @@ if (!class_exists('Ultra_Cache_Engine')) {
         private static function get_analytics_file()
         {
             return trailingslashit(UCWP_CACHE_DIR) . 'analytics.json';
+        }
+
+        private static function get_analytics_hit_buffer_file()
+        {
+            return trailingslashit(UCWP_CACHE_DIR) . 'analytics-hit-buffer.log';
+        }
+
+        private static function get_analytics_hit_buffer_key_prefix()
+        {
+            $base = defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : UCWP_CACHE_DIR;
+            return 'ucwp_analytics_hit_buffer_' . md5((string) $base) . '_';
+        }
+
+        private static function analytics_apcu_available()
+        {
+            if (!function_exists('apcu_fetch') || !function_exists('apcu_inc') || !function_exists('apcu_dec') || !function_exists('apcu_delete')) {
+                return false;
+            }
+
+            if (function_exists('apcu_enabled') && !apcu_enabled()) {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static function get_analytics_hit_buffer_counters()
+        {
+            return array(
+                'pageHits',
+                'pageStaleHits',
+                'bucket_orig',
+                'bucket_webp',
+                'bucket_avif',
+                'encoding_identity',
+                'encoding_gzip',
+                'encoding_brotli',
+            );
+        }
+
+        private static function apply_analytics_hit_delta(array &$analytics, $counter, $amount)
+        {
+            $amount = max(0, (int) $amount);
+            if ($amount <= 0) {
+                return;
+            }
+
+            $counter = (string) $counter;
+            if ('pageHits' === $counter || 'pageStaleHits' === $counter) {
+                $analytics[$counter] = (int) ($analytics[$counter] ?? 0) + $amount;
+                return;
+            }
+
+            if (0 === strpos($counter, 'bucket_')) {
+                $bucket = substr($counter, 7);
+                if (!in_array($bucket, array('orig', 'webp', 'avif'), true)) {
+                    return;
+                }
+                if (!isset($analytics['bucketHits']) || !is_array($analytics['bucketHits'])) {
+                    $analytics['bucketHits'] = array('orig' => 0, 'webp' => 0, 'avif' => 0);
+                }
+                $analytics['bucketHits'][$bucket] = (int) ($analytics['bucketHits'][$bucket] ?? 0) + $amount;
+                return;
+            }
+
+            if (0 === strpos($counter, 'encoding_')) {
+                $encoding = substr($counter, 9);
+                if (!in_array($encoding, array('identity', 'gzip', 'brotli'), true)) {
+                    return;
+                }
+                if (!isset($analytics['encodingHits']) || !is_array($analytics['encodingHits'])) {
+                    $analytics['encodingHits'] = array('identity' => 0, 'gzip' => 0, 'brotli' => 0);
+                }
+                $analytics['encodingHits'][$encoding] = (int) ($analytics['encodingHits'][$encoding] ?? 0) + $amount;
+            }
+        }
+
+        private static function snapshot_apcu_analytics_hit_buffer()
+        {
+            if (!self::analytics_apcu_available()) {
+                return array();
+            }
+
+            $prefix = self::get_analytics_hit_buffer_key_prefix();
+            $deltas = array();
+            foreach (self::get_analytics_hit_buffer_counters() as $counter) {
+                $success = false;
+                $value = apcu_fetch($prefix . $counter, $success);
+                $value = $success ? max(0, (int) $value) : 0;
+                if ($value > 0) {
+                    $deltas[$counter] = $value;
+                }
+            }
+
+            return $deltas;
+        }
+
+        private static function decrement_apcu_analytics_hit_buffer(array $deltas)
+        {
+            if (!self::analytics_apcu_available() || empty($deltas)) {
+                return;
+            }
+
+            $prefix = self::get_analytics_hit_buffer_key_prefix();
+            foreach ($deltas as $counter => $amount) {
+                $amount = max(0, (int) $amount);
+                if ($amount > 0) {
+                    @apcu_dec($prefix . (string) $counter, $amount);
+                }
+            }
+        }
+
+        private static function consume_file_analytics_hit_buffer()
+        {
+            $file = self::get_analytics_hit_buffer_file();
+            if (!file_exists($file) || !is_readable($file)) {
+                return array();
+            }
+
+            $handle = @fopen($file, 'c+');
+            if (!$handle) {
+                return array();
+            }
+
+            $raw = '';
+            if (@flock($handle, LOCK_EX)) {
+                rewind($handle);
+                $raw = stream_get_contents($handle);
+                ftruncate($handle, 0);
+                rewind($handle);
+                @flock($handle, LOCK_UN);
+            }
+            fclose($handle);
+
+            if (!is_string($raw) || '' === trim($raw)) {
+                return array();
+            }
+
+            $deltas = array();
+            foreach (preg_split('/\r?\n/', trim($raw)) as $line) {
+                if ('' === $line) {
+                    continue;
+                }
+                $parts = explode("\t", $line);
+                if (count($parts) < 3) {
+                    continue;
+                }
+
+                $state = strtoupper((string) $parts[0]);
+                $bucket = in_array($parts[1], array('orig', 'webp', 'avif'), true) ? $parts[1] : 'orig';
+                $encoding = in_array($parts[2], array('identity', 'gzip', 'brotli'), true) ? $parts[2] : 'identity';
+
+                $hit_counter = ('S' === $state) ? 'pageStaleHits' : 'pageHits';
+                foreach (array($hit_counter, 'bucket_' . $bucket, 'encoding_' . $encoding) as $counter) {
+                    if (!isset($deltas[$counter])) {
+                        $deltas[$counter] = 0;
+                    }
+                    $deltas[$counter]++;
+                }
+            }
+
+            return $deltas;
+        }
+
+        private static function clear_analytics_hit_buffer()
+        {
+            if (self::analytics_apcu_available()) {
+                $prefix = self::get_analytics_hit_buffer_key_prefix();
+                foreach (self::get_analytics_hit_buffer_counters() as $counter) {
+                    @apcu_delete($prefix . $counter);
+                }
+                @apcu_delete($prefix . 'total');
+                @apcu_delete($prefix . 'last_flush');
+                @apcu_delete($prefix . 'flush_lock');
+            }
+
+            ucwp_safe_unlink(self::get_analytics_hit_buffer_file(), 'analytics_hit_buffer_clear');
+        }
+
+        private static function flush_analytics_hit_buffer()
+        {
+            $apcu_lock_acquired = false;
+            $prefix = self::get_analytics_hit_buffer_key_prefix();
+            if (self::analytics_apcu_available()) {
+                if (function_exists('apcu_add') && @apcu_add($prefix . 'flush_lock', 1, 10)) {
+                    $apcu_lock_acquired = true;
+                }
+            }
+
+            $apcu_deltas = $apcu_lock_acquired ? self::snapshot_apcu_analytics_hit_buffer() : array();
+            $file_deltas = self::consume_file_analytics_hit_buffer();
+            if (empty($apcu_deltas) && empty($file_deltas)) {
+                if ($apcu_lock_acquired) {
+                    @apcu_delete($prefix . 'flush_lock');
+                }
+                return false;
+            }
+
+            $analytics = self::read_analytics(false);
+            foreach (array($apcu_deltas, $file_deltas) as $deltas) {
+                foreach ($deltas as $counter => $amount) {
+                    self::apply_analytics_hit_delta($analytics, $counter, $amount);
+                }
+            }
+
+            self::write_analytics($analytics);
+            self::decrement_apcu_analytics_hit_buffer($apcu_deltas);
+            if ($apcu_lock_acquired) {
+                @apcu_delete($prefix . 'total');
+                @apcu_delete($prefix . 'flush_lock');
+            }
+
+            return true;
         }
 
         private static function get_default_analytics()
@@ -179,8 +393,12 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return $data;
         }
 
-        private static function read_analytics()
+        private static function read_analytics($flush_hit_buffer = true)
         {
+            if ($flush_hit_buffer) {
+                self::flush_analytics_hit_buffer();
+            }
+
             $file = self::get_analytics_file();
             if (!file_exists($file) || !is_readable($file)) {
                 return self::get_default_analytics();
@@ -219,6 +437,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         public static function reset_analytics()
         {
+            self::clear_analytics_hit_buffer();
             self::write_analytics(self::get_default_analytics());
             return true;
         }
@@ -602,6 +821,13 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
+            clearstatcache(true, $tmp);
+            clearstatcache(true, $path);
+            if (!file_exists($path) || file_exists($tmp)) {
+                ucwp_safe_unlink($tmp);
+                return false;
+            }
+
             return true;
         }
 
@@ -713,7 +939,28 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $tag;
             }
 
-            if (!empty($settings['delay_third_party_js']) && $this->should_delay_script($handle, $src, $tag, $settings)) {
+            $defer_stage = $this->get_defer_stage_level($settings);
+            if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+                return $this->add_defer_attribute_to_script_tag($tag, true);
+            }
+
+            if (0 < $defer_stage && $this->is_script_force_blocking($handle, $src, $tag, $settings)) {
+                return $this->strip_native_loading_attributes_from_script_tag($tag);
+            }
+
+            if (0 < $defer_stage && $this->is_script_user_defer_excluded($handle, $src, $settings)) {
+                return $tag;
+            }
+
+            if (1 === $defer_stage && $this->is_script_safe_stage_excluded($handle, $src, $tag, $settings)) {
+                return $tag;
+            }
+
+            if (2 <= $defer_stage && !empty($settings['delay_third_party_js']) && $this->should_delay_script($handle, $src, $tag, $settings)) {
+                return $this->build_delayed_script_tag($tag, $handle, $src);
+            }
+
+            if (2 <= $defer_stage && !empty($settings['delay_non_critical_js']) && $this->should_delay_non_critical_script($handle, $src, $tag, $settings)) {
                 return $this->build_delayed_script_tag($tag, $handle, $src);
             }
 
@@ -721,19 +968,93 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $this->add_async_attribute_to_script_tag($tag);
             }
 
-            if (empty($settings['defer_js'])) {
+            if (0 === $defer_stage || empty($settings['defer_js'])) {
                 return $tag;
             }
 
-            if (false !== stripos($tag, ' defer') || false !== stripos($tag, ' async') || false !== stripos($tag, ' type="module"')) {
+            return $this->add_defer_attribute_to_script_tag($tag, false);
+        }
+
+        private function get_defer_stage_level(array $settings = array())
+        {
+            if (!empty($settings['defer_stage_aggressive']) || !empty($settings['delay_non_critical_js_aggressive'])) {
+                return 3;
+            }
+
+            if (!empty($settings['defer_stage_balanced'])) {
+                return 2;
+            }
+
+            if (!empty($settings['defer_stage_safe']) || !empty($settings['defer_js'])) {
+                return 1;
+            }
+
+            return 0;
+        }
+
+        private function strip_native_loading_attributes_from_script_tag($tag)
+        {
+            $tag = (string) $tag;
+            if ('' === $tag) {
                 return $tag;
             }
 
-            if ($this->is_script_optimization_excluded($handle, $src, $tag, $settings)) {
+            if (false === stripos($tag, ' async') && false === stripos($tag, ' defer') && false === stripos($tag, 'data-wp-strategy=')) {
                 return $tag;
             }
 
-            return str_replace(' src=', ' defer src=', $tag);
+            $tag = preg_replace('/\s(async|defer)(?=(\s|>))/i', '', $tag);
+            $tag = preg_replace('/\sdata-wp-strategy=("|\")(?:async|defer)\1/i', '', $tag);
+            $tag = preg_replace("/\sdata-wp-strategy=(')(?:async|defer)\1/i", '', $tag);
+            $tag = preg_replace('/\sdata-wp-strategy=(?:async|defer)(?=(\s|>))/i', '', $tag);
+            $tag = preg_replace('/\s{2,}/', ' ', $tag);
+
+            return $tag;
+        }
+
+        private function normalize_protected_script_loading_attributes_in_html($html, array $settings = array())
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<script')) {
+                return $html;
+            }
+
+            $that = $this;
+            $rewritten = preg_replace_callback('/<script\b[^>]*>/i', static function ($matches) use ($that, $settings) {
+                $tag = isset($matches[0]) ? (string) $matches[0] : '';
+                if ('' === $tag) {
+                    return $tag;
+                }
+
+                if (false === stripos($tag, ' async') && false === stripos($tag, ' defer') && false === stripos($tag, 'data-wp-strategy=')) {
+                    return $tag;
+                }
+
+                $handle = '';
+                if (preg_match('/\sid=("|\")(.*?)\1/i', $tag, $id_matches) && isset($id_matches[2])) {
+                    $handle = html_entity_decode((string) $id_matches[2], ENT_QUOTES, 'UTF-8');
+                } elseif (preg_match("/\sid=(')(.*?)\1/i", $tag, $id_matches) && isset($id_matches[2])) {
+                    $handle = html_entity_decode((string) $id_matches[2], ENT_QUOTES, 'UTF-8');
+                }
+
+                $src = '';
+                if (preg_match('/\ssrc=("|\")(.*?)\1/i', $tag, $src_matches) && isset($src_matches[2])) {
+                    $src = html_entity_decode((string) $src_matches[2], ENT_QUOTES, 'UTF-8');
+                } elseif (preg_match("/\ssrc=(')(.*?)\1/i", $tag, $src_matches) && isset($src_matches[2])) {
+                    $src = html_entity_decode((string) $src_matches[2], ENT_QUOTES, 'UTF-8');
+                }
+
+                if ($that->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+                    return $that->add_defer_attribute_to_script_tag($tag, true);
+                }
+
+                if (!$that->is_script_force_blocking($handle, $src, $tag, $settings)) {
+                    return $tag;
+                }
+
+                return $that->strip_native_loading_attributes_from_script_tag($tag);
+            }, $html);
+
+            return is_string($rewritten) ? $rewritten : $html;
         }
 
         private function script_handle_has_inline_segments($handle)
@@ -759,6 +1080,85 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             return false;
+        }
+
+        private function script_handle_has_inline_after_segments($handle)
+        {
+            $handle = (string) $handle;
+            if ('' === $handle) {
+                return false;
+            }
+
+            global $wp_scripts;
+            if (!($wp_scripts instanceof WP_Scripts)) {
+                return false;
+            }
+
+            $segment = $wp_scripts->get_data($handle, 'after');
+            if (is_array($segment) && !empty($segment)) {
+                return true;
+            }
+
+            return is_string($segment) && '' !== trim($segment);
+        }
+
+        private function script_handle_has_enqueued_dependents($handle)
+        {
+            $handle = (string) $handle;
+            if ('' === $handle) {
+                return false;
+            }
+
+            global $wp_scripts;
+            if (!($wp_scripts instanceof WP_Scripts)) {
+                return false;
+            }
+
+            $candidates = array();
+            foreach (array('queue', 'to_do', 'done') as $property) {
+                if (isset($wp_scripts->{$property}) && is_array($wp_scripts->{$property})) {
+                    $candidates = array_merge($candidates, $wp_scripts->{$property});
+                }
+            }
+
+            foreach (array_unique(array_filter(array_map('strval', $candidates))) as $candidate) {
+                if ($candidate === $handle || empty($wp_scripts->registered[$candidate]) || empty($wp_scripts->registered[$candidate]->deps)) {
+                    continue;
+                }
+
+                if (in_array($handle, array_map('strval', (array) $wp_scripts->registered[$candidate]->deps), true)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function add_defer_attribute_to_script_tag($tag, $force = false)
+        {
+            $tag = (string) $tag;
+            if ('' === $tag || false === stripos($tag, '<script') || false === stripos($tag, ' src=')) {
+                return $tag;
+            }
+
+            if (!$force && (false !== stripos($tag, ' defer') || false !== stripos($tag, ' async') || false !== stripos($tag, ' type="module"'))) {
+                return $tag;
+            }
+
+            if ($force) {
+                $tag = preg_replace('/\sasync(?=(\s|>))/i', '', $tag);
+                $tag = preg_replace('/\sdata-wp-strategy=("|\")(?:async|defer)\1/i', '', $tag);
+                $tag = preg_replace("/\sdata-wp-strategy=(')(?:async|defer)\1/i", '', $tag);
+                $tag = preg_replace('/\sdata-wp-strategy=(?:async|defer)(?=(\s|>))/i', '', $tag);
+                $tag = preg_replace('/\s{2,}/', ' ', $tag);
+            }
+
+            if (false !== stripos($tag, ' defer')) {
+                return $tag;
+            }
+
+            $deferred = preg_replace('/\ssrc=/i', ' defer src=', $tag, 1);
+            return is_string($deferred) ? $deferred : $tag;
         }
 
         private function add_async_attribute_to_script_tag($tag)
@@ -831,22 +1231,29 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function is_script_optimization_excluded($handle, $src, $tag = '', array $settings = array())
         {
+            return $this->is_script_force_blocking($handle, $src, $tag, $settings)
+                || $this->is_script_user_defer_excluded($handle, $src, $settings)
+                || $this->is_script_safe_stage_excluded($handle, $src, $tag, $settings);
+        }
+
+        private function is_script_force_blocking($handle, $src, $tag = '', array $settings = array())
+        {
             $handle = (string) $handle;
             $src    = (string) $src;
             $tag    = (string) $tag;
 
-            if (in_array($handle, $this->get_defer_excluded_handles($settings), true)) {
+            $handle_lc = strtolower($handle);
+            $src_lc    = strtolower($src);
+            $tag_lc    = strtolower($tag);
+            $haystack  = $handle_lc . ' ' . $src_lc . ' ' . $tag_lc;
+
+            if (in_array($handle_lc, array_map('strtolower', $this->get_force_blocking_script_handles($settings)), true)) {
                 return true;
             }
 
             if ($this->script_handle_has_inline_segments($handle)) {
                 return true;
             }
-
-            $handle_lc = strtolower($handle);
-            $src_lc    = strtolower($src);
-            $tag_lc    = strtolower($tag);
-            $haystack  = $handle_lc . ' ' . $src_lc . ' ' . $tag_lc;
 
             if (0 === strpos($handle_lc, 'wp-') || 0 === strpos($handle_lc, 'wc-')) {
                 return true;
@@ -857,19 +1264,29 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             $patterns = array(
+                'jquery',
+                'wp-hooks',
+                'wp-i18n',
+                'wp-util',
+                'wp-api',
+                'wp-polyfill',
                 'underscore',
                 'backbone',
-                'wp-util',
-                'wp-api-fetch',
-                'wp-polyfill',
-                'wp-polyfill-inert',
-                'googlesitekit',
-                'google-site-kit',
-                'sitekit',
-                'revslider',
-                'sr7',
-                'tptools',
-                'product-ajax-search',
+                'jquery/ui',
+                'heartbeat',
+                '/plugins/woocommerce/assets/js/frontend/cart-fragments',
+                '/plugins/woocommerce/assets/js/frontend/add-to-cart',
+                '/plugins/woocommerce/assets/js/frontend/checkout',
+                '/plugins/woocommerce/assets/js/frontend/single-product',
+                '/plugins/woocommerce/assets/js/selectwoo',
+                'wc-cart',
+                'wc-checkout',
+                'wc-add-to-cart',
+                'wc-single-product',
+                'wc-country-select',
+                'wc-address-i18n',
+                'wc-credit-card-form',
+                'selectwoo',
             );
 
             foreach ($patterns as $pattern) {
@@ -878,23 +1295,207 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 }
             }
 
+            if (!empty($settings['woo_safe_mode'])) {
+                $woo_patterns = array(
+                    'woocommerce',
+                    '/plugins/woocommerce/assets/js/',
+                    'js-cookie',
+                    'sourcebuster-js',
+                    'wc-order-attribution',
+                    'order-attribution',
+                );
+
+                foreach ($woo_patterns as $pattern) {
+                    if (false !== strpos($haystack, $pattern)) {
+                        return true;
+                    }
+                }
+            }
+
             return false;
         }
 
-        private function get_defer_excluded_handles(array $settings = array())
+        private function is_script_user_force_deferred($handle, $src, $tag = '', array $settings = array())
         {
-            $excluded_handles = array(
+            return $this->script_matches_force_defer_fragment_list($handle, $src, $tag, $this->get_force_defer_js_fragments($settings));
+        }
+
+        private function get_force_defer_js_fragments(array $settings = array())
+        {
+            $list = array();
+            if (isset($settings['defer_js_force_list']) && is_array($settings['defer_js_force_list'])) {
+                $list = array_merge($list, $settings['defer_js_force_list']);
+            }
+
+            return array_values(array_unique(array_filter(array_map('strval', $list), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+        }
+
+        private function script_matches_force_defer_fragment_list($handle, $src, $tag, array $fragments)
+        {
+            $haystacks = array(
+                strtolower(trim((string) $handle)),
+                strtolower(trim((string) $src)),
+                strtolower((string) wp_parse_url((string) $src, PHP_URL_PATH)),
+                strtolower((string) $tag),
+            );
+
+            foreach ($fragments as $fragment) {
+                $fragment = strtolower(trim((string) $fragment));
+                if ('' === $fragment) {
+                    continue;
+                }
+                foreach ($haystacks as $haystack) {
+                    if ('' !== $haystack && false !== strpos($haystack, $fragment)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private function is_script_user_defer_excluded($handle, $src, array $settings = array())
+        {
+            return $this->script_matches_fragment_list($handle, $src, $this->get_defer_stage_user_exclude_fragments($settings));
+        }
+
+        private function is_script_safe_stage_excluded($handle, $src, $tag = '', array $settings = array())
+        {
+            $handle_lc = strtolower((string) $handle);
+            if (in_array($handle_lc, array_map('strtolower', $this->get_safe_stage_excluded_handles($settings)), true)) {
+                return true;
+            }
+
+            return $this->script_matches_fragment_list($handle, $src, $this->get_safe_stage_defer_exclude_fragments($settings));
+        }
+
+        private function get_defer_stage_user_exclude_fragments(array $settings = array())
+        {
+            $list = array();
+
+            if (isset($settings['defer_js_exclude_list']) && is_array($settings['defer_js_exclude_list'])) {
+                $list = array_merge($list, $settings['defer_js_exclude_list']);
+            }
+
+            // Backward compatibility for sites that already saved the old separate Delay Non-Critical JS exclude list.
+            if (isset($settings['delay_non_critical_js_exclude_list']) && is_array($settings['delay_non_critical_js_exclude_list'])) {
+                $list = array_merge($list, $settings['delay_non_critical_js_exclude_list']);
+            }
+
+            return array_values(array_unique(array_filter(array_map('strval', $list), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+        }
+
+        private function get_safe_stage_defer_exclude_fragments(array $settings = array())
+        {
+            $list = $this->get_builtin_defer_js_exclude_fragments();
+            $list = array_merge($list, $this->get_defer_stage_user_exclude_fragments($settings));
+
+            return array_values(array_unique(array_filter(array_map('strval', $list), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+        }
+
+        private function get_defer_js_exclude_fragments(array $settings = array())
+        {
+            return $this->get_safe_stage_defer_exclude_fragments($settings);
+        }
+
+        private function get_builtin_defer_js_exclude_fragments()
+        {
+            return array(
+                'googlesitekit',
+                'google-site-kit',
+                'sitekit',
+                'revslider',
+                'sr7',
+                'tptools',
+                'tp-tools',
+                'sliderrevolution',
+                'revolution',
+                'rs6',
+                '/plugins/revslider/',
+                '/plugins/slider-revolution/',
+                'elementor/assets/js/frontend',
+                'elementor-pro/assets/js/frontend',
+                'elementor-frontend',
+                'elementor-pro-frontend',
+                'frontend-modules',
+                'header-footer-elementor',
+                'hfe-',
+                'smartmenus',
+                'swiper',
+                'swiper-bundle',
+                'slick',
+                'splide',
+                'owl.carousel',
+                'owlcarousel',
+                'flickity',
+                'keen-slider',
+                'bxslider',
+                'masterslider',
+                'master-slider',
+                'layerslider',
+                'layer-slider',
+                'metaslider',
+                'smartslider',
+                'smart-slider',
+                'n2-ss',
+                'soliloquy',
+                'royalslider',
+                'slider',
+                'carousel',
+                'slideshow',
+                'hero',
+                'html_types/image',
+                'html_types/color',
+                'html_types/label',
+                'html_types/slide',
+                'product-ajax-search',
+                'search-popup',
+                'nav-mobile',
+                'megamenu',
+                'header-cart',
+                'cart-canvas',
+                'off-canvas',
+                'woocommerce-products-filter',
+                'woof_',
+                'dgwt-wcas',
+                'woosq',
+                'wpcbn',
+                'contact-form-7',
+                'author-arc',
+                'mailerlite',
+                'mc4wp',
+                'complianz',
+                'sourcebuster',
+                'order-attribution',
+                'eael-general',
+            );
+        }
+
+        private function get_force_blocking_script_handles(array $settings = array())
+        {
+            $handles = array(
                 'jquery',
                 'jquery-core',
                 'jquery-migrate',
                 'wp-hooks',
                 'wp-i18n',
+                'wp-util',
+                'wp-api-request',
+                'wp-api-fetch',
+                'wp-url',
+                'wp-polyfill',
                 'heartbeat',
             );
 
             if (!empty($settings['woo_safe_mode'])) {
-                $excluded_handles = array_merge(
-                    $excluded_handles,
+                $handles = array_merge(
+                    $handles,
                     array(
                         'woocommerce',
                         'wc-cart-fragments',
@@ -912,7 +1513,346 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 );
             }
 
-            return array_values(array_unique($excluded_handles));
+            return array_values(array_unique($handles));
+        }
+
+        private function get_safe_stage_excluded_handles(array $settings = array())
+        {
+            return array(
+                'revslider',
+                'sr7',
+                'tptools',
+                'tp-tools',
+                'rs6',
+                'slider-revolution',
+                'elementor-frontend-js',
+                'elementor-pro-frontend-js',
+                'elementor-frontend-modules-js',
+                'pro-elements-handlers-js',
+                'swiper-js',
+                'swiper-bundle-js',
+                'slick-js',
+                'splide-js',
+                'owl-carousel-js',
+                'flickity-js',
+                'smartslider-frontend',
+                'smartslider-simple-type-frontend',
+                'n2-ss-public',
+                'layerslider',
+                'masterslider-core',
+                'metaslider-flex-slider',
+                'metaslider-responsive-slides',
+                'hfe-frontend-js-js',
+                'smartmenus-js',
+                'bokifa-theme-js',
+                'bokifa-elementor-frontend-js',
+                'bokifa-elementor-products-js',
+                'bokifa-elementor-posts-grid-js',
+                'bokifa-nav-mobile-js',
+                'bokifa-megamenu-frontend-js',
+            );
+        }
+
+        private function get_defer_excluded_handles(array $settings = array())
+        {
+            return array_values(array_unique(array_merge(
+                $this->get_force_blocking_script_handles($settings),
+                $this->get_safe_stage_excluded_handles($settings)
+            )));
+        }
+
+        private function is_same_host_public_url($url)
+        {
+            $url = trim((string) $url);
+            if ('' === $url) {
+                return false;
+            }
+
+            $absolute = $this->absolutize_public_resource_url($url, home_url('/'));
+            if ('' === $absolute) {
+                return false;
+            }
+
+            $src_host = (string) wp_parse_url($absolute, PHP_URL_HOST);
+            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ('' === $src_host || '' === $home_host) {
+                return false;
+            }
+
+            return strtolower($src_host) === strtolower($home_host);
+        }
+
+        private function get_delay_non_critical_js_exclude_fragments()
+        {
+            $settings = $this->get_settings();
+            $list = $this->get_defer_stage_user_exclude_fragments(is_array($settings) ? $settings : array());
+            $list = array_merge($this->get_builtin_delay_non_critical_js_exclude_fragments(), $list);
+
+            return array_values(array_unique(array_filter(array_map('strval', $list), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+        }
+
+        private function get_builtin_delay_non_critical_js_exclude_fragments()
+        {
+            $fragments = array(
+                'jquery',
+                'wp-hooks',
+                'wp-i18n',
+                'wp-util',
+                'wp-api',
+                'wp-polyfill',
+                'jquery/ui',
+                '/wp-includes/js/',
+                'woocommerce',
+                'wc-',
+                '/plugins/woocommerce/assets/js/',
+                'elementor',
+                'elementor-pro',
+                'frontend-modules',
+                'pro-elements-handlers',
+                'swiper',
+                'swiper-bundle',
+                'slick',
+                'splide',
+                'owl.carousel',
+                'owlcarousel',
+                'flickity',
+                'keen-slider',
+                'bxslider',
+                'masterslider',
+                'master-slider',
+                'layerslider',
+                'layer-slider',
+                'metaslider',
+                'smartslider',
+                'smart-slider',
+                'n2-ss',
+                'soliloquy',
+                'royalslider',
+                'revslider',
+                'sliderrevolution',
+                'sr7',
+                'tptools',
+                'tp-tools',
+                'html_types/image',
+                'html_types/color',
+                'html_types/label',
+                'html_types/slide',
+                'smartmenus',
+                'megamenu',
+                'nav-mobile',
+                'off-canvas',
+                'offcanvas',
+                'modal',
+                'popup',
+                'lightbox',
+                'fancybox',
+                'photoswipe',
+                'magnific-popup',
+                'video',
+                'mediaelement',
+                'mejs',
+                'plyr',
+                'youtube',
+                'vimeo',
+                'wistia',
+                'bricks',
+                'oxygen',
+                'wpbakery',
+                'visual-composer',
+                'vc_',
+                'wpb_',
+                'jet-',
+                'crocoblock',
+                'elementskit',
+                'eael',
+                'essential-addons',
+                'contact-form-7',
+                'wpforms',
+                'fluentform',
+                'forminator',
+                'gravityforms',
+            );
+
+            $filtered = apply_filters('ucwp_delay_js_blocking_fragments', $fragments);
+            if (is_array($filtered)) {
+                $fragments = $filtered;
+            }
+
+            return array_values(array_unique(array_filter(array_map('strval', $fragments), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+        }
+
+        private function script_handle_is_footer_group($handle)
+        {
+            $handle = (string) $handle;
+            if ('' === $handle) {
+                return false;
+            }
+
+            global $wp_scripts;
+            if (!($wp_scripts instanceof WP_Scripts)) {
+                return false;
+            }
+
+            $group = $wp_scripts->get_data($handle, 'group');
+            return (is_numeric($group) && 1 <= (int) $group);
+        }
+
+        private function is_local_wp_content_script_url($src)
+        {
+            $path = strtolower((string) wp_parse_url((string) $src, PHP_URL_PATH));
+            if ('' === $path) {
+                $path = strtolower((string) $src);
+            }
+
+            return false !== strpos($path, '/wp-content/plugins/')
+                || false !== strpos($path, '/wp-content/themes/')
+                || false !== strpos($path, '/wp-content/uploads/');
+        }
+
+        private function script_matches_fragment_list($handle, $src, array $fragments)
+        {
+            $haystacks = array(
+                strtolower(trim((string) $handle)),
+                strtolower(trim((string) $src)),
+                strtolower((string) wp_parse_url((string) $src, PHP_URL_PATH)),
+            );
+
+            foreach ($fragments as $fragment) {
+                $fragment = strtolower(trim((string) $fragment));
+                if ('' === $fragment) {
+                    continue;
+                }
+                foreach ($haystacks as $haystack) {
+                    if ('' !== $haystack && false !== strpos($haystack, $fragment)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private function matches_non_critical_delay_patterns($handle, $src, $tag = '')
+        {
+            $haystack = strtolower((string) $handle . ' ' . $src . ' ' . $tag);
+            $patterns = array(
+                'cmplz',
+                'complianz',
+                'googlesitekit-events-provider',
+                'google-site-kit',
+                'sitekit',
+                'mailerlite',
+                'mc4wp',
+                'sourcebuster',
+                'order-attribution',
+                'tooltipster',
+                'magnific-popup',
+                'perfect-scrollbar',
+                'plainoverlay',
+                'ion.range',
+                'icheck',
+                'easy-autocomplete',
+                'jarallax',
+                'tweenmax',
+                'gsap',
+                'sticky-kit',
+                'slick',
+                'swiper',
+                'carousel',
+                'slider',
+                'popup',
+                'modal',
+                'lightbox',
+                'off-canvas',
+                'offcanvas',
+                'search-popup',
+                'ajax-search',
+                'filter',
+                'animation',
+                'animate',
+            );
+
+            foreach ($patterns as $pattern) {
+                if (false !== strpos($haystack, strtolower($pattern))) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function should_delay_non_critical_script($handle, $src, $tag, array $settings = array())
+        {
+            $src = trim((string) $src);
+            if ('' === $src || false === stripos((string) $tag, '<script')) {
+                return false;
+            }
+
+            if (!$this->is_delayable_external_script_tag($tag)) {
+                return false;
+            }
+
+            if (!$this->is_same_host_public_url($src)) {
+                return false;
+            }
+
+            if ($this->script_matches_fragment_list($handle, $src, $this->get_delay_non_critical_js_exclude_fragments())) {
+                return false;
+            }
+
+            if ($this->script_handle_has_inline_after_segments($handle)) {
+                return false;
+            }
+
+            if ($this->is_script_force_blocking($handle, $src, $tag, $settings)) {
+                return false;
+            }
+
+            if ($this->script_handle_has_enqueued_dependents($handle)) {
+                return false;
+            }
+
+            $handle_lc = strtolower((string) $handle);
+            $src_lc    = strtolower((string) $src);
+
+            $forced_blocking_handles = array(
+                'elementor-webpack-runtime',
+                'elementor-pro-webpack-runtime',
+                'elementor-frontend-js',
+                'elementor-pro-frontend-js',
+                'contact-form-7-js',
+                'author-arc-handler-js',
+            );
+
+            if (in_array($handle_lc, $forced_blocking_handles, true)) {
+                return false;
+            }
+
+            if (false !== strpos($src_lc, '/plugins/woocommerce/assets/')) {
+                return false;
+            }
+
+            if (!empty($settings['critical_request_chain_relief']) && $this->script_matches_fragment_list($handle, $src, $this->get_critical_request_chain_delay_fragments($settings))) {
+                return true;
+            }
+
+            if ($this->matches_non_critical_delay_patterns($handle, $src, $tag)) {
+                return true;
+            }
+
+            if (empty($settings['delay_non_critical_js_aggressive'])) {
+                return false;
+            }
+
+            if (!$this->is_local_wp_content_script_url($src)) {
+                return false;
+            }
+
+            return $this->script_handle_is_footer_group($handle);
         }
 
         private function should_delay_script($handle, $src, $tag, array $settings = array())
@@ -922,11 +1862,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
-            if (false !== stripos($tag, ' type="module"') || false !== stripos($tag, ' nomodule')) {
+            if (!$this->is_delayable_external_script_tag($tag)) {
                 return false;
             }
 
-            if ($this->is_script_optimization_excluded($handle, $src, $tag, $settings)) {
+            if ($this->is_script_force_blocking($handle, $src, $tag, $settings) || $this->is_script_user_defer_excluded($handle, $src, $settings)) {
                 return false;
             }
 
@@ -965,15 +1905,42 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function build_delayed_script_tag($tag, $handle, $src)
         {
+            $original_attributes = $this->extract_html_tag_attributes($tag);
+            $preserved_attributes = array();
+
+            foreach ($original_attributes as $name => $value) {
+                $name_lc = strtolower((string) $name);
+                if (in_array($name_lc, array('src', 'async', 'defer', 'data-wp-strategy'), true)) {
+                    continue;
+                }
+
+                if ('type' === $name_lc && !$this->is_javascript_mime_type((string) $value)) {
+                    continue;
+                }
+
+                if (0 === strpos($name_lc, 'data-ucwp-')) {
+                    continue;
+                }
+
+                $preserved_attributes[$name_lc] = (string) $value;
+            }
+
             $attributes = array(
                 'type'             => 'text/ucwp-delayed-js',
                 'data-ucwp-src'    => esc_url($src),
                 'data-ucwp-handle' => esc_attr((string) $handle),
             );
 
+            if (!empty($preserved_attributes)) {
+                $encoded = base64_encode((string) wp_json_encode($preserved_attributes));
+                if ('' !== $encoded) {
+                    $attributes['data-ucwp-attrs'] = esc_attr($encoded);
+                }
+            }
+
             foreach (array('id', 'crossorigin', 'referrerpolicy', 'integrity', 'nonce') as $attribute) {
-                if (preg_match("/\s" . preg_quote($attribute, '/') . "=(\"|')(.*?)\1/i", $tag, $matches) && isset($matches[2]) && '' !== $matches[2]) {
-                    $attributes['data-ucwp-' . $attribute] = esc_attr($matches[2]);
+                if (isset($preserved_attributes[$attribute]) && '' !== $preserved_attributes[$attribute]) {
+                    $attributes['data-ucwp-' . $attribute] = esc_attr($preserved_attributes[$attribute]);
                 }
             }
 
@@ -985,16 +1952,264 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return '<script ' . implode(' ', $compiled) . '></script>';
         }
 
-        public function print_delayed_script_loader()
+        private function extract_html_tag_attributes($tag)
         {
-            $settings = $this->get_settings();
-            if (empty($settings['delay_third_party_js']) || is_admin()) {
+            $attributes = array();
+            $tag = (string) $tag;
+            if ('' === $tag || false === stripos($tag, '<script')) {
+                return $attributes;
+            }
+
+            $inside = preg_replace('/^\s*<script\b/i', '', $tag, 1);
+            $inside = preg_replace('/>.*$/s', '', is_string($inside) ? $inside : '');
+            if (!is_string($inside) || '' === trim($inside)) {
+                return $attributes;
+            }
+
+            if (preg_match_all('/\s+([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>`]+)))?/i', $inside, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $match) {
+                    if (empty($match[1])) {
+                        continue;
+                    }
+
+                    $name = strtolower((string) $match[1]);
+                    $value = '';
+                    if (isset($match[2]) && '' !== $match[2]) {
+                        $value = (string) $match[2];
+                    } elseif (isset($match[3]) && '' !== $match[3]) {
+                        $value = (string) $match[3];
+                    } elseif (isset($match[4]) && '' !== $match[4]) {
+                        $value = (string) $match[4];
+                    } else {
+                        $value = $name;
+                    }
+
+                    $attributes[$name] = html_entity_decode($value, ENT_QUOTES, 'UTF-8');
+                }
+            }
+
+            return $attributes;
+        }
+
+        private function is_delayable_external_script_tag($tag)
+        {
+            $tag = (string) $tag;
+            if (false !== stripos($tag, ' nomodule')) {
+                return false;
+            }
+
+            $type = $this->extract_attribute_from_html_tag($tag, 'type');
+            if ('' === $type) {
+                return true;
+            }
+
+            return $this->is_javascript_mime_type($type);
+        }
+
+        private function is_javascript_mime_type($type)
+        {
+            $type = strtolower(trim((string) $type));
+            if ('' === $type) {
+                return true;
+            }
+
+            $type = preg_replace('/\s*;.*$/', '', $type);
+            return in_array($type, array(
+                'text/javascript',
+                'application/javascript',
+                'application/ecmascript',
+                'text/ecmascript',
+                'text/jscript',
+                'application/x-javascript',
+            ), true);
+        }
+
+
+        public function cleanup_asset_chain_enqueue_assets()
+        {
+            if (is_admin()) {
                 return;
             }
 
-            echo <<<'HTML'
-<script id="ucwp-delayed-loader">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var fired=false;function q(){return Array.prototype.slice.call(document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src]'));}function c(n,a){var v=n.getAttribute('data-ucwp-'+a);return v||'';}function load(list,i){if(i>=list.length){return;}var node=list[i];var src=node.getAttribute('data-ucwp-src');if(!src){load(list,i+1);return;}var s=document.createElement('script');s.src=src;s.async=false;['id','crossorigin','referrerpolicy','integrity','nonce'].forEach(function(attr){var val=c(node,attr);if(val){s.setAttribute(attr,val);}});node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);s.onload=s.onerror=function(){load(list,i+1);};}function trigger(){if(fired){return;}fired=true;var list=q();if(!list.length){return;}load(list,0);}['scroll','mousemove','touchstart','keydown','click'].forEach(function(evt){window.addEventListener(evt,trigger,{passive:true,once:true});});window.addEventListener('load',function(){setTimeout(trigger,2000);},{once:true});setTimeout(trigger,6000);}());</script>
-HTML;
+            $settings = $this->get_settings();
+            if (empty($settings['asset_chain_cleanup'])) {
+                return;
+            }
+
+            if ($this->current_request_matches_asset_cleanup_exclusion($settings)) {
+                return;
+            }
+
+            if (!empty($settings['asset_cleanup_woo_product_assets']) && !$this->is_runtime_single_product_context()) {
+                $this->dequeue_matching_queued_assets('script', $this->get_woocommerce_product_asset_cleanup_fragments());
+                $this->dequeue_matching_queued_assets('style', $this->get_woocommerce_product_asset_cleanup_fragments());
+            }
+
+            if (!empty($settings['asset_cleanup_product_filter_assets']) && !$this->is_runtime_product_filter_context()) {
+                $this->dequeue_matching_queued_assets('script', $this->get_product_filter_asset_cleanup_fragments());
+                $this->dequeue_matching_queued_assets('style', $this->get_product_filter_asset_cleanup_fragments());
+            }
+
+            if (!empty($settings['asset_cleanup_woo_blocks_css']) && !$this->is_runtime_woocommerce_context()) {
+                $this->dequeue_matching_queued_assets('style', array('wc-blocks.css', 'wc-blocks-style', 'woocommerce-blocks'));
+            }
+        }
+
+        private function dequeue_matching_queued_assets($type, array $fragments)
+        {
+            $type = ('style' === $type) ? 'style' : 'script';
+            $registry = ('style' === $type) ? wp_styles() : wp_scripts();
+            if (!$registry || empty($registry->queue) || !is_array($registry->queue)) {
+                return;
+            }
+
+            foreach ((array) $registry->queue as $handle) {
+                $src = '';
+                if (isset($registry->registered[$handle]) && is_object($registry->registered[$handle])) {
+                    $src = (string) ($registry->registered[$handle]->src ?? '');
+                }
+
+                if (!$this->asset_matches_fragment_list($handle, $src, $fragments)) {
+                    continue;
+                }
+
+                if ('style' === $type) {
+                    wp_dequeue_style($handle);
+                } else {
+                    wp_dequeue_script($handle);
+                }
+            }
+        }
+
+        private function is_runtime_single_product_context()
+        {
+            return function_exists('is_product') && is_product();
+        }
+
+        private function is_runtime_woocommerce_context()
+        {
+            if (function_exists('is_product') && is_product()) {
+                return true;
+            }
+            if (function_exists('is_shop') && is_shop()) {
+                return true;
+            }
+            if (function_exists('is_product_taxonomy') && is_product_taxonomy()) {
+                return true;
+            }
+            if (function_exists('is_cart') && is_cart()) {
+                return true;
+            }
+            if (function_exists('is_checkout') && is_checkout()) {
+                return true;
+            }
+            if (function_exists('is_account_page') && is_account_page()) {
+                return true;
+            }
+
+            return false;
+        }
+
+        private function is_runtime_product_filter_context()
+        {
+            if (function_exists('is_shop') && is_shop()) {
+                return true;
+            }
+            if (function_exists('is_product_taxonomy') && is_product_taxonomy()) {
+                return true;
+            }
+
+            return false;
+        }
+
+        private function get_woocommerce_product_asset_cleanup_fragments()
+        {
+            return array(
+                'jquery.zoom',
+                'jquery.flexslider',
+                'photoswipe',
+                'photoswipe-ui-default',
+                'wc-single-product',
+                'single-product.min.js',
+                'add-to-cart-variation',
+                'wc-add-to-cart-variation',
+                '/woocommerce/assets/js/frontend/single-product',
+                '/woocommerce/assets/js/frontend/add-to-cart-variation',
+                '/woocommerce/assets/js/zoom/',
+                '/woocommerce/assets/js/flexslider/',
+                '/woocommerce/assets/js/photoswipe/',
+                '/woocommerce/assets/css/photoswipe',
+            );
+        }
+
+        private function get_product_filter_asset_cleanup_fragments()
+        {
+            // Keep this list plugin-specific. Broad fragments such as tooltipster,
+            // icheck, html_types/slider, or by_sku can also belong to unrelated UI.
+            return array(
+                'handle:woocommerce-products-filter',
+                'handle:woof',
+                'handle:woof_',
+                'handle:woof-',
+                'src:/plugins/woocommerce-products-filter/',
+                'src:/plugins/woof-products-filter/',
+                'src:/plugins/woocommerce-filter/',
+                'src:/plugins/woocommerce-product-filter/',
+                'src:/plugins/woocommerce-products-filter/js/',
+                'src:/plugins/woocommerce-products-filter/ext/',
+                'src:/plugins/woocommerce-products-filter/views/',
+                'src:/plugins/woocommerce-products-filter/css/',
+            );
+        }
+
+        private function asset_matches_fragment_list($handle, $src, array $fragments)
+        {
+            $handle_lc = strtolower(trim((string) $handle));
+            $src_lc = strtolower(trim((string) $src));
+            $path_lc = strtolower((string) wp_parse_url((string) $src, PHP_URL_PATH));
+            $haystacks = array($handle_lc, $src_lc, $path_lc);
+
+            foreach ($fragments as $fragment) {
+                $fragment = strtolower(trim((string) $fragment));
+                if ('' === $fragment) {
+                    continue;
+                }
+
+                if (0 === strpos($fragment, 'handle:')) {
+                    $needle = trim(substr($fragment, 7));
+                    if ('' !== $needle && '' !== $handle_lc && false !== strpos($handle_lc, $needle)) {
+                        return true;
+                    }
+                    continue;
+                }
+
+                if (0 === strpos($fragment, 'src:')) {
+                    $needle = trim(substr($fragment, 4));
+                    if ('' !== $needle && (('' !== $src_lc && false !== strpos($src_lc, $needle)) || ('' !== $path_lc && false !== strpos($path_lc, $needle)))) {
+                        return true;
+                    }
+                    continue;
+                }
+
+                foreach ($haystacks as $haystack) {
+                    if ('' !== $haystack && false !== strpos($haystack, $fragment)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        public function print_delayed_script_loader()
+        {
+            $settings = $this->get_settings();
+            if ((empty($settings['delay_third_party_js']) && empty($settings['delay_non_critical_js'])) || is_admin()) {
+                return;
+            }
+
+            $main_thread_relief = !empty($settings['main_thread_relief']) ? '1' : '0';
+            echo '<script id="ucwp-delayed-loader">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var relief=' . $main_thread_relief . ';var fired=false;var timeoutMs=8000;function q(){return Array.prototype.slice.call(document.querySelectorAll(\'script[type="text/ucwp-delayed-js"][data-ucwp-src]\'));}function c(n,a){var v=n.getAttribute(\'data-ucwp-\'+a);return v||\'\';}function decodeAttrs(node){var raw=c(node,\'attrs\');var attrs={};if(raw){try{attrs=JSON.parse(atob(raw))||{};}catch(e){attrs={};}}[\'id\',\'crossorigin\',\'referrerpolicy\',\'integrity\',\'nonce\'].forEach(function(attr){var val=c(node,attr);if(val&&!attrs[attr]){attrs[attr]=val;}});return attrs;}function idle(cb){if(!relief){cb();return;}if(\'requestIdleCallback\' in window){window.requestIdleCallback(cb,{timeout:1500});return;}setTimeout(cb,80);}function wait(ms,cb){if(!relief||ms<=0){cb();return;}setTimeout(cb,ms);}function loadOne(node,done){var src=node.getAttribute(\'data-ucwp-src\');if(!src){done();return;}var s=document.createElement(\'script\');var attrs=decodeAttrs(node);Object.keys(attrs).forEach(function(attr){var val=attrs[attr];if(!attr||attr===\'src\'||attr===\'async\'||attr===\'defer\'||attr===\'data-wp-strategy\'||val===null||typeof val===\'undefined\'){return;}try{s.setAttribute(attr,String(val));}catch(e){}});s.async=false;var finished=false;function finish(){if(finished){return;}finished=true;done();}s.onload=finish;s.onerror=finish;setTimeout(finish,timeoutMs);s.src=src;if(node.parentNode){node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);}else{document.head.appendChild(s);}}function load(list,i){if(i>=list.length){return;}idle(function(){loadOne(list[i],function(){wait(relief?120:0,function(){load(list,i+1);});});});}function trigger(){if(fired){return;}fired=true;var list=q();if(!list.length){return;}load(list,0);}[\'scroll\',\'mousemove\',\'touchstart\',\'keydown\',\'click\'].forEach(function(evt){window.addEventListener(evt,trigger,{passive:true,once:true});});window.addEventListener(\'load\',function(){setTimeout(trigger,relief?2500:2000);},{once:true});setTimeout(trigger,relief?7000:6000);}());</script>' . "\n";
         }
 
         public function add_display_swap_to_google_fonts($src, $handle)
@@ -1044,18 +2259,63 @@ HTML;
             }
 
             $settings = $this->get_settings();
-            $safe_mode = $this->should_use_safe_frontend_optimization_mode($html);
+            $html = $this->normalize_protected_script_loading_attributes_in_html($html, $settings);
+            $slider_safe_mode = !empty($settings['slider_safe_mode']) && $this->should_use_safe_frontend_optimization_mode($html);
+            $safe_mode = !empty($settings['frontend_safe_mode']) || $slider_safe_mode;
 
-            // Safe mode is intended to protect fragile frontend markup (for example JS-driven
-            // sliders/video shells) from structural HTML mutations. CSS-only optimizations remain
-            // allowed so we still get frontpage bundling and stylesheet request reduction.
+            if (!empty($settings['critical_request_chain_relief'])) {
+                if ($slider_safe_mode) {
+                    // Slider Safe Mode protects fragile slider runtime/CSS from delay/rewrite
+                    // transforms, but manual priority preloads are safe and still useful for LCP.
+                    $html = $this->inject_manual_critical_preload_links($html, $settings);
+                    $html = $this->inject_detected_slider_fetch_preloads($html, $settings);
+                } else {
+                    $html = $this->apply_critical_request_chain_relief($html, $settings);
+                }
+            }
+
+            if (!$slider_safe_mode && !empty($settings['asset_chain_cleanup']) && !$this->current_request_matches_asset_cleanup_exclusion($settings)) {
+                $html = $this->apply_asset_chain_cleanup_to_html($html, $settings);
+            }
+
+            // Frontend Safe Mode is user-controlled. When it is off, UltraCache does not silently
+            // re-enable it from automatic SR7/Elementor heuristics.
             if (!$safe_mode) {
                 $html = $this->strip_probable_frontend_authoring_assets($html);
             }
 
-            $html = $this->maybe_replace_frontpage_stylesheet_links_with_bundle($html);
+            if (!empty($settings['homepage_css_bundle']) || !empty($settings['critical_css'])) {
+                $bundle_mode = isset($settings['homepage_css_bundle_mode']) && 'aggressive' === strtolower((string) $settings['homepage_css_bundle_mode']) ? 'aggressive' : 'safe';
+                $bundle_scope = $this->get_css_bundle_scope($settings);
 
-            if (!empty($settings['async_css'])) {
+                // Slider Safe Mode should not automatically disable all CSS bundling. On fragile
+                // slider/hero pages, keep Stage 1 fully conservative, but let Stage 2 build/serve
+                // bundles for non-slider local CSS while built-in slider stylesheet exclusions keep
+                // SR7/Revolution/Swiper/Slick CSS as normal stylesheet links.
+                if ($slider_safe_mode && 'aggressive' !== $bundle_mode) {
+                    $bundle_mode = '';
+                }
+
+                if ('' !== $bundle_mode && !empty($settings['page_css_bundle_on_entry'])) {
+                    if ('per-page' === $bundle_scope || ('homepage' === $bundle_scope && $this->is_frontpage_request_url()) || ('shared' === $bundle_scope && $this->is_frontpage_request_url())) {
+                        $this->maybe_build_page_css_bundle_on_entry($html, $settings);
+                    }
+                }
+
+                if ('' !== $bundle_mode) {
+                    if ('homepage' === $bundle_scope) {
+                        if ($this->is_frontpage_request_url()) {
+                            $html = $this->maybe_replace_page_stylesheet_links_with_bundle($html, home_url('/'));
+                        }
+                    } elseif ('shared' === $bundle_scope) {
+                        $html = $this->maybe_replace_page_stylesheet_links_with_bundle($html, home_url('/'));
+                    } else {
+                        $html = $this->maybe_replace_page_stylesheet_links_with_bundle($html);
+                    }
+                }
+            }
+
+            if (!$slider_safe_mode && (!empty($settings['async_css']) || !empty($settings['aggressive_async_css']))) {
                 $safe_async_css_result = $this->rewrite_safe_async_css_links($html);
                 if (is_array($safe_async_css_result)) {
                     $html = isset($safe_async_css_result['html']) && is_string($safe_async_css_result['html']) ? $safe_async_css_result['html'] : $html;
@@ -1063,7 +2323,7 @@ HTML;
                 }
             }
 
-            if (!$safe_mode && !empty($settings['cls_dimensions'])) {
+            if (!empty($settings['cls_dimensions'])) {
                 $cls_dimensions_result = $this->inject_safe_cls_dimensions($html);
                 if (is_array($cls_dimensions_result)) {
                     $html = isset($cls_dimensions_result['html']) && is_string($cls_dimensions_result['html']) ? $cls_dimensions_result['html'] : $html;
@@ -1077,17 +2337,28 @@ HTML;
                 $html = $this->rewrite_google_fonts_display_swap_in_html($html);
             }
 
-            if (!empty($settings['self_hosted_font_css_optimization'])) {
+            if (!$slider_safe_mode && !empty($settings['self_hosted_font_css_optimization'])) {
                 $html = $this->optimize_self_hosted_font_css_links($html);
-                $html = $this->inject_runtime_font_css_url_map($html);
+                if (!$safe_mode && !empty($settings['self_hosted_font_runtime_rewrite'])) {
+                    $html = $this->inject_runtime_font_css_url_map($html);
+                }
             }
 
             if (!empty($settings['speculation_rules_enabled'])) {
                 $html = $this->inject_speculation_rules_prefetch($html, $settings);
             }
 
-            if (!$safe_mode && !empty($settings['lcp_image_priority'])) {
-                $html = $this->optimize_lcp_image_markup($html);
+            if (!empty($settings['lcp_image_priority'])) {
+                if ($safe_mode) {
+                    // Frontend Safe Mode avoids broad structural rewrites. When Slider Safe Mode is
+                    // actually active on this page, apply only the SR7 lifecycle-aware priority guard.
+                    if ($slider_safe_mode) {
+                        $html = $this->apply_sr7_first_slide_lcp_priority_markup($html);
+                    }
+                    $html = $this->inject_safe_lcp_priority_preloads($html);
+                } else {
+                    $html = $this->optimize_lcp_image_markup($html);
+                }
             }
 
             if (!$safe_mode) {
@@ -1095,6 +2366,378 @@ HTML;
             }
 
             return $html;
+        }
+
+
+        private function apply_critical_request_chain_relief($html, array $settings = array())
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            $html = $this->inject_manual_critical_preload_links($html, $settings);
+            $html = $this->inject_detected_slider_fetch_preloads($html, $settings);
+            $html = $this->rewrite_chain_delay_stylesheet_links($html, $settings);
+
+            return $html;
+        }
+
+        private function get_critical_request_chain_delay_fragments(array $settings = array())
+        {
+            if (isset($settings['critical_request_chain_delay_list']) && is_array($settings['critical_request_chain_delay_list'])) {
+                return array_values(array_unique(array_filter(array_map('strval', $settings['critical_request_chain_delay_list']), static function ($item) {
+                    return '' !== trim((string) $item);
+                })));
+            }
+
+            return array();
+        }
+
+        private function inject_manual_critical_preload_links($html, array $settings = array())
+        {
+            if (false === stripos((string) $html, '</head>')) {
+                return $html;
+            }
+
+            $links = array();
+            $resource_lines = isset($settings['critical_resource_preload_list']) && is_array($settings['critical_resource_preload_list']) ? $settings['critical_resource_preload_list'] : array();
+            $fetch_lines = isset($settings['critical_fetch_preload_list']) && is_array($settings['critical_fetch_preload_list']) ? $settings['critical_fetch_preload_list'] : array();
+
+            foreach ($resource_lines as $line) {
+                $candidate = $this->parse_critical_preload_line($line, '');
+                if (!empty($candidate['url'])) {
+                    if ($this->should_skip_sr7_generated_manual_preload($candidate, $html, $settings)) {
+                        continue;
+                    }
+                    $links[] = $candidate;
+                }
+            }
+
+            foreach ($fetch_lines as $line) {
+                $candidate = $this->parse_critical_preload_line($line, 'fetch');
+                if (!empty($candidate['url'])) {
+                    $links[] = $candidate;
+                }
+            }
+
+            return $this->inject_critical_preload_link_candidates($html, $links);
+        }
+
+        private function inject_detected_slider_fetch_preloads($html, array $settings = array())
+        {
+            if (false === stripos((string) $html, 'srengine=7') && false === stripos((string) $html, '/sliders/')) {
+                return $html;
+            }
+
+            if (!preg_match_all('~(?:https?:)?//[^\s"\']+/sliders/\d+\?srengine=7[^\s"\'<)]*|/sliders/\d+\?srengine=7[^\s"\'<)]*~i', $html, $matches)) {
+                return $html;
+            }
+
+            $links = array();
+            foreach ((array) ($matches[0] ?? array()) as $url) {
+                $url = html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8');
+                $url = $this->absolutize_public_resource_url($url, home_url('/'));
+                if ('' === $url) {
+                    continue;
+                }
+                $links[$url] = array('url' => $url, 'as' => 'fetch');
+                if (count($links) >= 4) {
+                    break;
+                }
+            }
+
+            return $this->inject_critical_preload_link_candidates($html, array_values($links));
+        }
+
+        private function should_skip_sr7_generated_manual_preload(array $candidate, $html, array $settings = array())
+        {
+            $url = isset($candidate['url']) ? $this->normalize_public_resource_url((string) $candidate['url']) : '';
+            $as = isset($candidate['as']) ? strtolower(trim((string) $candidate['as'])) : '';
+            if ('image' !== $as || '' === $url) {
+                return false;
+            }
+
+            // SR7 stores generated/optimized image-list assets under /revslider/o/. Those hidden
+            // placeholders are often not consumed within a few seconds, so manual preloading them
+            // can create Chrome "preloaded but not used" warnings and compete with real LCP work.
+            if (!$this->is_sr7_generated_image_list_url($url)) {
+                return false;
+            }
+
+            if (empty($settings['slider_safe_mode']) && empty($settings['lcp_image_priority'])) {
+                return false;
+            }
+
+            return false !== stripos((string) $html, '<sr7-')
+                || false !== stripos((string) $html, 'sr7-module')
+                || false !== stripos((string) $html, '/wp-content/uploads/revslider/');
+        }
+        private function parse_critical_preload_line($line, $forced_as = '')
+        {
+            $line = trim((string) $line);
+            if ('' === $line || '#' === $line[0]) {
+                return array('url' => '', 'as' => '');
+            }
+
+            $as = strtolower(trim((string) $forced_as));
+            $url = $line;
+
+            if (preg_match('/^(script|style|image|font|fetch|document)\s+(.+)$/i', $line, $matches)) {
+                $as = strtolower((string) $matches[1]);
+                $url = trim((string) $matches[2]);
+            }
+
+            $url = $this->absolutize_public_resource_url($url, home_url('/'));
+            if ('' === $url || 0 === strpos($url, 'data:') || 0 === strpos($url, '#')) {
+                return array('url' => '', 'as' => '');
+            }
+
+            if ('' === $as) {
+                $as = $this->infer_preload_as_from_url($url);
+            }
+
+            return array('url' => $url, 'as' => $as);
+        }
+
+        private function infer_preload_as_from_url($url)
+        {
+            $path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
+            if (preg_match('/\.css$/', $path)) {
+                return 'style';
+            }
+            if (preg_match('/\.js$/', $path)) {
+                return 'script';
+            }
+            if (preg_match('/\.(woff2?|ttf|otf)$/', $path)) {
+                return 'font';
+            }
+            if (preg_match('/\.(avif|webp|png|jpe?g|gif)$/', $path)) {
+                return 'image';
+            }
+
+            return 'fetch';
+        }
+
+        private function inject_critical_preload_link_candidates($html, array $candidates)
+        {
+            if (empty($candidates) || false === stripos((string) $html, '</head>')) {
+                return $html;
+            }
+
+            $tags = array();
+            $seen = array();
+            foreach ($candidates as $candidate) {
+                $url = isset($candidate['url']) ? esc_url((string) $candidate['url']) : '';
+                $as = isset($candidate['as']) ? strtolower(trim((string) $candidate['as'])) : 'fetch';
+                if ('' === $url || isset($seen[$url])) {
+                    continue;
+                }
+                if (false !== strpos($html, 'href="' . $url . '"') || false !== strpos($html, "href='" . $url . "'")) {
+                    continue;
+                }
+
+                $seen[$url] = true;
+                if (!in_array($as, array('script', 'style', 'image', 'font', 'fetch', 'document'), true)) {
+                    $as = 'fetch';
+                }
+
+                $attrs = 'rel="preload" as="' . esc_attr($as) . '" href="' . $url . '"';
+                if ('image' === $as) {
+                    $attrs .= ' fetchpriority="high"';
+                } elseif ('font' === $as) {
+                    $attrs .= ' type="font/woff2" crossorigin';
+                } elseif ('fetch' === $as) {
+                    $attrs .= ' crossorigin';
+                }
+
+                $tags[] = '<link ' . $attrs . ' data-ucwp-critical-chain="1">';
+            }
+
+            if (empty($tags)) {
+                return $html;
+            }
+
+            return preg_replace('/<\/head>/i', implode("\n", $tags) . "\n</head>", $html, 1);
+        }
+
+        private function rewrite_chain_delay_stylesheet_links($html, array $settings = array())
+        {
+            $fragments = $this->get_critical_request_chain_delay_fragments($settings);
+            if (empty($fragments) || false === stripos((string) $html, '<link')) {
+                return $html;
+            }
+
+            $that = $this;
+            $rewritten = preg_replace_callback('/<link\b[^>]*>/i', static function ($matches) use ($that, $fragments) {
+                $tag = isset($matches[0]) ? (string) $matches[0] : '';
+                if ('' === $tag || !$that->html_tag_rel_contains_stylesheet($tag)) {
+                    return $tag;
+                }
+                if (false !== stripos($tag, 'data-ucwp-async-css=') || false !== stripos($tag, 'data-ucwp-frontpage-css=') || false !== stripos($tag, 'data-ucwp-page-css-bundle=')) {
+                    return $tag;
+                }
+                $href = $that->extract_attribute_from_html_tag($tag, 'href');
+                if ('' === $href || !$that->asset_matches_fragment_list('', $href, $fragments)) {
+                    return $tag;
+                }
+
+                return $that->force_async_stylesheet_link_tag($tag);
+            }, $html);
+
+            return is_string($rewritten) ? $rewritten : $html;
+        }
+
+        private function force_async_stylesheet_link_tag($tag)
+        {
+            $tag = (string) $tag;
+            if ('' === $tag || false !== stripos($tag, ' onload=')) {
+                return $tag;
+            }
+
+            $rewritten = $this->remove_html_tag_attribute($tag, 'media');
+            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'media', 'print');
+            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'onload', "this.media='all'");
+            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-async-css', '1');
+            return $rewritten . '<noscript>' . $tag . '</noscript>';
+        }
+
+        private function apply_asset_chain_cleanup_to_html($html, array $settings = array())
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            if ($this->html_has_asset_cleanup_exclusion($html, $settings)) {
+                return $html;
+            }
+
+            if (!empty($settings['asset_cleanup_woo_product_assets']) && !$this->html_has_single_product_context($html)) {
+                $html = $this->remove_asset_tags_matching_fragments($html, $this->get_woocommerce_product_asset_cleanup_fragments());
+            }
+
+            if (!empty($settings['asset_cleanup_product_filter_assets']) && !$this->html_has_product_filter_context($html)) {
+                $html = $this->remove_asset_tags_matching_fragments($html, $this->get_product_filter_asset_cleanup_fragments());
+            }
+
+            if (!empty($settings['asset_cleanup_woo_blocks_css']) && !$this->html_has_woocommerce_block_context($html)) {
+                $html = $this->remove_asset_tags_matching_fragments($html, array('wc-blocks.css', 'wc-blocks-style', 'woocommerce-blocks'));
+            }
+
+            return $html;
+        }
+
+        private function remove_asset_tags_matching_fragments($html, array $fragments)
+        {
+            if (empty($fragments)) {
+                return $html;
+            }
+
+            $that = $this;
+            $html = preg_replace_callback('/<script\b[^>]*\bsrc=("|\')(.*?)\1[^>]*>\s*<\/script>/is', static function ($matches) use ($that, $fragments) {
+                $tag = isset($matches[0]) ? (string) $matches[0] : '';
+                $src = isset($matches[2]) ? html_entity_decode((string) $matches[2], ENT_QUOTES, 'UTF-8') : '';
+                return $that->asset_matches_fragment_list('', $src, $fragments) ? '' : $tag;
+            }, $html);
+
+            $html = preg_replace_callback('/<link\b[^>]*>/i', static function ($matches) use ($that, $fragments) {
+                $tag = isset($matches[0]) ? (string) $matches[0] : '';
+                $href = $that->extract_attribute_from_html_tag($tag, 'href');
+                return ('' !== $href && $that->asset_matches_fragment_list('', $href, $fragments)) ? '' : $tag;
+            }, is_string($html) ? $html : '');
+
+            return is_string($html) ? $html : '';
+        }
+
+        private function get_asset_cleanup_exclude_fragments(array $settings = array())
+        {
+            $defaults = array(
+                'elementor',
+                'bricks',
+                'oxygen',
+                'wpbakery',
+                'vc_',
+                'revslider',
+                'sr7',
+                'ajaxsearch',
+                'fibosearch',
+                '.dgwt-wcas',
+                'aws-container',
+                'cart',
+                'checkout',
+                'account',
+            );
+
+            $user_list = array();
+            if (isset($settings['asset_cleanup_exclude_list']) && is_array($settings['asset_cleanup_exclude_list'])) {
+                $user_list = $settings['asset_cleanup_exclude_list'];
+            }
+
+            return array_values(array_unique(array_filter(array_map('strval', array_merge($defaults, $user_list)), 'strlen')));
+        }
+
+        private function current_request_matches_asset_cleanup_exclusion(array $settings = array())
+        {
+            $request_uri = isset($_SERVER['REQUEST_URI']) ? strtolower((string) wp_unslash($_SERVER['REQUEST_URI'])) : '';
+            if ('' === $request_uri) {
+                return false;
+            }
+
+            foreach ($this->get_asset_cleanup_exclude_fragments($settings) as $fragment) {
+                $fragment = strtolower(trim((string) $fragment));
+                if ('' !== $fragment && false !== strpos($request_uri, $fragment)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function html_has_asset_cleanup_exclusion($html, array $settings = array())
+        {
+            $haystack = strtolower((string) $html);
+            if ('' === $haystack) {
+                return false;
+            }
+
+            foreach ($this->get_asset_cleanup_exclude_fragments($settings) as $fragment) {
+                $fragment = strtolower(trim((string) $fragment));
+                if ('' !== $fragment && false !== strpos($haystack, $fragment)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function html_has_single_product_context($html)
+        {
+            $haystack = strtolower((string) $html);
+            return false !== strpos($haystack, 'single-product')
+                || false !== strpos($haystack, 'product_title')
+                || false !== strpos($haystack, 'woocommerce-product-gallery')
+                || false !== strpos($haystack, 'summary entry-summary');
+        }
+
+        private function html_has_product_filter_context($html)
+        {
+            $haystack = strtolower((string) $html);
+            return false !== strpos($haystack, 'woocommerce-products-filter')
+                || false !== strpos($haystack, 'woof_')
+                || false !== strpos($haystack, 'woof_container')
+                || false !== strpos($haystack, 'wpf-')
+                || false !== strpos($haystack, 'berocket')
+                || false !== strpos($haystack, 'data-css-class="woof"')
+                || false !== strpos($haystack, 'ion.rangeSlider');
+        }
+
+        private function html_has_woocommerce_block_context($html)
+        {
+            $haystack = strtolower((string) $html);
+            return false !== strpos($haystack, 'wp-block-woocommerce')
+                || false !== strpos($haystack, 'wc-block-')
+                || false !== strpos($haystack, 'woocommerce-cart')
+                || false !== strpos($haystack, 'woocommerce-checkout')
+                || false !== strpos($haystack, 'woocommerce-account');
         }
 
         private function inject_speculation_rules_prefetch($html, array $settings = array())
@@ -1260,7 +2903,7 @@ HTML;
                 return false;
             }
 
-            if ($this->has_fragile_revslider_shell($html)) {
+            if ($this->has_fragile_revslider_shell($html) || $this->html_has_slider_safe_mode_marker($html)) {
                 return true;
             }
 
@@ -1288,6 +2931,46 @@ HTML;
 
             if ($empty_custom_elements >= 8 && $has_client_bootstrap) {
                 return true;
+            }
+
+            return false;
+        }
+
+        private function html_has_slider_safe_mode_marker($html)
+        {
+            if (!is_string($html) || '' === $html) {
+                return false;
+            }
+
+            $html_lc = strtolower($html);
+            foreach (array(
+                'revslider',
+                'slider revolution',
+                'wp-block-themepunch-revslider',
+                'sr7-',
+                '<sr7-',
+                'rs-module',
+                'rs-fullwidth-wrap',
+                '/wp-content/uploads/revslider/',
+                'revapi',
+                'tptools',
+                'smartslider',
+                'n2-ss',
+                'metaslider',
+                'layerslider',
+                'masterslider',
+                'swiper-container',
+                'swiper-wrapper',
+                'slick-slider',
+                'splide__track',
+                'owl-carousel',
+                'elementor-widget-slides',
+                'elementor-widget-image-carousel',
+                'elementor-widget-media-carousel'
+            ) as $marker) {
+                if (false !== strpos($html_lc, strtolower($marker))) {
+                    return true;
+                }
             }
 
             return false;
@@ -1432,42 +3115,20 @@ HTML;
                 'stats' => $this->get_default_safe_async_css_stats(),
             );
 
-            if (!is_string($html) || '' === $html || false === stripos($html, '<head') || false === stripos($html, '<link')) {
-                return $result;
-            }
-
-            if (!preg_match('/<head\b[^>]*>([\s\S]*?)<\/head>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
-                return $result;
-            }
-
-            $head_html = (string) $matches[0][0];
-            $head_offset = (int) $matches[0][1];
-            $head_inner = isset($matches[1][0]) ? (string) $matches[1][0] : '';
-            if ('' === $head_inner || false === stripos($head_inner, 'stylesheet')) {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link')) {
                 return $result;
             }
 
             $stats = $this->get_default_safe_async_css_stats();
-            $updated_inner = (string) preg_replace_callback(
+            $updated_html = (string) preg_replace_callback(
                 '/<link\b[^>]*>/i',
                 function ($matches) use (&$stats) {
                     return $this->maybe_rewrite_safe_async_css_link_tag((string) $matches[0], $stats);
                 },
-                $head_inner
+                $html
             );
 
-            if ($updated_inner === $head_inner) {
-                $result['stats'] = $stats;
-                return $result;
-            }
-
-            $updated_head = preg_replace('/<head\b([^>]*)>[\s\S]*<\/head>/i', '<head$1>' . $updated_inner . '</head>', $head_html, 1);
-            if (!is_string($updated_head) || '' === $updated_head) {
-                $result['stats'] = $stats;
-                return $result;
-            }
-
-            $result['html'] = substr($html, 0, $head_offset) . $updated_head . substr($html, $head_offset + strlen($head_html));
+            $result['html'] = $updated_html;
             $result['stats'] = $stats;
             return $result;
         }
@@ -1495,7 +3156,7 @@ HTML;
 
             $stats['scanned']++;
 
-            if (false !== stripos($tag, 'data-ucwp-async-css=') || false !== stripos($tag, 'data-ucwp-frontpage-css=')) {
+            if (false !== stripos($tag, 'data-ucwp-async-css=') || false !== stripos($tag, 'data-ucwp-frontpage-css=') || false !== stripos($tag, 'data-ucwp-page-css-bundle=')) {
                 $stats['skipped']++;
                 return $tag;
             }
@@ -1554,6 +3215,112 @@ HTML;
             return in_array('stylesheet', $parts, true) && !in_array('preload', $parts, true) && !in_array('alternate', $parts, true);
         }
 
+
+        private function should_exclude_stylesheet_url_by_fragments($url, array $fragments)
+        {
+            $haystacks = array(
+                strtolower((string) $url),
+                strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH)),
+            );
+
+            foreach ($fragments as $fragment) {
+                $fragment = strtolower(trim((string) $fragment));
+                if ('' === $fragment) {
+                    continue;
+                }
+                foreach ($haystacks as $haystack) {
+                    if ('' !== $haystack && false !== strpos($haystack, $fragment)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private function get_async_css_exclude_fragments()
+        {
+            $settings = $this->get_settings();
+            $list = isset($settings['async_css_exclude_list']) && is_array($settings['async_css_exclude_list']) ? $settings['async_css_exclude_list'] : array();
+            return array_values(array_filter(array_map('strval', $list), static function ($item) {
+                return '' !== trim((string) $item);
+            }));
+        }
+
+        private function get_aggressive_async_css_exclude_fragments()
+        {
+            $settings = $this->get_settings();
+            $list = isset($settings['aggressive_async_css_exclude_list']) && is_array($settings['aggressive_async_css_exclude_list']) ? $settings['aggressive_async_css_exclude_list'] : array();
+            $list = array_merge($this->get_builtin_aggressive_async_css_exclude_fragments(), $list);
+            return array_values(array_filter(array_map('strval', $list), static function ($item) {
+                return '' !== trim((string) $item);
+            }));
+        }
+
+        private function get_builtin_aggressive_async_css_exclude_fragments()
+        {
+            return array(
+                '/uploads/elementor/css/',
+                '/plugins/woocommerce/',
+                '/post-',
+                'base/elementor.css',
+                'gutenberg-blocks.css',
+                'font-css/',
+                'fontawesome',
+                'eicons',
+                'elementor-icons',
+                'wc-blocks.css',
+                'select2.css',
+                'mailerlite_forms.css',
+                'woocommerce-products-filter',
+                '/woof',
+            );
+        }
+
+        private function get_builtin_homepage_css_bundle_exclude_fragments()
+        {
+            return array(
+                // Keep fragile slider/hero runtime CSS outside generated bundles. These files often
+                // coordinate with JS initialization order and should remain explicit stylesheet links.
+                'revslider',
+                'slider-revolution',
+                'revolution',
+                'sr7',
+                'rs7',
+                'rs6',
+                'tptools',
+                'tp-tools',
+                'rs-module',
+                'swiper',
+                'slick',
+                'splide',
+                'owl.carousel',
+                'smartslider',
+                'n2-ss',
+                'layerslider',
+                'metaslider',
+            );
+        }
+
+        private function get_homepage_css_bundle_exclude_fragments()
+        {
+            $settings = $this->get_settings();
+            $list = isset($settings['homepage_css_bundle_exclude_list']) && is_array($settings['homepage_css_bundle_exclude_list'])
+                ? $settings['homepage_css_bundle_exclude_list']
+                : (isset($settings['critical_css_exclude_list']) && is_array($settings['critical_css_exclude_list']) ? $settings['critical_css_exclude_list'] : array());
+
+            $list = array_merge($this->get_builtin_homepage_css_bundle_exclude_fragments(), (array) $list);
+
+            return array_values(array_unique(array_filter(array_map('strval', $list), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+        }
+
+        private function get_critical_css_exclude_fragments()
+        {
+            return $this->get_homepage_css_bundle_exclude_fragments();
+        }
+
         private function is_safe_local_public_stylesheet_url($url)
         {
             $url = $this->normalize_public_resource_url($url);
@@ -1579,9 +3346,49 @@ HTML;
 
         private function should_async_css_stylesheet_url($url, $tag = '')
         {
+            $settings = $this->get_settings();
             $path = strtolower((string) wp_parse_url($url, PHP_URL_PATH));
             if ('' === $path) {
                 return false;
+            }
+
+            $exclude_fragments = $this->get_async_css_exclude_fragments();
+            $aggressive_enabled = !empty($settings['aggressive_async_css']);
+            if ($aggressive_enabled) {
+                $exclude_fragments = array_values(array_unique(array_merge($exclude_fragments, $this->get_aggressive_async_css_exclude_fragments())));
+            }
+
+            if ($this->should_exclude_stylesheet_url_by_fragments($url, $exclude_fragments)) {
+                return false;
+            }
+
+            if ($aggressive_enabled) {
+                $hard_block_patterns = array(
+                    '/dashicons/i',
+                    '/admin-bar/i',
+                    '/\/wp-admin\//i',
+                    '/\/uploads\/elementor\/css\//i',
+                    '/\/plugins\/woocommerce\//i',
+                    '/\/post-\d+\.css$/i',
+                    '/base\/elementor\.css$/i',
+                    '/gutenberg-blocks\.css$/i',
+                    '/font-css\//i',
+                    '/fontawesome/i',
+                    '/eicons/i',
+                    '/wc-blocks\.css$/i',
+                    '/select2\.css$/i',
+                    '/mailerlite_forms\.css$/i',
+                    '/woocommerce-products-filter/i',
+                    '/\/woof/i',
+                );
+
+                foreach ($hard_block_patterns as $pattern) {
+                    if (preg_match($pattern, $path) || preg_match($pattern, (string) $tag)) {
+                        return false;
+                    }
+                }
+
+                return true;
             }
 
             $critical_patterns = array(
@@ -1833,6 +3640,11 @@ HTML;
                 return array('skipped' => true);
             }
 
+            $converted_source_dimensions = $this->get_source_dimensions_for_ultracache_converted_image_url($absolute_url);
+            if ($converted_source_dimensions['width'] > 0 && $converted_source_dimensions['height'] > 0) {
+                return $converted_source_dimensions;
+            }
+
             $attachment_dimensions = $this->get_attachment_dimensions_for_public_image_url($absolute_url);
             if ($attachment_dimensions['width'] > 0 && $attachment_dimensions['height'] > 0) {
                 return $attachment_dimensions;
@@ -1849,6 +3661,83 @@ HTML;
                 'source' => '',
                 'skipped' => false,
             );
+        }
+
+        private function get_source_dimensions_for_ultracache_converted_image_url($url)
+        {
+            $source_url = $this->map_ultracache_converted_image_url_to_upload_url($url);
+            if ('' === $source_url) {
+                return array('width' => 0, 'height' => 0, 'source' => '');
+            }
+
+            $attachment_dimensions = $this->get_attachment_dimensions_for_public_image_url($source_url);
+            if ($attachment_dimensions['width'] > 0 && $attachment_dimensions['height'] > 0) {
+                $attachment_dimensions['source'] = 'converted-source-attachment-metadata';
+                return $attachment_dimensions;
+            }
+
+            $file_dimensions = $this->get_local_file_dimensions_for_public_image_url($source_url);
+            if ($file_dimensions['width'] > 0 && $file_dimensions['height'] > 0) {
+                $file_dimensions['source'] = 'converted-source-file-dimensions';
+                return $file_dimensions;
+            }
+
+            return array('width' => 0, 'height' => 0, 'source' => '');
+        }
+
+        private function map_ultracache_converted_image_url_to_upload_url($url)
+        {
+            $url = $this->normalize_public_resource_url($url);
+            if ('' === $url) {
+                return '';
+            }
+
+            $path = (string) wp_parse_url($url, PHP_URL_PATH);
+            if ('' === $path) {
+                return '';
+            }
+
+            $content_path = rtrim((string) wp_parse_url(content_url('/'), PHP_URL_PATH), '/');
+            $cache_prefixes = array(
+                $content_path . '/cache/ultracache-avif/',
+                $content_path . '/cache/ultracache-webp/',
+            );
+
+            $relative = '';
+            foreach ($cache_prefixes as $prefix) {
+                if ('' !== $prefix && 0 === strpos($path, $prefix)) {
+                    $relative = ltrim(substr($path, strlen($prefix)), '/');
+                    break;
+                }
+            }
+
+            if ('' === $relative || false !== strpos($relative, '..')) {
+                return '';
+            }
+
+            $relative_dir = trim(str_replace('\\', '/', dirname($relative)), '. /');
+            $stem = pathinfo($relative, PATHINFO_FILENAME);
+            if ('' === $stem) {
+                return '';
+            }
+
+            $uploads = wp_get_upload_dir();
+            if (empty($uploads['basedir']) || empty($uploads['baseurl'])) {
+                return '';
+            }
+
+            $candidate_dir = trailingslashit((string) $uploads['basedir']) . ('' !== $relative_dir ? trailingslashit($relative_dir) : '');
+            $candidate_url_dir = trailingslashit((string) $uploads['baseurl']) . ('' !== $relative_dir ? trailingslashit($relative_dir) : '');
+            $extensions = array('jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp');
+
+            foreach ($extensions as $extension) {
+                $candidate_file = $candidate_dir . $stem . '.' . $extension;
+                if (is_readable($candidate_file) && is_file($candidate_file)) {
+                    return $candidate_url_dir . rawurlencode($stem . '.' . $extension);
+                }
+            }
+
+            return '';
         }
 
         private function is_safe_local_public_image_url($url)
@@ -2208,9 +4097,15 @@ HTML;
                 return $html;
             }
 
+            $manual_candidate = $this->find_manual_lcp_candidate($html);
+            if (null !== $manual_candidate) {
+                return $this->apply_lcp_candidate_optimizations($html, $manual_candidate);
+            }
+
             $has_standard_images = false !== stripos($html, '<img');
             $has_sr7_markup = false !== stripos($html, '<sr7-') || false !== stripos($html, 'sr7-module') || false !== stripos($html, '/wp-content/uploads/revslider/');
-            if (!$has_standard_images && !$has_sr7_markup) {
+            $has_manual_lcp_override = !empty($this->get_settings()['lcp_image_priority_override_list']);
+            if (!$has_standard_images && !$has_sr7_markup && !$has_manual_lcp_override) {
                 return $html;
             }
 
@@ -2219,6 +4114,275 @@ HTML;
             }
 
             return $this->optimize_lcp_image_markup_with_regex($html);
+        }
+
+
+        private function inject_safe_lcp_priority_preloads($html)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '</head')) {
+                return $html;
+            }
+
+            $manual_candidate = $this->find_manual_lcp_candidate($html);
+            if (null !== $manual_candidate && !empty($manual_candidate['url'])) {
+                return $this->inject_lcp_preload_link($html, $manual_candidate['url']);
+            }
+
+            $sr7_candidate = $this->find_best_sr7_lcp_candidate($html);
+            if (null !== $sr7_candidate && !empty($sr7_candidate['url'])) {
+                if ($this->is_sr7_generated_image_list_url($sr7_candidate['url'])) {
+                    return $html;
+                }
+                return $this->inject_lcp_preload_link($html, $sr7_candidate['url']);
+            }
+
+            return $html;
+        }
+
+
+        private function apply_sr7_first_slide_lcp_priority_markup($html)
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            if (false === stripos($html, '<sr7-') && false === stripos($html, 'sr7-module')) {
+                return $html;
+            }
+
+            $html = preg_replace_callback(
+                '/<sr7-slide\b[^>]*>.*?<\/sr7-slide>/is',
+                function ($matches) {
+                    $slide = isset($matches[0]) ? (string) $matches[0] : '';
+                    if ('' === $slide || false === stripos($slide, '<sr7-img')) {
+                        return $slide;
+                    }
+
+                    $slide = preg_replace_callback(
+                        '/<sr7-img\b[^>]*>/i',
+                        function ($tag_matches) {
+                            $tag = isset($tag_matches[0]) ? (string) $tag_matches[0] : '';
+                            return $this->add_lcp_priority_attributes_to_start_tag($tag, true);
+                        },
+                        $slide
+                    );
+
+                    return is_string($slide) ? $slide : (string) $matches[0];
+                },
+                $html,
+                1
+            );
+
+            if (!is_string($html)) {
+                return '';
+            }
+
+            // Some SR7 layers are created or normalized by runtime JS. Add a tiny, ID-independent
+            // guard so first-slide image layers are still marked when generated dynamically.
+            return $this->inject_sr7_lcp_priority_runtime_script($html);
+        }
+
+        private function add_lcp_priority_attributes_to_start_tag($tag, $include_loading = false)
+        {
+            $tag = (string) $tag;
+            if ('' === $tag || '>' !== substr(rtrim($tag), -1)) {
+                return $tag;
+            }
+
+            $replacement = $tag;
+            if (false === stripos($replacement, 'fetchpriority=')) {
+                $replacement = rtrim(substr($replacement, 0, -1)) . ' fetchpriority="high">';
+            }
+
+            if ($include_loading) {
+                if (preg_match('~\sloading=("|\')lazy\1~i', $replacement)) {
+                    $replacement = preg_replace('~\sloading=("|\')lazy\1~i', ' loading="eager"', $replacement, 1);
+                } elseif (false === stripos($replacement, ' loading=')) {
+                    $replacement = rtrim(substr($replacement, 0, -1)) . ' loading="eager">';
+                }
+            }
+
+            return $replacement;
+        }
+
+        private function inject_sr7_lcp_priority_runtime_script($html)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '</head>')) {
+                return $html;
+            }
+
+            if (false !== stripos($html, 'id="ucwp-sr7-lcp-priority"') || false !== stripos($html, "id='ucwp-sr7-lcp-priority'")) {
+                return $html;
+            }
+
+            $script = <<<'HTML'
+<script id="ucwp-sr7-lcp-priority">(function(){"use strict";if(window.__ucwpSr7LcpPriority){return;}window.__ucwpSr7LcpPriority=1;var MAX=8;function tagName(n){return n&&n.tagName?String(n.tagName).toLowerCase():"";}function mark(n){try{if(!n||n.nodeType!==1){return false;}var t=tagName(n);if(t!=="sr7-img"&&t!=="img"){return false;}n.setAttribute("fetchpriority","high");n.setAttribute("data-ucwp-sr7-lcp","1");if(!n.hasAttribute("loading")||n.getAttribute("loading")==="lazy"){n.setAttribute("loading","eager");}if(!n.hasAttribute("decoding")){n.setAttribute("decoding","sync");}return true;}catch(e){return false;}}function firstSlide(m){if(!m){return null;}return m.querySelector('sr7-slide[data-key="1"]')||m.querySelector('sr7-slide:not([aria-hidden="true"])')||m.querySelector("sr7-slide");}function markSlide(s){if(!s){return false;}var nodes=s.querySelectorAll("sr7-img,img");var did=false;for(var i=0;i<nodes.length&&i<MAX;i++){did=mark(nodes[i])||did;var inner=nodes[i].querySelectorAll?nodes[i].querySelectorAll("img"):[];for(var j=0;j<inner.length&&j<MAX;j++){did=mark(inner[j])||did;}}return did;}function markModule(m){return markSlide(firstSlide(m));}function markAll(){var did=false;var modules=document.querySelectorAll("sr7-module,rs-module");if(modules.length){for(var i=0;i<modules.length;i++){did=markModule(modules[i])||did;}}else{var slides=document.querySelectorAll('sr7-slide[data-key="1"],sr7-slide');for(var k=0;k<slides.length&&k<2;k++){did=markSlide(slides[k])||did;}}return did;}function schedule(){markAll();requestAnimationFrame(function(){markAll();});}document.addEventListener("sr.module.ready",function(){schedule();},true);document.addEventListener("sr.slide.afterChange",function(){schedule();},true);document.addEventListener("SR7_MODULE_READY",function(){schedule();},true);if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",schedule,{once:true});}else{schedule();}var tries=[100,300,800,1500,3000,5000];for(var x=0;x<tries.length;x++){setTimeout(schedule,tries[x]);}var mo;if("MutationObserver" in window){mo=new MutationObserver(function(muts){for(var i=0;i<muts.length;i++){for(var j=0;j<muts[i].addedNodes.length;j++){var n=muts[i].addedNodes[j];if(!n||n.nodeType!==1){continue;}var tn=tagName(n);if(tn==="sr7-img"||tn==="img"||tn==="sr7-slide"||tn==="sr7-module"||tn==="rs-module"||(n.querySelector&&(n.querySelector("sr7-img,img,sr7-slide,sr7-module,rs-module")))){schedule();return;}}}});mo.observe(document.documentElement,{childList:true,subtree:true});setTimeout(function(){try{if(mo){mo.disconnect();}}catch(e){}schedule();},8000);}}());</script>
+HTML;
+
+            return preg_replace('/<\/head>/i', $script . "\n</head>", $html, 1);
+        }
+
+        private function find_manual_lcp_candidate($html)
+        {
+            $settings = $this->get_settings();
+            $entries = isset($settings['lcp_image_priority_override_list']) && is_array($settings['lcp_image_priority_override_list']) ? $settings['lcp_image_priority_override_list'] : array();
+            if (empty($entries) || !is_string($html) || '' === $html) {
+                return null;
+            }
+
+            foreach ($entries as $entry) {
+                $needle = trim((string) $entry);
+                if ('' === $needle) {
+                    continue;
+                }
+
+                $tag_candidate = $this->find_lcp_candidate_matching_manual_fragment($html, $needle);
+                if (null !== $tag_candidate) {
+                    $tag_candidate['score'] = 1000000;
+                    $tag_candidate['is_manual'] = true;
+                    return $tag_candidate;
+                }
+
+                $matched_url = $this->find_image_url_in_html_by_fragment($html, $needle);
+                if ('' !== $matched_url) {
+                    $candidate = $this->build_lcp_candidate_from_values($matched_url, array(
+                        'tag' => 'MANUAL',
+                        'attribute' => 'manual',
+                    ));
+                    if (null !== $candidate) {
+                        $candidate['score'] = 1000000;
+                        $candidate['is_manual'] = true;
+                        return $candidate;
+                    }
+                }
+
+                $normalized = $this->normalize_public_resource_url($needle);
+                if ($this->is_lcp_candidate_image_url($normalized)) {
+                    return array(
+                        'url' => $normalized,
+                        'raw_url' => $needle,
+                        'attribute' => 'manual',
+                        'tag' => 'MANUAL',
+                        'score' => 1000000,
+                        'is_manual' => true,
+                    );
+                }
+            }
+
+            return null;
+        }
+
+        private function find_lcp_candidate_matching_manual_fragment($html, $needle)
+        {
+            if (!preg_match_all('/<(img|video|div|section|figure|picture|a|sr7-img|sr7-slide|sr7-content|sr7-module)\b[^>]*>/i', (string) $html, $matches)) {
+                return null;
+            }
+
+            $candidates = array();
+            foreach ($matches[0] as $tag_html) {
+                if (!$this->manual_lcp_fragment_matches_tag($tag_html, $needle)) {
+                    continue;
+                }
+
+                $tag_name = '';
+                if (preg_match('/^<([a-z0-9:-]+)/i', $tag_html, $tag_match) && !empty($tag_match[1])) {
+                    $tag_name = strtoupper((string) $tag_match[1]);
+                }
+
+                $context = array(
+                    'tag'        => $tag_name,
+                    'class'      => $this->extract_attribute_from_html_tag($tag_html, 'class'),
+                    'id'         => $this->extract_attribute_from_html_tag($tag_html, 'id'),
+                    'title'      => $this->extract_attribute_from_html_tag($tag_html, 'title'),
+                    'alt'        => $this->extract_attribute_from_html_tag($tag_html, 'alt'),
+                    'aria-label' => $this->extract_attribute_from_html_tag($tag_html, 'aria-label'),
+                    'width'      => $this->extract_attribute_from_html_tag($tag_html, 'width'),
+                    'height'     => $this->extract_attribute_from_html_tag($tag_html, 'height'),
+                    'loading'    => $this->extract_attribute_from_html_tag($tag_html, 'loading'),
+                    'style'      => $this->extract_attribute_from_html_tag($tag_html, 'style'),
+                );
+
+                foreach (array('src', 'data-src', 'data-lazy-src', 'data-lazyload', 'data-image', 'data-origin', 'data-bg', 'data-background', 'data-bg-image', 'data-background-image', 'poster') as $attribute) {
+                    $value = $this->extract_attribute_from_html_tag($tag_html, $attribute);
+                    if ('' === $value) {
+                        continue;
+                    }
+                    $candidate = $this->build_lcp_candidate_from_values($value, $context + array('attribute' => $attribute));
+                    if (null !== $candidate) {
+                        $candidates[] = $candidate;
+                    }
+                }
+
+                foreach (array('srcset', 'data-srcset', 'data-lazy-srcset', 'data-lazyload-srcset') as $attribute) {
+                    foreach ($this->extract_candidate_urls_from_srcset($this->extract_attribute_from_html_tag($tag_html, $attribute)) as $srcset_url) {
+                        $candidate = $this->build_lcp_candidate_from_values($srcset_url, $context + array('attribute' => $attribute));
+                        if (null !== $candidate) {
+                            $candidates[] = $candidate;
+                        }
+                    }
+                }
+
+                foreach ($this->extract_candidate_urls_from_style($context['style']) as $style_url) {
+                    $candidate = $this->build_lcp_candidate_from_values($style_url, $context + array('attribute' => 'style'));
+                    if (null !== $candidate) {
+                        $candidates[] = $candidate;
+                    }
+                }
+            }
+
+            if (empty($candidates)) {
+                return null;
+            }
+
+            usort($candidates, function ($left, $right) {
+                return (int) $right['score'] <=> (int) $left['score'];
+            });
+
+            return $candidates[0];
+        }
+
+        private function manual_lcp_fragment_matches_tag($tag_html, $needle)
+        {
+            $tag_html = (string) $tag_html;
+            $needle = trim((string) $needle);
+            if ('' === $needle) {
+                return false;
+            }
+
+            if ('#' === substr($needle, 0, 1)) {
+                $id = substr($needle, 1);
+                return '' !== $id && strtolower($this->extract_attribute_from_html_tag($tag_html, 'id')) === strtolower($id);
+            }
+
+            if ('.' === substr($needle, 0, 1)) {
+                $class = substr($needle, 1);
+                if ('' === $class) {
+                    return false;
+                }
+                $classes = preg_split('/\s+/', strtolower($this->extract_attribute_from_html_tag($tag_html, 'class')));
+                return in_array(strtolower($class), is_array($classes) ? $classes : array(), true);
+            }
+
+            return false !== stripos($tag_html, $needle);
+        }
+
+        private function find_image_url_in_html_by_fragment($html, $needle)
+        {
+            $needle = trim((string) $needle);
+            if ('' === $needle) {
+                return '';
+            }
+
+            if (preg_match_all('/[^\s"\'<>]+\.(?:avif|webp|png|jpe?g|gif|bmp|heic|heif)(?:\?[^\s"\'<>]*)?/i', (string) $html, $matches)) {
+                foreach ($matches[0] as $raw_url) {
+                    $candidate_url = trim((string) $raw_url, " \t\n\r\0\x0B()[]{}.,;");
+                    if ('' !== $candidate_url && false !== stripos($candidate_url, $needle) && $this->is_lcp_candidate_image_url($candidate_url)) {
+                        return $candidate_url;
+                    }
+                }
+            }
+
+            return '';
         }
 
         private function optimize_lcp_image_markup_with_tag_processor($html)
@@ -2712,6 +4876,15 @@ HTML;
             );
         }
 
+        private function is_sr7_generated_image_list_url($url)
+        {
+            $url = $this->normalize_public_resource_url($url);
+            if ('' === $url) {
+                return false;
+            }
+
+            return false !== stripos($url, '/wp-content/uploads/revslider/o/');
+        }
         private function is_lcp_candidate_image_url($src)
         {
             $src = $this->normalize_public_resource_url($src);
@@ -2874,14 +5047,14 @@ HTML;
                         return $tag;
                     }
 
-                    if (false !== stripos($tag, 'data-ucwp-frontpage-css=') || false !== stripos($tag, 'id="ucwp-frontpage-css"') || false !== stripos($tag, "id='ucwp-frontpage-css'")) {
+                    if (false !== stripos($tag, 'data-ucwp-frontpage-css=') || false !== stripos($tag, 'id="ucwp-page-css-bundle"') || false !== stripos($tag, "id='ucwp-frontpage-css'")) {
                         return $tag;
                     }
 
                     $normalized_href = $this->normalize_public_resource_url($href);
                     if ('' !== $normalized_href) {
                         $normalized_path = strtolower((string) wp_parse_url($normalized_href, PHP_URL_PATH));
-                        if (false !== strpos($normalized_path, '/cache/ultracache/frontpage-css/')) {
+                        if (false !== strpos($normalized_path, '/cache/ultracache/css-bundles/')) {
                             return $tag;
                         }
                     }
@@ -2929,7 +5102,7 @@ HTML;
             }
 
             $source_path_lc = strtolower(str_replace('\\', '/', $source_path));
-            if (false !== strpos($source_path_lc, '/cache/ultracache/frontpage-css/')) {
+            if (false !== strpos($source_path_lc, '/cache/ultracache/css-bundles/')) {
                 return array();
             }
 
@@ -2982,7 +5155,7 @@ HTML;
                 return $html;
             }
 
-            $script = '<script data-ucwp-font-css-map="1">(function(){var map=' . $json . ';if(!map||typeof map!=="object"){return;}var toAbs=function(url){if(!url){return "";}try{return new URL(url, document.baseURI).href;}catch(e){try{var a=document.createElement("a");a.href=url;return a.href||url;}catch(err){return url;}}};var rewrite=function(node){if(!node||node.nodeType!==1||String(node.tagName||"").toLowerCase()!=="link"){return;}var rel=String(node.getAttribute("rel")||"").toLowerCase();if(rel.indexOf("stylesheet")===-1){return;}var href=node.getAttribute("href")||node.href||"";if(!href){return;}var abs=toAbs(href);if(abs&&map[abs]&&abs!==map[abs]){node.setAttribute("href", map[abs]);try{node.href=map[abs];}catch(e){}}};var patch=function(proto, method){if(!proto||typeof proto[method]!=="function"){return;}var orig=proto[method];proto[method]=function(node, ref){try{rewrite(node);}catch(e){}return orig.apply(this, arguments);};};patch(Element.prototype,"appendChild");patch(Element.prototype,"insertBefore");try{var links=document.querySelectorAll("link[rel][href]");for(var i=0;i<links.length;i++){rewrite(links[i]);}}catch(e){}try{var mo=new MutationObserver(function(list){for(var i=0;i<list.length;i++){var added=list[i]&&list[i].addedNodes?list[i].addedNodes:[];for(var j=0;j<added.length;j++){var node=added[j];rewrite(node);if(node&&node.querySelectorAll){var nested=node.querySelectorAll("link[rel][href]");for(var k=0;k<nested.length;k++){rewrite(nested[k]);}}}}});mo.observe(document.documentElement||document.head||document.body,{childList:true,subtree:true});}catch(e){}})();</script>';
+            $script = '<script data-ucwp-font-css-map="1">(function(){var map=' . $json . ';if(!map||typeof map!=="object"){return;}var toAbs=function(url){if(!url){return "";}try{return new URL(url, document.baseURI).href;}catch(e){try{var a=document.createElement("a");a.href=url;return a.href||url;}catch(err){return url;}}};var rewrite=function(node){if(!node||node.nodeType!==1){return;}var tag=String(node.tagName||"").toLowerCase();if(tag!=="link"){return;}var rel=String(node.getAttribute("rel")||"").toLowerCase();if(rel.indexOf("stylesheet")===-1){return;}var href=node.getAttribute("href")||node.href||"";if(!href){return;}var abs=toAbs(href);if(abs&&map[abs]&&abs!==map[abs]){node.setAttribute("href",map[abs]);try{node.href=map[abs];}catch(e){}}};var scan=function(root){try{var links=(root||document).querySelectorAll? (root||document).querySelectorAll("link[rel][href]") : [];for(var i=0;i<links.length;i++){rewrite(links[i]);}}catch(e){}};scan(document);try{var mo=new MutationObserver(function(list){for(var i=0;i<list.length;i++){var added=list[i]&&list[i].addedNodes?list[i].addedNodes:[];for(var j=0;j<added.length;j++){var node=added[j];rewrite(node);scan(node);}}});mo.observe(document.documentElement||document.head||document.body,{childList:true,subtree:true});}catch(e){}})();</script>';
 
             return preg_replace('/<\/head>/i', $script . "\n</head>", $html, 1);
         }
@@ -3521,14 +5694,13 @@ HTML;
                 }
             }
 
-            if (empty($lookup)) {
-                return array();
-            }
-
             $filtered = array();
             foreach ($query_vars as $query_key => $query_value) {
                 $normalized_key = sanitize_key((string) $query_key);
-                if ('' === $normalized_key || !isset($lookup[$normalized_key])) {
+                if ('' === $normalized_key) {
+                    continue;
+                }
+                if (!empty($lookup) && !isset($lookup[$normalized_key])) {
                     continue;
                 }
 
@@ -3551,6 +5723,59 @@ HTML;
             }
 
             return http_build_query($filtered, '', '&', PHP_QUERY_RFC3986);
+        }
+
+        private function get_first_non_allowlisted_query_key($query, array $allowlist = array())
+        {
+            if ('' === (string) $query) {
+                return '';
+            }
+
+            if (is_string($query)) {
+                parse_str($query, $query_vars);
+            } elseif (is_array($query)) {
+                $query_vars = $query;
+            } else {
+                $query_vars = array();
+            }
+
+            if (empty($query_vars) || !is_array($query_vars)) {
+                return '';
+            }
+
+            $lookup = array();
+            foreach ($allowlist as $allowed_key) {
+                $allowed_key = sanitize_key((string) $allowed_key);
+                if ('' !== $allowed_key) {
+                    $lookup[$allowed_key] = true;
+                }
+            }
+
+            if (empty($lookup)) {
+                return '';
+            }
+
+            foreach (array_keys($query_vars) as $query_key) {
+                $normalized_key = sanitize_key((string) $query_key);
+                if ('' === $normalized_key || !isset($lookup[$normalized_key])) {
+                    return '' !== $normalized_key ? $normalized_key : (string) $query_key;
+                }
+            }
+
+            return '';
+        }
+
+        private function query_has_cacheable_allowlisted_variant($query, array $allowlist = array())
+        {
+            if ('' === (string) $query) {
+                return false;
+            }
+
+            if ('' !== $this->get_first_non_allowlisted_query_key($query, $allowlist)) {
+                return false;
+            }
+
+            return !empty($this->normalize_query_vars_for_cache($query, $allowlist));
         }
 
         private function get_matching_path_rule($path, array $rules)
@@ -3615,6 +5840,7 @@ HTML;
                 'excluded-path'             => 'Excluded by path rule',
                 'excluded-query-arg'        => 'Excluded by query-arg rule',
                 'query-strings-disabled'    => 'Query strings are not cached',
+                'query-arg-not-allowlisted' => 'Query arg is not in the cache allowlist',
                 'woocommerce-dynamic-path'  => 'WooCommerce dynamic path bypass',
                 'woocommerce-dynamic-query' => 'WooCommerce dynamic query bypass',
                 'woocommerce-cart'          => 'WooCommerce cart bypass',
@@ -3858,8 +6084,14 @@ HTML;
                     return true;
                 }
 
+                $query_allowlist = $this->get_query_allowlist($settings);
                 if (empty($settings['cache_query_strings'])) {
                     $this->last_bypass_reason = 'query-strings-disabled';
+                    return true;
+                }
+
+                if (!empty($query_allowlist) && !$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
+                    $this->last_bypass_reason = 'query-arg-not-allowlisted';
                     return true;
                 }
             }
@@ -4107,6 +6339,22 @@ HTML;
                 'message' => $success ? sprintf('Generated %d cache file(s).', count($cached_files)) : $last_error,
                 'files'   => $cached_files,
             );
+
+            if ($success && !empty($args['build_css_bundle'])) {
+                $settings = $this->get_settings();
+                $bundle_scope = $this->get_css_bundle_scope($settings);
+                $bundle_result = array('success' => false, 'skipped' => true, 'message' => 'CSS bundle skipped for this URL by the selected CSS Bundling Scope.');
+                if ('per-page' === $bundle_scope || $this->is_frontpage_request_url($url)) {
+                    $bundle_result = $this->build_frontpage_css_bundle($url);
+                }
+                $result['cssBundle'] = is_array($bundle_result) ? $bundle_result : array();
+                if (!empty($bundle_result['success'])) {
+                    $result['message'] .= ' CSS bundle built.';
+                } elseif (!empty($bundle_result['message'])) {
+                    $result['message'] .= ' CSS bundle skipped: ' . (string) $bundle_result['message'];
+                }
+            }
+
             $this->record_analytics_warm($url, $result);
 
             return $result;
@@ -4115,6 +6363,12 @@ HTML;
         private function is_frontpage_css_scan_mode()
         {
             return '1' === sanitize_text_field(ucwp_query_value('ucwp_frontpage_css_scan'));
+        }
+
+        private function get_css_bundle_scope(array $settings = array())
+        {
+            $scope = isset($settings['css_bundle_scope']) ? strtolower(trim((string) $settings['css_bundle_scope'])) : 'homepage';
+            return in_array($scope, array('homepage', 'shared', 'per-page'), true) ? $scope : 'homepage';
         }
 
         private function is_frontpage_request_url($url = '')
@@ -4128,7 +6382,7 @@ HTML;
 
         private function get_frontpage_css_dir()
         {
-            return trailingslashit(UCWP_CACHE_DIR) . 'frontpage-css/';
+            return trailingslashit(UCWP_CACHE_DIR) . 'css-bundles/';
         }
 
         private function get_frontpage_css_manifest_file()
@@ -4168,6 +6422,9 @@ HTML;
             if (empty($decoded['entry']) || !is_array($decoded['entry'])) {
                 $decoded['entry'] = array();
             }
+            if (empty($decoded['entries']) || !is_array($decoded['entries'])) {
+                $decoded['entries'] = array();
+            }
 
             return $decoded;
         }
@@ -4181,10 +6438,25 @@ HTML;
             ucwp_safe_file_put_contents($this->get_frontpage_css_manifest_file(), wp_json_encode($manifest), LOCK_EX);
         }
 
-        private function get_frontpage_css_manifest_entry()
+        private function get_css_bundle_manifest_key($url)
         {
+            $normalized = $this->normalize_url((string) $url);
+            return '' === $normalized ? '' : md5($normalized);
+        }
+
+        private function get_frontpage_css_manifest_entry($url = '')
+        {
+            $url = '' !== (string) $url ? (string) $url : $this->get_current_request_url();
+            $key = $this->get_css_bundle_manifest_key($url);
             $manifest = $this->read_frontpage_css_manifest();
-            $entry = isset($manifest['entry']) && is_array($manifest['entry']) ? $manifest['entry'] : array();
+            $entry = array();
+
+            if ('' !== $key && isset($manifest['entries'][$key]) && is_array($manifest['entries'][$key])) {
+                $entry = $manifest['entries'][$key];
+            } elseif ($this->is_frontpage_request_url($url) && isset($manifest['entry']) && is_array($manifest['entry'])) {
+                $entry = $manifest['entry'];
+            }
+
             if (empty($entry['bundleFile']) || !file_exists((string) $entry['bundleFile']) || !is_readable((string) $entry['bundleFile'])) {
                 return array();
             }
@@ -4195,12 +6467,38 @@ HTML;
             return $entry;
         }
 
-        private function delete_frontpage_css_bundle()
+        private function delete_frontpage_css_bundle($url = '')
         {
             $manifest = $this->read_frontpage_css_manifest();
-            $entry = isset($manifest['entry']) && is_array($manifest['entry']) ? $manifest['entry'] : array();
-            if (!empty($entry['bundleFile']) && file_exists((string) $entry['bundleFile'])) {
-                ucwp_safe_unlink((string) $entry['bundleFile']);
+
+            if ('' !== (string) $url) {
+                $key = $this->get_css_bundle_manifest_key($url);
+                $entry = ('' !== $key && isset($manifest['entries'][$key]) && is_array($manifest['entries'][$key])) ? $manifest['entries'][$key] : array();
+                if (empty($entry) && $this->is_frontpage_request_url($url) && isset($manifest['entry']) && is_array($manifest['entry'])) {
+                    $entry = $manifest['entry'];
+                }
+                if (!empty($entry['bundleFile']) && file_exists((string) $entry['bundleFile'])) {
+                    ucwp_safe_unlink((string) $entry['bundleFile']);
+                }
+                if ('' !== $key && isset($manifest['entries'][$key])) {
+                    unset($manifest['entries'][$key]);
+                }
+                if ($this->is_frontpage_request_url($url)) {
+                    $manifest['entry'] = array();
+                }
+                $this->write_frontpage_css_manifest($manifest);
+                return;
+            }
+
+            foreach ((array) ($manifest['entries'] ?? array()) as $entry) {
+                if (is_array($entry) && !empty($entry['bundleFile']) && file_exists((string) $entry['bundleFile'])) {
+                    ucwp_safe_unlink((string) $entry['bundleFile']);
+                }
+            }
+
+            $legacy_entry = isset($manifest['entry']) && is_array($manifest['entry']) ? $manifest['entry'] : array();
+            if (!empty($legacy_entry['bundleFile']) && file_exists((string) $legacy_entry['bundleFile'])) {
+                ucwp_safe_unlink((string) $legacy_entry['bundleFile']);
             }
 
             $file = $this->get_frontpage_css_manifest_file();
@@ -4226,12 +6524,12 @@ HTML;
 
         public function warm_frontpage_html_with_css()
         {
-            return $this->build_frontpage_css_bundle();
+            return $this->build_frontpage_css_bundle(home_url('/'));
         }
 
-        public function build_frontpage_css_bundle()
+        public function build_frontpage_css_bundle($url = '')
         {
-            $frontpage_url = home_url('/');
+            $frontpage_url = '' !== (string) $url ? esc_url_raw((string) $url) : home_url('/');
             $result = array(
                 'success' => false,
                 'skipped' => false,
@@ -4246,14 +6544,14 @@ HTML;
             );
 
             if (!$this->is_cacheable_local_url($frontpage_url)) {
-                $result['message'] = 'Front page is not a local cacheable URL.';
+                $result['message'] = 'Page is not a local cacheable URL.';
                 $this->record_analytics_frontpage_css_warm($result);
                 return $result;
             }
 
             $scan = $this->fetch_frontpage_css_source_html($frontpage_url);
             if (empty($scan['success']) || empty($scan['html'])) {
-                $result['message'] = !empty($scan['message']) ? (string) $scan['message'] : 'Could not fetch front page HTML.';
+                $result['message'] = !empty($scan['message']) ? (string) $scan['message'] : 'Could not fetch page HTML.';
                 $this->record_analytics_frontpage_css_warm($result);
                 return $result;
             }
@@ -4265,25 +6563,37 @@ HTML;
 
             if (empty($prepared['success'])) {
                 $result['skipped'] = !empty($prepared['skipped']);
-                $result['message'] = !empty($prepared['message']) ? (string) $prepared['message'] : 'Could not build front page CSS bundle.';
+                $result['message'] = !empty($prepared['message']) ? (string) $prepared['message'] : 'Could not build CSS bundle.';
                 $this->record_analytics_frontpage_css_warm($result);
                 return $result;
             }
 
-            $previous = $this->get_frontpage_css_manifest_entry();
+            $previous = $this->get_frontpage_css_manifest_entry($frontpage_url);
             $manifest = $this->read_frontpage_css_manifest();
+            $manifest['version'] = 2;
             $manifest['updatedAt'] = current_time('timestamp');
             $manifest['updatedAtMysql'] = current_time('mysql');
-            $manifest['entry'] = array(
+            if (!isset($manifest['entries']) || !is_array($manifest['entries'])) {
+                $manifest['entries'] = array();
+            }
+            $entry = array(
                 'normalizedUrl' => $this->normalize_url($frontpage_url),
                 'bundleFile' => (string) $prepared['bundleFile'],
                 'bundleUrl' => (string) $prepared['bundleUrl'],
                 'sourceUrls' => array_values(array_unique(array_map('strval', (array) ($prepared['sourceUrls'] ?? array())))),
                 'sourceCount' => count((array) ($prepared['sourceUrls'] ?? array())),
                 'bundleCount' => 1,
+                'mode' => (string) ($prepared['mode'] ?? 'safe'),
                 'time' => current_time('timestamp'),
                 'time_mysql' => current_time('mysql'),
             );
+            $key = $this->get_css_bundle_manifest_key($frontpage_url);
+            if ('' !== $key) {
+                $manifest['entries'][$key] = $entry;
+            }
+            if ($this->is_frontpage_request_url($frontpage_url)) {
+                $manifest['entry'] = $entry;
+            }
             $this->write_frontpage_css_manifest($manifest);
 
             if (!empty($previous['bundleFile']) && (string) $previous['bundleFile'] !== (string) $prepared['bundleFile'] && file_exists((string) $previous['bundleFile'])) {
@@ -4297,8 +6607,8 @@ HTML;
             $result['bundleUrl'] = (string) $prepared['bundleUrl'];
             $result['sourceUrls'] = array_values(array_unique(array_map('strval', (array) ($prepared['sourceUrls'] ?? array()))));
             $result['warmResult'] = is_array($warm_result) ? $warm_result : array();
-            $result['message'] = 'Built 1 front page CSS bundle from ' . max(0, (int) ($result['stats']['bundled'] ?? 0)) . ' stylesheet(s).' . (!empty($warm_result['success']) ? ' Front page cache warmed.' : ' Front page cache warm returned: ' . (!empty($warm_result['message']) ? (string) $warm_result['message'] : 'unknown result'));
-            $this->record_cache_event('frontpage-css-build', array(
+            $result['message'] = 'Built 1 CSS bundle from ' . max(0, (int) ($result['stats']['bundled'] ?? 0)) . ' stylesheet(s).' . (!empty($warm_result['success']) ? ' Page cache warmed.' : ' Page cache warm returned: ' . (!empty($warm_result['message']) ? (string) $warm_result['message'] : 'unknown result'));
+            $this->record_cache_event('page-css-bundle-build', array(
                 'url' => $frontpage_url,
                 'bundleFile' => $result['bundleFile'],
                 'sourceCount' => count($result['sourceUrls']),
@@ -4325,13 +6635,13 @@ HTML;
                     'timeout' => 25,
                     'redirection' => 5,
                     'sslverify' => $this->should_verify_loopback_ssl($scan_url),
-                    'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-FrontpageCSS/' . UCWP_VERSION . '; +https://wordpress.org)',
+                    'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-CSSBundle/' . UCWP_VERSION . '; +https://wordpress.org)',
                     'headers' => array(
                         'Cache-Control' => 'no-cache',
                         'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     ),
                 ),
-                'frontpage_css_scan'
+                'css_bundle_scan'
             );
 
             if (is_wp_error($response)) {
@@ -4341,27 +6651,30 @@ HTML;
             $code = (int) wp_remote_retrieve_response_code($response);
             $html = (string) wp_remote_retrieve_body($response);
             if (200 !== $code || '' === $html) {
-                return array('success' => false, 'message' => 200 !== $code ? 'Remote front page did not return HTTP 200.' : 'Remote front page returned an empty body.', 'html' => '');
+                return array('success' => false, 'message' => 200 !== $code ? 'Remote page did not return HTTP 200.' : 'Remote page returned an empty body.', 'html' => '');
             }
 
             return array('success' => true, 'message' => '', 'html' => $html);
         }
 
-        private function build_frontpage_css_bundle_from_html($html, $page_url)
+        private function build_frontpage_css_bundle_from_html($html, $page_url, $mode = '')
         {
+            $settings = $this->get_settings();
+            $mode = in_array((string) $mode, array('safe', 'aggressive'), true) ? (string) $mode : (string) ($settings['homepage_css_bundle_mode'] ?? 'safe');
+            $mode = in_array($mode, array('safe', 'aggressive'), true) ? $mode : 'safe';
             $stats = $this->get_default_frontpage_css_stats();
             $html = $this->normalize_protocol_relative_urls_in_html((string) $html);
             if ('' === $html || false === stripos($html, '<head') || false === stripos($html, '<link')) {
-                return array('success' => false, 'skipped' => true, 'message' => 'No stylesheet links were found on the front page.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => true, 'message' => 'No stylesheet links were found on the page.', 'stats' => $stats);
             }
 
             if (!preg_match('/<head\b[^>]*>([\s\S]*?)<\/head>/i', $html, $matches)) {
-                return array('success' => false, 'skipped' => true, 'message' => 'No <head> element was found on the front page.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => true, 'message' => 'No <head> element was found on the page.', 'stats' => $stats);
             }
 
             $head_inner = isset($matches[1]) ? (string) $matches[1] : '';
             if (!preg_match_all('/<link\b[^>]*>/i', $head_inner, $tag_matches)) {
-                return array('success' => false, 'skipped' => true, 'message' => 'No <link> tags were found on the front page.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => true, 'message' => 'No <link> tags were found on the page.', 'stats' => $stats);
             }
 
             $assets = array();
@@ -4372,7 +6685,7 @@ HTML;
                 }
 
                 $stats['scanned']++;
-                $asset = $this->get_safe_frontpage_stylesheet_asset($tag_html);
+                $asset = $this->get_safe_frontpage_stylesheet_asset($tag_html, $page_url, $mode);
                 if (!empty($asset)) {
                     $assets[] = $asset;
                 } else {
@@ -4386,38 +6699,57 @@ HTML;
             }
 
             if (count($assets) < 2) {
-                return array('success' => false, 'skipped' => true, 'message' => 'Not enough safe local stylesheets were eligible for front page bundling.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => true, 'message' => 'Not enough eligible local stylesheets were found for CSS bundling.', 'stats' => $stats);
             }
 
-            $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets);
+            $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, $mode);
             if (!empty($bundle['stats']) && is_array($bundle['stats'])) {
                 $stats['bundled'] += max(0, (int) ($bundle['stats']['bundled'] ?? 0));
                 $stats['skipped'] += max(0, (int) ($bundle['stats']['skipped'] ?? 0));
                 $stats['unresolved'] += max(0, (int) ($bundle['stats']['unresolved'] ?? 0));
             }
             if (empty($bundle['success'])) {
-                return array('success' => false, 'skipped' => !empty($bundle['skipped']), 'message' => !empty($bundle['message']) ? (string) $bundle['message'] : 'Could not write the front page CSS bundle.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => !empty($bundle['skipped']), 'message' => !empty($bundle['message']) ? (string) $bundle['message'] : 'Could not write the CSS bundle.', 'stats' => $stats);
             }
 
             return array(
                 'success' => true,
                 'skipped' => false,
-                'message' => !empty($bundle['message']) ? (string) $bundle['message'] : 'Prepared front page CSS bundle.',
+                'message' => !empty($bundle['message']) ? (string) $bundle['message'] : 'Prepared CSS bundle.',
                 'bundleFile' => (string) $bundle['file'],
                 'bundleUrl' => (string) $bundle['url'],
                 'sourceUrls' => array_values(array_unique(array_map('strval', (array) ($bundle['sourceUrls'] ?? wp_list_pluck($assets, 'url'))))),
+                'mode' => $mode,
                 'stats' => $stats,
             );
         }
 
-        private function get_safe_frontpage_stylesheet_asset($tag_html)
+        private function is_homepage_css_bundle_allowed_media($media, $mode = 'safe')
+        {
+            $media = strtolower(trim((string) $media));
+            if ('' === $media || 'all' === $media) {
+                return true;
+            }
+
+            if ('aggressive' !== strtolower((string) $mode)) {
+                return false;
+            }
+
+            if (false !== strpos($media, 'print') || false !== strpos($media, 'speech')) {
+                return false;
+            }
+
+            return (0 === strpos($media, 'screen') || 0 === strpos($media, 'all '));
+        }
+
+        private function get_safe_frontpage_stylesheet_asset($tag_html, $page_url = '', $mode = 'safe')
         {
             $tag_html = (string) $tag_html;
             if (!$this->html_tag_rel_contains_stylesheet($tag_html)) {
                 return array();
             }
 
-            if (false !== stripos($tag_html, 'data-ucwp-frontpage-css=') || false !== stripos($tag_html, 'data-ucwp-async-css=')) {
+            if (false !== stripos($tag_html, 'data-ucwp-frontpage-css=') || false !== stripos($tag_html, 'data-ucwp-page-css-bundle=') || false !== stripos($tag_html, 'data-ucwp-async-css=')) {
                 return array();
             }
 
@@ -4433,12 +6765,16 @@ HTML;
             }
 
             $media = strtolower(trim((string) $this->extract_attribute_from_html_tag($tag_html, 'media')));
-            if ('' !== $media && 'all' !== $media) {
+            if (!$this->is_homepage_css_bundle_allowed_media($media, $mode)) {
                 return array();
             }
 
-            $absolute_url = $this->absolutize_public_resource_url($href, home_url('/'));
+            $absolute_url = $this->absolutize_public_resource_url($href, '' !== (string) $page_url ? (string) $page_url : home_url('/'));
             if ('' === $absolute_url) {
+                return array();
+            }
+
+            if ($this->should_exclude_stylesheet_url_by_fragments($absolute_url, $this->get_homepage_css_bundle_exclude_fragments())) {
                 return array();
             }
 
@@ -4452,7 +6788,7 @@ HTML;
             if ('' === $path || '.css' !== strtolower(substr($path, -4))) {
                 return array();
             }
-            if (false !== strpos(strtolower($path), '/cache/ultracache/frontpage-css/')) {
+            if (false !== strpos(strtolower($path), '/cache/ultracache/css-bundles/')) {
                 return array();
             }
 
@@ -4467,7 +6803,7 @@ HTML;
             );
         }
 
-        private function build_frontpage_css_bundle_file($page_url, array $assets)
+        private function build_frontpage_css_bundle_file($page_url, array $assets, $mode = 'safe')
         {
             $dir = $this->get_frontpage_css_dir();
             if (!is_dir($dir)) {
@@ -4491,7 +6827,7 @@ HTML;
                     return array(
                         'success' => false,
                         'skipped' => false,
-                        'message' => 'A front page stylesheet could not be read.',
+                        'message' => 'A stylesheet could not be read.',
                         'stats' => $stats,
                     );
                 }
@@ -4504,7 +6840,7 @@ HTML;
 
                 $signature_parts[] = $url . '|' . (string) ucwp_safe_filemtime($path, 'frontpage_css_bundle_signature') . '|' . strlen($css);
                 $bundle_body .= "
-/* UltraCache Frontpage CSS Source: " . $url . " */
+/* UltraCache CSS Bundle Source: " . $url . " */
 ";
                 $bundle_body .= $this->rewrite_frontpage_css_urls_for_bundle($css, $url) . "
 ";
@@ -4516,24 +6852,25 @@ HTML;
                 return array(
                     'success' => false,
                     'skipped' => true,
-                    'message' => 'Not enough non-empty front page stylesheets were eligible for bundling.',
+                    'message' => 'Not enough non-empty stylesheets were eligible for bundling.',
                     'stats' => $stats,
                     'sourceUrls' => array_values(array_unique(array_map('strval', $used_urls))),
                 );
             }
 
             $signature = md5($page_hash . '|' . implode('||', $signature_parts));
-            $filename = 'frontpage-' . $page_hash . '-' . $signature . '.css';
+            $mode = in_array((string) $mode, array('safe', 'aggressive'), true) ? (string) $mode : 'safe';
+            $filename = 'page-' . $mode . '-' . $page_hash . '-' . $signature . '.css';
             $file = $dir . $filename;
             ucwp_safe_file_put_contents($file, trim($bundle_body) . "
 ", LOCK_EX);
 
-            $message = 'Prepared front page CSS bundle.';
+            $message = 'Prepared ' . $mode . ' CSS bundle.';
             if ($stats['skipped'] > 0) {
                 $message .= ' Skipped ' . (int) $stats['skipped'] . ' empty stylesheet(s).';
             }
 
-            $bundle_url = home_url('/wp-content/cache/ultracache/frontpage-css/' . rawurlencode($filename));
+            $bundle_url = home_url('/wp-content/cache/ultracache/css-bundles/' . rawurlencode($filename));
             $bundle_url = $this->normalize_public_resource_url($bundle_url);
 
             return array(
@@ -4542,6 +6879,7 @@ HTML;
                 'url' => $bundle_url,
                 'message' => $message,
                 'stats' => $stats,
+                'mode' => $mode,
                 'sourceUrls' => array_values(array_unique(array_map('strval', $used_urls))),
             );
         }
@@ -4578,13 +6916,96 @@ HTML;
             return $this->normalize_font_face_display_in_css($css);
         }
 
-        private function maybe_replace_frontpage_stylesheet_links_with_bundle($html)
+        private function maybe_build_page_css_bundle_on_entry($html, array $settings = array())
+        {
+            $url = $this->get_current_request_url();
+            if ('' === $url || !$this->is_cacheable_local_url($url)) {
+                return false;
+            }
+
+            if (!empty($_SERVER['REQUEST_METHOD']) && 'GET' !== strtoupper((string) $_SERVER['REQUEST_METHOD'])) {
+                return false;
+            }
+
+            if (function_exists('is_user_logged_in') && is_user_logged_in()) {
+                return false;
+            }
+
+            if (!empty($this->get_frontpage_css_manifest_entry($url))) {
+                return false;
+            }
+
+            $prepared = $this->build_frontpage_css_bundle_from_html((string) $html, $url, (string) ($settings['homepage_css_bundle_mode'] ?? 'safe'));
+            if (empty($prepared['success'])) {
+                return false;
+            }
+
+            $manifest = $this->read_frontpage_css_manifest();
+            if (!isset($manifest['entries']) || !is_array($manifest['entries'])) {
+                $manifest['entries'] = array();
+            }
+
+            $entry = array(
+                'normalizedUrl' => $this->normalize_url($url),
+                'bundleFile' => (string) $prepared['bundleFile'],
+                'bundleUrl' => (string) $prepared['bundleUrl'],
+                'sourceUrls' => array_values(array_unique(array_map('strval', (array) ($prepared['sourceUrls'] ?? array())))),
+                'sourceCount' => count((array) ($prepared['sourceUrls'] ?? array())),
+                'bundleCount' => 1,
+                'mode' => (string) ($prepared['mode'] ?? 'safe'),
+                'time' => current_time('timestamp'),
+                'time_mysql' => current_time('mysql'),
+            );
+
+            $key = $this->get_css_bundle_manifest_key($url);
+            if ('' !== $key) {
+                $manifest['version'] = 2;
+                $manifest['updatedAt'] = current_time('timestamp');
+                $manifest['updatedAtMysql'] = current_time('mysql');
+                $manifest['entries'][$key] = $entry;
+                if ($this->is_frontpage_request_url($url)) {
+                    $manifest['entry'] = $entry;
+                }
+                $this->write_frontpage_css_manifest($manifest);
+                return true;
+            }
+
+            return false;
+        }
+
+        private function prepare_inline_css_bundle_for_style_tag($css)
+        {
+            $css = is_string($css) ? trim($css) : '';
+            if ('' === $css) {
+                return '';
+            }
+
+            // Keep inline CSS bundles safe inside an HTML <style> element. A literal
+            // </style sequence inside a bundled stylesheet can prematurely close the
+            // tag and leave the document malformed.
+            $css = preg_replace('/<\/(style)/i', '<\\/$1', $css);
+            if (!is_string($css)) {
+                return '';
+            }
+
+            // @charset belongs at the top of external stylesheets. Concatenated inline
+            // bundles may contain multiple declarations, so strip them for inline mode.
+            $css = preg_replace('/@charset\s+["\'][^"\']+["\']\s*;/i', '', $css);
+            if (!is_string($css)) {
+                return '';
+            }
+
+            return trim($css);
+        }
+
+        private function maybe_replace_legacy_frontpage_stylesheet_links_with_bundle($html)
         {
             if (!is_string($html) || '' === $html || !$this->is_frontpage_request_url()) {
                 return $html;
             }
 
-            $entry = $this->get_frontpage_css_manifest_entry();
+            // Stage 1 is the legacy homepage-only bundle path. Do not apply it to page-entry bundles.
+            $entry = $this->get_frontpage_css_manifest_entry(home_url('/'));
             if (empty($entry)) {
                 return $html;
             }
@@ -4611,11 +7032,25 @@ HTML;
                 return $html;
             }
 
+            $settings = $this->get_settings();
+            $bundle_url = isset($entry['bundleUrl']) ? (string) $entry['bundleUrl'] : '';
+            $bundle_file = isset($entry['bundleFile']) ? (string) $entry['bundleFile'] : (isset($entry['file']) ? (string) $entry['file'] : '');
+            if ('' === $bundle_url) {
+                return $html;
+            }
+
+            $replacement = '<link rel="stylesheet" id="ucwp-frontpage-css" href="' . esc_url($bundle_url) . '" data-ucwp-frontpage-css="1" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+            if (!empty($settings['homepage_css_bundle_inline']) || !empty($settings['critical_css_inline'])) {
+                $bundle_css = ('' !== $bundle_file && is_readable($bundle_file)) ? ucwp_safe_file_get_contents($bundle_file) : '';
+                $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($bundle_css);
+                if ('' !== $bundle_css) {
+                    $replacement = '<style id="ucwp-frontpage-css" data-ucwp-frontpage-css="1">' . $bundle_css . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+                }
+            }
+
             $rebuilt_head = '';
             $cursor = 0;
             $matched = 0;
-            $replacement = '<link rel="stylesheet" id="ucwp-frontpage-css" href="' . esc_url((string) $entry['bundleUrl']) . '" data-ucwp-frontpage-css="1" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
-
             foreach ($tag_matches[0] as $match) {
                 $tag_html = (string) $match[0];
                 $start = (int) $match[1];
@@ -4654,6 +7089,136 @@ HTML;
             }
 
             return substr($html, 0, $head_offset) . $updated_head . substr($html, $head_offset + strlen($head_html));
+        }
+
+        private function maybe_replace_page_stylesheet_links_with_bundle($html, $entry_url = '')
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            // Do not stack bundle injections on already-processed HTML.
+            if (false !== stripos($html, 'data-ucwp-page-css-bundle=') || false !== stripos($html, 'id="ucwp-page-css-bundle"')) {
+                return $html;
+            }
+
+            $current_url = $this->get_current_request_url();
+            $entry_url = '' !== (string) $entry_url ? (string) $entry_url : $current_url;
+            $entry = $this->get_frontpage_css_manifest_entry($entry_url);
+            if (empty($entry)) {
+                return $html;
+            }
+
+            $bundle_file = isset($entry['bundleFile']) ? (string) $entry['bundleFile'] : '';
+            $bundle_url = isset($entry['bundleUrl']) ? (string) $entry['bundleUrl'] : '';
+            if ('' === $bundle_file || !is_readable($bundle_file) || '' === $bundle_url) {
+                return $html;
+            }
+
+            $source_urls = array();
+            foreach ((array) ($entry['sourceUrls'] ?? array()) as $url) {
+                $normalized = $this->absolutize_public_resource_url((string) $url, home_url('/'));
+                if ('' !== $normalized) {
+                    $source_urls[$normalized] = true;
+                }
+            }
+            if (empty($source_urls)) {
+                return $html;
+            }
+
+            if (!preg_match('/<head\\b[^>]*>([\\s\\S]*?)<\\/head>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
+                return $html;
+            }
+
+            $head_inner = isset($matches[1][0]) ? (string) $matches[1][0] : '';
+            $head_inner_offset = isset($matches[1][1]) ? (int) $matches[1][1] : -1;
+            if ('' === $head_inner || $head_inner_offset < 0 || !preg_match_all('/<link\\b[^>]*>/i', $head_inner, $tag_matches, PREG_OFFSET_CAPTURE)) {
+                return $html;
+            }
+
+            $matched_tags = array();
+            foreach ($tag_matches[0] as $match) {
+                $tag_html = (string) $match[0];
+                $start = (int) $match[1];
+                $end = $start + strlen($tag_html);
+
+                if (!$this->html_tag_rel_contains_stylesheet($tag_html)) {
+                    continue;
+                }
+
+                $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag_html, 'href'), ENT_QUOTES);
+                if ('' === $href) {
+                    continue;
+                }
+
+                $absolute_url = $this->absolutize_public_resource_url($href, '' !== $current_url ? $current_url : home_url('/'));
+                if ('' === $absolute_url || !isset($source_urls[$absolute_url])) {
+                    continue;
+                }
+
+                $matched_tags[] = array(
+                    'html' => $tag_html,
+                    'start' => $start,
+                    'end' => $end,
+                    'url' => $absolute_url,
+                );
+            }
+
+            if (empty($matched_tags)) {
+                return $html;
+            }
+
+            $settings = $this->get_settings();
+            $replacement = '<link rel="stylesheet" id="ucwp-page-css-bundle" href="' . esc_url($bundle_url) . '" data-ucwp-page-css-bundle="1" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+            if (!empty($settings['homepage_css_bundle_inline']) || !empty($settings['critical_css_inline'])) {
+                $maybe_css = ucwp_safe_file_get_contents($bundle_file);
+                $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($maybe_css);
+                if ('' !== $bundle_css) {
+                    $replacement = '<style id="ucwp-page-css-bundle" data-ucwp-page-css-bundle="1">' . $bundle_css . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+                }
+            }
+
+            $mode = isset($entry['mode']) && 'aggressive' === strtolower((string) $entry['mode']) ? 'aggressive' : 'safe';
+
+            // Stage 1 is intentionally non-destructive: inject the bundle before the first matching
+            // stylesheet but keep the original stylesheets as the authoritative fallback. This avoids
+            // blank/unstyled frontends if a generated bundle is incomplete or blocked.
+            if ('aggressive' !== $mode) {
+                $insert_at = (int) $matched_tags[0]['start'];
+                $rebuilt_head = substr($head_inner, 0, $insert_at) . $replacement . "\n" . substr($head_inner, $insert_at);
+                return substr($html, 0, $head_inner_offset) . $rebuilt_head . substr($html, $head_inner_offset + strlen($head_inner));
+            }
+
+            $fallback_links = array();
+            foreach ($matched_tags as $tag) {
+                $url = (string) $tag['url'];
+                // Stage 2 is intentionally more aggressive: do not preload every original
+                // bundled stylesheet, otherwise the browser still downloads the whole chain.
+                // Keep noscript fallbacks only; slider/hero stylesheets are excluded from the
+                // bundle earlier and therefore remain as normal stylesheet links.
+                $fallback_links[$url] = '<noscript><link rel="stylesheet" href="' . esc_url($url) . '" data-ucwp-page-css-bundle-fallback="1" /></noscript>'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+            }
+
+            $rebuilt_head = '';
+            $cursor = 0;
+            $inserted = false;
+            foreach ($matched_tags as $tag) {
+                $start = (int) $tag['start'];
+                $end = (int) $tag['end'];
+                $rebuilt_head .= substr($head_inner, $cursor, $start - $cursor);
+                if (!$inserted) {
+                    $rebuilt_head .= $replacement . "\n" . implode("\n", array_values($fallback_links)) . "\n";
+                    $inserted = true;
+                }
+                $cursor = $end;
+            }
+            $rebuilt_head .= substr($head_inner, $cursor);
+
+            if (!$inserted || '' === $rebuilt_head) {
+                return $html;
+            }
+
+            return substr($html, 0, $head_inner_offset) . $rebuilt_head . substr($html, $head_inner_offset + strlen($head_inner));
         }
 
         private function get_accept_header_for_bucket($bucket)
@@ -4705,9 +7270,7 @@ HTML;
                     $this->delete_cache_variants($file);
                 }
 
-                if ($this->is_frontpage_request_url($normalized_url)) {
-                    $this->delete_frontpage_css_bundle();
-                }
+                $this->delete_frontpage_css_bundle($normalized_url);
 
                 $purged_urls[$normalized_url] = $normalized_url;
             }
@@ -5315,7 +7878,7 @@ HTML;
             $path = isset($parts['path']) ? '/' . ltrim((string) $parts['path'], '/') : '/';
             $query = '';
 
-            if (!empty($parts['query']) && !empty($allowlist)) {
+            if (!empty($parts['query']) && !empty($settings['cache_query_strings'])) {
                 $query = $this->build_normalized_query_string_for_cache((string) $parts['query'], $allowlist);
             }
 
@@ -5346,11 +7909,12 @@ HTML;
         {
             $input_url = trim((string) $url);
             $absolute_url = $this->normalize_inspection_url($input_url);
-            $normalized_url = '' !== $absolute_url ? $this->normalize_url($absolute_url) : '';
             $settings = $this->get_settings();
-            $parts = '' !== $normalized_url ? wp_parse_url($normalized_url) : array();
-            $path = isset($parts['path']) ? $this->normalize_path_value((string) $parts['path']) : '/';
-            $query = isset($parts['query']) ? (string) $parts['query'] : '';
+            $decision_parts = '' !== $absolute_url ? wp_parse_url($absolute_url) : array();
+            $path = isset($decision_parts['path']) ? $this->normalize_path_value((string) $decision_parts['path']) : '/';
+            $query = isset($decision_parts['query']) ? (string) $decision_parts['query'] : '';
+            $normalized_url = '' !== $absolute_url ? $this->normalize_url($absolute_url) : '';
+            $parts = !empty($decision_parts) && is_array($decision_parts) ? $decision_parts : array();
             $query_vars = array();
             if ('' !== $query) {
                 parse_str($query, $query_vars);
@@ -5371,18 +7935,20 @@ HTML;
 
             $matched_excluded_path_rule = '' !== $normalized_url ? $this->get_matching_path_rule($path, $excluded_paths) : '';
             $matched_excluded_query_arg = '' !== $query ? $this->get_matching_query_arg($query, $excluded_query_args) : '';
-            $matched_woo_path_rule = '' !== $normalized_url ? $this->get_matching_path_rule($path, $dynamic_paths) : '';
+            $query_allowlist = $this->get_query_allowlist($settings);
+            $matched_non_allowlisted_query_arg = '' !== $query ? $this->get_first_non_allowlisted_query_key($query, $query_allowlist) : '';
+            $matched_woo_path_rule = '' !== $absolute_url ? $this->get_matching_path_rule($path, $dynamic_paths) : '';
             $matched_woo_query_arg = '' !== $query ? $this->get_matching_query_arg($query, $dynamic_query_args) : '';
 
             $reason = 'cacheable';
             $matched_woo_rule = '';
             $matched_woo_rule_type = '';
 
-            if ('' === $input_url || '' === $absolute_url || '' === $normalized_url) {
+            if ('' === $input_url || '' === $absolute_url) {
                 $reason = 'invalid-url';
             } elseif (empty($settings['enabled'])) {
                 $reason = 'disabled';
-            } elseif (!$this->is_cacheable_local_url($normalized_url)) {
+            } elseif (!$this->is_cacheable_local_url($absolute_url)) {
                 $reason = 'non-local-url';
             } elseif (!empty($settings['woo_safe_mode']) && '' !== $matched_woo_path_rule) {
                 $reason = 'woocommerce-dynamic-path';
@@ -5398,6 +7964,8 @@ HTML;
                 $reason = 'excluded-query-arg';
             } elseif ('' !== $query && empty($settings['cache_query_strings'])) {
                 $reason = 'query-strings-disabled';
+            } elseif ('' !== $query && !empty($query_allowlist) && !$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
+                $reason = 'query-arg-not-allowlisted';
             }
 
             $cacheable = 'cacheable' === $reason;
@@ -5418,7 +7986,7 @@ HTML;
                 'cacheable'               => $cacheable,
                 'reason'                  => $reason,
                 'reasonLabel'             => $this->get_bypass_reason_label($reason),
-                'local'                   => '' !== $normalized_url ? $this->is_cacheable_local_url($normalized_url) : false,
+                'local'                   => '' !== $absolute_url ? $this->is_cacheable_local_url($absolute_url) : false,
                 'host'                    => isset($parts['host']) ? (string) $parts['host'] : '',
                 'path'                    => isset($parts['path']) ? (string) $parts['path'] : '',
                 'normalizedPath'          => $path,
@@ -5426,6 +7994,7 @@ HTML;
                 'queryArgKeys'            => array_values(array_map('strval', array_keys($query_vars))),
                 'matchedExcludedPathRule' => $matched_excluded_path_rule,
                 'matchedExcludedQueryArg' => $matched_excluded_query_arg,
+                'matchedNonAllowlistedQueryArg' => $matched_non_allowlisted_query_arg,
                 'matchedWooRule'          => $matched_woo_rule,
                 'matchedWooRuleType'      => $matched_woo_rule_type,
                 'pageCacheEnabled'        => !empty($settings['enabled']),
@@ -6104,8 +8673,14 @@ HTML;
                     return true;
                 }
 
+                $query_allowlist = $this->get_query_allowlist($settings);
                 if (empty($settings['cache_query_strings'])) {
                     $this->last_bypass_reason = 'query-strings-disabled';
+                    return true;
+                }
+
+                if (!empty($query_allowlist) && !$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
+                    $this->last_bypass_reason = 'query-arg-not-allowlisted';
                     return true;
                 }
             }
@@ -6119,10 +8694,18 @@ HTML;
                 return;
             }
 
-            $items = array_diff(scandir($dir), array('.', '..'));
+            $items = function_exists('ucwp_safe_scandir') ? ucwp_safe_scandir($dir, 'page_cache_recursive_delete scandir') : scandir($dir);
+            if (!is_array($items)) {
+                return;
+            }
+
             foreach ($items as $item) {
+                if ('.' === $item || '..' === $item) {
+                    continue;
+                }
+
                 $path = $dir . DIRECTORY_SEPARATOR . $item;
-                if (is_dir($path)) {
+                if (is_dir($path) && !is_link($path)) {
                     $this->recursive_delete($path);
                 } else {
                     ucwp_safe_unlink($path);

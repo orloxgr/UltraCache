@@ -41,7 +41,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		public static function get_unavailable_reason() {
 			$settings = self::get_plugin_settings();
 			if (!empty($settings['object_cache_enabled']) && 'redis' === self::get_selected_backend() && !self::redis_supported()) {
-				return 'Redis backend selected, but the PHP Redis extension is not loaded. Disk fallback will be used.';
+				return 'Redis backend selected, but the PHP Redis extension is not loaded. The fallback backend is Disk.';
 			}
 
 			return '';
@@ -798,6 +798,8 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'redis_password'       => isset($saved['redisPassword']) ? (string) $saved['redisPassword'] : '',
 				'redis_database'       => isset($saved['redisDatabase']) ? absint($saved['redisDatabase']) : 0,
 				'redis_prefix'         => isset($saved['redisPrefix']) ? trim((string) $saved['redisPrefix']) : '',
+				'redis_use_tls'        => !empty($saved['redisUseTls']),
+				'redis_persistent'     => !empty($saved['redisPersistent']),
 				'redis_connect_timeout_ms' => isset($saved['redisConnectTimeoutMs']) ? absint($saved['redisConnectTimeoutMs']) : 200,
 				'redis_read_timeout_ms'    => isset($saved['redisReadTimeoutMs']) ? absint($saved['redisReadTimeoutMs']) : 200,
 			);

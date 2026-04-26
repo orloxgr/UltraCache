@@ -26,7 +26,10 @@
 	const CLEAR_NOTICE_DELAY = 4200;
 	const SYSTEM_NOTICE_DELAY = 7000;
 	const SYSTEM_NOTICE_COOLDOWN = 24 * 60 * 60 * 1000;
-	const STATS_REFRESH_INTERVAL = 15000;
+	const STATS_REFRESH_INTERVAL = 30000;
+	const SETTINGS_SAVE_DEBOUNCE_MS = 700;
+	const ACTION_QUEUE_POLL_DELAY = 750;
+	const ACTION_QUEUE_MAX_POLLS = 160;
 	const JOB_STORAGE_KEY = 'ucwp-dashboard-job-state-v3';
 	const DEFAULT_QUEUE_BATCH_SIZE = 100;
 	const MAX_ITEM_RETRIES = 2;
@@ -51,15 +54,50 @@
 		'brotliEnabled',
 		'gzipEnabled',
 		'avifConversionEnabled',
+		'mediaOptimizationEnabled',
+		'mediaGenerateOnUploadEnabled',
+		'mediaGenerateOnDemandEnabled',
+		'mediaOutputMode',
 		'deferJsEnabled',
+		'deferJsForceList',
+		'deferJsExcludeList',
 		'delayThirdPartyJsEnabled',
 		'asyncExternalScriptsEnabled',
+		'homepageCssBundleEnabled',
+		'homepageCssBundleInlineEnabled',
+		'homepageCssBundleExcludeList',
+		'homepageCssBundleMode',
+		'cssBundleScope',
+		'pageCssBundleOnEntryEnabled',
+		// Legacy import aliases.
+		'criticalCssEnabled',
+		'criticalCssInlineEnabled',
+		'criticalCssExcludeList',
+		'frontendSafeModeEnabled',
+		'sliderSafeModeEnabled',
 		'clsDimensionsEnabled',
 		'asyncCssEnabled',
+		'asyncCssExcludeList',
+		'aggressiveAsyncCssEnabled',
+		'aggressiveAsyncCssExcludeList',
+		'delayNonCriticalJsEnabled',
+		'delayNonCriticalJsExcludeList',
 		'lcpImagePriorityEnabled',
+		'lcpImagePriorityOverride',
+		'mainThreadReliefEnabled',
+		'criticalRequestChainReliefEnabled',
+		'criticalResourcePreloadList',
+		'criticalFetchPreloadList',
+		'criticalRequestChainDelayList',
+		'assetChainCleanupEnabled',
+		'assetCleanupWooProductAssetsEnabled',
+		'assetCleanupProductFilterAssetsEnabled',
+		'assetCleanupWooBlocksCssEnabled',
+		'assetCleanupExcludeList',
 		'googleFontsSwapEnabled',
 		'googleFontsLocalOptimizationEnabled',
 		'selfHostedFontCssOptimizationEnabled',
+		'selfHostedFontRuntimeRewriteEnabled',
 		'speculationRulesEnabled',
 		'browserCacheRulesEnabled',
 		'varnishCliEnabled',
@@ -73,6 +111,8 @@
 		'cacheCleanupEnabled',
 		'cronWarmEnabled',
 		'cronWarmStartAfterCleanup',
+		'cronWarmStartAfterManualPurge',
+		'cronWarmStartAfterFlush',
 		'warmAfterScheduledCleanup',
 		'cronWarmPagesPerMinute',
 		'scheduledWarmLimit',
@@ -82,8 +122,73 @@
 		'cacheMaxStaleMinutes',
 		'cacheExceptionPaths',
 		'cacheExceptionQueryArgs',
+		'cacheQueryStringsEnabled',
 		'cacheQueryStringAllowlist',
 	];
+
+
+	const PERFORMANCE_PROFILE_ORDER = ['off', 'safe', 'balanced', 'aggressive'];
+	const PERFORMANCE_PROFILE_DISPLAY_ORDER = ['custom', 'off', 'safe', 'balanced', 'aggressive'];
+	const PERFORMANCE_PROFILE_CUSTOM = {
+		label: 'Custom',
+		description: 'Turns on automatically when current settings no longer match a known preset. It preserves your manual choices.',
+	};
+	const PERFORMANCE_PROFILES = {
+		off: { label: 'All Off', description: 'Disable page cache, object cache, media, CSS, JS, fonts, prefetch, warmup, and scheduled jobs. Best for first install or troubleshooting.', patch: {
+			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, avifConversionEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
+			deferJsEnabled: false, delayThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, pageCssBundleOnEntryEnabled: false, criticalCssEnabled: false, criticalCssInlineEnabled: false,
+			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
+			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
+			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, cronWarmStartAfterFlush: false, warmAfterScheduledCleanup: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
+			homepageCssBundleMode: 'safe', cssBundleScope: 'homepage', mediaOutputMode: 'auto',
+		} },
+		safe: { label: 'Safe', description: 'Enables page caching, WooCommerce-safe bypasses, browser cache headers, save-time warmup, and stale protection. No JS/CSS/media rewrites.', patch: {
+			pageCacheEnabled: true, objectCacheEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			cronWarmEnabled: false, cacheCleanupEnabled: false, avifConversionEnabled: false, mediaOptimizationEnabled: false, deferJsEnabled: false, delayThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false,
+		} },
+		balanced: { label: 'Balanced', description: 'Adds object cache, media optimization, Safe CLS/LCP image hints, conservative JS defer, safe CSS bundling, and font-display improvements.', patch: {
+			pageCacheEnabled: true, objectCacheEnabled: true, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			avifConversionEnabled: true, mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
+			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'safe', cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: false, criticalCssEnabled: true, criticalCssInlineEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
+			speculationRulesEnabled: false, cronWarmEnabled: false, cacheCleanupEnabled: false, cacheQueryStringsEnabled: false,
+		} },
+		aggressive: { label: 'Aggressive', description: 'Balanced plus delayed third-party JS, main-thread relief, aggressive CSS bundling, CSS bundles on warm, speculation prefetch, cron warmup, and scheduled cleanup.', patch: {
+			pageCacheEnabled: true, objectCacheEnabled: true, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			avifConversionEnabled: true, mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: true, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
+			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'aggressive', cssBundleScope: 'per-page', pageCssBundleOnEntryEnabled: true, criticalCssEnabled: true, criticalCssInlineEnabled: false, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
+			speculationRulesEnabled: true, cronWarmEnabled: true, cronWarmStartAfterCleanup: true, cronWarmStartAfterManualPurge: true, cronWarmStartAfterFlush: true, warmAfterScheduledCleanup: true, cacheCleanupEnabled: true, cacheQueryStringsEnabled: false,
+		} },
+	};
+
+
+	function getPerformanceProfilePatch(profileKey) {
+		const profile = PERFORMANCE_PROFILES[profileKey];
+		if (!profile || !profile.patch) {
+			return {};
+		}
+		if (profileKey === 'off') {
+			return Object.assign({}, profile.patch);
+		}
+		return Object.assign({}, PERFORMANCE_PROFILES.off.patch, profile.patch);
+	}
+
+	function settingValueMatchesProfileValue(currentValue, profileValue) {
+		if (typeof profileValue === 'boolean') { return !!currentValue === profileValue; }
+		if (typeof profileValue === 'number') { return Number(currentValue) === profileValue; }
+		return String(currentValue || '') === String(profileValue || '');
+	}
+
+	function getActivePerformanceProfile(settings) {
+		const current = settings && typeof settings === 'object' ? settings : {};
+		for (const key of PERFORMANCE_PROFILE_ORDER) {
+			const profile = PERFORMANCE_PROFILES[key];
+			const patch = getPerformanceProfilePatch(key);
+			if (Object.keys(patch).every((settingKey) => settingValueMatchesProfileValue(current[settingKey], patch[settingKey]))) {
+				return key;
+			}
+		}
+		return 'custom';
+	}
 
 	function classNames() {
 		return Array.prototype.slice.call(arguments).filter(Boolean).join(' ');
@@ -221,7 +326,10 @@
 		const defaultLimit = getDefaultScheduledWarmLimit();
 
 		if (menuCount > 0 || contentCount > 0 || baseCount > 0 || totalCount > 0) {
-			return 'Detected crawl scope: menu URLs ' + formatNumber(menuCount) + ' + content URLs ' + formatNumber(contentCount) + ' + base URLs ' + formatNumber(baseCount) + ' = estimated ' + formatNumber(totalCount) + ' total. Default scheduled limit is ' + formatNumber(defaultLimit) + '.';
+			const discoveredTotal = Number(crawlScopeSummary.discoveredTotal || totalCount || 0);
+			const cappedTotal = Number(crawlScopeSummary.estimatedTotal || 0);
+			const maxUrls = Number(crawlScopeSummary.maxUrls || cappedTotal || 0);
+			return 'Detected crawl scope: menu URLs ' + formatNumber(menuCount) + ' + content URLs ' + formatNumber(contentCount) + ' + base URLs ' + formatNumber(baseCount) + ' = ' + formatNumber(discoveredTotal) + ' discovered. Scheduled runs are capped at ' + formatNumber(cappedTotal || maxUrls) + '. Default scheduled limit is ' + formatNumber(defaultLimit) + '.';
 		}
 
 		return 'Set the maximum total URLs to process in one scheduled warm queue. Use 0 for unlimited.';
@@ -359,6 +467,7 @@
 			optimize_media: { path: 'optimize-media', method: 'POST' },
 			varnish_test: { path: 'varnish/test', method: 'POST' },
 			varnish_flush_all: { path: 'varnish/flush-all', method: 'POST' },
+			opcache_flush: { path: 'opcache/flush', method: 'POST' },
 			redis_test: { path: 'object-cache/redis-test', method: 'POST' },
 			object_cache_flush: { path: 'object-cache/flush', method: 'POST' },
 			cron_warm_start: { path: 'cron-warm/start', method: 'POST' },
@@ -366,6 +475,9 @@
 			cron_warm_tick: { path: 'cron-warm/tick', method: 'POST' },
 			settings: { path: 'settings', method: 'POST' },
 			save_settings: { path: 'settings', method: 'POST' },
+			queue_action: { path: 'action-queue', method: 'POST' },
+			queue_status: { path: 'action-queue/{id}', method: 'GET' },
+			delete_all_data: { path: 'delete-all-data', method: 'POST' },
 		};
 
 		const route = routes[subAction];
@@ -375,10 +487,16 @@
 
 		let payload = params;
 		let requestUrl = ucwp.restBase + route.path;
+		if (subAction === 'queue_status' && params && params.id) {
+			requestUrl = ucwp.restBase + route.path.replace('{id}', encodeURIComponent(String(params.id)));
+		}
 
 		if (route.method === 'GET' && params && typeof params === 'object') {
 			const query = new URLSearchParams();
 			Object.keys(params).forEach((key) => {
+				if (subAction === 'queue_status' && key === 'id') {
+					return;
+				}
 				if (typeof params[key] === 'undefined' || params[key] === null || params[key] === '') {
 					return;
 				}
@@ -391,11 +509,22 @@
 		}
 
 		if (subAction === 'settings') {
+			let normalizedValue = params.value;
+			if (params.value === '1' || params.value === true) {
+				normalizedValue = true;
+			} else if (params.value === '0' || params.value === false) {
+				normalizedValue = false;
+			}
 			payload = {
-				[params.key]: params.value === '1' || params.value === true,
+				[params.key]: normalizedValue,
 			};
 		} else if (subAction === 'save_settings') {
 			payload = params.settings_json ? JSON.parse(params.settings_json) : {};
+		} else if (subAction === 'queue_action') {
+			payload = {
+				action: params.action || '',
+				params: params.params || {},
+			};
 		}
 
 		const response = await fetch(requestUrl, {
@@ -461,6 +590,8 @@
 		return {
 			items,
 			total,
+			workTotal: typeof (data && data.workTotal) !== 'undefined' ? Math.max(0, Number(data.workTotal || 0)) : total,
+			attachmentTotal: typeof (data && data.attachmentTotal) !== 'undefined' ? Math.max(0, Number(data.attachmentTotal || total)) : total,
 			cursor: typeof (data && data.cursor) === 'string' ? data.cursor : normalizedCursor,
 			limit: typeof (data && data.limit) !== 'undefined' ? Number(data.limit || normalizedLimit) : normalizedLimit,
 			nextCursor: nextCursor,
@@ -489,7 +620,7 @@
 		while (attempt <= MAX_ITEM_RETRIES) {
 			try {
 				if (isWarmJobType(type)) {
-					const result = await apiRequest('crawl_page', { url: item });
+					const result = await apiRequest('crawl_page', { url: item, buildCssBundle: isWarmCssJobType(type) });
 					const detail = result && result.message ? ' — ' + result.message : '';
 					await sleep(40);
 					return ((result && result.cached !== false) ? 'Cached: ' : 'Skipped: ') + item + detail;
@@ -497,7 +628,14 @@
 
 				const response = await apiRequest('optimize_id', { id: item });
 				await sleep(20);
-				return response && response.converted ? 'Converted attachment #' + item : 'Skipped attachment #' + item;
+				const workCompleted = Math.max(1, Number(response && response.workCompleted ? response.workCompleted : response && response.workTotal ? response.workTotal : 1));
+				const avifCount = Math.max(0, Number(response && response.avif ? response.avif : 0));
+				const webpCount = Math.max(0, Number(response && response.webp ? response.webp : 0));
+				return {
+					line: (response && response.converted ? 'Processed attachment #' : 'Scanned attachment #') + item + ' · ' + workCompleted + ' unit' + (workCompleted === 1 ? '' : 's') + ' · AVIF ' + avifCount + ' · WebP ' + webpCount,
+					progressIncrement: workCompleted,
+					attachmentIncrement: 1,
+				};
 			} catch (error) {
 				lastError = error;
 				if (attempt >= MAX_ITEM_RETRIES) {
@@ -681,7 +819,7 @@
 							'p',
 							{ className: 'uc-stat-label mt-1 mb-0', key: 'desc' },
 							description
-					  )
+					 )
 					: null,
 			]),
 			h('div', { key: 'body' }, children),
@@ -693,7 +831,7 @@
 
 	function StatCard({ label, value, hint }) {
 		return h('div', { className: 'uc-card' }, [
-			h('div', { className: 'text-xs uppercase tracking-widest text-zinc-500 mb-2', key: 'label' }, label),
+			h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-2', key: 'label' }, label),
 			h('div', { className: 'text-3xl font-black tracking-tight text-white', key: 'value' }, value),
 			h('div', { className: 'text-xs text-zinc-500 mt-2', key: 'hint' }, hint || '\u00A0'),
 		]);
@@ -705,6 +843,8 @@
 				? 'uc-btn--primary text-white'
 				: variant === 'light'
 				? 'uc-btn--primary text-white'
+				: variant === 'danger'
+				? 'uc-btn--danger'
 				: '';
 
 		return h(
@@ -784,6 +924,37 @@
 		]);
 	}
 
+	function SaveableTextAreaField({ label, description, value, onSave, disabled, placeholder, saveLabel }) {
+		const [draft, setDraft] = useState(value || '');
+
+		useEffect(() => {
+			setDraft(value || '');
+		}, [value]);
+
+		const currentValue = String(value || '');
+		const draftValue = String(draft || '');
+		const hasChanges = draftValue !== currentValue;
+
+		return h('div', { className: 'uc-field-wrap' }, [
+			h('label', { className: 'uc-field-label' }, label),
+			description ? h('div', { className: 'text-xs text-zinc-500 mb-2' }, description) : null,
+			h('textarea', {
+				className: 'uc-field-input uc-field-textarea',
+				value: draft,
+				disabled: !!disabled,
+				placeholder: placeholder || '',
+				onChange: (e) => setDraft(e.target.value),
+			}),
+			h('div', { className: 'mt-3 flex justify-end' }, [
+				h(Button, {
+					onClick: () => onSave(draftValue),
+					disabled: !!disabled || !hasChanges,
+					variant: 'primary',
+				}, saveLabel || 'Save'),
+			]),
+		]);
+	}
+
 	function NumberField({ label, description, value, onChange, disabled, min, step }) {
 		return h('div', { className: 'uc-field-wrap' }, [
 			label ? h('label', { className: 'uc-field-label' }, label) : null,
@@ -821,12 +992,15 @@
 		return h('div', { className: 'uc-field-wrap' }, [
 			label ? h('label', { className: 'uc-field-label' }, label) : null,
 			description ? h('div', { className: 'text-xs text-zinc-500 mb-2' }, description) : null,
-			h('select', {
-				className: 'uc-field-input',
-				value: value || '',
-				disabled: !!disabled,
-				onChange: (e) => onChange(e.target.value),
-			}, (options || []).map((option) => h('option', { value: option.value, key: option.value }, option.label))),
+			h('div', { className: 'uc-select-wrap' }, [
+				h('select', {
+					className: 'uc-field-input uc-field-select',
+					value: value || '',
+					disabled: !!disabled,
+					onChange: (e) => onChange(e.target.value),
+				}, (options || []).map((option) => h('option', { value: option.value, key: option.value }, option.label))),
+				h('span', { className: 'uc-select-icon', 'aria-hidden': 'true' }, '▾'),
+			]),
 		]);
 	}
 
@@ -836,7 +1010,7 @@
 		}
 
 		return h('div', { className: 'flex flex-col gap-1 py-2 border-b border-white/5 last:border-0' }, [
-			h('div', { className: 'text-[11px] uppercase tracking-widest text-zinc-500' }, label),
+			h('div', { className: 'text-[11px] tracking-widest text-zinc-500' }, label),
 			h('div', { className: classNames('text-sm text-white break-all', mono ? 'font-mono text-[12px]' : '') }, String(value)),
 		]);
 	}
@@ -863,7 +1037,7 @@
 			]),
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-6 mt-5', key: 'detail-grid' }, [
 				h('div', { key: 'buckets' }, [
-					h('div', { className: 'text-[11px] uppercase tracking-widest text-zinc-500 mb-2' }, 'Served cache buckets'),
+					h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, 'Served cache buckets'),
 					h(DetailRow, { label: 'Original HTML', value: formatNumber(bucketHits.orig || 0) }),
 					h(DetailRow, { label: 'WebP HTML', value: formatNumber(bucketHits.webp || 0) }),
 					h(DetailRow, { label: 'AVIF HTML', value: formatNumber(bucketHits.avif || 0) }),
@@ -876,7 +1050,7 @@
 					h(DetailRow, { label: 'Background refreshes', value: formatNumber(stats.pageCacheBackgroundRevalidations || 0) }),
 				]),
 				h('div', { key: 'reasons' }, [
-					h('div', { className: 'text-[11px] uppercase tracking-widest text-zinc-500 mb-2' }, 'Top bypass reasons'),
+					h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, 'Top bypass reasons'),
 					reasonEntries.length
 						? h('div', { className: 'space-y-2' }, reasonEntries.map(([reason, count]) =>
 							h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0', key: reason }, [
@@ -971,7 +1145,7 @@
 		const variant = tone || (ok ? 'success' : 'neutral');
 		return h('span', {
 			className: classNames(
-				'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider',
+				'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wider',
 				'success' === variant
 					? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
 					: ('warning' === variant
@@ -981,11 +1155,14 @@
 		}, text);
 	}
 
+
 		function DiagnosticsCard({ diagnostics, stats }) {
 		const compressionStatus = diagnostics.compression || {};
 		const pathDiagnostics = diagnostics.paths || {};
 		const reverseProxy = diagnostics.reverseProxy || {};
 		const runtimeConfigDiag = pathDiagnostics.runtimeConfig || {};
+		const environmentDiag = diagnostics.environment || {};
+		const mediaRuntimeDiag = diagnostics.mediaRuntime || {};
 		const analyticsDiag = pathDiagnostics.analytics || {};
 		const advancedCacheDiag = pathDiagnostics.advancedCache || {};
 		const objectCacheDiag = pathDiagnostics.objectCache || {};
@@ -998,16 +1175,22 @@
 		const reverseProxyText = reverseProxy.detected
 			? (proxyProviderText + (reverseProxy.x_cache ? ' · ' + reverseProxy.x_cache : '') + (reverseProxy.x_litespeed_cache ? ' · ' + reverseProxy.x_litespeed_cache : '') + (reverseProxy.x_cache_status ? ' · ' + reverseProxy.x_cache_status : ''))
 			: 'Not detected';
+		const loadedRuntime = runtimeConfigDiag.loaded || {};
+		const allowlist = Array.isArray(loadedRuntime.cache_query_allowlist) ? loadedRuntime.cache_query_allowlist : [];
+		const queryStringCachingText = loadedRuntime.cache_query_strings
+			? ('Enabled' + (allowlist.length ? ' - Whitelist: ' + allowlist.join(', ') : ' - Whitelist empty: caching all non-excluded query variants'))
+			: 'Disabled';
 		const statusRows = [
 			['Page Cache', diagnostics.pageCache && diagnostics.pageCache.active, diagnostics.pageCache && diagnostics.pageCache.active ? 'Active' : diagnostics.pageCache && diagnostics.pageCache.enabled ? 'Configured' : 'Disabled'],
 			['Object Cache', diagnostics.objectCache && diagnostics.objectCache.active, diagnostics.objectCache && diagnostics.objectCache.active ? ('Active · ' + (diagnostics.objectCache.activeBackend || diagnostics.objectCache.selectedBackend || 'disk')) : diagnostics.objectCache && diagnostics.objectCache.enabled ? ('Configured · ' + (diagnostics.objectCache.selectedBackend || 'disk')) : 'Disabled'],
 			['Cron Warm Up', diagnostics.cronWarm && diagnostics.cronWarm.active, diagnostics.cronWarm && diagnostics.cronWarm.active ? ('Running · ' + formatNumber(diagnostics.cronWarm.processed || 0) + '/' + formatNumber(diagnostics.cronWarm.total || 0)) : diagnostics.cronWarm && diagnostics.cronWarm.enabled ? ((diagnostics.cronWarm.completed ? 'Completed' : 'Enabled') + ' · ' + formatNumber(diagnostics.cronWarm.pagesPerMinute || 0) + '/min') : 'Disabled'],
-			['Varnish', diagnostics.varnish && diagnostics.varnish.enabled, diagnostics.varnish && diagnostics.varnish.enabled ? (((diagnostics.varnish.mode || 'http').toUpperCase()) + ' · ' + ((((diagnostics.varnish.mode || 'http') === 'admin') ? 'BAN' : (diagnostics.varnish.method || 'BAN')) + ' · ' + ((diagnostics.varnish.servers || '').trim() || 'No endpoints'))) : 'Disabled'],
+				['Varnish', diagnostics.varnish && diagnostics.varnish.enabled, diagnostics.varnish && diagnostics.varnish.enabled ? ('Varnish mode: ' + (diagnostics.varnish.mode || 'http') + ' · ' + (((diagnostics.varnish.mode || 'http') === 'admin') ? 'BAN' : (diagnostics.varnish.method || 'BAN')) + ' · ' + ((diagnostics.varnish.servers || '').trim() || 'No endpoints')) : 'Disabled'],
 			['Reverse Proxy', !!reverseProxy.detected, reverseProxyText],
 			['Brotli Compression', compressionStatus.brotli && compressionStatus.brotli.available, compressionStatus.brotli && compressionStatus.brotli.available ? (compressionStatus.preferred === 'brotli' ? 'Available · Preferred' : 'Available') : 'Unavailable'],
 			['Gzip Compression', compressionStatus.gzip && compressionStatus.gzip.available, compressionStatus.gzip && compressionStatus.gzip.available ? (compressionStatus.preferred === 'gzip' ? 'Available · Preferred' : 'Available') : 'Unavailable'],
 			['AVIF Capability', diagnostics.formats && diagnostics.formats.avif, diagnostics.formats && diagnostics.formats.avif ? 'Available' : 'Unavailable'],
 			['WebP Capability', diagnostics.formats && diagnostics.formats.webp, diagnostics.formats && diagnostics.formats.webp ? 'Available' : 'Unavailable'],
+			['Query-string args caching', !!loadedRuntime.cache_query_strings, queryStringCachingText],
 		];
 		const runtimeRows = [
 			['Cache directory', !!cacheDirDiag.exists, cacheDirDiag.exists ? (cacheDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
@@ -1020,17 +1203,14 @@
 			['AVIF cache directory', !!avifDirDiag.exists, avifDirDiag.exists ? (avifDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
 			['WebP cache directory', !!webpDirDiag.exists, webpDirDiag.exists ? (webpDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
 		];
-		const loadedRuntime = runtimeConfigDiag.loaded || {};
-		const allowlist = Array.isArray(loadedRuntime.cache_query_allowlist) ? loadedRuntime.cache_query_allowlist : [];
 		const runtimeConfigRows = runtimeConfigDiag.valid ? [
 			['Fresh TTL', false, formatNumber(loadedRuntime.cache_fresh_ttl_minutes || 0) + ' min'],
 			['Max stale window', false, formatNumber(loadedRuntime.cache_max_stale_minutes || 0) + ' min'],
 			['Stale-while-revalidate', !!loadedRuntime.stale_while_revalidate_enabled, loadedRuntime.stale_while_revalidate_enabled ? 'Enabled' : 'Disabled'],
-			['Query string mode', !!loadedRuntime.cache_query_strings, loadedRuntime.cache_query_strings ? 'Enabled' : 'Disabled'],
 			['Query allowlist', false, allowlist.length ? (formatNumber(allowlist.length) + ' key' + (allowlist.length === 1 ? '' : 's') + ' · ' + allowlist.join(', ')) : 'None'],
 			['Woo safe mode', !!loadedRuntime.woo_safe_mode, loadedRuntime.woo_safe_mode ? 'Enabled' : 'Disabled'],
 			['Excluded paths', false, formatNumber((loadedRuntime.excluded_paths || []).length) + ' path' + (((loadedRuntime.excluded_paths || []).length === 1) ? '' : 's')],
-			['Excluded query args', false, formatNumber((loadedRuntime.excluded_query_args || []).length) + ' arg' + (((loadedRuntime.excluded_query_args || []).length === 1) ? '' : 's')],
+			['Excluded query-string args', false, formatNumber((loadedRuntime.excluded_query_args || []).length) + ' arg' + (((loadedRuntime.excluded_query_args || []).length === 1) ? '' : 's')],
 			['Sync state', !!runtimeConfigDiag.inSync, runtimeConfigDiag.inSync ? 'In sync with dashboard settings' : 'Out of sync with dashboard settings'],
 		] : [];
 
@@ -1072,6 +1252,8 @@
 		const reasonEntries = Object.entries(reasons).slice(0, 8);
 		const reverseProxy = diagnostics.reverseProxy || {};
 		const runtimeConfigDiag = pathDiagnostics.runtimeConfig || {};
+		const environmentDiag = diagnostics.environment || {};
+		const mediaRuntimeDiag = diagnostics.mediaRuntime || {};
 		const analyticsDiag = pathDiagnostics.analytics || {};
 		const advancedCacheDiag = pathDiagnostics.advancedCache || {};
 		const objectCacheDiag = pathDiagnostics.objectCache || {};
@@ -1094,6 +1276,35 @@
 			['CLS unresolved', false, formatNumber(stats.clsImagesUnresolved || 0)],
 		];
 
+		const environmentRows = [
+			['Server Hostname', false, environmentDiag.serverHostname || 'Unavailable'],
+			['Origin IP:Port', false, environmentDiag.originIpPort || 'Unavailable'],
+			['Server Document Root', false, environmentDiag.serverDocumentRoot || 'Unavailable'],
+			['PHP Version', false, environmentDiag.phpVersion || 'Unavailable'],
+			['PHP SAPI', false, environmentDiag.phpSapi || 'Unavailable'],
+			['PHP Max Script Execute Time', false, environmentDiag.phpMaxExecutionTime ? (String(environmentDiag.phpMaxExecutionTime) + 's') : 'Unavailable'],
+			['PHP Memory Limit', false, environmentDiag.phpMemoryLimit || 'Unavailable'],
+			['PHP Max Upload Size', false, environmentDiag.phpMaxUploadSize || 'Unavailable'],
+			['Max Post Size', false, environmentDiag.phpMaxPostSize || 'Unavailable'],
+			['Max Input Vars', false, environmentDiag.phpMaxInputVars || 'Unavailable'],
+			['WordPress Memory Limit', false, environmentDiag.wpMemoryLimit || 'Unavailable'],
+			['MYSQL Query Cache Size', false, environmentDiag.mysqlQueryCacheSize || 'Unavailable'],
+			['MYSQL Maximum Packet Size', false, environmentDiag.mysqlMaxAllowedPacket || 'Unavailable'],
+		];
+
+		const mediaRuntimeRows = [
+			['Preferred image editor', false, mediaRuntimeDiag.preferredEditor || 'Unavailable'],
+			['Last image editor class', false, mediaRuntimeDiag.lastImageEditorClass || 'Unavailable'],
+			['Imagick AVIF', !!mediaRuntimeDiag.imagickAvif, mediaRuntimeDiag.imagickAvif ? 'Yes' : 'No'],
+			['Imagick WebP', !!mediaRuntimeDiag.imagickWebp, mediaRuntimeDiag.imagickWebp ? 'Yes' : 'No'],
+			['GD AVIF', !!mediaRuntimeDiag.gdAvif, mediaRuntimeDiag.gdAvif ? 'Yes' : 'No'],
+			['GD WebP', !!mediaRuntimeDiag.gdWebp, mediaRuntimeDiag.gdWebp ? 'Yes' : 'No'],
+			['Last AVIF encode engine', false, mediaRuntimeDiag.lastAvifEncodeEngine || 'Unavailable'],
+			['Last AVIF encode error', false, mediaRuntimeDiag.lastAvifEncodeError || 'None'],
+			['Last AVIF encode file', false, mediaRuntimeDiag.lastAvifEncodeFile || 'Unavailable'],
+			['Last AVIF encode at', false, mediaRuntimeDiag.lastAvifEncodeAt ? formatLooseTime(mediaRuntimeDiag.lastAvifEncodeAt) : 'Unavailable'],
+		];
+
 		function renderRows(rows, tone) {
 			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0', key: row[0] }, [
 				h('div', { className: 'text-sm text-white' }, row[0]),
@@ -1106,7 +1317,7 @@
 				return null;
 			}
 			return h('div', { className: 'rounded bg-black/10 p-4', key: 'path-' + label }, [
-				h('div', { className: 'text-xs font-bold uppercase tracking-widest text-zinc-400 mb-2' }, label),
+				h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400 mb-2' }, label),
 				h('div', { className: 'space-y-3' }, [
 					h(DetailRow, { label: 'Path', value: diag.path, mono: true }),
 					h(DetailRow, { label: 'Exists', value: diag.exists ? 'Yes' : 'No' }),
@@ -1129,7 +1340,7 @@
 				h('summary', { className: 'uc-accordion__summary' }, [
 					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
 						h('div', { className: 'uc-accordion__title' }, 'Advanced Diagnostics'),
-						h('div', { className: 'uc-accordion__description' }, 'Expanded path, proxy, cache-write, and bypass inspection.'),
+						h('div', { className: 'uc-accordion__description' }, 'Expanded server, PHP, media, proxy, cache-write, and bypass inspection.'),
 					]),
 					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
 				]),
@@ -1173,6 +1384,14 @@
 							h(DetailRow, { label: 'Age', value: reverseProxy.age || '' }),
 						]),
 					]) : null,
+					h('div', { className: 'uc-diagnostic-group', key: 'environment-group' }, [
+						h('div', { className: 'uc-section-title' }, 'Server & PHP environment'),
+						renderRows(environmentRows, 'neutral'),
+					]),
+					h('div', { className: 'uc-diagnostic-group', key: 'media-runtime-group' }, [
+						h('div', { className: 'uc-section-title' }, 'Media runtime diagnostics'),
+						renderRows(mediaRuntimeRows, 'neutral'),
+					]),
 					h('div', { className: 'uc-diagnostic-group', key: 'cache-group' }, [
 						h('div', { className: 'uc-section-title' }, 'Cache diagnostics'),
 						renderRows(cacheDetailRows, 'neutral'),
@@ -1205,13 +1424,16 @@
 		}
 
 		const percent =
-			process.total > 0 ? Math.round((process.current / process.total) * 100) : 0;
+			process.total > 0 ? Math.min(100, Math.round((process.current / process.total) * 100)) : 0;
+		const attachmentText = process.attachmentsTotal > 0
+			? ('Attachments ' + process.attachmentsProcessed + ' / ' + process.attachmentsTotal)
+			: '';
 
 		return h('div', { className: 'bg-emerald-500/5 border border-emerald-500/20 p-6 rounded' }, [
 			h('div', { className: 'flex justify-between items-center mb-3 gap-3', key: 'head' }, [
 				h(
 					'h4',
-					{ className: 'text-sm font-bold uppercase tracking-widest text-emerald-400 m-0' },
+					{ className: 'text-sm font-bold tracking-widest text-emerald-400 m-0' },
 					process.label || 'Working'
 				),
 				h('div', { className: 'flex items-center gap-3', key: 'controls' }, [
@@ -1226,7 +1448,7 @@
 								key: 'cancel',
 							},
 							process.cancelRequested ? 'Stopping…' : 'Cancel'
-						  )
+						 )
 						: null,
 				]),
 			]),
@@ -1257,7 +1479,7 @@
 						process.logs.slice(-10).map((log, index) =>
 							h('div', { key: 'log-' + index }, '> ' + log)
 						)
-				  )
+				 )
 				: null,
 		]);
 	}
@@ -1360,7 +1582,7 @@
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
 						h('div', { className: 'text-sm text-white' }, 'Mode'),
-						h(StatusPill, { ok: true, text: (form.varnishCliMode || 'http').toUpperCase(), tone: 'neutral' }),
+						h(StatusPill, { ok: true, text: (form.varnishCliMode || 'http'), tone: 'neutral' }),
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
 						h('div', { className: 'text-sm text-white' }, 'Configured endpoints'),
@@ -1379,11 +1601,48 @@
 	}
 
 
-	function RedisCard({ form, diagnostics, busy, onFieldChange, onSave, onTest, onFlush }) {
+
+	function OPcacheCard({ stats, busy, onFlush }) {
+		const opcache = stats && stats.opcache ? stats.opcache : {};
+		const isAvailable = !!opcache.available;
+		const isEnabled = !!opcache.enabled;
+		const statusText = !isAvailable ? 'Unavailable' : (isEnabled ? 'Enabled' : 'Disabled');
+		const rows = [
+			['Status', statusText],
+			['Used memory', opcache.memoryUsedHuman || '—'],
+			['Free memory', opcache.memoryFreeHuman || '—'],
+			['Wasted memory', opcache.memoryWastedHuman || '—'],
+			['Interned strings used', opcache.internedUsedHuman || '—'],
+			['Interned strings free', opcache.internedFreeHuman || '—'],
+			['Cached scripts', typeof opcache.cachedScripts !== 'undefined' ? formatNumber(opcache.cachedScripts) : '—'],
+			['Cached keys', typeof opcache.cachedKeys !== 'undefined' ? (formatNumber(opcache.cachedKeys) + (opcache.maxCachedKeys ? ' / ' + formatNumber(opcache.maxCachedKeys) : '')) : '—'],
+			['Hit rate', typeof opcache.hitRate !== 'undefined' ? formatPercent(opcache.hitRate) : '—'],
+			['Last restart', opcache.lastRestartTimeHuman || 'Never'],
+		];
+
+		return h(Card, {
+			title: 'OPcache',
+			description: 'Production-safe visibility into PHP OPcache memory usage, hit rate, and restart state, with a manual flush control for post-deployment opcode invalidation when application code changes.',
+		}, [
+			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
+				h(Button, { onClick: onFlush, disabled: busy || !isAvailable || !isEnabled, variant: 'primary' }, busy ? 'Working…' : 'Flush OPcache'),
+			]),
+			h('div', { className: 'uc-diagnostic-group mt-5' }, [
+				h('div', { className: 'uc-section-title' }, 'Status'),
+				h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0', key: row[0] }, [
+					h('div', { className: 'text-sm text-white' }, row[0]),
+					h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
+				]))),
+				(opcache.message ? h('div', { className: 'text-xs text-zinc-500 mt-4' }, opcache.message) : null),
+			]),
+		]);
+	}
+
+	function RedisCard({ form, diagnostics, busy, objectCacheEnabled, onObjectCacheEnabledChange, onFieldChange, onSave, onTest, onFlush }) {
 		const objectCache = diagnostics.objectCache || {};
 		const redis = objectCache.redis || {};
 		const backend = form.objectCacheBackend || 'disk';
-		const redisSupportText = redis.available ? 'PHP Redis extension detected on this server.' : (redis.message || 'PHP Redis extension not detected. Disk fallback stays available.');
+		const redisSupportText = redis.available ? 'PHP Redis extension detected on this server.' : (redis.message || 'PHP Redis extension not detected. Disk remains available as the fallback backend.');
 		const transportText = [form.redisUseTls ? 'TLS' : 'TCP', form.redisPersistent ? 'Persistent connections ON' : 'Persistent connections OFF'].join(' · ');
 		const statusText = objectCache.active
 			? ('Active backend: ' + (objectCache.activeBackend || backend))
@@ -1393,21 +1652,35 @@
 			: (redis.message || 'Not tested yet');
 
 		return h(Card, {
-			title: 'Object Cache Backend',
-			description: 'Choose Disk or Redis for object caching. Disk remains the safe fallback backend.',
+			title: 'Object Cache',
+			description: 'Enable the WordPress object-cache.php drop-in and choose Disk or Redis as the backend. Disk is the fallback backend.',
 		}, [
-			h(SelectField, {
-				label: 'Object cache backend',
-				description: 'Use Redis when available. If Redis cannot connect, or a cache value is too large or complex, UltraCache falls back to Disk automatically.',
-				value: backend,
-				onChange: (value) => onFieldChange('objectCacheBackend', value),
+			h(ToggleField, {
+				label: 'Enable Object Cache',
+				description: 'Enable the WordPress object-cache.php drop-in. Choose Disk or Redis below.',
+				checked: !!objectCacheEnabled,
+				onChange: onObjectCacheEnabledChange,
 				disabled: busy,
-				options: [
-					{ value: 'disk', label: 'Use Disk (fallback)' },
-					{ value: 'redis', label: 'Use Redis' },
-				],
-				key: 'backend',
+				key: 'object-cache-enabled',
 			}),
+			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
+				h(ToggleField, {
+					label: 'Use Disk',
+					description: 'Use the local filesystem for persistent object cache storage.',
+					checked: backend !== 'redis',
+					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'disk') : null,
+					disabled: busy,
+					key: 'backend-disk',
+				}),
+				h(ToggleField, {
+					label: 'Use Redis',
+					description: 'Use Redis when available. If Redis cannot connect, or a cache value is too large or complex, UltraCache falls back to Disk automatically.',
+					checked: backend === 'redis',
+					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'redis') : null,
+					disabled: busy,
+					key: 'backend-redis',
+				}),
+			]),
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(TextField, {
 					label: 'Redis host',
@@ -1467,22 +1740,6 @@
 					step: 50,
 					key: 'redis-connect-timeout',
 				}),
-				h(ToggleField, {
-					label: 'Use TLS',
-					description: 'Enable for managed Redis providers that require TLS/SSL transport.',
-					checked: !!form.redisUseTls,
-					onChange: (value) => onFieldChange('redisUseTls', value),
-					disabled: busy,
-					key: 'redis-use-tls',
-				}),
-				h(ToggleField, {
-					label: 'Persistent connection',
-					description: 'Advanced. Reuse the Redis connection across PHP worker requests when supported.',
-					checked: !!form.redisPersistent,
-					onChange: (value) => onFieldChange('redisPersistent', value),
-					disabled: busy,
-					key: 'redis-persistent',
-				}),
 				h(NumberField, {
 					label: 'Read timeout (ms)',
 					description: 'Advanced. Default: 200ms.',
@@ -1492,6 +1749,22 @@
 					min: 50,
 					step: 50,
 					key: 'redis-read-timeout',
+				}),
+				h(ToggleField, {
+					label: 'Persistent connection',
+					description: 'Advanced. Reuse the Redis connection across PHP worker requests when supported.',
+					checked: !!form.redisPersistent,
+					onChange: (value) => onFieldChange('redisPersistent', value),
+					disabled: busy,
+					key: 'redis-persistent',
+				}),
+				h(ToggleField, {
+					label: 'Use TLS',
+					description: 'Enable for managed Redis providers that require TLS/SSL transport.',
+					checked: !!form.redisUseTls,
+					onChange: (value) => onFieldChange('redisUseTls', value),
+					disabled: busy,
+					key: 'redis-use-tls',
 				}),
 			]),
 			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
@@ -1507,7 +1780,7 @@
 						h(StatusPill, { ok: backend === 'redis' ? !!redis.available : true, text: backend === 'redis' ? 'Redis' : 'Disk', tone: backend === 'redis' ? (redis.available ? 'success' : 'warning') : 'neutral' }),
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
-						h('div', { className: 'text-sm text-white' }, 'Disk fallback'),
+						h('div', { className: 'text-sm text-white' }, 'Fallback backend'),
 						h(StatusPill, { ok: true, text: objectCache.fallbackBackend || 'disk', tone: 'neutral' }),
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
@@ -1538,6 +1811,7 @@
 		const [diagnostics, setDiagnostics] = useState(initialDiagnostics);
 		const [browserCompressionProbe, setBrowserCompressionProbe] = useState({ ready: false, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: '' });
 		const [busy, setBusy] = useState(false);
+		const [asyncActions, setAsyncActions] = useState({});
 		const [toasts, setToasts] = useState([]);
 		const [isMobile, setIsMobile] = useState(isMobileViewport());
 		const [supportModalOpen, setSupportModalOpen] = useState(false);
@@ -1577,14 +1851,20 @@
 		const [inspectUrl, setInspectUrl] = useState('');
 		const [inspectBusy, setInspectBusy] = useState(false);
 		const [inspectResult, setInspectResult] = useState(null);
-		const [frontpageHtmlBusy, setFrontpageHtmlBusy] = useState(false);
-		const [frontpageHtmlCssBusy, setFrontpageHtmlCssBusy] = useState(false);
+		const [homepageHtmlBusy, setHomepageHtmlBusy] = useState(false);
+		const [homepageHtmlCssBusy, setHomepageHtmlCssBusy] = useState(false);
 		const [allUrlsCssBusy, setAllUrlsCssBusy] = useState(false);
 		const [menuUrlsCssBusy, setMenuUrlsCssBusy] = useState(false);
 		const [savedJob, setSavedJob] = useState(loadSavedJob());
 		const cancelRequestedRef = useRef(false);
 		const importFileInputRef = useRef(null);
 		const statsRefreshInFlightRef = useRef(false);
+		const settingsRef = useRef(initialSettings);
+		const committedSettingsRef = useRef(initialSettings);
+		const pendingSettingsPatchRef = useRef({});
+		const settingsSaveTimerRef = useRef(null);
+		const settingsSaveInFlightRef = useRef(false);
+		const queuedActionKeysRef = useRef({});
 		const compressionSyncRef = useRef('');
 		const compressionLocks = useMemo(() => getCompressionLockState(diagnostics, browserCompressionProbe), [diagnostics, browserCompressionProbe]);
 		const [process, setProcess] = useState({
@@ -1625,6 +1905,19 @@
 			return nextToast.id;
 		}, []);
 
+
+		useEffect(() => {
+			settingsRef.current = settings;
+		}, [settings]);
+
+		useEffect(() => {
+			return () => {
+				if (settingsSaveTimerRef.current) {
+					window.clearTimeout(settingsSaveTimerRef.current);
+					settingsSaveTimerRef.current = null;
+				}
+			};
+		}, []);
 		useEffect(() => {
 			if (!Array.isArray(toasts) || !toasts.length) {
 				return undefined;
@@ -1691,8 +1984,10 @@
 		}, []);
 
 		useEffect(() => {
+			let interval = null;
+
 			const runRefresh = async () => {
-				if (statsRefreshInFlightRef.current) {
+				if (document.hidden || statsRefreshInFlightRef.current) {
 					return;
 				}
 				statsRefreshInFlightRef.current = true;
@@ -1704,9 +1999,37 @@
 				}
 			};
 
+			const startInterval = () => {
+				if (interval) {
+					return;
+				}
+				interval = window.setInterval(runRefresh, STATS_REFRESH_INTERVAL);
+			};
+
+			const stopInterval = () => {
+				if (!interval) {
+					return;
+				}
+				window.clearInterval(interval);
+				interval = null;
+			};
+
+			const handleVisibilityChange = () => {
+				if (document.hidden) {
+					stopInterval();
+					return;
+				}
+				runRefresh();
+				startInterval();
+			};
+
 			runRefresh();
-			const interval = window.setInterval(runRefresh, STATS_REFRESH_INTERVAL);
-			return () => window.clearInterval(interval);
+			startInterval();
+			document.addEventListener('visibilitychange', handleVisibilityChange);
+			return () => {
+				stopInterval();
+				document.removeEventListener('visibilitychange', handleVisibilityChange);
+			};
 		}, []);
 
 		useEffect(() => {
@@ -1815,7 +2138,7 @@
 				try {
 					const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
 					if (response && response.settings) {
-						setSettings(response.settings);
+						applyServerSettings(response.settings);
 					}
 					if (response && response.stats) {
 						setStats(response.stats);
@@ -1910,7 +2233,7 @@
 			try {
 				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(next) });
 				if (response && response.settings) {
-					setSettings(response.settings);
+					applyServerSettings(response.settings);
 				}
 				if (response && response.stats) {
 					setStats(response.stats);
@@ -1927,7 +2250,7 @@
 		}
 
 		async function testRedisConnection() {
-			if (busy) {
+			if (asyncActions.redis_test) {
 				return;
 			}
 
@@ -1937,44 +2260,25 @@
 				delete payload.redisPassword;
 			}
 
-			setBusy(true);
-			try {
-				const result = await apiRequest('redis_test', payload);
+			await queueDashboardAction('redis_test', payload, {
+				queued: 'Redis connection test queued…',
+				success: 'Redis connection test finished.',
+				failed: 'Redis connection test failed.',
+			}, 'redis_test', (result) => {
 				setDiagnostics((current) => Object.assign({}, current || {}, {
 					objectCache: Object.assign({}, (current && current.objectCache) || {}, {
 						redis: Object.assign({}, (((current && current.objectCache) || {}).redis) || {}, result || {}),
 					}),
 				}));
-				pushToast({ type: result && result.success ? 'success' : 'error', text: result && result.message ? result.message : 'Redis connection test finished.' });
-			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Redis connection test failed.' });
-			} finally {
-				setBusy(false);
-			}
+			});
 		}
 
 		async function flushObjectCache() {
-			if (busy) {
-				return;
-			}
-
-			setBusy(true);
-			try {
-				const result = await apiRequest('object_cache_flush');
-				if (result && result.stats) {
-					setStats(normalizeStatsResponse(result));
-				}
-				if (result && result.diagnostics) {
-					setDiagnostics(result.diagnostics);
-				} else {
-					await refreshStats();
-				}
-				pushToast({ type: result && result.success ? 'success' : 'error', text: result && result.message ? result.message : 'Object cache flush finished.' });
-			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Object cache flush failed.' });
-			} finally {
-				setBusy(false);
-			}
+			await queueDashboardAction('object_cache_flush', {}, {
+				queued: 'Object cache flush queued…',
+				success: 'Object cache flush finished.',
+				failed: 'Object cache flush failed.',
+			}, 'object_cache_flush');
 		}
 
 		async function saveVarnishSettings() {
@@ -1991,7 +2295,7 @@
 			try {
 				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(next) });
 				if (response && response.settings) {
-					setSettings(response.settings);
+					applyServerSettings(response.settings);
 				}
 				if (response && response.stats) {
 					setStats(response.stats);
@@ -2007,37 +2311,28 @@
 			}
 		}
 		async function runVarnishTest() {
-			if (busy) {
-				return;
-			}
-			setBusy(true);
-			try {
-				const result = await apiRequest('varnish_test');
-				await refreshStats();
-				const success = !!(result && result.success);
-				pushToast({ type: success ? 'success' : 'error', text: result && result.message ? result.message : 'Varnish test completed.' });
-			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Varnish test failed.' });
-			} finally {
-				setBusy(false);
-			}
+			await queueDashboardAction('varnish_test', {}, {
+				queued: 'Varnish test queued…',
+				success: 'Varnish test completed.',
+				failed: 'Varnish test failed.',
+			}, 'varnish_test');
 		}
 
 		async function runVarnishFlushAll() {
-			if (busy) {
-				return;
-			}
-			setBusy(true);
-			try {
-				const result = await apiRequest('varnish_flush_all');
-				await refreshStats();
-				const success = !!(result && result.success);
-				pushToast({ type: success ? 'success' : 'error', text: result && result.message ? result.message : 'Varnish flush finished.' });
-			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Varnish flush failed.' });
-			} finally {
-				setBusy(false);
-			}
+			await queueDashboardAction('varnish_flush_all', {}, {
+				queued: 'Varnish flush queued…',
+				success: 'Varnish flush finished.',
+				failed: 'Varnish flush failed.',
+			}, 'varnish_flush_all');
+		}
+
+
+		async function flushOpcache() {
+			await queueDashboardAction('opcache_flush', {}, {
+				queued: 'OPcache flush queued…',
+				success: 'OPcache flush finished.',
+				failed: 'OPcache flush failed.',
+			}, 'opcache_flush');
 		}
 
 		function normalizeStatsResponse(payload) {
@@ -2058,7 +2353,8 @@
 				typeof freshStats.cacheSizeBytes !== 'undefined' ||
 				typeof freshStats.cacheSizeHuman !== 'undefined' ||
 				typeof freshStats.optimizedImages !== 'undefined' ||
-				typeof freshStats.imagesOptimized !== 'undefined'
+				typeof freshStats.imagesOptimized !== 'undefined' ||
+				typeof freshStats.opcache !== 'undefined'
 			);
 
 			if (hasMeaningfulStats) {
@@ -2067,47 +2363,234 @@
 			}
 		}
 
-		async function warmFrontpageHtml() {
-			if (busy || frontpageHtmlBusy || frontpageHtmlCssBusy || process.active) {
+		function hasPendingSettingsPatch() {
+			return !!Object.keys(pendingSettingsPatchRef.current || {}).length;
+		}
+
+		function applyServerSettings(responseSettings) {
+			if (!responseSettings || typeof responseSettings !== 'object') {
 				return;
 			}
 
-			setFrontpageHtmlBusy(true);
-			try {
-				const result = await apiRequest('warm_frontpage_html');
-				await refreshStats();
-				pushToast({
-					type: result && result.success ? 'success' : 'error',
-					text: result && result.message ? result.message : 'Frontpage HTML warm completed.',
-				});
-			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Frontpage HTML warm failed.' });
-			} finally {
-				setFrontpageHtmlBusy(false);
+			const committed = Object.assign({}, responseSettings);
+			committedSettingsRef.current = committed;
+
+			const pendingPatch = Object.assign({}, pendingSettingsPatchRef.current || {});
+			const nextSettings = Object.keys(pendingPatch).length ? Object.assign({}, committed, pendingPatch) : committed;
+			settingsRef.current = nextSettings;
+			setSettings(nextSettings);
+		}
+
+		function applyEffectiveSettingsFromCommitted() {
+			const committed = committedSettingsRef.current || initialSettings || {};
+			const pendingPatch = Object.assign({}, pendingSettingsPatchRef.current || {});
+			const nextSettings = Object.keys(pendingPatch).length ? Object.assign({}, committed, pendingPatch) : committed;
+			settingsRef.current = nextSettings;
+			setSettings(nextSettings);
+		}
+
+		function applyDashboardPayload(payload) {
+			if (!payload || typeof payload !== 'object') {
+				return;
 			}
+
+			const responseStats = payload.stats || (payload.result && payload.result.stats);
+			if (responseStats) {
+				setStats(normalizeStatsResponse(responseStats));
+			}
+
+			const responseDiagnostics = payload.diagnostics || (payload.result && payload.result.diagnostics);
+			if (responseDiagnostics) {
+				setDiagnostics(responseDiagnostics);
+			}
+
+			const responseSettings = payload.settings || (payload.result && payload.result.settings);
+			if (responseSettings) {
+				applyServerSettings(responseSettings);
+			}
+		}
+		function setAsyncActionState(key, active, label) {
+			if (!key) {
+				return;
+			}
+			queuedActionKeysRef.current[key] = !!active;
+			setAsyncActions((current) => {
+				const next = Object.assign({}, current || {});
+				if (active) {
+					next[key] = label || true;
+				} else {
+					delete next[key];
+				}
+				return next;
+			});
+		}
+
+		async function pollQueuedAction(jobId) {
+			let job = null;
+			for (let attempt = 0; attempt < ACTION_QUEUE_MAX_POLLS; attempt++) {
+				const response = await apiRequest('queue_status', { id: jobId });
+				job = response && response.job ? response.job : null;
+				if (job && ['done', 'failed'].indexOf(job.status) !== -1) {
+					return job;
+				}
+				await sleep(ACTION_QUEUE_POLL_DELAY);
+			}
+			throw new Error('Queued action timed out.');
+		}
+
+		async function queueDashboardAction(action, params, labels, key, afterResult) {
+			const actionKey = key || action;
+			if (queuedActionKeysRef.current[actionKey]) {
+				pushToast({ type: 'info', text: (labels && labels.alreadyQueued) || 'This action is already queued.' });
+				return null;
+			}
+
+			setAsyncActionState(actionKey, true, (labels && labels.runningLabel) || 'Queued…');
+			pushToast({ id: 'ucwp-action-' + actionKey, type: 'info', text: (labels && labels.queued) || 'Action queued…', duration: 2200 });
+
+			try {
+				const queued = await apiRequest('queue_action', { action, params: params || {} });
+				const job = queued && queued.job ? queued.job : null;
+				if (!job || !job.id) {
+					throw new Error('Queued action was not created.');
+				}
+
+				const completed = await pollQueuedAction(job.id);
+				const result = completed && completed.result ? completed.result : {};
+				applyDashboardPayload(result);
+				if (typeof afterResult === 'function') {
+					afterResult(result, completed);
+				}
+				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'varnish_flush_all'].indexOf(action) !== -1) {
+					try {
+						await refreshStats();
+					} catch (error) {}
+				}
+				const ok = completed && completed.status === 'done';
+				pushToast({
+					type: ok ? 'success' : 'error',
+					text: (completed && completed.message) || (ok ? ((labels && labels.success) || 'Action completed.') : ((labels && labels.failed) || 'Action failed.')),
+				});
+				return completed;
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : ((labels && labels.failed) || 'Queued action failed.') });
+				return null;
+			} finally {
+				setAsyncActionState(actionKey, false);
+			}
+		}
+
+		async function flushQueuedSettings() {
+			if (settingsSaveTimerRef.current) {
+				window.clearTimeout(settingsSaveTimerRef.current);
+				settingsSaveTimerRef.current = null;
+			}
+
+			if (settingsSaveInFlightRef.current) {
+				return;
+			}
+
+			const patch = Object.assign({}, pendingSettingsPatchRef.current || {});
+			pendingSettingsPatchRef.current = {};
+			if (!Object.keys(patch).length) {
+				return;
+			}
+
+			settingsSaveInFlightRef.current = true;
+			pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Saving queued settings…', persistent: true });
+
+			try {
+				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
+				if (response && response.settings) {
+					applyServerSettings(response.settings);
+				} else {
+					const committed = Object.assign({}, committedSettingsRef.current || {}, patch);
+					committedSettingsRef.current = committed;
+					applyEffectiveSettingsFromCommitted();
+				}
+				applyDashboardPayload(response || {});
+				pushToast({ id: 'ucwp-settings-queue', type: 'success', text: hasPendingSettingsPatch() ? 'Queued settings saved. More changes are pending…' : 'Queued settings saved.' });
+			} catch (error) {
+				applyEffectiveSettingsFromCommitted();
+				pushToast({ id: 'ucwp-settings-queue', type: 'error', text: error && error.message ? error.message : 'Queued settings failed to save.' });
+			} finally {
+				settingsSaveInFlightRef.current = false;
+				if (Object.keys(pendingSettingsPatchRef.current || {}).length) {
+					settingsSaveTimerRef.current = window.setTimeout(flushQueuedSettings, 50);
+				}
+			}
+		}
+		function queueSettingsPatch(patch) {
+			if (!patch || typeof patch !== 'object') {
+				return;
+			}
+			pendingSettingsPatchRef.current = Object.assign({}, pendingSettingsPatchRef.current || {}, patch);
+			const next = Object.assign({}, settingsRef.current || {}, patch);
+			settingsRef.current = next;
+			setSettings(next);
+			if (settingsSaveInFlightRef.current) {
+				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Saving queued settings…', persistent: true });
+			} else {
+				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Settings queued…', duration: 1400 });
+			}
+
+			if (settingsSaveTimerRef.current) {
+				window.clearTimeout(settingsSaveTimerRef.current);
+			}
+			settingsSaveTimerRef.current = window.setTimeout(flushQueuedSettings, SETTINGS_SAVE_DEBOUNCE_MS);
+		}
+
+		async function warmFrontpageHtml() {
+			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				return;
+			}
+			if (process.active || asyncActions.warm_frontpage_html) {
+				return;
+			}
+
+			setHomepageHtmlBusy(true);
+			await queueDashboardAction('warm_frontpage_html', {}, {
+				queued: 'Frontpage HTML warm queued…',
+				success: 'Frontpage HTML warm completed.',
+				failed: 'Frontpage HTML warm failed.',
+				runningLabel: 'Warming…',
+			}, 'warm_frontpage_html');
+			setHomepageHtmlBusy(false);
 		}
 
 		async function warmFrontpageHtmlCss() {
-			if (busy || frontpageHtmlBusy || frontpageHtmlCssBusy || process.active) {
+			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				return;
+			}
+			if (!(settingsRef.current && settingsRef.current.homepageCssBundleEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
+				return;
+			}
+			if (process.active || asyncActions.warm_frontpage_html_css) {
 				return;
 			}
 
-			setFrontpageHtmlCssBusy(true);
-			try {
-				const result = await apiRequest('warm_frontpage_html_css');
-				await refreshStats();
-				pushToast({
-					type: (result && (result.success || result.skipped)) ? 'success' : 'error',
-					text: result && result.message ? result.message : 'Frontpage HTML + CSS warm completed.',
-				});
-			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Frontpage HTML + CSS warm failed.' });
-			} finally {
-				setFrontpageHtmlCssBusy(false);
-			}
+			setHomepageHtmlCssBusy(true);
+			await queueDashboardAction('warm_frontpage_html_css', {}, {
+				queued: 'Homepage HTML + CSS bundle warm queued…',
+				success: 'Homepage HTML + CSS bundle warm completed.',
+				failed: 'Homepage HTML + CSS bundle warm failed.',
+				runningLabel: 'Warming…',
+			}, 'warm_frontpage_html_css');
+			setHomepageHtmlCssBusy(false);
 		}
 
 		async function startWarmingAllWithFrontpageCss(forceRestart = false) {
+			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				return;
+			}
+			if (!(settingsRef.current && settingsRef.current.homepageCssBundleEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
+				return;
+			}
 			const controls = getJobControls('warm_css');
 			if (!forceRestart && controls.canResume) {
 				await runJob(savedJob, false);
@@ -2120,20 +2603,24 @@
 
 			await runJob({
 				type: 'warm_css',
-				label: 'Warming Full Site HTML Cache + Frontpage CSS',
+				label: 'Warming Full Site HTML Cache + CSS Bundles',
 				cursor: '',
 				nextCursor: '',
 				processed: 0,
 				total: 0,
 				pendingItems: [],
 				hasMore: true,
-				logs: ['Starting full site crawler + frontpage CSS…'],
+				logs: ['Starting full site crawler + CSS Bundles…'],
 				startTime: Date.now(),
 				batchSize: DEFAULT_QUEUE_BATCH_SIZE,
 			}, !!forceRestart);
 		}
 
 		async function startMenuWarming(forceRestart = false) {
+			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				return;
+			}
 			const controls = getJobControls('warm_menu');
 			if (!forceRestart && controls.canResume) {
 				await runJob(savedJob, false);
@@ -2161,6 +2648,14 @@
 		}
 
 		async function startMenuWarmingWithFrontpageCss(forceRestart = false) {
+			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				return;
+			}
+			if (!(settingsRef.current && settingsRef.current.homepageCssBundleEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
+				return;
+			}
 			const controls = getJobControls('warm_menu_css');
 			if (!forceRestart && controls.canResume) {
 				await runJob(savedJob, false);
@@ -2174,56 +2669,50 @@
 			await runJob({
 				type: 'warm_menu_css',
 				scope: 'menu',
-				label: 'Warming Menu HTML Cache + Frontpage CSS',
+				label: 'Warming Menu HTML Cache + CSS Bundles',
 				cursor: '',
 				nextCursor: '',
 				processed: 0,
 				total: 0,
 				pendingItems: [],
 				hasMore: true,
-				logs: ['Starting menu URL crawler + frontpage CSS…'],
+				logs: ['Starting menu URL crawler + CSS Bundles…'],
 				startTime: Date.now(),
 				batchSize: DEFAULT_QUEUE_BATCH_SIZE,
 			}, !!forceRestart);
 		}
 
-		async function updateSetting(key, value) {
-			if (busy) {
+		function updateSetting(key, value) {
+			queueSettingsPatch({ [key]: value });
+		}
+
+		function updateMediaOptimizationSetting(value) {
+			queueSettingsPatch({
+				mediaOptimizationEnabled: value,
+				avifConversionEnabled: value,
+			});
+		}
+
+		function updateManualPurgeWarmSetting(value) {
+			queueSettingsPatch({
+				cronWarmStartAfterManualPurge: value,
+				cronWarmStartAfterFlush: value,
+			});
+		}
+
+
+		function applyPerformanceProfile(profileKey) {
+			const profile = PERFORMANCE_PROFILES[profileKey];
+			if (!profile || !profile.patch) {
 				return;
 			}
-
-			const previous = settings;
-			const next = Object.assign({}, previous, { [key]: value });
-
-			setSettings(next);
-			setBusy(true);
-
-			try {
-				const response = await apiRequest('settings', {
-					key,
-					value: value ? '1' : '0',
-				});
-
-				if (response && response.settings) {
-					setSettings(response.settings);
-				}
-
-				if (response && response.diagnostics) {
-					setDiagnostics(response.diagnostics);
-				} else {
-					await refreshStats();
-				}
-
-				pushToast({ type: 'success', text: 'Settings updated.' });
-			} catch (error) {
-				setSettings(previous);
-				pushToast({
-					type: 'error',
-					text: error && error.message ? error.message : 'Failed to update settings.',
-				});
-			} finally {
-				setBusy(false);
-			}
+			const patch = getPerformanceProfilePatch(profileKey);
+			queueSettingsPatch(patch);
+			setAdvancedForm((prev) => Object.assign({}, prev, {
+				cacheFreshTtlMinutes: Object.prototype.hasOwnProperty.call(patch, 'cacheFreshTtlMinutes') ? patch.cacheFreshTtlMinutes : prev.cacheFreshTtlMinutes,
+				cacheMaxStaleMinutes: Object.prototype.hasOwnProperty.call(patch, 'cacheMaxStaleMinutes') ? patch.cacheMaxStaleMinutes : prev.cacheMaxStaleMinutes,
+			}));
+			pushToast({ type: 'success', text: profile.label + ' profile queued.' });
 		}
 
 		function updateAdvancedField(key, value) {
@@ -2239,19 +2728,16 @@
 			try {
 				const response = await apiRequest('save_settings', {
 					settings_json: JSON.stringify({
-						cacheExceptionPaths: advancedForm.cacheExceptionPaths || '',
-						cacheExceptionQueryArgs: advancedForm.cacheExceptionQueryArgs || '',
-						cacheQueryStringAllowlist: advancedForm.cacheQueryStringAllowlist || '',
 						cacheCleanupIntervalHours: Number(advancedForm.cacheCleanupIntervalHours || 24),
 						cronWarmPagesPerMinute: Number(advancedForm.cronWarmPagesPerMinute || 0),
 						scheduledWarmLimit: Number(advancedForm.scheduledWarmLimit || advancedForm.cronWarmPagesPerMinute || 0),
-						cacheFreshTtlMinutes: Number(advancedForm.cacheFreshTtlMinutes || 1440),
-						cacheMaxStaleMinutes: Number(advancedForm.cacheMaxStaleMinutes || 10080),
+						cacheFreshTtlMinutes: Number(advancedForm.cacheFreshTtlMinutes || 15),
+						cacheMaxStaleMinutes: Number(advancedForm.cacheMaxStaleMinutes || 720),
 					}),
 				});
 
 				if (response && response.settings) {
-					setSettings(response.settings);
+					applyServerSettings(response.settings);
 				}
 
 				if (response && response.stats) {
@@ -2418,9 +2904,13 @@
 						}
 
 						const item = batchItems[i];
-						const line = await processJobItem(state.type, item);
+						const itemResult = await processJobItem(state.type, item);
+						const line = itemResult && typeof itemResult === 'object' ? itemResult.line : itemResult;
+						const progressIncrement = itemResult && typeof itemResult === 'object' ? Math.max(0, Number(itemResult.progressIncrement || 0)) : 1;
+						const attachmentIncrement = itemResult && typeof itemResult === 'object' ? Math.max(0, Number(itemResult.attachmentIncrement || 0)) : 0;
 						state = Object.assign({}, state, {
-							processed: Number(state.processed || 0) + 1,
+							processed: Number(state.processed || 0) + progressIncrement,
+							attachmentsProcessed: Number(state.attachmentsProcessed || 0) + attachmentIncrement,
 							logs: state.logs.concat([line]).slice(-50),
 							pendingItems: batchItems.slice(i + 1),
 							nextCursor: batchNextCursor,
@@ -2453,21 +2943,10 @@
 				if (completed) {
 					let finalNotice = { type: 'success', text: isWarmJobType(state.type) ? 'Cache warming complete.' : 'Media optimization complete.' };
 					if (isWarmCssJobType(state.type)) {
-						const setCssBusy = 'warm_menu_css' === state.type ? setMenuUrlsCssBusy : setAllUrlsCssBusy;
-						const successText = 'warm_menu_css' === state.type ? 'Menu URLs warmed and frontpage CSS built.' : 'Full site HTML warmed and frontpage CSS built.';
-						const errorText = 'warm_menu_css' === state.type ? 'Menu URLs warmed, but frontpage CSS build failed.' : 'Full site HTML warmed, but frontpage CSS build failed.';
-						setCssBusy(true);
-						try {
-							const cssResult = await apiRequest('build_frontpage_css');
-							finalNotice = {
-								type: (cssResult && (cssResult.success || cssResult.skipped)) ? 'success' : 'error',
-								text: cssResult && cssResult.message ? cssResult.message : successText,
-							};
-						} catch (cssError) {
-							finalNotice = { type: 'error', text: cssError && cssError.message ? cssError.message : errorText };
-						} finally {
-							setCssBusy(false);
-						}
+						finalNotice = {
+							type: 'success',
+							text: 'warm_menu_css' === state.type ? 'Menu URLs warmed and CSS bundles built.' : 'Full site HTML warmed and CSS bundles built.',
+						};
 					}
 					await refreshStats();
 					pushToast(finalNotice);
@@ -2486,6 +2965,10 @@
 		}
 
 		async function startWarming(forceRestart = false) {
+			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
+				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				return;
+			}
 			const controls = getJobControls('warm');
 			if (!forceRestart && controls.canResume) {
 				await runJob(savedJob, false);
@@ -2579,7 +3062,7 @@
 				});
 
 				if (response && response.settings) {
-					setSettings(response.settings);
+					applyServerSettings(response.settings);
 				}
 
 				if (response && response.stats) {
@@ -2624,7 +3107,7 @@
 			try {
 				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(defaultsPayload) });
 				if (response && response.settings) {
-					setSettings(response.settings);
+					applyServerSettings(response.settings);
 				}
 				if (response && response.stats) {
 					setStats(response.stats);
@@ -2641,25 +3124,49 @@
 			}
 		}
 
+async function deleteAllPluginDataAndDeactivate() {
+	if (busy) {
+		return;
+	}
+
+	const mediaFolders = [
+		'wp-content/cache/ultracache-avif',
+		'wp-content/cache/ultracache-webp',
+	];
+	const confirmed = window.confirm(
+		'Delete all UltraCache plugin data and deactivate the plugin?\n\n' +
+		'This removes UltraCache settings, runtime files, drop-ins, Redis password files, object cache files, cache files, scheduled jobs, and managed .htaccess/WP_CACHE changes.\n\n' +
+		'Converted media folders will NOT be deleted automatically. Delete them manually if needed:\n- ' + mediaFolders.join('\n- ')
+	);
+	if (!confirmed) {
+		return;
+	}
+
+	const typed = window.prompt('Type DELETE to confirm. Converted media folders must be deleted manually if you want them removed.');
+	if (String(typed || '').trim() !== 'DELETE') {
+		pushToast({ type: 'info', text: 'Delete all plugin data cancelled.' });
+		return;
+	}
+
+	setBusy(true);
+	try {
+		const response = await apiRequest('delete_all_data', { confirmation: 'DELETE' });
+		pushToast({ type: 'success', text: response && response.message ? response.message : 'UltraCache data deleted and plugin deactivated.' });
+		window.setTimeout(() => {
+			window.location.href = 'plugins.php?deactivate=true';
+		}, 1200);
+	} catch (error) {
+		pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to delete UltraCache data.' });
+		setBusy(false);
+	}
+}
+
 		async function purgeCache() {
-			if (busy) {
-				return;
-			}
-
-			setBusy(true);
-
-			try {
-				await apiRequest('purge_all');
-				await refreshStats();
-				pushToast({ type: 'success', text: 'All cache files cleared.' });
-			} catch (error) {
-				pushToast({
-					type: 'error',
-					text: error && error.message ? error.message : 'Failed to purge cache.',
-				});
-			} finally {
-				setBusy(false);
-			}
+			await queueDashboardAction('purge_all', {}, {
+				queued: 'Full cache purge queued…',
+				success: 'All cache files cleared.',
+				failed: 'Failed to purge cache.',
+			}, 'purge_all');
 		}
 
 
@@ -2676,18 +3183,27 @@
 			setSupportModalOpen(false);
 		}
 
+		const mediaOptimizationEnabled = typeof settings.mediaOptimizationEnabled === 'undefined' ? !!settings.avifConversionEnabled : !!settings.mediaOptimizationEnabled;
+		const activePerformanceProfile = getActivePerformanceProfile(settings);
+		const pageCacheReady = !!settings.pageCacheEnabled;
+		const cssBundleReady = pageCacheReady && !!settings.homepageCssBundleEnabled;
+		const warmBusy = busy || process.active || homepageHtmlBusy || homepageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy;
+		const warmDisabledMessage = !pageCacheReady
+			? 'Please enable Page Caching first or select a profile before warming cache.'
+			: (!settings.homepageCssBundleEnabled ? 'CSS bundle warm buttons are disabled until CSS Bundling is enabled.' : '');
+
 		return h('div', { className: 'max-w-6xl p-6 space-y-8' }, [
 			h('header', { className: 'flex flex-col gap-4 md:flex-row md:justify-between md:items-end', key: 'header' }, [
 				h('div', { key: 'title' }, [
 					h('h1', { className: 'text-3xl font-black tracking-tighter m-0 text-white' }, 'UltraCache'),
 					h(
 						'p',
-						{ className: 'text-zinc-500 text-xs tracking-widest uppercase mt-2 mb-0' },
+						{ className: 'text-zinc-500 text-xs tracking-widest mt-2 mb-0' },
 						'Page cache, object cache, compression, warmups, fonts, and next-gen images'
 					),
 				]),
 				h('div', { className: 'flex flex-wrap gap-3', key: 'actions' }, [
-					h(Button, { onClick: purgeCache, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Flush All Cache'),
+					h(Button, { onClick: purgeCache, disabled: busy || !!asyncActions.purge_all, variant: 'primary' }, asyncActions.purge_all ? 'Queued…' : (busy ? 'Working…' : 'Flush All Cache')),
 				]),
 			]),
 
@@ -2751,105 +3267,166 @@
 						key: 'warm',
 					},
 					[
+						warmDisabledMessage ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', key: 'warm-disabled-message' }, warmDisabledMessage) : null,
 						h('div', { className: 'mt-4 flex gap-3 flex-wrap' }, [
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: warmFrontpageHtml,
-									disabled: busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy,
+									disabled: !pageCacheReady || warmBusy,
 								},
-								busy || process.active || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy ? 'Engine Busy' : (frontpageHtmlBusy ? 'Warming Frontpage HTML…' : 'Warm Up Frontpage HTML Cache')
+								!pageCacheReady ? 'Enable Page Cache First' : (warmBusy && !homepageHtmlBusy ? 'Engine Busy' : (homepageHtmlBusy ? 'Warming Homepage HTML…' : 'Warm Up Homepage HTML Cache'))
 							),
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: warmFrontpageHtmlCss,
-									disabled: busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy,
+									disabled: !cssBundleReady || warmBusy,
 								},
-								busy || process.active || frontpageHtmlBusy || menuUrlsCssBusy || allUrlsCssBusy ? 'Engine Busy' : (frontpageHtmlCssBusy ? 'Warming Frontpage HTML + CSS…' : 'Warm Up Frontpage HTML Cache + Frontpage CSS')
+								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !homepageHtmlCssBusy ? 'Engine Busy' : (homepageHtmlCssBusy ? 'Warming Homepage HTML + CSS Bundle…' : 'Warm Up Homepage HTML Cache + CSS Bundle')))
 							),
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startMenuWarming(false),
-									disabled: busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy,
+									disabled: !pageCacheReady || warmBusy,
 								},
-								busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy ? 'Engine Busy' : (getJobControls('warm_menu').canResume ? 'Resume Warm Up Menu HTML Cache' : 'Warm Up Menu HTML Cache')
+								!pageCacheReady ? 'Enable Page Cache First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm_menu').canResume ? 'Resume Warm Up Menu HTML Cache' : 'Warm Up Menu HTML Cache'))
 							),
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startMenuWarmingWithFrontpageCss(false),
-									disabled: busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy,
+									disabled: !cssBundleReady || warmBusy,
 								},
-								busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || allUrlsCssBusy ? 'Engine Busy' : (menuUrlsCssBusy ? 'Building Frontpage CSS…' : (getJobControls('warm_menu_css').canResume ? 'Resume Warm Up Menu HTML Cache + Frontpage CSS' : 'Warm Up Menu HTML Cache + Frontpage CSS'))
+								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !menuUrlsCssBusy ? 'Engine Busy' : (menuUrlsCssBusy ? 'Building CSS Bundles…' : (getJobControls('warm_menu_css').canResume ? 'Resume Warm Up Menu HTML Cache + CSS Bundles' : 'Warm Up Menu HTML Cache + CSS Bundles'))))
 							),
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startWarming(false),
-									disabled: busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy,
+									disabled: !pageCacheReady || warmBusy,
 								},
-								busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy ? 'Engine Busy' : (getJobControls('warm').canResume ? 'Resume Warm Up Full Site HTML Cache' : 'Warm Up Full Site HTML Cache')
+								!pageCacheReady ? 'Enable Page Cache First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm').canResume ? 'Resume Warm Up Full Site HTML Cache' : 'Warm Up Full Site HTML Cache'))
 							),
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startWarmingAllWithFrontpageCss(false),
-									disabled: busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy,
+									disabled: !cssBundleReady || warmBusy,
 								},
-								busy || process.active || frontpageHtmlBusy || frontpageHtmlCssBusy || menuUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Building Frontpage CSS…' : (getJobControls('warm_css').canResume ? 'Resume Warm Up Full Site HTML Cache + Frontpage CSS' : 'Warm Up Full Site HTML Cache + Frontpage CSS'))
+								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !allUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Building CSS Bundles…' : (getJobControls('warm_css').canResume ? 'Resume Warm Up Full Site HTML Cache + CSS Bundles' : 'Warm Up Full Site HTML Cache + CSS Bundles'))))
 							)
 						]),
 						h('div', { className: 'mt-4 text-xs text-zinc-400 space-y-1' }, [
-							h('div', { key: 'fp-css-1' }, 'Frontpage CSS bundles built: ' + formatNumber(stats.frontpageCssBundlesBuilt || 0)),
-							h('div', { key: 'fp-css-2' }, 'Frontpage styles bundled: ' + formatNumber(stats.frontpageCssStylesBundled || 0) + ' / ' + formatNumber(stats.frontpageCssStylesScanned || 0)),
-							h('div', { key: 'fp-css-3' }, 'Skipped: ' + formatNumber(stats.frontpageCssStylesSkipped || 0) + ' · Unresolved: ' + formatNumber(stats.frontpageCssStylesUnresolved || 0)),
-							h('div', { key: 'fp-css-4' }, 'Last frontpage CSS warm: ' + formatLooseTime(stats.lastFrontpageCssWarm || null)),
+							h('div', { key: 'fp-css-1' }, 'CSS bundles built: ' + formatNumber(stats.homepageCssBundlesBuilt || 0)),
+							h('div', { key: 'fp-css-2' }, 'Page styles bundled: ' + formatNumber(stats.homepageCssStylesBundled || 0) + ' / ' + formatNumber(stats.homepageCssStylesScanned || 0)),
+							h('div', { key: 'fp-css-3' }, 'Skipped: ' + formatNumber(stats.homepageCssStylesSkipped || 0) + ' · Unresolved: ' + formatNumber(stats.homepageCssStylesUnresolved || 0)),
+							h('div', { key: 'fp-css-4' }, 'Last CSS bundle warm: ' + formatLooseTime(stats.lastFrontpageCssWarm || null)),
 							(stats.lastFrontpageCssWarm && stats.lastFrontpageCssWarm.message)
 								? h('div', { key: 'fp-css-5', className: 'text-zinc-500' }, stats.lastFrontpageCssWarm.message)
 								: null,
 						]),
 					]
 				),
-				h(
-					Card,
-					{
-						title: 'AVIF / WebP Batch',
-						description: 'Convert existing uploads and generated image sizes to AVIF with WebP fallback.',
-						key: 'avif',
-						footer: h('div', { className: 'text-xs text-zinc-500 space-y-1' }, [
-							h('div', { key: 's1' }, 'Imagick: ' + (avifSupport.imagick ? 'Yes' : 'No')),
-							h('div', { key: 's2' }, 'Imagick AVIF: ' + (avifSupport.imagick_avif ? 'Yes' : 'No')),
-							h('div', { key: 's3' }, 'Imagick WebP: ' + (avifSupport.imagick_webp ? 'Yes' : 'No')),
-							h('div', { key: 's4' }, 'GD AVIF: ' + (avifSupport.gd_avif ? 'Yes' : 'No')),
-							h('div', { key: 's5' }, 'GD WebP: ' + (avifSupport.gd_webp ? 'Yes' : 'No')),
-						]),
-					},
-					[
-						!avifSupport.supported
-							? h(
-									'div',
-									{
-										className:
-											'mb-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-xs',
-									},
-									'This server cannot generate AVIF or WebP yet. Install Imagick with AVIF/WebP support or a GD build that includes imageavif()/imagewebp().' 
-							  )
-							: null,
-						h('div', { className: 'mt-4 flex gap-3 flex-wrap' }, [
+			h(
+				Card,
+				{
+					title: 'Media Optimization',
+					description: 'Generate and serve AVIF/WebP variants, including upload-time, guarded on-demand conversion, and batch conversion for existing uploads.',
+					key: 'avif',
+				},
+				[
+					h(ToggleRow, {
+						label: 'Enable Media Optimization',
+						description: 'Enable AVIF/WebP generation and frontend image URL rewriting according to the selected output policy.',
+						checked: mediaOptimizationEnabled,
+						onChange: (value) => updateMediaOptimizationSetting(value),
+						disabled: busy,
+						key: 'media-optimization-enabled',
+					}),
+					h(ToggleRow, {
+						label: 'Automatic Format',
+						description: 'AVIF is preferred first, with WebP kept as the compatibility fallback.',
+						checked: !settings.mediaOutputMode || 'auto' === settings.mediaOutputMode,
+						onChange: (value) => { if (value) { updateSetting('mediaOutputMode', 'auto'); } },
+						disabled: busy || !mediaOptimizationEnabled,
+						key: 'media-output-auto',
+					}),
+					h(ToggleRow, {
+						label: 'AVIF Format',
+						description: 'Generate and prefer AVIF variants only.',
+						checked: 'avif' === settings.mediaOutputMode,
+						onChange: (value) => { if (value) { updateSetting('mediaOutputMode', 'avif'); } },
+						disabled: busy || !mediaOptimizationEnabled,
+						key: 'media-output-avif',
+					}),
+					h(ToggleRow, {
+						label: 'WebP Format',
+						description: 'Generate and prefer WebP variants only.',
+						checked: 'webp' === settings.mediaOutputMode,
+						onChange: (value) => { if (value) { updateSetting('mediaOutputMode', 'webp'); } },
+						disabled: busy || !mediaOptimizationEnabled,
+						key: 'media-output-webp',
+					}),
+					h(ToggleRow, {
+						label: 'Generate on Upload',
+						description: 'When enabled, newly uploaded images and their registered thumbnail sizes are queued for next-gen conversion.',
+						checked: !!settings.mediaGenerateOnUploadEnabled,
+						onChange: (value) => updateSetting('mediaGenerateOnUploadEnabled', value),
+						disabled: busy || !mediaOptimizationEnabled,
+						key: 'media-generate-upload',
+					}),
+					h(ToggleRow, {
+						label: 'Generate on Demand',
+						description: 'When enabled, UltraCache may create a missing next-gen image variant during safe frontend GET/HEAD requests, guarded by per-image locks, per-request limits, and a short time budget.',
+						checked: !!settings.mediaGenerateOnDemandEnabled,
+						onChange: (value) => updateSetting('mediaGenerateOnDemandEnabled', value),
+						disabled: busy || !mediaOptimizationEnabled,
+						key: 'media-generate-demand',
+					}),
+					h(ToggleRow, {
+						label: 'Safe CLS Dimensions',
+						description: 'Inject missing width and height on local images using attachment metadata first and local file dimensions as fallback.',
+						checked: settings.clsDimensionsEnabled,
+						onChange: (value) => updateSetting('clsDimensionsEnabled', value),
+						disabled: busy || !mediaOptimizationEnabled || !!settings.frontendSafeModeEnabled,
+						key: 'media-cls-dimensions',
+					}),
+					h(ToggleRow, {
+						label: 'LCP Image Priority',
+						description: 'Prioritize the likely hero/LCP image. When Fix sliders / hero sections is enabled, SR7 first-slide image layers are marked through the SR7 lifecycle without hardcoded IDs.',
+						checked: settings.lcpImagePriorityEnabled,
+						onChange: (value) => updateSetting('lcpImagePriorityEnabled', value),
+						disabled: busy || !mediaOptimizationEnabled || !!settings.frontendSafeModeEnabled,
+						key: 'media-lcp-priority',
+					}),
+					!avifSupport.supported
+						? h(
+							'div',
+							{
+								className:
+									'mt-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-xs',
+							},
+							'This server cannot generate AVIF or WebP yet. Install Imagick with AVIF/WebP support or a GD build that includes imageavif()/imagewebp().'
+						 )
+						: null,
+					h('div', { className: 'mt-5 pt-4 space-y-3', key: 'media-batch-section' }, [
+						h('div', { className: 'text-sm font-medium text-white', key: 'media-batch-title' }, 'Batch conversion'),
+						h('div', { className: 'text-xs text-zinc-500', key: 'media-batch-description' }, 'Convert existing uploads and generated image sizes using the selected output format policy.'),
+						h('div', { className: 'flex gap-3 flex-wrap', style: { marginTop: '5px' }, key: 'media-batch-actions' }, [
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[180px] text-white py-3 font-bold',
 									onClick: () => startMediaOptimization(false),
-									disabled: busy || !avifSupport.supported,
+									disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported,
 								},
 								busy ? 'Engine Busy' : (getJobControls('media').canResume ? 'Resume Media Conversion' : 'Start Media Conversion')
 							),
@@ -2859,22 +3436,61 @@
 									{
 										className: 'uc-btn uc-btn--primary flex-1 min-w-[180px] text-white py-3 font-bold',
 										onClick: () => startMediaOptimization(true),
-										disabled: busy || !avifSupport.supported,
+										disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported,
 									},
 									busy ? 'Engine Busy' : 'Restart Media Conversion'
 								)
 								: null,
-						])
-					]
-				),
+						]),
+						h('div', { className: 'text-xs text-zinc-500 mt-2', key: 'media support' }, [
+							h('div', { key: 's1' }, 'Imagick: ' + (avifSupport.imagick ? 'Yes' : 'No')),
+							h('div', { key: 's2' }, 'Imagick AVIF: ' + (avifSupport.imagick_avif ? 'Yes' : 'No')),
+							h('div', { key: 's3' }, 'Imagick WebP: ' + (avifSupport.imagick_webp ? 'Yes' : 'No')),
+							h('div', { key: 's4' }, 'GD AVIF: ' + (avifSupport.gd_avif ? 'Yes' : 'No')),
+							h('div', { key: 's5' }, 'GD WebP: ' + (avifSupport.gd_webp ? 'Yes' : 'No')),
+						]),
+					]),
+				]
+			)
 			]),
 
-			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-8', key: 'settings' }, [
+			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4', key: 'settings' }, [
+
+				h(
+					Card,
+					{
+						title: 'Select profile',
+						description: 'Select a known preset below. Profiles apply their settings immediately and can be adjusted manually afterwards.',
+						key: 'performance-profile-card',
+					},
+					[
+						h('div', { className: 'grid grid-cols-1 gap-4', key: 'performance-profile-grid' },
+							PERFORMANCE_PROFILE_DISPLAY_ORDER.map((profileKey) => {
+								const profile = profileKey === 'custom' ? PERFORMANCE_PROFILE_CUSTOM : PERFORMANCE_PROFILES[profileKey];
+								return h(ToggleRow, {
+									label: profile.label,
+									description: profile.description,
+									checked: activePerformanceProfile === profileKey,
+									onChange: (value) => {
+										if (!value) { return; }
+										if (profileKey === 'custom') {
+											pushToast({ type: 'info', text: 'Custom turns on automatically when settings do not match a preset.' });
+											return;
+										}
+										applyPerformanceProfile(profileKey);
+									},
+									disabled: busy,
+									key: 'performance-profile-' + profileKey,
+								});
+							})
+						),
+					]
+				),
 				h(
 					Card,
 					{
 						title: 'Cache Engine',
-						description: 'Controls that affect page cache behavior and preload.',
+						description: 'Core page cache behavior, WooCommerce bypasses, compression variants, and safe prefetch hints.',
 						key: 'cache-engine',
 					},
 					[
@@ -2886,7 +3502,7 @@
 							disabled: busy,
 							key: 'page',
 						}),
-						h(ToggleRow, {
+h(ToggleRow, {
 							label: 'Pre-render on Save',
 							description: 'Warm the updated page after content changes.',
 							checked: settings.preRenderOnSave,
@@ -2894,54 +3510,178 @@
 							disabled: busy,
 							key: 'preload',
 						}),
-						h(ToggleRow, {
-							label: 'Defer JavaScript',
-							description: 'Add defer to non-critical frontend scripts.',
-							checked: settings.deferJsEnabled,
-							onChange: (value) => updateSetting('deferJsEnabled', value),
+h(ToggleRow, {
+							label: 'WooCommerce Safe Mode',
+							description: 'Bypass cart, checkout, account, order endpoints, and cart-changing requests.',
+							checked: settings.woocommerceSafeModeEnabled,
+							onChange: (value) => updateSetting('woocommerceSafeModeEnabled', value),
 							disabled: busy,
-							key: 'defer',
+							key: 'woo-safe',
 						}),
-						h(ToggleRow, {
-							label: 'Delay Third-Party JavaScript',
-							description: 'Delay common analytics, maps, and tracking scripts until interaction or a short fallback timeout.',
-							checked: settings.delayThirdPartyJsEnabled,
-							onChange: (value) => updateSetting('delayThirdPartyJsEnabled', value),
+h(ToggleRow, {
+							label: 'Browser Cache Headers (.htaccess)',
+							description: 'Write long-lived browser cache headers for CSS, JS, fonts, static images, AVIF, and WebP on Apache-compatible hosts.',
+							checked: settings.browserCacheRulesEnabled,
+							onChange: (value) => updateSetting('browserCacheRulesEnabled', value),
 							disabled: busy,
-							key: 'delay-third-party',
+							key: 'browser-cache-rules',
 						}),
+							h(ToggleRow, {
+								label: 'Gzip',
+								description: compressionLocks.gzipDescription,
+								checked: settings.gzipEnabled,
+								onChange: (value) => updateSetting('gzipEnabled', value),
+								disabled: busy || compressionLocks.gzipLocked,
+								key: 'gzip',
+							}),
+							h(ToggleRow, {
+								label: 'Brotli',
+								description: compressionLocks.brotliDescription,
+								checked: settings.brotliEnabled,
+								onChange: (value) => updateSetting('brotliEnabled', value),
+								disabled: busy || compressionLocks.brotliLocked,
+								key: 'brotli',
+							}),
+							h(ToggleRow, {
+								label: 'Speculation Rules Prefetch',
+								description: 'Inject a safe prefetch-only speculationrules block for likely next-page internal navigations. Logged-in users, query-string links, WooCommerce flows, admin-like paths, nofollow links, and target/download links stay excluded.',
+								checked: settings.speculationRulesEnabled,
+								onChange: (value) => updateSetting('speculationRulesEnabled', value),
+								disabled: busy,
+								key: 'cache-engine-speculation-rules',
+							}),
+
+					]
+				),
+				h(
+					Card,
+					{
+						title: 'Frontend JS & Request Chains',
+						description: 'Defer/delay safe scripts and prioritize known critical request chains.',
+						key: 'frontend-js-request-chains-card',
+					},
+					[
 						h(ToggleRow, {
-							label: 'Async External Scripts',
-							description: 'Add async only to known external analytics and pixel scripts such as Google Tag Manager, Google Analytics, Meta Pixel, Bing, Clarity, Fathom, and Plausible.',
-							checked: settings.asyncExternalScriptsEnabled,
-							onChange: (value) => updateSetting('asyncExternalScriptsEnabled', value),
-							disabled: busy || settings.delayThirdPartyJsEnabled,
-							key: 'async-external-scripts',
-						}),
+									label: 'Enable Defer JS',
+									description: 'Add native defer to safe frontend scripts while keeping core, inline-dependent, WooCommerce, and protected scripts in normal blocking flow.',
+									checked: settings.deferJsEnabled,
+									onChange: (value) => updateSetting('deferJsEnabled', value),
+									disabled: busy,
+									key: 'defer-stage-one',
+								}),
+h(ToggleRow, {
+									label: 'Delay third-party JS',
+									description: 'Delay known third-party scripts until user interaction or the normal fallback timeout. Use the advanced exclusions accordion for sliders, menus, checkout, forms, and other fragile frontend scripts.',
+									checked: settings.delayThirdPartyJsEnabled,
+									onChange: (value) => updateSetting('delayThirdPartyJsEnabled', value),
+									disabled: busy,
+									key: 'defer-stage-two',
+								}),
+					h(ToggleRow, {
+						label: 'Delay non-critical/local JS',
+						description: 'Delay selected same-host enhancement scripts such as popups, sliders, filters, consent extras, marketing helpers, and other local footer scripts unless protected or excluded here.',
+						checked: settings.delayNonCriticalJsEnabled,
+						onChange: (value) => updateSetting('delayNonCriticalJsEnabled', value),
+						disabled: busy,
+						key: 'defer-stage-three',
+					}),
+h(ToggleRow, {
+									label: 'Main Thread Relief',
+									description: 'Load delayed scripts gradually during browser idle time instead of releasing the full delayed queue at once. Works with Stage two and Stage three delayed scripts.',
+									checked: settings.mainThreadReliefEnabled,
+									onChange: (value) => updateSetting('mainThreadReliefEnabled', value),
+									disabled: busy,
+									key: 'main-thread-relief',
+								}),
+h(ToggleRow, {
+									label: 'Critical Request Chain Relief',
+									description: 'Preload known critical requests and let selected non-critical chained assets be delayed so the browser has a shorter critical network chain.',
+									checked: settings.criticalRequestChainReliefEnabled,
+									onChange: (value) => updateSetting('criticalRequestChainReliefEnabled', value),
+									disabled: busy,
+									key: 'critical-request-chain-relief',
+								})
+					]
+				),
+h(
+					Card,
+					{
+						title: 'CSS Delivery',
+						description: 'Bundle eligible CSS and async low-risk stylesheets without changing media-related controls.',
+						key: 'css-delivery-lcp-card',
+					},
+					[
 						h(ToggleRow, {
-							label: 'Safe CLS Dimensions',
-							description: 'Inject missing width and height on local images using attachment metadata first and local file dimensions as fallback.',
-							checked: settings.clsDimensionsEnabled,
-							onChange: (value) => updateSetting('clsDimensionsEnabled', value),
+							label: 'CSS Bundling',
+							description: 'Create local UltraCache CSS bundles for eligible stylesheet links. Choose the scope below: homepage-only for safest cache reuse, shared for a common site bundle, or per-page for isolated landing/page optimization.',
+							checked: settings.homepageCssBundleEnabled,
+							onChange: (value) => updateSetting('homepageCssBundleEnabled', value),
 							disabled: busy,
-							key: 'cls-dimensions',
+							key: 'homepage-css-bundle',
 						}),
-						h(ToggleRow, {
-							label: 'Safe Async CSS',
-							description: 'Rewrite only low-risk local stylesheet links to non-blocking print+onload loading with a noscript fallback.',
+						h(ToggleRow, { label: 'CSS Bundling Scope: Homepage only', description: 'Use CSS bundles only on the homepage. Safest option when the goal is homepage PageSpeed testing and maximum browser cache reuse on inner pages.', checked: (settings.cssBundleScope || 'homepage') === 'homepage', onChange: (value) => value && updateSetting('cssBundleScope', 'homepage'), disabled: busy || !settings.homepageCssBundleEnabled, key: 'css-bundle-scope-homepage' }),
+						h(ToggleRow, { label: 'CSS Bundling Scope: Shared site bundle', description: 'Use the homepage-generated bundle as a shared bundle across pages. Matching common CSS is bundled once and reused; page-specific CSS remains as normal links.', checked: settings.cssBundleScope === 'shared', onChange: (value) => value && updateSetting('cssBundleScope', 'shared'), disabled: busy || !settings.homepageCssBundleEnabled, key: 'css-bundle-scope-shared' }),
+						h(ToggleRow, { label: 'CSS Bundling Scope: Per-page bundles', description: 'Create page-specific bundles. Best for isolated landing pages, but it can reduce browser cache reuse across multi-page browsing sessions.', checked: settings.cssBundleScope === 'per-page', onChange: (value) => value && updateSetting('cssBundleScope', 'per-page'), disabled: busy || !settings.homepageCssBundleEnabled, key: 'css-bundle-scope-per-page' }),
+h(ToggleRow, {
+							label: 'CSS Safe Bundling',
+							description: 'Conservative site-wide CSS bundling. Injects the generated bundle without removing original stylesheet links, making it the safest default for fragile themes, sliders, and mixed plugin stacks.',
+							checked: 'aggressive' !== settings.homepageCssBundleMode,
+							onChange: (value) => updateSetting('homepageCssBundleMode', value ? 'safe' : 'aggressive'),
+							disabled: busy || !settings.homepageCssBundleEnabled,
+							key: 'homepage-css-bundle-stage-1',
+						}),
+h(ToggleRow, {
+							label: 'CSS Aggressive Bundling',
+							description: 'Includes the safe local CSS rules and additionally accepts local screen/all media stylesheets. It replaces matched stylesheet links with the generated bundle while still skipping external, async, disabled, unreadable, and excluded CSS.',
+							checked: 'aggressive' === settings.homepageCssBundleMode,
+							onChange: (value) => updateSetting('homepageCssBundleMode', value ? 'aggressive' : 'safe'),
+							disabled: busy || !settings.homepageCssBundleEnabled,
+							key: 'homepage-css-bundle-stage-2',
+						}),
+h(ToggleRow, {
+							label: 'Inline CSS Bundling',
+							description: 'Inline the generated page CSS bundle directly into the document head instead of loading it as a separate stylesheet request.',
+							checked: settings.homepageCssBundleInlineEnabled,
+							onChange: (value) => updateSetting('homepageCssBundleInlineEnabled', value),
+							disabled: busy || !settings.homepageCssBundleEnabled,
+							key: 'homepage-css-bundle-inline',
+						}),
+h(ToggleRow, {
+							label: 'Create CSS Bundle on Entry / Warm',
+							description: 'Build missing CSS bundles on entry or warmup according to the selected scope. Homepage and shared scopes build the homepage bundle; per-page scope can build a separate bundle for each warmed cacheable URL.',
+							checked: settings.pageCssBundleOnEntryEnabled,
+							onChange: (value) => updateSetting('pageCssBundleOnEntryEnabled', value),
+							disabled: busy || !settings.homepageCssBundleEnabled,
+							key: 'page-css-bundle-on-entry',
+						}),
+h(ToggleRow, {
+							label: 'Async Remaining CSS',
+							description: 'Rewrite only low-risk local stylesheet links to non-blocking print+onload loading with a noscript fallback. This complements CSS Bundling.',
 							checked: settings.asyncCssEnabled,
 							onChange: (value) => updateSetting('asyncCssEnabled', value),
 							disabled: busy,
 							key: 'async-css',
 						}),
-						h(ToggleRow, {
-							label: 'LCP Image Priority',
-							description: 'Preload the first likely hero image and prevent lazy loading on that candidate.',
-							checked: settings.lcpImagePriorityEnabled,
-							onChange: (value) => updateSetting('lcpImagePriorityEnabled', value),
-							disabled: busy,
-							key: 'lcp-priority',
-						}),
+			
+h('div', { className: 'uc-diagnostic-group mt-5', key: 'css-bundle-diagnostics' }, [
+							h('div', { className: 'uc-section-title' }, 'CSS Bundle Diagnostics'),
+							h('div', { className: 'space-y-2 text-xs text-zinc-400' }, [
+								h('div', { key: 'css-d1' }, 'Bundles built: ' + formatNumber(stats.homepageCssBundlesBuilt || 0)),
+								h('div', { key: 'css-d2' }, 'Styles bundled/scanned: ' + formatNumber(stats.homepageCssStylesBundled || 0) + ' / ' + formatNumber(stats.homepageCssStylesScanned || 0)),
+								h('div', { key: 'css-d3' }, 'Skipped/unresolved: ' + formatNumber(stats.homepageCssStylesSkipped || 0) + ' / ' + formatNumber(stats.homepageCssStylesUnresolved || 0)),
+								h('div', { key: 'css-d4' }, 'Last CSS bundle warm: ' + formatLooseTime(stats.lastFrontpageCssWarm || null)),
+							]),
+						]),
+					]
+				),
+h(
+					Card,
+					{
+						title: 'Fonts Optimization',
+						description: 'Optimize Google Fonts and self-hosted font CSS delivery.',
+						key: 'fonts-optimization-card',
+					},
+					[
 						h(ToggleRow, {
 							label: 'Google Fonts display=swap',
 							description: 'Append display=swap to Google Fonts requests generated by themes and plugins.',
@@ -2950,7 +3690,7 @@
 							disabled: busy,
 							key: 'fonts-swap',
 						}),
-						h(ToggleRow, {
+h(ToggleRow, {
 							label: 'Local Google Fonts Optimization',
 							description: 'Opt-in feature. Download Google Fonts CSS and WOFF2 files into the UltraCache cache, rewrite the frontend to serve local copies, and keep font-display: swap on the localized CSS. This feature makes outbound requests to Google Fonts when building the local cache.',
 							checked: settings.googleFontsLocalOptimizationEnabled,
@@ -2958,7 +3698,7 @@
 							disabled: busy,
 							key: 'google-fonts-local',
 						}),
-						h(ToggleRow, {
+h(ToggleRow, {
 							label: 'Optimize Self-Hosted Font CSS',
 							description: 'Rewrite local @font-face CSS to add font-display: swap, normalize font URLs, and preload up to two likely first-paint WOFF2 files.',
 							checked: settings.selfHostedFontCssOptimizationEnabled,
@@ -2966,22 +3706,222 @@
 							disabled: busy,
 							key: 'self-hosted-fonts',
 						}),
-						h(ToggleRow, {
-							label: 'Speculation Rules Prefetch',
-							description: 'Inject a safe prefetch-only speculationrules block for likely next-page internal navigations. Logged-in users, query-string links, WooCommerce flows, admin-like paths, nofollow links, and target/download links stay excluded.',
-							checked: settings.speculationRulesEnabled,
-							onChange: (value) => updateSetting('speculationRulesEnabled', value),
-							disabled: busy,
-							key: 'speculation-rules',
-					}),
-						h(ToggleRow, {
-							label: 'WooCommerce Safe Mode',
-							description: 'Bypass cart, checkout, account, order endpoints, and cart-changing requests.',
-							checked: settings.woocommerceSafeModeEnabled,
-							onChange: (value) => updateSetting('woocommerceSafeModeEnabled', value),
-							disabled: busy,
-							key: 'woo-safe',
+h(ToggleRow, {
+							label: 'Advanced Runtime Font CSS Rewrite',
+							description: 'Advanced opt-in. Uses a MutationObserver to rewrite late-injected local font stylesheet links. Native DOM prototype monkey-patching has been removed from the default path.',
+							checked: settings.selfHostedFontRuntimeRewriteEnabled,
+							onChange: (value) => updateSetting('selfHostedFontRuntimeRewriteEnabled', value),
+							disabled: busy || !settings.selfHostedFontCssOptimizationEnabled,
+							key: 'self-hosted-fonts-runtime-rewrite',
 						}),
+
+					]
+				),
+h(
+					Card,
+					{
+						title: 'Safe Asset Cleanup',
+						description: 'Optional cleanup for WooCommerce product/gallery/filter assets when they are not detected as needed.',
+						key: 'asset-cleanup-section-card',
+					},
+					[
+						h(ToggleRow, { label: 'Enable Asset Chain Cleanup', description: 'Cleans selected unnecessary frontend assets from cached HTML and late WordPress queues. Test homepage, shop, product, cart, checkout, and header search after enabling.', checked: settings.assetChainCleanupEnabled, onChange: (value) => updateSetting('assetChainCleanupEnabled', value), disabled: busy, key: 'asset-chain-cleanup-enabled' }),
+h(ToggleRow, { label: 'Clean WooCommerce product/gallery assets outside product pages', description: 'Removes zoom, flexslider, PhotoSwipe, variation, and single-product assets when the cached HTML is not a single product page.', checked: settings.assetCleanupWooProductAssetsEnabled, onChange: (value) => updateSetting('assetCleanupWooProductAssetsEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-woo-product-assets' }),
+h(ToggleRow, { label: 'Clean product filter assets when no filter is detected', description: 'Removes WOOF/filter scripts and styles when UltraCache cannot detect filter markup in the generated HTML.', checked: settings.assetCleanupProductFilterAssetsEnabled, onChange: (value) => updateSetting('assetCleanupProductFilterAssetsEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-product-filter-assets' }),
+h(ToggleRow, { label: 'Clean WooCommerce Blocks CSS when no Woo blocks are detected', description: 'Removes wc-blocks.css from cached HTML when no WooCommerce block markup is present.', checked: settings.assetCleanupWooBlocksCssEnabled, onChange: (value) => updateSetting('assetCleanupWooBlocksCssEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-woo-blocks-css' })
+					]
+				),
+			]),
+
+			h('div', { className: 'uc-card', key: 'cache-engine-advanced-settings-exclusions-card' }, [
+h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-advanced-settings-exclusions' }, [
+									h('summary', { className: 'uc-accordion__summary' }, [
+										h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
+											h('div', { className: 'uc-accordion__title' }, 'Advanced Settings & Exclusions'),
+											h('div', { className: 'uc-accordion__description' }, 'Manual include/exclude lists and higher-risk toggles for frontend delivery, CSS/JS handling, asset cleanup, and LCP image handling.'),
+										]),
+										h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
+									]),
+									h('div', { className: 'uc-accordion__body space-y-4' }, [
+										h(ToggleRow, {
+											label: 'Frontend Safe Mode',
+											description: 'Force the internal safe frontend mode. When enabled, UltraCache skips structural HTML mutations such as LCP image priority, CLS image dimensions, authoring-asset stripping, and safe HTML minification.',
+											checked: settings.frontendSafeModeEnabled,
+											onChange: (value) => updateSetting('frontendSafeModeEnabled', value),
+											disabled: busy,
+											key: 'frontend-safe-mode',
+										}),
+										h(ToggleRow, {
+											label: 'Fix sliders / hero sections',
+											description: 'When Revolution Slider, SR7, Swiper, Slick, or similar hero slider markup is detected, protect slider/runtime assets. Stage 2 CSS bundling can still bundle non-slider local CSS, while slider CSS and risky frontend transforms stay protected.',
+											checked: settings.sliderSafeModeEnabled !== false,
+											onChange: (value) => updateSetting('sliderSafeModeEnabled', value),
+											disabled: busy,
+											key: 'slider-safe-mode',
+										}),
+										h(ToggleRow, {
+											label: 'Aggressive Async CSS',
+											description: 'Optional advanced mode. Rewrite almost all remaining local stylesheet links, including late footer output, to non-blocking print+onload loading with a noscript fallback. Use the exclude list for styles that must stay blocking.',
+											checked: settings.aggressiveAsyncCssEnabled,
+											onChange: (value) => updateSetting('aggressiveAsyncCssEnabled', value),
+											disabled: busy,
+											key: 'aggressive-async-css',
+										}),
+										h(ToggleRow, {
+								label: 'Enable query-string args caching',
+								description: 'Allow UltraCache to cache URL variants that include query-string args. Excluded query-string args always bypass cache. If the whitelist below is empty, all non-excluded query-string variants can be cached.',
+								checked: !!settings.cacheQueryStringsEnabled,
+								onChange: (value) => updateSetting('cacheQueryStringsEnabled', value),
+								disabled: busy,
+								key: 'query-string-caching',
+							}),
+											h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'cache-engine-advanced-fields' }, [
+											h(SaveableTextAreaField, {
+												label: 'Exclude Paths From Caching',
+												description: 'One path per line. Prefix matching is supported. Example: /members/ or /thank-you/.',
+												value: settings.cacheExceptionPaths || '',
+												onSave: (value) => updateSetting('cacheExceptionPaths', value),
+												disabled: busy,
+												placeholder: '/cart/\n/checkout/\n/my-account/',
+												saveLabel: 'Save Excluded Paths',
+												key: 'exclude-paths-from-caching',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Excluded query-string args from Caching',
+												description: 'One query key per line. URLs containing any of these query-string args always bypass cache. Use this for carts, previews, searches, dynamic filters, tracking actions, and other unsafe parameters.',
+												value: settings.cacheExceptionQueryArgs || '',
+												onSave: (value) => updateSetting('cacheExceptionQueryArgs', value),
+												disabled: busy,
+												placeholder: 'preview\nadd-to-cart\nwc-ajax',
+												saveLabel: 'Save Excluded Query-string Args',
+												key: 'excluded-query-string-args-from-caching',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Query-string args whitelist',
+												description: 'Optional. One query key per line. Leave empty to cache all non-excluded query-string variants. When filled, UltraCache caches a query-string URL only when every query arg is listed here.',
+												value: settings.cacheQueryStringAllowlist || '',
+												onSave: (value) => updateSetting('cacheQueryStringAllowlist', value),
+												disabled: busy,
+												placeholder: 'color\nsize\nfilter',
+												saveLabel: 'Save Query-string Whitelist',
+												key: 'query-string-args-whitelist',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Defer those scripts',
+												description: 'Optional newline-separated handle or URL fragments. Matching frontend scripts are forced to native defer even when Defer JS is off or the script would normally be protected. Use carefully for scripts you explicitly want deferred.',
+												value: settings.deferJsForceList || '',
+												onSave: (value) => updateSetting('deferJsForceList', value),
+												disabled: busy,
+												placeholder: 'my-theme-script\n/custom-plugin/assets/app.js',
+												saveLabel: 'Save Force Defer List',
+												key: 'defer-those-scripts-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Defer / Delay Exclusions',
+												description: 'Optional newline-separated handle or URL fragments. Matching scripts are left untouched by Defer JS and Delay JS. Use this for sliders, menus, checkout, forms, videos, and scripts that must run during initial render.',
+												value: settings.deferJsExcludeList || '',
+												onSave: (value) => updateSetting('deferJsExcludeList', value),
+												disabled: busy,
+												placeholder: 'revslider\nsr7\ntptools\nelementor-frontend\nswiper\nslick\nsmartslider\nn2-ss',
+												saveLabel: 'Save Exclusions',
+												key: 'defer-stages-exclude-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Manual Priority Preloads',
+												description: 'Optional newline-separated priority resources. Prefix each line with image, style, script, font, or fetch. Image entries receive fetchpriority=high.',
+												value: settings.criticalResourcePreloadList || '',
+												onSave: (value) => updateSetting('criticalResourcePreloadList', value),
+												disabled: busy || !settings.criticalRequestChainReliefEnabled,
+												placeholder: 'style /wp-content/cache/ultracache/homepage-css/homepage.css\nfont /wp-content/uploads/fonts/manrope.woff2',
+												saveLabel: 'Save Priority Preloads',
+												key: 'critical-resource-preload-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Additional Fetch URL Preloads',
+												description: 'Optional newline-separated URLs for dynamic frontend fetches, slider JSON/assets, or request chains that are not discovered early in the initial HTML.',
+												value: settings.criticalFetchPreloadList || '',
+												onSave: (value) => updateSetting('criticalFetchPreloadList', value),
+												disabled: busy || !settings.criticalRequestChainReliefEnabled,
+												placeholder: '/sliders/1?srengine=7&slideid=2\n/sliders/1?srengine=7&slideid=3',
+												saveLabel: 'Save Fetch URL Preloads',
+												key: 'critical-fetch-preload-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Delay Non-Critical Request Chains',
+												description: 'Optional newline-separated handle or URL fragments. Matching local scripts are delayed and matching stylesheets are converted to async print/onload loading.',
+												value: settings.criticalRequestChainDelayList || '',
+												onSave: (value) => updateSetting('criticalRequestChainDelayList', value),
+												disabled: busy || !settings.criticalRequestChainReliefEnabled,
+												placeholder: 'tooltipster\nplainoverlay\nion.rangeSlider\nsourcebuster',
+												saveLabel: 'Save Chain Delay List',
+												key: 'critical-request-chain-delay-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Asset Cleanup Exclusions',
+												description: 'Optional newline-separated handle, URL, or HTML fragments. When a page/request matches one of these fragments, Asset Chain Cleanup is skipped to protect builders, search, carts, checkout, and custom widgets.',
+												value: settings.assetCleanupExcludeList || '',
+												onSave: (value) => updateSetting('assetCleanupExcludeList', value),
+												disabled: busy || !settings.assetChainCleanupEnabled,
+												placeholder: 'elementor\nrevslider\nfibosearch\ncart\ncheckout',
+												saveLabel: 'Save Asset Exclusions',
+												key: 'asset-cleanup-exclude-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'CSS Bundle Exclusions',
+												description: 'Optional newline-separated URL fragments. Matching stylesheets stay outside generated CSS bundles.',
+												value: settings.homepageCssBundleExcludeList || '',
+												onSave: (value) => updateSetting('homepageCssBundleExcludeList', value),
+												disabled: busy || !settings.homepageCssBundleEnabled,
+												placeholder: '/widget-mega-menu.min.css\n/front.css',
+												saveLabel: 'Save CSS Bundle Exclusions',
+												key: 'homepage-css-bundle-exclude-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Async CSS Exclude List',
+												description: 'Optional newline-separated URL fragments. Matching stylesheets will not be rewritten to async loading.',
+												value: settings.asyncCssExcludeList || '',
+												onSave: (value) => updateSetting('asyncCssExcludeList', value),
+												disabled: busy || !settings.asyncCssEnabled,
+												placeholder: '/post-21.css\n/base/elementor.css',
+												saveLabel: 'Save Exclude List',
+												key: 'async-css-exclude-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Aggressive Async CSS Exclude List',
+												description: 'Optional newline-separated handle or URL fragments. Matching local stylesheets stay in normal blocking flow even when Aggressive Async CSS is enabled.',
+												value: settings.aggressiveAsyncCssExcludeList || '',
+												onSave: (value) => updateSetting('aggressiveAsyncCssExcludeList', value),
+												disabled: busy || !settings.aggressiveAsyncCssEnabled,
+												placeholder: '/fontawesome.css\n/elementor/css/post-21.css',
+												saveLabel: 'Save Exclude List',
+												key: 'aggressive-async-css-exclude-list',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Single LCP Image URL',
+												description: 'Optional single hero/LCP image URL or fragment. For complex sliders with multiple assets, prefer Manual Priority Preloads or the slider-safe LCP priority feature.',
+												value: settings.lcpImagePriorityOverride || '',
+												onSave: (value) => updateSetting('lcpImagePriorityOverride', value),
+												disabled: busy || !!settings.frontendSafeModeEnabled || !settings.lcpImagePriorityEnabled,
+												placeholder: '/wp-content/uploads/hero.webp\nhero-home.jpg',
+												saveLabel: 'Save LCP Image URL',
+												key: 'lcp-priority-override',
+											}),
+										]),
+									]),
+								])
+			]),
+
+			h(RedisCard, { form: redisForm, diagnostics, busy: busy || !!asyncActions.redis_test || !!asyncActions.object_cache_flush, objectCacheEnabled: settings.objectCacheEnabled, onObjectCacheEnabledChange: (value) => updateSetting('objectCacheEnabled', value), onFieldChange: updateRedisField, onSave: saveRedisSettings, onTest: testRedisConnection, onFlush: flushObjectCache, key: 'redis-card' }),
+
+			h(
+				Card,
+				{
+					title: 'Automation & Scheduling',
+					description: 'Scheduled cache cleanup, background warmup queue, and stale cache timing controls.',
+					key: 'automation-scheduling-reworked',
+				},
+				[
+					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
 						h(ToggleRow, {
 							label: 'Scheduled Cache Cleanup',
 							description: 'Run an automatic full cache purge using the interval below.',
@@ -2999,148 +3939,31 @@
 							key: 'cron-warm-enabled',
 						}),
 						h(ToggleRow, {
-							label: 'Start Cron Warm Up Automatically',
-							description: 'Start the cron warm queue automatically after scheduled cleanup or Flush All Cache whenever Cron Warm Up is enabled.',
+							label: 'Start after Scheduled Cleanup',
+							description: 'Start the cron warm queue after the scheduled cleanup purge completes.',
 							checked: settings.cronWarmStartAfterCleanup,
 							onChange: (value) => updateSetting('cronWarmStartAfterCleanup', value),
 							disabled: busy || !settings.cacheCleanupEnabled || !settings.cronWarmEnabled,
 							key: 'cleanup-warm',
 						}),
-					]
-				),
-				h(
-					Card,
-					{
-						title: 'Compression, Images & Objects',
-						description: 'Response compression, object cache, and next-gen image settings.',
-						key: 'compression',
-					},
-					[
 						h(ToggleRow, {
-							label: 'Object Cache',
-							description: diagnostics.objectCache && diagnostics.objectCache.available
-								? 'Enable the managed WordPress object-cache.php drop-in. Backend can be Disk or Redis. Disk remains the fallback.'
-								: ((diagnostics.objectCache && diagnostics.objectCache.message) || 'Temporarily unavailable in this hotfix.'),
-							checked: settings.objectCacheEnabled,
-							onChange: (value) => updateSetting('objectCacheEnabled', value),
-							disabled: busy || !(diagnostics.objectCache && diagnostics.objectCache.available),
-							key: 'object-cache',
-						}),
-							h(ToggleRow, {
-							label: 'Gzip',
-							description: compressionLocks.gzipDescription,
-							checked: settings.gzipEnabled,
-							onChange: (value) => updateSetting('gzipEnabled', value),
-							disabled: busy || compressionLocks.gzipLocked,
-							key: 'gzip',
+							label: 'Start after Flush All Cache',
+							description: 'Start the cron warm queue after a manual full cache purge.',
+							checked: typeof settings.cronWarmStartAfterFlush === 'undefined' ? settings.cronWarmStartAfterManualPurge : settings.cronWarmStartAfterFlush,
+							onChange: updateManualPurgeWarmSetting,
+							disabled: busy || !settings.cronWarmEnabled,
+							key: 'manual-purge-warm',
 						}),
 						h(ToggleRow, {
-							label: 'Brotli',
-							description: compressionLocks.brotliDescription,
-							checked: settings.brotliEnabled,
-							onChange: (value) => updateSetting('brotliEnabled', value),
-							disabled: busy || compressionLocks.brotliLocked,
-							key: 'brotli',
-						}),
-						h(ToggleRow, {
-							label: 'AVIF / WebP Conversion',
-							description: 'Generate AVIF versions first and WebP fallback files when AVIF is unavailable.',
-							checked: settings.avifConversionEnabled,
-							onChange: (value) => updateSetting('avifConversionEnabled', value),
+							label: 'Stale While Revalidate',
+							description: 'Serve stale HTML only within the max stale window while UltraCache refreshes it in the background.',
+							checked: settings.staleWhileRevalidateEnabled,
+							onChange: (value) => updateSetting('staleWhileRevalidateEnabled', value),
 							disabled: busy,
-							key: 'avif',
+							key: 'swr-toggle',
 						}),
-						h(ToggleRow, {
-							label: 'Browser Cache Rules (.htaccess)',
-							description: 'Write long-lived cache headers for CSS, JS, fonts, and static images on Apache-compatible hosts.',
-							checked: settings.browserCacheRulesEnabled,
-							onChange: (value) => updateSetting('browserCacheRulesEnabled', value),
-							disabled: busy,
-							key: 'browser-cache-rules',
-						}),
-					]
-				),
-			]),
-
-			h(RedisCard, { form: redisForm, diagnostics, busy, onFieldChange: updateRedisField, onSave: saveRedisSettings, onTest: testRedisConnection, onFlush: flushObjectCache, key: 'redis-card' }),
-
-			h(VarnishCard, { form: varnishForm, diagnostics, busy, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onTest: runVarnishTest, onFlushAll: runVarnishFlushAll, key: 'varnish-card' }),
-
-			h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
-				h(DiagnosticsCard, { diagnostics, stats, key: 'diagnostics' }),
-				h(ActivitySummaryCard, { stats, key: 'activity-summary' }),
-			]),
-			h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }),
-
-			h(
-				Card,
-				{
-					title: 'Cache Decision Tester',
-					description: 'Inspect how UltraCache evaluates a frontend URL without using your current admin session cookies.',
-					key: 'inspector',
-				},
-				[
-					h(TextField, {
-						label: 'URL or path',
-						description: 'Paste a full local URL or just a path like /checkout/ or /product/widget/?add-to-cart=12.',
-						value: inspectUrl,
-						onChange: setInspectUrl,
-						disabled: inspectBusy,
-						placeholder: '/sample-page/?utm_source=test',
-						onKeyDown: (event) => {
-							if ('Enter' === event.key) {
-								event.preventDefault();
-								inspectCacheDecision();
-							}
-						},
-					}),
-					h('div', { className: 'mt-4 flex flex-wrap gap-3 items-center' }, [
-						h(Button, { onClick: inspectCacheDecision, disabled: inspectBusy || !String(inspectUrl || '').trim(), variant: 'primary' }, inspectBusy ? 'Inspecting…' : 'Inspect URL'),
-						inspectResult
-							? h(StatusPill, { ok: !!inspectResult.cacheable, text: inspectResult.cacheable ? 'Cacheable' : 'Bypassed' })
-							: null,
 					]),
-					inspectResult
-						? h('div', { className: 'mt-5 grid grid-cols-1 md:grid-cols-2 gap-6' }, [
-							h('div', { className: 'space-y-0' }, [
-								h(DetailRow, { label: 'Reason', value: inspectResult.reasonLabel || inspectResult.reason }),
-								h(DetailRow, { label: 'Normalized URL', value: inspectResult.normalizedUrl || inspectResult.url, mono: true }),
-								h(DetailRow, { label: 'Normalized path', value: inspectResult.normalizedPath || inspectResult.path, mono: true }),
-								h(DetailRow, { label: 'Query string', value: inspectResult.query || '—', mono: true }),
-								h(DetailRow, { label: 'Matched excluded path rule', value: inspectResult.matchedExcludedPathRule, mono: true }),
-								h(DetailRow, { label: 'Matched excluded query arg', value: inspectResult.matchedExcludedQueryArg, mono: true }),
-								h(DetailRow, { label: 'Matched WooCommerce rule', value: inspectResult.matchedWooRule ? ((inspectResult.matchedWooRuleType || 'rule') + ': ' + inspectResult.matchedWooRule) : '', mono: true }),
-								h(DetailRow, { label: 'Query arg keys', value: Array.isArray(inspectResult.queryArgKeys) && inspectResult.queryArgKeys.length ? inspectResult.queryArgKeys.join(', ') : '' }),
-								h(DetailRow, { label: 'Notes', value: inspectResult.simulationNote }),
-							]),
-							h('div', { className: 'space-y-0' }, [
-								h(DetailRow, { label: 'Local URL', value: inspectResult.local ? 'Yes' : 'No' }),
-								h(DetailRow, { label: 'Page cache enabled', value: inspectResult.pageCacheEnabled ? 'Yes' : 'No' }),
-								h(DetailRow, { label: 'WooCommerce safe mode', value: inspectResult.wooSafeModeEnabled ? 'Yes' : 'No' }),
-								h(DetailRow, { label: 'Cache query strings', value: inspectResult.cacheQueryStrings ? 'Yes' : 'No' }),
-								inspectResult.cacheable && inspectResult.cachePaths
-									? h('div', { className: 'pt-2' }, [
-										h('div', { className: 'text-[11px] uppercase tracking-widest text-zinc-500 mb-2' }, 'Expected cache files'),
-										h(DetailRow, { label: 'Original HTML', value: inspectResult.cachePaths.orig, mono: true }),
-										h(DetailRow, { label: 'WebP HTML', value: inspectResult.cachePaths.webp, mono: true }),
-										h(DetailRow, { label: 'AVIF HTML', value: inspectResult.cachePaths.avif, mono: true }),
-									])
-									: null,
-							]),
-						])
-						: h('div', { className: 'mt-4 text-xs text-zinc-500' }, 'Enter a local URL or path to see the exact cache decision and matching bypass rule.'),
-				]
-			),
-
-			h(
-				Card,
-				{
-					title: 'Rules & Scheduling',
-					description: 'Custom cache exceptions and scheduled maintenance controls.',
-					key: 'rules',
-				},
-				[
-					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
+					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 						h(NumberField, {
 							label: 'Cleanup interval (hours)',
 							description: 'Use 24 for daily, 168 for weekly, or any custom number of hours.',
@@ -3187,29 +4010,79 @@
 							key: 'max-stale',
 						}),
 					]),
-					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
-						h(TextAreaField, {
-							label: 'Excluded paths',
-							description: 'One path per line. Prefix matching is supported. Example: /members/ or /thank-you/.',
-							value: advancedForm.cacheExceptionPaths,
-							onChange: (value) => updateAdvancedField('cacheExceptionPaths', value),
-							disabled: busy,
-							placeholder: '/cart/\n/checkout/\n/my-account/',
-							key: 'paths',
-						}),
-						h(TextAreaField, {
-							label: 'Excluded query args',
-							description: 'One query key per line. Useful for previews, campaign links, and dynamic actions.',
-							value: advancedForm.cacheExceptionQueryArgs,
-							onChange: (value) => updateAdvancedField('cacheExceptionQueryArgs', value),
-							disabled: busy,
-							placeholder: 'preview\nadd-to-cart\nwc-ajax',
-							key: 'query-args',
-						}),
-					]),
 					h('div', { className: 'mt-4 flex justify-end' }, [
-						h(Button, { onClick: saveAdvancedSettings, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Save Rules & Schedule'),
+						h(Button, { onClick: saveAdvancedSettings, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Save Automation & Scheduling'),
 					]),
+				]
+			),
+
+			h(VarnishCard, { form: varnishForm, diagnostics, busy: busy || !!asyncActions.varnish_test || !!asyncActions.varnish_flush_all, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onTest: runVarnishTest, onFlushAll: runVarnishFlushAll, key: 'varnish-card' }),
+			h(OPcacheCard, { stats, busy: busy || !!asyncActions.opcache_flush, onFlush: flushOpcache, key: 'opcache-card' }),
+
+			h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
+				h(DiagnosticsCard, { diagnostics, stats, key: 'diagnostics' }),
+				h(ActivitySummaryCard, { stats, key: 'activity-summary' }),
+			]),
+			h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }),
+
+			h(
+				Card,
+				{
+					title: 'Cache Decision Tester',
+					description: 'Inspect how UltraCache evaluates a frontend URL without using your current admin session cookies.',
+					key: 'inspector',
+				},
+				[
+					h(TextField, {
+						label: 'URL or path',
+						description: 'Paste a full local URL or just a path like /checkout/ or /product/widget/?add-to-cart=12.',
+						value: inspectUrl,
+						onChange: setInspectUrl,
+						disabled: inspectBusy,
+						placeholder: '/sample-page/?utm_source=test',
+						onKeyDown: (event) => {
+							if ('Enter' === event.key) {
+								event.preventDefault();
+								inspectCacheDecision();
+							}
+						},
+					}),
+					h('div', { className: 'mt-4 flex flex-wrap gap-3 items-center' }, [
+						h(Button, { onClick: inspectCacheDecision, disabled: inspectBusy || !String(inspectUrl || '').trim(), variant: 'primary' }, inspectBusy ? 'Inspecting…' : 'Inspect URL'),
+						inspectResult
+							? h(StatusPill, { ok: !!inspectResult.cacheable, text: inspectResult.cacheable ? 'Cacheable' : 'Bypassed' })
+							: null,
+					]),
+					inspectResult
+						? h('div', { className: 'mt-5 grid grid-cols-1 md:grid-cols-2 gap-6' }, [
+							h('div', { className: 'space-y-0' }, [
+								h(DetailRow, { label: 'Reason', value: inspectResult.reasonLabel || inspectResult.reason }),
+								h(DetailRow, { label: 'Normalized URL', value: inspectResult.normalizedUrl || inspectResult.url, mono: true }),
+								h(DetailRow, { label: 'Normalized path', value: inspectResult.normalizedPath || inspectResult.path, mono: true }),
+								h(DetailRow, { label: 'Query string', value: inspectResult.query || '—', mono: true }),
+								h(DetailRow, { label: 'Matched excluded path rule', value: inspectResult.matchedExcludedPathRule, mono: true }),
+								h(DetailRow, { label: 'Matched excluded query arg', value: inspectResult.matchedExcludedQueryArg, mono: true }),
+								h(DetailRow, { label: 'Non-allowlisted query arg', value: inspectResult.matchedNonAllowlistedQueryArg, mono: true }),
+								h(DetailRow, { label: 'Matched WooCommerce rule', value: inspectResult.matchedWooRule ? ((inspectResult.matchedWooRuleType || 'rule') + ': ' + inspectResult.matchedWooRule) : '', mono: true }),
+								h(DetailRow, { label: 'Query arg keys', value: Array.isArray(inspectResult.queryArgKeys) && inspectResult.queryArgKeys.length ? inspectResult.queryArgKeys.join(', ') : '' }),
+								h(DetailRow, { label: 'Notes', value: inspectResult.simulationNote }),
+							]),
+							h('div', { className: 'space-y-0' }, [
+								h(DetailRow, { label: 'Local URL', value: inspectResult.local ? 'Yes' : 'No' }),
+								h(DetailRow, { label: 'Page cache enabled', value: inspectResult.pageCacheEnabled ? 'Yes' : 'No' }),
+								h(DetailRow, { label: 'WooCommerce safe mode', value: inspectResult.wooSafeModeEnabled ? 'Yes' : 'No' }),
+								h(DetailRow, { label: 'Cache query strings', value: inspectResult.cacheQueryStrings ? 'Yes' : 'No' }),
+								inspectResult.cacheable && inspectResult.cachePaths
+									? h('div', { className: 'pt-2' }, [
+										h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, 'Expected cache files'),
+										h(DetailRow, { label: 'Original HTML', value: inspectResult.cachePaths.orig, mono: true }),
+										h(DetailRow, { label: 'WebP HTML', value: inspectResult.cachePaths.webp, mono: true }),
+										h(DetailRow, { label: 'AVIF HTML', value: inspectResult.cachePaths.avif, mono: true }),
+									])
+									: null,
+							]),
+						])
+						: h('div', { className: 'mt-4 text-xs text-zinc-500' }, 'Enter a local URL or path to see the exact cache decision and matching bypass rule.'),
 				]
 			),
 
@@ -3237,8 +4110,10 @@
 						h(Button, { onClick: exportSettingsFile, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Export Settings'),
 						h(Button, { onClick: openImportSettingsDialog, disabled: busy, variant: 'light' }, busy ? 'Working…' : 'Import Settings'),
 					h(Button, { onClick: resetSettingsToDefaults, disabled: busy, variant: 'light' }, busy ? 'Working…' : 'Reset Settings'),
+					h(Button, { onClick: deleteAllPluginDataAndDeactivate, disabled: busy, variant: 'danger' }, busy ? 'Working…' : 'Delete all plugin Data and disable plugin'),
 					]),
 					h('div', { className: 'mt-4 text-xs text-zinc-500', key: 'hint' }, 'Recommended flow: export from the known-good site, then import into the target site and review Diagnostics once.'),
+					h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'delete-hint' }, 'Delete all plugin Data and disable plugin keeps converted media folders. Remove wp-content/cache/ultracache-avif and wp-content/cache/ultracache-webp manually if you want to delete converted media.'),
 				]
 			),
 
@@ -3258,7 +4133,30 @@
 				},
 				[
 					h('p', { className: 'mb-2 font-bold text-zinc-300' }, 'Quick start & examples'),
-					h('p', { className: 'm-0' }, 'Enable Page Caching, then Flush All Cache once. Use Warm Up Frontpage HTML Cache for a single homepage warm, Warm Up Frontpage HTML Cache + Frontpage CSS for homepage HTML + bundle rebuild, Warm Up Menu HTML Cache for menu URLs only, Warm Up Menu HTML Cache + Frontpage CSS for menu URLs plus one homepage CSS bundle build, Warm Up Full Site HTML Cache for a full crawl, or Warm Up Full Site HTML Cache + Frontpage CSS for the full crawl followed by one homepage CSS bundle build. In WP-CLI run `wp ultracache help` for commands, `wp ultracache warm-html-all --purge-first` for the full crawl, `wp ultracache warm-html-all-css --purge-first` for the full crawl plus frontpage CSS, `wp ultracache warm-frontpage-html` for the homepage only, `wp ultracache warm-frontpage-html-css` for homepage HTML + CSS, `wp ultracache cron_warm start` to start the minute-by-minute warm queue, and `wp ultracache cron_warm tick` from a server cron each minute when you want deterministic warming. Use `wp ultracache purge` after major theme or plugin changes. Keep WooCommerce Safe Mode enabled on shops, enable Local Google Fonts Optimization only when you explicitly want UltraCache to fetch Google Fonts assets and proxy them locally, turn on Speculation Rules Prefetch only after basic cache behavior looks stable, and review Cache diagnostics after testing.'),
+					h('div', { className: 'space-y-3' }, [
+						h('p', { className: 'm-0' }, 'Enable Page Caching, save settings, then run Flush All Cache once.'),
+						h('div', { className: 'space-y-1' }, [
+							h('div', { key: 'w1' }, 'Warm Up Homepage HTML Cache: homepage only.'),
+							h('div', { key: 'w2' }, 'Warm Up Homepage HTML Cache + CSS Bundle: homepage HTML plus homepage CSS bundle rebuild.'),
+							h('div', { key: 'w3' }, 'Warm Up Menu HTML Cache: URLs found in public menus.'),
+							h('div', { key: 'w4' }, 'Warm Up Menu HTML Cache + CSS Bundles: menu URLs plus CSS bundling based on the selected CSS Bundling Scope.'),
+							h('div', { key: 'w5' }, 'Warm Up Full Site HTML Cache: crawl all public crawlable URLs.'),
+							h('div', { key: 'w6' }, 'Warm Up Full Site HTML Cache + CSS Bundles: full crawl plus CSS bundling based on the selected CSS Bundling Scope.'),
+						]),
+						h('div', { className: 'space-y-1' }, [
+							h('div', { className: 'text-zinc-300 font-semibold', key: 'cli-title' }, 'WP-CLI examples'),
+							h('code', { className: 'block text-zinc-400', key: 'cli-1' }, 'wp ultracache --help'),
+							h('code', { className: 'block text-zinc-400', key: 'cli-2' }, 'wp ultracache purge'),
+							h('code', { className: 'block text-zinc-400', key: 'cli-3' }, 'wp ultracache warm_frontpage_html'),
+							h('code', { className: 'block text-zinc-400', key: 'cli-4' }, 'wp ultracache warm_frontpage_html_css'),
+							h('code', { className: 'block text-zinc-400', key: 'cli-5' }, 'wp ultracache warm_html_all --purge-first'),
+							h('code', { className: 'block text-zinc-400', key: 'cli-6' }, 'wp ultracache warm_html_all_css --purge-first'),
+							h('code', { className: 'block text-zinc-400', key: 'cli-7' }, 'wp ultracache cron_warm start'),
+							h('code', { className: 'block text-zinc-400', key: 'cli-8' }, 'wp ultracache cron_warm tick'),
+						]),
+						h('p', { className: 'm-0' }, 'Recommended: keep WooCommerce Safe Mode enabled on shops. Enable Local Google Fonts Optimization only when you want UltraCache to fetch and serve Google Fonts locally. Enable Speculation Rules Prefetch only after cache behavior is stable. Review Cache Diagnostics after testing.'),
+					]),
+
 				]
 			),
 		]);

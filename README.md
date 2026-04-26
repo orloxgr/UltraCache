@@ -8,8 +8,8 @@ It is built for sites that want a managed page-cache drop-in, optional Redis-bac
 
 ## Current repository build
 
-- version: `2.55.02`
-- latest pass: repository-clean release polish with standard Domain Path metadata, translation-loading cleanup for WordPress.org compatibility and version/header consistency cleanup for the new 2.55.02 series
+- version: `2.55.80`
+- latest pass: safer fresh-install defaults for page cache, object cache, and Browser Cache Headers; backward-compatible Media Optimization aliasing; safer .htaccess warning behavior
 - sixth pass fixes: removed hard page reloads after Varnish Test and Flush Varnish All; the dashboard now stays on the page and refreshes through AJAX only
 - fifth pass fixes: reduced `@` suppression in non-critical helper paths and added safer internal debug logging for font CSS reads and Varnish admin socket connects
 - third pass fixes: redacted secrets from `wp ultracache status` settings/all output, added stricter local-site URL validation for single-URL CLI actions, and tightened REST validation for settings enums and URL/scope inputs
@@ -18,23 +18,19 @@ It is built for sites that want a managed page-cache drop-in, optional Redis-bac
 
 ---
 
-## What UltraCache WP does
+## 2.55.73 notes
 
-UltraCache includes:
+- Disabled Warm Cache actions until Page Caching is enabled.
+- Disabled CSS-bundle warm actions until CSS Bundling is enabled.
+- Added REST guards for direct warm/CSS bundle requests when required features are off.
 
-- full-page HTML caching through a managed `advanced-cache.php` drop-in
-- optional object caching through a managed `object-cache.php` drop-in
-- cache warming for local URLs and front-page assets
-- stale-while-revalidate page delivery
-- optional Gzip and Brotli sidecar generation
-- AVIF generation with WebP fallback support
-- front-page CSS bundling and font optimization helpers
-- WooCommerce-aware cache bypassing
-- Varnish integration for purge workflows
-- scheduled cache cleanup and cron warm-up queues
-- admin diagnostics, cache inspection, and analytics
-- REST endpoints used by the admin UI
-- WP-CLI commands for operators
+## 2.55.61 notes
+
+- Removed forced all-caps dashboard styling and utility usage.
+- Added 5px spacing above the Start Media Conversion action row.
+- Added 5px left spacing to dashboard toggles.
+- Added 10px top spacing to the Advanced Settings & Exclusions textarea grid.
+- Suppressed Elementor Notes admin assets on the UltraCache dashboard to avoid React global console errors from notes.min.js and notes-app-initiator.min.js.
 
 ---
 
@@ -80,8 +76,9 @@ Whether AVIF or WebP is actually available depends on the PHP/image stack on the
 
 The current codebase also includes optional frontend optimization switches such as:
 
-- defer JS
-- delay third-party JS
+- cumulative Defer Stages for JavaScript optimization
+- shared JS defer-stage exclusions
+- delay third-party JS and selected local enhancement scripts
 - async external scripts
 - async CSS support
 - image dimension injection for CLS reduction
@@ -100,7 +97,7 @@ UltraCache supports:
 - scheduled cleanup
 - cron warm-up queue execution
 - front-page HTML warming
-- front-page CSS scan + bundle generation
+- homepage/page CSS scan + bundle generation
 
 ### Reverse-proxy integration
 
@@ -310,3 +307,89 @@ In short, you may use, modify, and redistribute this plugin under the terms of *
 - Added safe wrappers for filesize(), tempnam(), and fread() in non-critical helpers.
 
 - latest patch: moved Redis auth out of generated `object-cache.php` into a protected sidecar config file with restrictive permissions
+
+
+## 2.55.46 notes
+
+- Added SR7/Revolution lifecycle-aware LCP priority handling that listens for `sr.module.ready` and marks first-slide image layers without relying on generated layer IDs.
+- Kept the SR7 priority fix controlled by the visible LCP Image Priority and Fix sliders / hero sections settings; it is not a hidden optimization.
+- Renamed confusing dashboard fields: Manual Priority Preloads, Additional Fetch URL Preloads, and Single LCP Image URL.
+
+- Added ID-independent SR7 first-slide LCP priority handling, so Revolution Slider image layers can receive `fetchpriority="high"` without relying on dynamic IDs such as `SR7_1_1-1-8`.
+- Added a tiny runtime guard for SR7 layers generated after the initial HTML parse.
+- Prevents generated SR7 `/revslider/o/` image-list placeholders from being manually preloaded when Slider Safe Mode or LCP Image Priority is active, avoiding Chrome `preloaded but not used` warnings.
+
+## 2.55.44 notes
+
+- Made CSS Bundle output fail-safe after the 2.55.38 frontend blank-page regression.
+- Stage 1 now injects the bundle non-destructively and keeps the original stylesheet links as the authoritative fallback.
+- Stage 2 still replaces matching source stylesheet links, but keeps async preload/noscript fallbacks for the original stylesheets.
+- Hardened the page CSS bundle replacement path so it verifies the generated bundle file before touching the document head and reconstructs the head without `preg_replace()` replacement-string side effects.
+- Moved **Cache Engine Advanced settings and exclusions** into its own one-column accordion card below the main Cache Engine / Compression settings grid.
+
+## 2.55.33 notes
+
+- Hardened the delayed JS loader so it preserves script attributes through a compact encoded attribute map.
+- Added safer delayed execution with sequential loading, an 8-second per-script fallback timeout, and compatibility fallbacks for older placeholders.
+- Added dependency safeguards so local scripts with enqueued dependents are not delayed.
+- Expanded built-in delay exclusions for builders, menus, sliders, video players, popups, forms, and fragile frontend runtimes.
+
+## 2.55.32 notes
+
+- Moved runtime self-hosted font CSS rewriting behind a separate advanced toggle and removed native DOM prototype monkey-patching from the default path.
+- Made Asset Chain Cleanup more conservative with built-in/request/HTML exclusions and a dashboard-managed exclusion list.
+- Narrowed product-filter asset cleanup to plugin-specific handles/paths instead of broad fragments such as tooltipster, icheck, html_types/slider, or by_sku.
+- Cleaned up legacy/mapping issues for scheduled cleanup warming and media-converter settings fallbacks.
+
+## 2.55.31 notes
+
+- Added frontend on-demand image conversion safeguards: per-image/per-format lock files, per-request conversion limits, and a short request-time budget before starting new conversions.
+- Kept Generate on Demand as the explicit dashboard control, but restricted runtime generation to safe frontend GET/HEAD requests.
+
+## 2.55.30 notes
+
+- Analytics hot path cleanup: page-cache HIT counters are now buffered and flushed in batches instead of reading/writing analytics.json on every cached response.
+- APCu is used for in-memory hit counters when available; a compact file buffer is used as a fallback and dashboard/CLI reads flush pending counters before reporting stats.
+
+## 2.55.29 notes
+
+- Added native `rename()` fallback to `ucwp_safe_rename()` so atomic replacements do not depend only on `WP_Filesystem`.
+- Added native recursive directory deletion fallback to `ucwp_safe_rmdir()` for cache cleanup paths when `WP_Filesystem` cannot remove directories.
+- Tightened page-cache atomic write verification so failed replacements do not silently look successful.
+- Hardened full-cache purge recursion by using safe directory scans and avoiding recursion into symlinks.
+
+## 2.55.28 notes
+
+- Fixed Redis object-cache drop-in bootstrap so the protected Redis secret config is loaded before connecting/authenticating.
+- Propagated Redis TLS and persistent-connection settings into the generated object-cache drop-in.
+- Fixed disk object-cache reads so signed payloads that contain WordPress objects can be restored instead of being rejected.
+- Moved `wp_suspend_cache_addition()` handling before runtime cache mutation so suspended additions do not pollute the in-request cache.
+
+## 2.55.27 notes
+
+- Separated JS Defer and Delay controls so third-party delay, non-critical/local delay, and native defer no longer silently enable one another.
+- Fixed the runtime mapping that incorrectly enabled non-critical/local JS delay when only third-party delay was enabled.
+
+## 2.55.26 notes
+
+- Added Critical Request Chain Relief with manual preload and chain-delay controls.
+- Added Asset Chain Cleanup for WooCommerce/product-filter request chains.
+- Frontend Safe Mode OFF now remains fully off.
+
+## 2.55.44 notes
+
+- Restores Stage 1 CSS Bundle to the legacy site-wide behavior used before the 2.55.38 CSS bundle stage/page-entry changes.
+- Keeps page-entry CSS bundle generation and the newer page-wide replacement path behind Stage 2 / Aggressive mode only.
+- This avoids changing the safe stage while retaining the new Stage 2 experimentation path.
+
+## 2.55.44 notes
+
+- Added **Fix sliders / hero sections** in Cache Engine Advanced settings and exclusions.
+- When enabled, UltraCache detects Revolution Slider/SR7 and common hero slider markup and keeps that page closer to WordPress default frontend loading.
+- Slider-safe responses skip CSS bundle replacement, async CSS rewriting, asset cleanup, self-hosted font CSS rewriting, LCP/CLS structural mutations, and HTML minification for that response.
+
+## 2.55.44 notes
+
+- Stage 2 CSS Bundle is now more aggressive: bundled source stylesheets are replaced by the generated bundle without preloading every original source.
+- Slider Safe Mode is now slider-aware for CSS bundles: SR7/Revolution/Swiper/Slick CSS stays as normal explicit links, while non-slider local CSS can still be bundled.
+- Built-in CSS bundle exclusions now protect fragile slider/hero stylesheet fragments.

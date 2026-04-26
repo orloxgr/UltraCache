@@ -3,13 +3,13 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.55.02
+ * Version: 2.55.80
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
  * Domain Path: /languages
- * Hotfix Bundle Version: 2.55.02
+ * Hotfix Bundle Version: 2.55.80
  */
 
 if (!defined('ABSPATH')) {
@@ -17,10 +17,10 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.55.02');
+    define('UCWP_VERSION', '2.55.80');
 }
 if (!defined('UCWP_HOTFIX_BUNDLE_VERSION')) {
-    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.55.02');
+    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.55.80');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -365,9 +365,38 @@ if (!function_exists('ucwp_safe_unlink')) {
 if (!function_exists('ucwp_safe_rename')) {
     function ucwp_safe_rename($from, $to, $context = '')
     {
+        $from = is_string($from) ? $from : '';
+        $to = is_string($to) ? $to : '';
+        if ('' === $from || '' === $to) {
+            ucwp_debug_log('rename failed: empty path', array('from' => $from, 'to' => $to, 'context' => (string) $context));
+            return false;
+        }
+
+        if ($from === $to) {
+            return file_exists($to);
+        }
+
+        clearstatcache(true, $from);
+        clearstatcache(true, $to);
+        if (!file_exists($from)) {
+            $already_moved = file_exists($to);
+            if (!$already_moved) {
+                ucwp_debug_log('rename failed: source missing', array('from' => $from, 'to' => $to, 'context' => (string) $context));
+            }
+            return $already_moved;
+        }
+
+        if (@rename($from, $to)) {
+            clearstatcache(true, $from);
+            clearstatcache(true, $to);
+            return file_exists($to) && !file_exists($from);
+        }
+
         $filesystem = ucwp_get_wp_filesystem();
         if ($filesystem) {
             $result = $filesystem->move($from, $to, true);
+            clearstatcache(true, $from);
+            clearstatcache(true, $to);
             if ($result || (file_exists($to) && !file_exists($from))) {
                 return true;
             }
@@ -423,19 +452,61 @@ if (!function_exists('ucwp_safe_mkdir')) {
     }
 }
 
+if (!function_exists('ucwp_native_delete_directory')) {
+    function ucwp_native_delete_directory($dir)
+    {
+        $dir = is_string($dir) ? $dir : '';
+        if ('' === $dir || !file_exists($dir)) {
+            return true;
+        }
+        if (!is_dir($dir) || is_link($dir)) {
+            return false;
+        }
+
+        $items = @scandir($dir);
+        if (!is_array($items)) {
+            return false;
+        }
+
+        foreach ($items as $item) {
+            if ('.' === $item || '..' === $item) {
+                continue;
+            }
+            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            if (is_dir($path) && !is_link($path)) {
+                if (!ucwp_native_delete_directory($path)) {
+                    return false;
+                }
+            } elseif (file_exists($path) && !@unlink($path)) {
+                return false;
+            }
+        }
+
+        clearstatcache(true, $dir);
+        return @rmdir($dir) || !file_exists($dir);
+    }
+}
+
 if (!function_exists('ucwp_safe_rmdir')) {
     function ucwp_safe_rmdir($dir, $context = '')
     {
-        if (!file_exists($dir)) {
+        $dir = is_string($dir) ? $dir : '';
+        if ('' === $dir || !file_exists($dir)) {
             return true;
         }
 
         $filesystem = ucwp_get_wp_filesystem();
         if ($filesystem) {
             $result = $filesystem->delete($dir, true, 'd');
+            clearstatcache(true, $dir);
             if ($result || !file_exists($dir)) {
                 return true;
             }
+        }
+
+        if (ucwp_native_delete_directory($dir)) {
+            clearstatcache(true, $dir);
+            return true;
         }
 
         ucwp_debug_log('rmdir failed', array('dir' => $dir, 'context' => (string) $context));
@@ -846,6 +917,9 @@ if (!class_exists('Ultra_Cache_WP')) {
             add_action('plugins_loaded', array($this, 'reconcile_runtime_config'), 21);
             add_action('admin_menu', array($this, 'register_admin_menu'));
             add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+            add_action('admin_enqueue_scripts', array($this, 'suppress_conflicting_admin_assets'), 999);
+            add_action('admin_print_scripts-toplevel_page_ultracache', array($this, 'suppress_conflicting_admin_assets'), 1);
+            add_action('admin_print_footer_scripts-toplevel_page_ultracache', array($this, 'suppress_conflicting_admin_assets'), 1);
             add_action('admin_notices', array($this, 'render_admin_notice'));
             add_action('admin_bar_menu', array($this, 'register_admin_bar_menu'), 100);
             add_action('init', array($this, 'handle_admin_bar_actions'));
@@ -904,6 +978,9 @@ if (!class_exists('Ultra_Cache_WP')) {
 
                 case 'WP_CACHE is not currently defined in wp-config.php. UltraCache can add it automatically.':
                     return __('WP_CACHE is not currently defined in wp-config.php. UltraCache can add it automatically.', 'ultracache');
+
+                case 'WP_CACHE is defined in a non-standard way in wp-config.php and UltraCache can replace it safely when enabling page cache.':
+                    return __('WP_CACHE is defined in a non-standard way in wp-config.php and UltraCache can replace it safely when enabling page cache.', 'ultracache');
 
                 case 'Reverse Proxy Cache':
                     return __('Reverse Proxy Cache', 'ultracache');
@@ -1064,16 +1141,25 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             self::ensure_directories();
 
-            if (false === get_option(UCWP_SETTINGS_KEY, false)) {
-                add_option(UCWP_SETTINGS_KEY, self::get_dashboard_defaults());
-            }
-
+            // Do not create a full settings row on first install. Missing boolean
+            // switches are treated as off at runtime; non-boolean settings use safe
+            // runtime fallbacks until the user explicitly saves settings or applies a profile.
             self::reset_settings_cache();
 
             self::sync_page_cache_bootstrap();
             self::sync_runtime_config();
             self::sync_scheduled_events();
-            self::sync_browser_cache_rules();
+            $browser_cache_sync = self::sync_browser_cache_rules();
+            if (false === $browser_cache_sync) {
+                set_transient(
+                    'ucwp_admin_notice',
+                    array(
+                        'type'    => 'warning',
+                        'message' => self::maybe_translate('UltraCache: Browser Cache Headers are enabled, but .htaccess could not be updated during activation. Check file permissions or disable Browser Cache Headers.'),
+                    ),
+                    90
+                );
+            }
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
                 Ultra_Cache_Object_Cache_Manager::sync_dropin();
@@ -1132,8 +1218,8 @@ if (!class_exists('Ultra_Cache_WP')) {
             $default_scheduled_warm_limit = max(1, (int) ($crawl_scope_summary['defaultScheduledWarmLimit'] ?? 0));
 
             return array(
-                'pageCacheEnabled'           => true,
-                'objectCacheEnabled'         => true,
+                'pageCacheEnabled'           => false,
+                'objectCacheEnabled'         => false,
                 'objectCacheBackend'         => 'disk',
                 'redisHost'                  => '127.0.0.1',
                 'redisPort'                  => 6379,
@@ -1144,20 +1230,55 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'redisPersistent'            => false,
                 'redisConnectTimeoutMs'      => 200,
                 'redisReadTimeoutMs'         => 200,
-                'brotliEnabled'              => !empty($compression_support['brotli']) && empty($frontend_compression['brotli']),
-                'gzipEnabled'                => !empty($compression_support['gzip']) && empty($frontend_compression['gzip']),
-                'avifConversionEnabled'      => !empty($media_support['supported']),
-                'deferJsEnabled'             => true,
-                'delayThirdPartyJsEnabled'   => true,
+                'brotliEnabled'              => false,
+                'gzipEnabled'                => false,
+                'avifConversionEnabled'      => false,
+                'mediaOptimizationEnabled'     => false,
+                'mediaGenerateOnUploadEnabled' => false,
+                'mediaGenerateOnDemandEnabled' => false,
+                'mediaOutputMode'            => 'auto',
+                'deferJsEnabled'             => false,
+                'deferJsForceList'           => '',
+                'deferJsExcludeList'         => "revslider\nsr7\ntptools\nelementor-frontend\nswiper\nslick\nsplide\nowl.carousel\nsmartslider\nn2-ss\nhtml_types/image\nhtml_types/color\nhtml_types/label",
+                'delayThirdPartyJsEnabled'   => false,
                 'asyncExternalScriptsEnabled'=> false,
-                'clsDimensionsEnabled'       => true,
-                'asyncCssEnabled'            => true,
-                'lcpImagePriorityEnabled'    => true,
-                'googleFontsSwapEnabled'     => true,
+                'homepageCssBundleEnabled'   => false,
+                'homepageCssBundleInlineEnabled' => false,
+                'homepageCssBundleExcludeList' => '',
+                'homepageCssBundleMode'      => 'safe',
+                'cssBundleScope'            => 'homepage',
+                'pageCssBundleOnEntryEnabled' => false,
+                // Legacy aliases kept so older exported settings remain readable.
+                'criticalCssEnabled'         => false,
+                'criticalCssInlineEnabled'   => false,
+                'criticalCssExcludeList'     => '',
+                'frontendSafeModeEnabled'    => false,
+                'sliderSafeModeEnabled'       => false,
+                'clsDimensionsEnabled'       => false,
+                'asyncCssEnabled'            => false,
+                'asyncCssExcludeList'        => '',
+                'aggressiveAsyncCssEnabled'  => false,
+                'aggressiveAsyncCssExcludeList' => '',
+                'delayNonCriticalJsEnabled'  => false,
+                'delayNonCriticalJsExcludeList' => '',
+                'lcpImagePriorityEnabled'    => false,
+                'lcpImagePriorityOverride'   => '',
+                'mainThreadReliefEnabled'    => false,
+                'criticalRequestChainReliefEnabled' => false,
+                'criticalResourcePreloadList' => '',
+                'criticalFetchPreloadList'    => '',
+                'criticalRequestChainDelayList' => '',
+                'assetChainCleanupEnabled'    => false,
+                'assetCleanupWooProductAssetsEnabled' => false,
+                'assetCleanupProductFilterAssetsEnabled' => false,
+                'assetCleanupWooBlocksCssEnabled' => false,
+                'assetCleanupExcludeList'     => "elementor\nbricks\noxygen\nwpbakery\nvc_\nrevslider\nsr7\najaxsearch\nfibosearch\n.dgwt-wcas\naws-container\ncart\ncheckout\naccount",
+                'googleFontsSwapEnabled'     => false,
                 'googleFontsLocalOptimizationEnabled' => false,
-                'selfHostedFontCssOptimizationEnabled' => true,
-                'speculationRulesEnabled'    => true,
-                'browserCacheRulesEnabled'   => true,
+                'selfHostedFontCssOptimizationEnabled' => false,
+                'selfHostedFontRuntimeRewriteEnabled' => false,
+                'speculationRulesEnabled'    => false,
+                'browserCacheRulesEnabled'   => false,
                 'varnishCliEnabled'          => false,
                 'varnishCliMode'             => 'http',
                 'varnishCliServers'          => self::get_default_varnish_http_endpoint(),
@@ -1165,20 +1286,23 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'varnishCliTimeoutSeconds'   => 2,
                 'varnishCliMethod'           => 'BAN',
                 'varnishCliDebug'            => false,
-                'preRenderOnSave'            => true,
-                'woocommerceSafeModeEnabled' => true,
+                'preRenderOnSave'            => false,
+                'woocommerceSafeModeEnabled' => false,
                 'cacheCleanupEnabled'        => false,
                 'cacheCleanupIntervalHours'  => 24,
-                'cronWarmEnabled'            => true,
-                'cronWarmStartAfterCleanup'  => true,
+                'cronWarmEnabled'            => false,
+                'cronWarmStartAfterCleanup'  => false,
+                'cronWarmStartAfterManualPurge' => false,
+                'cronWarmStartAfterFlush'  => false,
                 'cronWarmPagesPerMinute'     => 2,
-                'warmAfterScheduledCleanup'  => true,
+                'warmAfterScheduledCleanup'  => false,
                 'scheduledWarmLimit'         => $default_scheduled_warm_limit,
-                'staleWhileRevalidateEnabled'=> true,
+                'staleWhileRevalidateEnabled'=> false,
                 'cacheFreshTtlMinutes'       => 15,
                 'cacheMaxStaleMinutes'       => 720,
                 'cacheExceptionPaths'        => implode("\n", self::get_default_excluded_paths()),
                 'cacheExceptionQueryArgs'    => implode("\n", self::get_default_excluded_query_args()),
+                'cacheQueryStringsEnabled'   => false,
                 'cacheQueryStringAllowlist'  => '',
             );
         }
@@ -1424,6 +1548,18 @@ if (!class_exists('Ultra_Cache_WP')) {
             return in_array($value, array('disk', 'redis'), true) ? $value : 'disk';
         }
 
+        private static function sanitize_homepage_css_bundle_mode($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('safe', 'aggressive'), true) ? $value : 'safe';
+        }
+
+        private static function sanitize_css_bundle_scope($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('homepage', 'shared', 'per-page'), true) ? $value : 'homepage';
+        }
+
         private static function sanitize_redis_host($value)
         {
             $value = trim((string) $value);
@@ -1571,6 +1707,13 @@ if (!class_exists('Ultra_Cache_WP')) {
 ", array_values(array_unique($normalized)));
         }
 
+
+        private static function sanitize_media_output_mode($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('auto', 'avif', 'webp'), true) ? $value : 'auto';
+        }
+
         private static function normalize_boolean_setting_value($value, $default = false)
         {
             if (is_bool($value)) {
@@ -1615,6 +1758,14 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['cronWarmStartAfterCleanup'] = $raw_settings['warmAfterScheduledCleanup'];
             }
 
+            if (array_key_exists('cronWarmStartAfterFlush', $raw_settings)) {
+                $settings['cronWarmStartAfterFlush'] = $raw_settings['cronWarmStartAfterFlush'];
+                $settings['cronWarmStartAfterManualPurge'] = $raw_settings['cronWarmStartAfterFlush'];
+            } elseif (array_key_exists('cronWarmStartAfterManualPurge', $raw_settings)) {
+                $settings['cronWarmStartAfterManualPurge'] = $raw_settings['cronWarmStartAfterManualPurge'];
+                $settings['cronWarmStartAfterFlush'] = $raw_settings['cronWarmStartAfterManualPurge'];
+            }
+
             if (array_key_exists('cronWarmPagesPerMinute', $raw_settings)) {
                 $settings['cronWarmPagesPerMinute'] = $raw_settings['cronWarmPagesPerMinute'];
             }
@@ -1623,21 +1774,59 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['scheduledWarmLimit'] = $raw_settings['scheduledWarmLimit'];
             }
 
+            if (array_key_exists('criticalCssEnabled', $raw_settings) && !array_key_exists('homepageCssBundleEnabled', $raw_settings)) {
+                $settings['homepageCssBundleEnabled'] = $raw_settings['criticalCssEnabled'];
+            }
+            if (array_key_exists('criticalCssInlineEnabled', $raw_settings) && !array_key_exists('homepageCssBundleInlineEnabled', $raw_settings)) {
+                $settings['homepageCssBundleInlineEnabled'] = $raw_settings['criticalCssInlineEnabled'];
+            }
+            if (array_key_exists('criticalCssExcludeList', $raw_settings) && !array_key_exists('homepageCssBundleExcludeList', $raw_settings)) {
+                $settings['homepageCssBundleExcludeList'] = $raw_settings['criticalCssExcludeList'];
+            }
+
+            // Media Optimization is the semantic setting name. Keep the legacy
+            // avifConversionEnabled key as a compatibility alias for existing
+            // options, exports, REST clients, and older dashboard bundles.
+            if (array_key_exists('mediaOptimizationEnabled', $raw_settings)) {
+                $settings['avifConversionEnabled'] = $raw_settings['mediaOptimizationEnabled'];
+            } elseif (array_key_exists('avifConversionEnabled', $raw_settings)) {
+                $settings['mediaOptimizationEnabled'] = $raw_settings['avifConversionEnabled'];
+            }
+
             $boolean_keys = array(
                 'pageCacheEnabled',
                 'objectCacheEnabled',
                 'brotliEnabled',
                 'gzipEnabled',
                 'avifConversionEnabled',
+                'mediaOptimizationEnabled',
+                'mediaGenerateOnUploadEnabled',
+                'mediaGenerateOnDemandEnabled',
                 'deferJsEnabled',
                 'delayThirdPartyJsEnabled',
                 'asyncExternalScriptsEnabled',
+                'homepageCssBundleEnabled',
+                'homepageCssBundleInlineEnabled',
+                'pageCssBundleOnEntryEnabled',
+                'criticalCssEnabled',
+                'criticalCssInlineEnabled',
+                'frontendSafeModeEnabled',
+                'sliderSafeModeEnabled',
                 'clsDimensionsEnabled',
                 'asyncCssEnabled',
+                'aggressiveAsyncCssEnabled',
+                'delayNonCriticalJsEnabled',
                 'lcpImagePriorityEnabled',
+                'mainThreadReliefEnabled',
+                'criticalRequestChainReliefEnabled',
+                'assetChainCleanupEnabled',
+                'assetCleanupWooProductAssetsEnabled',
+                'assetCleanupProductFilterAssetsEnabled',
+                'assetCleanupWooBlocksCssEnabled',
                 'googleFontsSwapEnabled',
                 'googleFontsLocalOptimizationEnabled',
                 'selfHostedFontCssOptimizationEnabled',
+                'selfHostedFontRuntimeRewriteEnabled',
                 'speculationRulesEnabled',
                 'browserCacheRulesEnabled',
                 'varnishCliEnabled',
@@ -1647,8 +1836,11 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cacheCleanupEnabled',
                 'cronWarmEnabled',
                 'cronWarmStartAfterCleanup',
+                'cronWarmStartAfterManualPurge',
+                'cronWarmStartAfterFlush',
                 'warmAfterScheduledCleanup',
                 'staleWhileRevalidateEnabled',
+                'cacheQueryStringsEnabled',
                 'redisUseTls',
                 'redisPersistent',
             );
@@ -1657,6 +1849,10 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $default = array_key_exists($key, $defaults) ? $defaults[$key] : false;
                 $settings[$key] = self::normalize_boolean_setting_value($settings[$key], $default);
             }
+
+            // Defer and Delay controls are intentionally independent. Delay third-party and
+            // delay non-critical/local scripts must not silently enable each other or enable
+            // native defer, because that makes frontend regressions hard to isolate.
 
             $settings['cacheCleanupIntervalHours'] = max(1, min(720, absint($settings['cacheCleanupIntervalHours'])));
             $settings['cronWarmPagesPerMinute']    = max(0, min(600, absint($settings['cronWarmPagesPerMinute'])));
@@ -1667,6 +1863,25 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['cacheExceptionPaths']       = self::sanitize_excluded_paths_setting($settings['cacheExceptionPaths']);
             $settings['cacheExceptionQueryArgs']   = self::sanitize_setting_key_list($settings['cacheExceptionQueryArgs']);
             $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
+            $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
+            $settings['deferJsExcludeList']       = self::normalize_textarea_setting($settings['deferJsExcludeList']);
+            $settings['homepageCssBundleExcludeList'] = self::normalize_textarea_setting($settings['homepageCssBundleExcludeList']);
+            $settings['homepageCssBundleMode'] = self::sanitize_homepage_css_bundle_mode($settings['homepageCssBundleMode']);
+            $settings['cssBundleScope'] = self::sanitize_css_bundle_scope($settings['cssBundleScope'] ?? 'homepage');
+            $settings['criticalCssExcludeList']    = self::normalize_textarea_setting($settings['criticalCssExcludeList']);
+            $settings['asyncCssExcludeList']       = self::normalize_textarea_setting($settings['asyncCssExcludeList']);
+            $settings['aggressiveAsyncCssExcludeList'] = self::normalize_textarea_setting($settings['aggressiveAsyncCssExcludeList']);
+            $settings['delayNonCriticalJsExcludeList'] = self::normalize_textarea_setting($settings['delayNonCriticalJsExcludeList']);
+            $settings['assetCleanupExcludeList'] = self::normalize_textarea_setting($settings['assetCleanupExcludeList']);
+            $settings['lcpImagePriorityOverride'] = self::normalize_textarea_setting($settings['lcpImagePriorityOverride']);
+            $settings['criticalResourcePreloadList'] = self::normalize_textarea_setting($settings['criticalResourcePreloadList']);
+            $settings['criticalFetchPreloadList'] = self::normalize_textarea_setting($settings['criticalFetchPreloadList']);
+            $settings['criticalRequestChainDelayList'] = self::normalize_textarea_setting($settings['criticalRequestChainDelayList']);
+            $settings['criticalCssEnabled'] = !empty($settings['homepageCssBundleEnabled']);
+            $settings['criticalCssInlineEnabled'] = !empty($settings['homepageCssBundleInlineEnabled']);
+            $settings['criticalCssExcludeList'] = $settings['homepageCssBundleExcludeList'];
+
+            $settings['mediaOutputMode']           = self::sanitize_media_output_mode($settings['mediaOutputMode']);
             $settings['objectCacheBackend']        = self::sanitize_object_cache_backend($settings['objectCacheBackend']);
             $settings['redisHost']                 = self::sanitize_redis_host($settings['redisHost']);
             $settings['redisPort']                 = self::sanitize_bounded_integer_setting($settings['redisPort'], $defaults['redisPort'], 1, 65535);
@@ -1706,6 +1921,9 @@ if (!class_exists('Ultra_Cache_WP')) {
             $media_support = self::get_media_support_status();
             if (empty($media_support['supported'])) {
                 $settings['avifConversionEnabled'] = false;
+                $settings['mediaOptimizationEnabled'] = false;
+                $settings['mediaGenerateOnUploadEnabled'] = false;
+                $settings['mediaGenerateOnDemandEnabled'] = false;
             }
 
             $varnish_support = self::get_varnish_support_status();
@@ -1713,7 +1931,17 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['varnishCliEnabled'] = false;
             }
 
-            $settings['warmAfterScheduledCleanup'] = !empty($settings['cronWarmStartAfterCleanup']);
+            // Keep scheduled cleanup warming independent from the normal cron warm-start switch.
+            $settings['warmAfterScheduledCleanup'] = !empty($settings['warmAfterScheduledCleanup']);
+
+            // Keep the manual purge/flush warm-start aliases in lock-step.
+            $manual_purge_warm = !empty($settings['cronWarmStartAfterFlush']) && !empty($settings['cronWarmStartAfterManualPurge']);
+            $settings['cronWarmStartAfterFlush'] = $manual_purge_warm;
+            $settings['cronWarmStartAfterManualPurge'] = $manual_purge_warm;
+
+            // Keep both dashboard keys in lock-step. The old key stays exported
+            // for backwards compatibility; new code can read the semantic key.
+            $settings['mediaOptimizationEnabled'] = !empty($settings['avifConversionEnabled']);
 
 
             return $settings;
@@ -1839,6 +2067,12 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             $query_allowlist = self::parse_textarea_setting(self::sanitize_setting_key_list($ui['cacheQueryStringAllowlist']));
+            $defer_js_enabled = !empty($ui['deferJsEnabled']);
+            $delay_third_party_js_enabled = !empty($ui['delayThirdPartyJsEnabled']);
+            $delay_non_critical_js_enabled = !empty($ui['delayNonCriticalJsEnabled']);
+            $defer_stage_aggressive = $delay_non_critical_js_enabled;
+            $defer_stage_balanced = $delay_third_party_js_enabled || $defer_stage_aggressive;
+            $defer_stage_safe = $defer_js_enabled || $defer_stage_balanced;
 
             self::$settings_cache = array(
                 'enabled'                      => !empty($ui['pageCacheEnabled']),
@@ -1855,20 +2089,55 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'redis_connect_timeout_ms'     => self::sanitize_bounded_integer_setting($ui['redisConnectTimeoutMs'], 200, 50, 5000),
                 'redis_read_timeout_ms'        => self::sanitize_bounded_integer_setting($ui['redisReadTimeoutMs'], 200, 50, 5000),
                 'cache_logged_in_users'        => false,
-                'cache_query_strings'          => !empty($query_allowlist),
+                'cache_query_strings'          => !empty($ui['cacheQueryStringsEnabled']),
                 'cache_query_allowlist'        => $query_allowlist,
                 'gzip_enabled'                 => !empty($ui['gzipEnabled']),
                 'brotli_enabled'               => !empty($ui['brotliEnabled']),
                 'preload_on_save'              => !empty($ui['preRenderOnSave']),
-                'defer_js'                     => !empty($ui['deferJsEnabled']),
-                'delay_third_party_js'         => !empty($ui['delayThirdPartyJsEnabled']),
+                'defer_js'                     => $defer_js_enabled,
+                'defer_stage_safe'             => $defer_js_enabled,
+                'defer_stage_balanced'         => $defer_stage_balanced,
+                'defer_stage_aggressive'       => $defer_stage_aggressive,
+                'defer_js_force_list'          => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsForceList'])),
+                'defer_js_exclude_list'        => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
+                'delay_third_party_js'         => $delay_third_party_js_enabled,
                 'async_external_scripts'       => !empty($ui['asyncExternalScriptsEnabled']),
+                'homepage_css_bundle'         => !empty($ui['homepageCssBundleEnabled']),
+                'homepage_css_bundle_inline'  => !empty($ui['homepageCssBundleInlineEnabled']),
+                'homepage_css_bundle_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['homepageCssBundleExcludeList'])),
+                'homepage_css_bundle_mode'    => self::sanitize_homepage_css_bundle_mode($ui['homepageCssBundleMode']),
+                'css_bundle_scope'            => self::sanitize_css_bundle_scope($ui['cssBundleScope'] ?? 'homepage'),
+                'page_css_bundle_on_entry'    => !empty($ui['pageCssBundleOnEntryEnabled']),
+                // Legacy runtime aliases retained for older helper names.
+                'critical_css'                 => !empty($ui['homepageCssBundleEnabled']),
+                'critical_css_inline'          => !empty($ui['homepageCssBundleInlineEnabled']),
+                'critical_css_exclude_list'    => self::parse_textarea_setting(self::normalize_textarea_setting($ui['homepageCssBundleExcludeList'])),
+                'frontend_safe_mode'          => !empty($ui['frontendSafeModeEnabled']),
+                'slider_safe_mode'            => !empty($ui['sliderSafeModeEnabled']),
                 'cls_dimensions'               => !empty($ui['clsDimensionsEnabled']),
                 'async_css'                    => !empty($ui['asyncCssEnabled']),
+                'async_css_exclude_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['asyncCssExcludeList'])),
+                'aggressive_async_css'         => !empty($ui['aggressiveAsyncCssEnabled']),
+                'aggressive_async_css_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['aggressiveAsyncCssExcludeList'])),
+                'delay_non_critical_js'        => $delay_non_critical_js_enabled,
+                'delay_non_critical_js_aggressive' => $defer_stage_aggressive,
+                'delay_non_critical_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayNonCriticalJsExcludeList'])),
                 'lcp_image_priority'           => !empty($ui['lcpImagePriorityEnabled']),
+                'lcp_image_priority_override_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['lcpImagePriorityOverride'])),
+                'main_thread_relief'          => !empty($ui['mainThreadReliefEnabled']),
+                'critical_request_chain_relief' => !empty($ui['criticalRequestChainReliefEnabled']),
+                'critical_resource_preload_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalResourcePreloadList'])),
+                'critical_fetch_preload_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalFetchPreloadList'])),
+                'critical_request_chain_delay_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalRequestChainDelayList'])),
+                'asset_chain_cleanup'          => !empty($ui['assetChainCleanupEnabled']),
+                'asset_cleanup_woo_product_assets' => !empty($ui['assetCleanupWooProductAssetsEnabled']),
+                'asset_cleanup_product_filter_assets' => !empty($ui['assetCleanupProductFilterAssetsEnabled']),
+                'asset_cleanup_woo_blocks_css' => !empty($ui['assetCleanupWooBlocksCssEnabled']),
+                'asset_cleanup_exclude_list'   => self::parse_textarea_setting(self::normalize_textarea_setting($ui['assetCleanupExcludeList'])),
                 'google_fonts_swap'            => !empty($ui['googleFontsSwapEnabled']),
                 'google_fonts_local_optimization' => !empty($ui['googleFontsLocalOptimizationEnabled']),
                 'self_hosted_font_css_optimization' => !empty($ui['selfHostedFontCssOptimizationEnabled']),
+                'self_hosted_font_runtime_rewrite' => !empty($ui['selfHostedFontRuntimeRewriteEnabled']),
                 'speculation_rules_enabled'    => !empty($ui['speculationRulesEnabled']),
                 'browser_cache_rules'          => !empty($ui['browserCacheRulesEnabled']),
                 'varnish_cli_enabled'          => !empty($ui['varnishCliEnabled']),
@@ -1878,14 +2147,19 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'varnish_cli_timeout_seconds'  => max(1, min(30, absint($ui['varnishCliTimeoutSeconds']))),
                 'varnish_cli_method'           => ('PURGE' === strtoupper(trim((string) $ui['varnishCliMethod']))) ? 'PURGE' : 'BAN',
                 'varnish_cli_debug'            => !empty($ui['varnishCliDebug']),
-                'avif_enabled'                 => !empty($ui['avifConversionEnabled']),
+                'avif_enabled'                 => !empty($ui['avifConversionEnabled']) || !empty($ui['mediaOptimizationEnabled']),
+                'media_optimization_enabled'   => !empty($ui['avifConversionEnabled']) || !empty($ui['mediaOptimizationEnabled']),
+                'media_generate_on_upload'     => !empty($ui['mediaGenerateOnUploadEnabled']),
+                'media_generate_on_demand'     => !empty($ui['mediaGenerateOnDemandEnabled']),
+                'media_output_mode'            => self::sanitize_media_output_mode($ui['mediaOutputMode']),
                 'woo_safe_mode'                => !empty($ui['woocommerceSafeModeEnabled']),
                 'cache_cleanup_enabled'        => !empty($ui['cacheCleanupEnabled']),
                 'cache_cleanup_interval_hours' => max(1, absint($ui['cacheCleanupIntervalHours'])),
                 'cron_warm_enabled'            => !empty($ui['cronWarmEnabled']),
                 'cron_warm_start_after_cleanup'=> !empty($ui['cronWarmStartAfterCleanup']),
+                'cron_warm_start_after_manual_purge'=> !empty($ui['cronWarmStartAfterManualPurge']) || !empty($ui['cronWarmStartAfterFlush']),
                 'cron_warm_pages_per_minute'   => max(0, absint($ui['cronWarmPagesPerMinute'])),
-                'warm_after_cleanup'           => !empty($ui['cronWarmStartAfterCleanup']),
+                'warm_after_cleanup'           => !empty($ui['warmAfterScheduledCleanup']),
                 'scheduled_warm_limit'         => max(0, absint($ui['scheduledWarmLimit'])),
                 'stale_while_revalidate_enabled' => !empty($ui['staleWhileRevalidateEnabled']),
                 'cache_fresh_ttl_minutes'      => max(1, absint($ui['cacheFreshTtlMinutes'])),
@@ -2018,7 +2292,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             return self::normalize_runtime_config(array(
                 'excluded_paths'                  => $settings['excluded_paths'],
                 'excluded_query_args'             => $settings['excluded_query_args'],
-                'cache_query_strings'             => !empty($settings['cache_query_allowlist']),
+                'cache_query_strings'             => !empty($settings['cache_query_strings']),
                 'cache_query_allowlist'           => !empty($settings['cache_query_allowlist']) ? self::parse_textarea_setting(self::sanitize_setting_key_list((array) $settings['cache_query_allowlist'])) : array(),
                 'woo_safe_mode'                   => !empty($settings['woo_safe_mode']),
                 'stale_while_revalidate_enabled'  => !empty($settings['stale_while_revalidate_enabled']),
@@ -2190,6 +2464,19 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $timestamp = wp_next_scheduled('ucwp_scheduled_cache_cleanup');
             }
         }
+        /**
+         * Backward-compatible cleanup scheduler alias.
+         *
+         * The destructive cleanup action used this method name, while the
+         * actual scheduled cleanup helper is unschedule_scheduled_events().
+         * Keep this wrapper so the REST cleanup action cannot fatal.
+         */
+        public static function unschedule_cache_cleanup()
+        {
+            self::unschedule_scheduled_events();
+        }
+
+
 
         private static function unschedule_cron_warm_events()
         {
@@ -2309,6 +2596,10 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             if ('scheduled_cleanup' === $reason && empty($settings['cron_warm_start_after_cleanup'])) {
                 return array('success' => false, 'message' => self::maybe_translate('Cron warm up after scheduled cleanup is disabled.'), 'state' => self::get_cron_warm_status());
+            }
+
+            if (in_array((string) $reason, array('manual_purge', 'manual', 'cli'), true) && empty($settings['cron_warm_start_after_manual_purge'])) {
+                return array('success' => false, 'message' => self::maybe_translate('Cron warm up after manual purge is disabled.'), 'state' => self::get_cron_warm_status());
             }
 
             $pages_per_minute = max(0, (int) $settings['cron_warm_pages_per_minute']);
@@ -2432,6 +2723,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             return array(
                 'enabled' => !empty($settings['cron_warm_enabled']),
                 'startAfterCleanup' => !empty($settings['cron_warm_start_after_cleanup']),
+                'startAfterManualPurge' => !empty($settings['cron_warm_start_after_manual_purge']),
                 'pagesPerMinute' => max(0, (int) $settings['cron_warm_pages_per_minute']),
                 'totalLimit' => max(0, (int) ($state['totalLimit'] ?: $settings['scheduled_warm_limit'])),
                 'active' => !empty($state['active']),
@@ -2766,6 +3058,155 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
         }
 
+private static function delete_plugin_options_and_transients()
+{
+    global $wpdb;
+
+    $option_names = array(
+        UCWP_SETTINGS_KEY,
+        UCWP_CRON_WARM_STATE_KEY,
+        UCWP_WP_CACHE_MANAGED_KEY,
+        UCWP_SETTINGS_KEY . '_action_jobs',
+        'ucwp_media_conversion_queue',
+        'ucwp_media_diagnostics_v1',
+        'ucwp_object_cache_last_flush_report',
+    );
+
+    foreach ($option_names as $option_name) {
+        delete_option($option_name);
+        delete_site_option($option_name);
+    }
+
+    delete_transient(UCWP_CRON_WARM_LOCK_KEY);
+    delete_transient('ucwp_loopback_ssl_status_v1');
+    delete_transient('ucwp_frontend_compression_probe_v1');
+    delete_transient('ucwp_media_conversion_queue_lock');
+    delete_transient('ucwp_media_work_summary_v1');
+
+    if ($wpdb instanceof wpdb) {
+        $patterns = array(
+            'ucwp_%',
+            '_transient_ucwp_%',
+            '_transient_timeout_ucwp_%',
+            '_site_transient_ucwp_%',
+            '_site_transient_timeout_ucwp_%',
+        );
+
+        foreach ($patterns as $pattern) {
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                    $pattern
+                )
+            );
+        }
+
+        if (is_multisite()) {
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
+                    'ucwp_%'
+                )
+            );
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
+                    '_site_transient_ucwp_%'
+                )
+            );
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
+                    '_site_transient_timeout_ucwp_%'
+                )
+            );
+        }
+    }
+}
+
+private static function remove_runtime_secret_files()
+{
+    $candidates = array();
+
+    if (defined('WP_CONTENT_DIR')) {
+        $candidates[] = trailingslashit(WP_CONTENT_DIR) . 'ultracache-runtime-secrets.php';
+        $candidates[] = trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-runtime-secrets.php';
+    }
+
+    if (defined('UCWP_CACHE_DIR')) {
+        $candidates[] = trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.json';
+        $candidates[] = trailingslashit(UCWP_CACHE_DIR) . 'runtime-secrets.php';
+        $candidates[] = trailingslashit(UCWP_CACHE_DIR) . '.ultracache-runtime-secrets.php';
+    }
+
+    foreach (array_unique($candidates) as $path) {
+        if (is_string($path) && '' !== $path && file_exists($path)) {
+            ucwp_safe_unlink($path, 'delete_all_plugin_data runtime cleanup');
+        }
+    }
+}
+
+public static function delete_all_plugin_data_and_deactivate()
+{
+    if (!current_user_can('activate_plugins') && !current_user_can('manage_options')) {
+        return new WP_Error('ucwp_forbidden', 'You do not have permission to deactivate this plugin.');
+    }
+
+    self::stop_cron_warmup_queue('delete-all-data');
+    self::unschedule_cache_cleanup();
+    self::unschedule_cron_warm_events();
+    wp_clear_scheduled_hook('ucwp_scheduled_cache_cleanup');
+    wp_clear_scheduled_hook('ucwp_cron_warm_tick');
+    wp_clear_scheduled_hook('ucwp_cron_warm_tick_kickoff');
+    wp_clear_scheduled_hook('ucwp_process_media_conversion_queue');
+
+    if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'maybe_remove_advanced_cache')) {
+        Ultra_Cache_Engine::maybe_remove_advanced_cache();
+    }
+
+    if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
+        if (method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
+            Ultra_Cache_Object_Cache_Manager::flush_cache(true, true);
+        }
+        if (method_exists('Ultra_Cache_Object_Cache_Manager', 'maybe_remove_dropin')) {
+            Ultra_Cache_Object_Cache_Manager::maybe_remove_dropin();
+        }
+    }
+
+    self::sync_browser_cache_rules(false);
+    self::set_wp_cache_flag(false);
+    self::remove_runtime_secret_files();
+
+    if (defined('UCWP_CACHE_DIR') && is_dir(UCWP_CACHE_DIR)) {
+        ucwp_safe_rmdir(UCWP_CACHE_DIR, 'delete_all_plugin_data cache dir');
+    }
+    if (defined('UCWP_OBJECT_CACHE_DIR') && is_dir(UCWP_OBJECT_CACHE_DIR)) {
+        ucwp_safe_rmdir(UCWP_OBJECT_CACHE_DIR, 'delete_all_plugin_data object cache dir');
+    }
+
+    // Keep converted media files by design. UCWP_AVIF_DIR and UCWP_WEBP_DIR
+    // are intentionally not removed here.
+    self::delete_plugin_options_and_transients();
+    self::reset_settings_cache();
+
+    if (!function_exists('deactivate_plugins')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    if (function_exists('deactivate_plugins')) {
+        deactivate_plugins(UCWP_BASENAME, false, is_multisite());
+    }
+
+    return array(
+        'success' => true,
+        'message' => 'UltraCache data was deleted and the plugin was deactivated. Converted media folders were not deleted.',
+        'mediaFoldersKept' => array(
+            'avif' => defined('UCWP_AVIF_DIR') ? UCWP_AVIF_DIR : '',
+            'webp' => defined('UCWP_WEBP_DIR') ? UCWP_WEBP_DIR : '',
+        ),
+    );
+}
+
         public static function persist_dashboard_settings(array $settings)
         {
             $current_settings = self::sanitize_dashboard_settings(self::merge_protected_dashboard_settings($settings, self::get_dashboard_settings()));
@@ -2795,7 +3236,10 @@ if (!class_exists('Ultra_Cache_WP')) {
                 }
             }
             self::sync_scheduled_events();
-            self::sync_browser_cache_rules();
+            $browser_cache_sync = self::sync_browser_cache_rules();
+            if (false === $browser_cache_sync) {
+                return new WP_Error('ucwp_browser_cache_rules_not_writable', self::maybe_translate('Browser Cache Headers could not be written to .htaccess. Check file permissions or disable Browser Cache Headers.'));
+            }
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
                 Ultra_Cache_Object_Cache_Manager::sync_dropin();
@@ -2857,11 +3301,12 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             $path = self::get_browser_cache_htaccess_path();
-            if (file_exists($path) && !ucwp_path_is_writable($path)) {
-                return true;
-            }
-
             $contents = file_exists($path) ? (string) ucwp_safe_file_get_contents($path, 'sync_browser_cache_rules') : '';
+            $has_block = (false !== strpos($contents, $begin) && false !== strpos($contents, $end));
+
+            if (file_exists($path) && !ucwp_path_is_writable($path)) {
+                return !$enabled && !$has_block;
+            }
             $pattern  = '/' . preg_quote($begin, '/') . '.*?' . preg_quote($end, '/') . '\R*/s';
             $updated  = (string) preg_replace($pattern, '', $contents);
             $updated  = rtrim($updated);
@@ -2976,43 +3421,312 @@ if (!class_exists('Ultra_Cache_WP')) {
             return (string) preg_replace($pattern, '$1define(\'WP_CACHE\', $2);', (string) $contents);
         }
 
-        private static function insert_managed_wp_cache_block($contents, $block)
+        private static function get_wp_cache_insertion_offset($contents)
         {
-            if (false !== strpos($contents, "/* That's all, stop editing! Happy publishing. */")) {
-                return str_replace(
-                    "/* That's all, stop editing! Happy publishing. */",
-                    $block . "\n/* That's all, stop editing! Happy publishing. */",
-                    $contents
-                );
+            $contents = (string) $contents;
+            if ('' === $contents) {
+                return false;
             }
 
-            if (preg_match('/^\s*require_once\s+ABSPATH\s*\.\s*[\'\"]wp-settings\.php[\'\"]\s*;/m', $contents)) {
-                return (string) preg_replace(
-                    '/^\s*require_once\s+ABSPATH\s*\.\s*[\'\"]wp-settings\.php[\'\"]\s*;/m',
-                    $block . "\nrequire_once ABSPATH . 'wp-settings.php';",
-                    $contents,
-                    1
-                );
+            $tokens = token_get_all($contents);
+            if (!is_array($tokens) || empty($tokens)) {
+                return false;
             }
 
-            return new WP_Error('ucwp_wp_config_anchor_not_found', 'Could not locate a safe insertion point for WP_CACHE in wp-config.php.');
+            $offset   = 0;
+            $saw_open = false;
+            $total    = count($tokens);
+
+            for ($i = 0; $i < $total; $i++) {
+                $token = $tokens[$i];
+                $text  = is_array($token) ? (string) $token[1] : (string) $token;
+
+                if (!$saw_open) {
+                    $offset += strlen($text);
+                    if (is_array($token) && T_OPEN_TAG === $token[0]) {
+                        $saw_open = true;
+                    }
+                    continue;
+                }
+
+                if (is_array($token) && in_array($token[0], array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT), true)) {
+                    $offset += strlen($text);
+                    continue;
+                }
+
+                if (is_array($token) && T_DECLARE === $token[0]) {
+                    $offset += strlen($text);
+                    $depth = 0;
+                    for ($j = $i + 1; $j < $total; $j++) {
+                        $next      = $tokens[$j];
+                        $next_text = is_array($next) ? (string) $next[1] : (string) $next;
+                        $offset += strlen($next_text);
+                        if ('(' === $next_text) {
+                            $depth++;
+                        } elseif (')' === $next_text && $depth > 0) {
+                            $depth--;
+                        } elseif (';' === $next_text && 0 === $depth) {
+                            $i = $j;
+                            break;
+                        }
+                    }
+                    continue;
+                }
+
+                break;
+            }
+
+            return $saw_open ? $offset : false;
         }
 
-        private static function comment_out_existing_wp_cache_false_define($contents, &$did_change = false)
+        private static function normalize_wp_cache_define_name($raw)
         {
-            $did_change = false;
+            $raw = trim((string) $raw);
+            if ('' === $raw) {
+                return '';
+            }
 
-            return (string) preg_replace_callback(
-                '/^([ \t]*)define\s*\(\s*[\'\"]WP_CACHE[\'\"]\s*,\s*false\s*\)\s*;\s*(\/\/.*)?$/mi',
-                static function ($matches) use (&$did_change) {
-                    $did_change = true;
-                    $indent   = isset($matches[1]) ? (string) $matches[1] : '';
-                    $original = trim((string) $matches[0]);
-                    return $indent . '// ' . $original . ' // Disabled by UltraCache';
-                },
-                (string) $contents,
-                1
+            $quote = substr($raw, 0, 1);
+            if (("'" === $quote || '"' === $quote) && $quote === substr($raw, -1)) {
+                $raw = substr($raw, 1, -1);
+            }
+
+            return stripslashes($raw);
+        }
+
+        private static function classify_wp_cache_define_value($raw)
+        {
+            $raw = trim((string) $raw);
+            if ('' === $raw) {
+                return 'unknown';
+            }
+
+            $normalized = strtolower($raw);
+            if ('true' === $normalized) {
+                return 'true';
+            }
+
+            if ('false' === $normalized) {
+                return 'false';
+            }
+
+            $quote = substr($raw, 0, 1);
+            if (("'" === $quote || '"' === $quote) && $quote === substr($raw, -1)) {
+                $string_value = strtolower(stripslashes(substr($raw, 1, -1)));
+                if ('true' === $string_value) {
+                    return 'string-true';
+                }
+                if ('false' === $string_value) {
+                    return 'string-false';
+                }
+            }
+
+            return 'other';
+        }
+
+        private static function find_wp_cache_define_statements($contents)
+        {
+            $contents = (string) $contents;
+            if ('' === $contents) {
+                return array();
+            }
+
+            $tokens = token_get_all($contents);
+            if (!is_array($tokens) || empty($tokens)) {
+                return array();
+            }
+
+            $matches = array();
+            $offset  = 0;
+            $total   = count($tokens);
+
+            for ($i = 0; $i < $total; $i++) {
+                $token = $tokens[$i];
+                $text  = is_array($token) ? (string) $token[1] : (string) $token;
+                $len   = strlen($text);
+
+                if (!is_array($token) || T_STRING !== $token[0] || 'define' !== strtolower($text)) {
+                    $offset += $len;
+                    continue;
+                }
+
+                $start_offset = $offset;
+                $cursor       = $offset + $len;
+                $j            = $i + 1;
+
+                while ($j < $total) {
+                    $next      = $tokens[$j];
+                    $next_text = is_array($next) ? (string) $next[1] : (string) $next;
+                    if (is_array($next) && in_array($next[0], array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT), true)) {
+                        $cursor += strlen($next_text);
+                        $j++;
+                        continue;
+                    }
+                    break;
+                }
+
+                if ($j >= $total || '(' !== (is_array($tokens[$j]) ? (string) $tokens[$j][1] : (string) $tokens[$j])) {
+                    $offset += $len;
+                    continue;
+                }
+
+                $cursor += 1;
+                $j++;
+                $depth       = 0;
+                $current_arg = '';
+                $args        = array();
+                $closed      = false;
+
+                for (; $j < $total; $j++) {
+                    $part      = $tokens[$j];
+                    $part_text = is_array($part) ? (string) $part[1] : (string) $part;
+                    $cursor   += strlen($part_text);
+
+                    if ('(' === $part_text) {
+                        $depth++;
+                        $current_arg .= $part_text;
+                        continue;
+                    }
+
+                    if (')' === $part_text) {
+                        if ($depth > 0) {
+                            $depth--;
+                            $current_arg .= $part_text;
+                            continue;
+                        }
+
+                        $args[] = $current_arg;
+                        $current_arg = '';
+                        $closed = true;
+                        $j++;
+                        break;
+                    }
+
+                    if (',' === $part_text && 0 === $depth) {
+                        $args[] = $current_arg;
+                        $current_arg = '';
+                        continue;
+                    }
+
+                    $current_arg .= $part_text;
+                }
+
+                if (!$closed) {
+                    $offset += $len;
+                    continue;
+                }
+
+                while ($j < $total) {
+                    $tail      = $tokens[$j];
+                    $tail_text = is_array($tail) ? (string) $tail[1] : (string) $tail;
+                    $cursor   += strlen($tail_text);
+                    if (';' === $tail_text) {
+                        break;
+                    }
+                    $j++;
+                }
+
+                if ($j >= $total) {
+                    $offset += $len;
+                    continue;
+                }
+
+                $name = isset($args[0]) ? self::normalize_wp_cache_define_name($args[0]) : '';
+                if ('WP_CACHE' !== $name) {
+                    $offset += $len;
+                    continue;
+                }
+
+                $matches[] = array(
+                    'start'      => $start_offset,
+                    'end'        => $cursor,
+                    'statement'  => substr($contents, $start_offset, $cursor - $start_offset),
+                    'value_type' => self::classify_wp_cache_define_value(isset($args[1]) ? $args[1] : ''),
+                );
+
+                $offset = $cursor;
+                $i      = $j;
+            }
+
+            return $matches;
+        }
+
+        private static function get_wp_cache_define_summary($contents)
+        {
+            $matches = self::find_wp_cache_define_statements($contents);
+            if (empty($matches)) {
+                return array(
+                    'status'  => 'missing',
+                    'matches' => array(),
+                );
+            }
+
+            $status = 'other';
+            foreach ($matches as $match) {
+                $value_type = isset($match['value_type']) ? (string) $match['value_type'] : 'other';
+                if ('true' === $value_type) {
+                    return array(
+                        'status'  => 'true',
+                        'matches' => $matches,
+                    );
+                }
+
+                if ('false' === $value_type) {
+                    $status = 'false';
+                    continue;
+                }
+
+                if ('false' !== $status) {
+                    $status = 'nonstandard';
+                }
+            }
+
+            return array(
+                'status'  => $status,
+                'matches' => $matches,
             );
+        }
+
+        private static function remove_wp_cache_define_statements($contents, $matches)
+        {
+            $contents = (string) $contents;
+            if (empty($matches) || !is_array($matches)) {
+                return $contents;
+            }
+
+            usort($matches, static function ($a, $b) {
+                return (int) $b['start'] <=> (int) $a['start'];
+            });
+
+            foreach ($matches as $match) {
+                $start = isset($match['start']) ? (int) $match['start'] : 0;
+                $end   = isset($match['end']) ? (int) $match['end'] : $start;
+                if ($end <= $start) {
+                    continue;
+                }
+
+                $contents = substr($contents, 0, $start) . substr($contents, $end);
+            }
+
+            return $contents;
+        }
+
+        private static function insert_managed_wp_cache_block($contents, $block)
+        {
+            $offset = self::get_wp_cache_insertion_offset($contents);
+            if (false === $offset) {
+                return new WP_Error('ucwp_wp_config_anchor_not_found', 'Could not locate a safe insertion point for WP_CACHE in wp-config.php.');
+            }
+
+            $before = substr((string) $contents, 0, $offset);
+            $after  = substr((string) $contents, $offset);
+            $prefix = '';
+
+            if ('' !== $before && !preg_match('/\R\z/', $before)) {
+                $prefix = "\n";
+            }
+
+            return $before . $prefix . $block . "\n" . ltrim($after, "\r\n");
         }
 
         private static function get_wp_config_backup_path($config)
@@ -3078,30 +3792,21 @@ if (!class_exists('Ultra_Cache_WP')) {
             $contents          = self::normalize_legacy_managed_wp_cache_define($contents);
 
             if ($enabled) {
-                if (preg_match('/^\s*define\s*\(\s*[\'\"]WP_CACHE[\'\"]\s*,\s*true\s*\)\s*;.*$/mi', $contents)) {
+                $wp_cache_define = self::get_wp_cache_define_summary($contents);
+                if ('true' === $wp_cache_define['status']) {
                     delete_option(UCWP_WP_CACHE_MANAGED_KEY);
-                } elseif (preg_match('/^\s*define\s*\(\s*[\'\"]WP_CACHE[\'\"]\s*,\s*false\s*\)\s*;.*$/mi', $contents)) {
-                    $did_comment = false;
-                    $contents = self::comment_out_existing_wp_cache_false_define($contents, $did_comment);
-                    if (!$did_comment) {
-                        return new WP_Error('ucwp_wp_cache_defined_false', 'WP_CACHE is already defined as false in wp-config.php and could not be updated safely.');
-                    }
-
-                    $block    = self::get_managed_wp_cache_block(true);
-                    $contents = self::insert_managed_wp_cache_block($contents, $block);
-                    if (is_wp_error($contents)) {
-                        return $contents;
-                    }
-
-                    update_option(UCWP_WP_CACHE_MANAGED_KEY, 'commented-false', false);
                 } else {
+                    if (!empty($wp_cache_define['matches'])) {
+                        $contents = self::remove_wp_cache_define_statements($contents, $wp_cache_define['matches']);
+                    }
+
                     $block    = self::get_managed_wp_cache_block(true);
                     $contents = self::insert_managed_wp_cache_block($contents, $block);
                     if (is_wp_error($contents)) {
                         return $contents;
                     }
 
-                    update_option(UCWP_WP_CACHE_MANAGED_KEY, 'block', false);
+                    update_option(UCWP_WP_CACHE_MANAGED_KEY, !empty($wp_cache_define['matches']) ? 'replaced-existing' : 'block', false);
                 }
             } else {
                 delete_option(UCWP_WP_CACHE_MANAGED_KEY);
@@ -3169,6 +3874,66 @@ if (!class_exists('Ultra_Cache_WP')) {
                     'hotfixBundle' => UCWP_HOTFIX_BUNDLE_VERSION,
                 )
             );
+        }
+
+        public function suppress_conflicting_admin_assets($hook = '')
+        {
+            $is_ultracache_screen = ('toplevel_page_ultracache' === (string) $hook);
+
+            if (!$is_ultracache_screen && function_exists('get_current_screen')) {
+                $screen = get_current_screen();
+                $is_ultracache_screen = $screen && 'toplevel_page_ultracache' === (string) $screen->id;
+            }
+
+            if (!$is_ultracache_screen) {
+                return;
+            }
+
+            // Elementor Notes can be enqueued on unrelated admin pages and may
+            // throw "React is not defined" when its dependency chain is not
+            // present. UltraCache does not use it, so keep the dashboard clean.
+            $blocked_handles = array(
+                'elementor-notes',
+                'elementor-notes-app',
+                'elementor-notes-app-initiator',
+                'elementor-pro-notes',
+                'elementor-pro-notes-app',
+                'elementor-pro-notes-app-initiator',
+            );
+
+            foreach ($blocked_handles as $handle) {
+                wp_dequeue_script($handle);
+                wp_deregister_script($handle);
+                wp_dequeue_style($handle);
+                wp_deregister_style($handle);
+            }
+
+            global $wp_scripts, $wp_styles;
+
+            if ($wp_scripts instanceof WP_Scripts) {
+                foreach ((array) $wp_scripts->registered as $handle => $script) {
+                    $src = isset($script->src) ? (string) $script->src : '';
+                    $handle_lc = strtolower((string) $handle);
+                    $src_lc = strtolower($src);
+
+                    if (false !== strpos($handle_lc, 'elementor-notes') || false !== strpos($src_lc, 'notes.min.js') || false !== strpos($src_lc, 'notes-app-initiator.min.js')) {
+                        wp_dequeue_script($handle);
+                        wp_deregister_script($handle);
+                    }
+                }
+            }
+
+            if ($wp_styles instanceof WP_Styles) {
+                foreach ((array) $wp_styles->registered as $handle => $style) {
+                    $src = isset($style->src) ? strtolower((string) $style->src) : '';
+                    $handle_lc = strtolower((string) $handle);
+
+                    if (false !== strpos($handle_lc, 'elementor-notes') || false !== strpos($src, 'notes.min.css')) {
+                        wp_dequeue_style($handle);
+                        wp_deregister_style($handle);
+                    }
+                }
+            }
         }
 
         public function maybe_fix_revslider_footer_conflict()
@@ -3261,13 +4026,29 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         public function render_admin_notice()
         {
-            $message = get_transient('ucwp_admin_notice');
-            if (!$message) {
+            $notice = get_transient('ucwp_admin_notice');
+            if (!$notice) {
                 return;
             }
 
             delete_transient('ucwp_admin_notice');
-            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($message) . '</p></div>';
+
+            $type = 'success';
+            $message = $notice;
+            if (is_array($notice)) {
+                $message = isset($notice['message']) ? (string) $notice['message'] : '';
+                $type = isset($notice['type']) ? sanitize_key((string) $notice['type']) : 'success';
+            }
+
+            if ('' === trim((string) $message)) {
+                return;
+            }
+
+            if (!in_array($type, array('success', 'warning', 'error', 'info'), true)) {
+                $type = 'success';
+            }
+
+            echo '<div class="notice notice-' . esc_attr($type) . ' is-dismissible"><p>' . esc_html($message) . '</p></div>';
         }
 
         private static function get_engine_instance()
@@ -3292,6 +4073,90 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             return null;
+        }
+
+
+        public static function get_opcache_status_summary()
+        {
+            if (!function_exists('opcache_get_status')) {
+                return array(
+                    'available' => false,
+                    'enabled'   => false,
+                    'message'   => 'OPcache functions are unavailable on this server.',
+                );
+            }
+
+            $status = @opcache_get_status(false);
+            if (!is_array($status)) {
+                return array(
+                    'available' => true,
+                    'enabled'   => false,
+                    'message'   => 'OPcache is not enabled for the current PHP SAPI.',
+                );
+            }
+
+            $memory = isset($status['memory_usage']) && is_array($status['memory_usage']) ? $status['memory_usage'] : array();
+            $interned = isset($status['interned_strings_usage']) && is_array($status['interned_strings_usage']) ? $status['interned_strings_usage'] : array();
+            $statistics = isset($status['opcache_statistics']) && is_array($status['opcache_statistics']) ? $status['opcache_statistics'] : array();
+
+            $used = (int) ($memory['used_memory'] ?? 0);
+            $free = (int) ($memory['free_memory'] ?? 0);
+            $wasted = (int) ($memory['wasted_memory'] ?? 0);
+            $hits = (int) ($statistics['hits'] ?? 0);
+            $misses = (int) ($statistics['misses'] ?? 0);
+            $requests = $hits + $misses;
+            $hit_rate = $requests > 0 ? round(($hits / $requests) * 100, 2) : 0.0;
+            $last_restart = (int) ($status['last_restart_time'] ?? 0);
+
+            return array(
+                'available'                 => true,
+                'enabled'                   => true,
+                'message'                   => '',
+                'memoryUsedBytes'           => $used,
+                'memoryFreeBytes'           => $free,
+                'memoryWastedBytes'         => $wasted,
+                'memoryUsedHuman'           => function_exists('size_format') ? size_format($used, 2) : (string) $used,
+                'memoryFreeHuman'           => function_exists('size_format') ? size_format($free, 2) : (string) $free,
+                'memoryWastedHuman'         => function_exists('size_format') ? size_format($wasted, 2) : (string) $wasted,
+                'internedUsedBytes'         => (int) ($interned['used_memory'] ?? 0),
+                'internedFreeBytes'         => (int) ($interned['free_memory'] ?? 0),
+                'internedUsedHuman'         => function_exists('size_format') ? size_format((int) ($interned['used_memory'] ?? 0), 2) : (string) ((int) ($interned['used_memory'] ?? 0)),
+                'internedFreeHuman'         => function_exists('size_format') ? size_format((int) ($interned['free_memory'] ?? 0), 2) : (string) ((int) ($interned['free_memory'] ?? 0)),
+                'cachedScripts'             => (int) ($statistics['num_cached_scripts'] ?? 0),
+                'cachedKeys'                => (int) ($statistics['num_cached_keys'] ?? 0),
+                'maxCachedKeys'             => (int) ($statistics['max_cached_keys'] ?? 0),
+                'hits'                      => $hits,
+                'misses'                    => $misses,
+                'hitRate'                   => $hit_rate,
+                'oomRestarts'               => (int) ($statistics['oom_restarts'] ?? 0),
+                'hashRestarts'              => (int) ($statistics['hash_restarts'] ?? 0),
+                'manualRestarts'            => (int) ($statistics['manual_restarts'] ?? 0),
+                'lastRestartTime'           => $last_restart,
+                'lastRestartTimeHuman'      => $last_restart > 0 ? gmdate('Y-m-d H:i:s', $last_restart) . ' UTC' : 'Never',
+                'restartPending'            => !empty($status['restart_pending']),
+            );
+        }
+
+        public static function flush_opcache()
+        {
+            if (!function_exists('opcache_reset')) {
+                return array(
+                    'success' => false,
+                    'message' => 'OPcache reset is unavailable on this server.',
+                );
+            }
+
+            $success = (bool) @opcache_reset();
+            $response = array(
+                'success' => $success,
+                'message' => $success ? 'OPcache flushed successfully.' : 'OPcache flush failed.',
+            );
+
+            if (method_exists(__CLASS__, 'get_engine_stats')) {
+                $response['stats'] = self::get_engine_stats();
+            }
+
+            return $response;
         }
 
         public static function get_engine_stats()
@@ -3326,6 +4191,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             $stats['cronWarm'] = self::get_cron_warm_status();
+            $stats['opcache'] = self::get_opcache_status_summary();
             $stats['diagnostics'] = self::get_dashboard_diagnostics();
             return $stats;
         }
@@ -3472,18 +4338,25 @@ if (!class_exists('Ultra_Cache_WP')) {
                 );
             }
 
-            if (preg_match('/^\s*define\s*\(\s*[\'\"]WP_CACHE[\'\"]\s*,\s*(true|false)\s*\)\s*;.*$/mi', $contents, $matches)) {
-                $value = strtolower((string) $matches[1]);
-                if ('true' === $value) {
-                    return array(
-                        'status'  => 'true',
-                        'message' => self::maybe_translate('WP_CACHE is already defined as true in wp-config.php.'),
-                    );
-                }
+            $wp_cache_define = self::get_wp_cache_define_summary($contents);
+            if ('true' === $wp_cache_define['status']) {
+                return array(
+                    'status'  => 'true',
+                    'message' => self::maybe_translate('WP_CACHE is already defined as true in wp-config.php.'),
+                );
+            }
 
+            if ('false' === $wp_cache_define['status']) {
                 return array(
                     'status'  => 'false',
                     'message' => self::maybe_translate('WP_CACHE is currently defined as false in wp-config.php and UltraCache will disable that line safely before enabling page cache.'),
+                );
+            }
+
+            if ('nonstandard' === $wp_cache_define['status']) {
+                return array(
+                    'status'  => 'nonstandard',
+                    'message' => self::maybe_translate('WP_CACHE is defined in a non-standard way in wp-config.php and UltraCache can replace it safely when enabling page cache.'),
                 );
             }
 
@@ -4370,6 +5243,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                 ),
                 'reverseProxy' => self::get_reverse_proxy_status(),
                 'loopbackSsl' => ucwp_get_loopback_ssl_status(),
+                'environment' => self::get_advanced_environment_diagnostic(),
+                'mediaRuntime' => self::get_media_runtime_diagnostic(),
                 'cronWarm' => self::get_cron_warm_status(),
                 'paths' => array(
                     'cacheDir'          => self::get_path_diagnostic(UCWP_CACHE_DIR, 'dir'),
@@ -4639,6 +5514,128 @@ if (!class_exists('Ultra_Cache_WP')) {
             $last['time']   = $time > 0 ? $time : 0;
 
             return $last;
+        }
+
+        private static function get_mysql_query_cache_size()
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb)) {
+                return '';
+            }
+
+            $value = '';
+            $result = $wpdb->get_var("SHOW VARIABLES LIKE 'query_cache_size'", 1);
+            if (null === $result || false === $result || '' === $result) {
+                $result = $wpdb->get_var("SELECT @@query_cache_size");
+            }
+            if (null === $result || false === $result) {
+                return '';
+            }
+            return (string) $result;
+        }
+
+        private static function get_mysql_max_allowed_packet_size()
+        {
+            global $wpdb;
+            if (!($wpdb instanceof wpdb)) {
+                return '';
+            }
+
+            $result = $wpdb->get_var("SHOW VARIABLES LIKE 'max_allowed_packet'", 1);
+            if (null === $result || false === $result || '' === $result) {
+                $result = $wpdb->get_var("SELECT @@max_allowed_packet");
+            }
+            if (null === $result || false === $result) {
+                return '';
+            }
+            return (string) $result;
+        }
+
+        private static function get_advanced_environment_diagnostic()
+        {
+            $host = function_exists('gethostname') ? (string) @gethostname() : '';
+
+            $site_url = function_exists('home_url') ? (string) home_url('/') : '';
+            $site_parts = $site_url ? wp_parse_url($site_url) : array();
+            $default_port = (!empty($site_parts['scheme']) && 'http' === strtolower((string) $site_parts['scheme'])) ? '80' : '443';
+            $server_addr = (string) ucwp_server_value('SERVER_ADDR');
+            $server_port = (string) ucwp_server_value('SERVER_PORT');
+
+            if ('' === $server_addr && !empty($site_parts['host'])) {
+                $resolved = @gethostbyname((string) $site_parts['host']);
+                if (is_string($resolved) && '' !== $resolved) {
+                    $server_addr = $resolved;
+                }
+            }
+
+            if ('' === $server_port) {
+                if (!empty($site_parts['port'])) {
+                    $server_port = (string) $site_parts['port'];
+                } else {
+                    $server_port = $default_port;
+                }
+            }
+
+            $ip_port = $server_addr;
+            if ('' !== $server_addr && '' !== $server_port) {
+                $ip_port .= ':' . $server_port;
+            }
+
+            $document_root = (string) ucwp_server_value('DOCUMENT_ROOT');
+            if ('' === $document_root && defined('ABSPATH')) {
+                $document_root = untrailingslashit((string) ABSPATH);
+            }
+
+            $query_cache_raw = self::get_mysql_query_cache_size();
+            $query_cache_size = '';
+            if ('' !== $query_cache_raw && is_numeric($query_cache_raw)) {
+                $query_cache_size = size_format((int) $query_cache_raw);
+            } elseif ('' !== $query_cache_raw) {
+                $query_cache_size = (string) $query_cache_raw;
+            }
+
+            $max_packet_raw = self::get_mysql_max_allowed_packet_size();
+            $max_packet_size = '';
+            if ('' !== $max_packet_raw && is_numeric($max_packet_raw)) {
+                $max_packet_size = size_format((int) $max_packet_raw);
+            } elseif ('' !== $max_packet_raw) {
+                $max_packet_size = (string) $max_packet_raw;
+            }
+
+            return array(
+                'serverHostname' => $host,
+                'originIpPort' => $ip_port,
+                'serverDocumentRoot' => $document_root,
+                'phpVersion' => (string) PHP_VERSION,
+                'phpSapi' => function_exists('php_sapi_name') ? (string) php_sapi_name() : '',
+                'phpMaxExecutionTime' => (string) ini_get('max_execution_time'),
+                'phpMemoryLimit' => (string) ini_get('memory_limit'),
+                'phpMaxUploadSize' => (string) ini_get('upload_max_filesize'),
+                'phpMaxPostSize' => (string) ini_get('post_max_size'),
+                'phpMaxInputVars' => (string) ini_get('max_input_vars'),
+                'wpMemoryLimit' => defined('WP_MEMORY_LIMIT') ? (string) WP_MEMORY_LIMIT : '',
+                'mysqlQueryCacheSize' => $query_cache_size,
+                'mysqlMaxAllowedPacket' => $max_packet_size,
+            );
+        }
+
+        private static function get_media_runtime_diagnostic()
+
+        {
+            $support = self::get_media_support_status();
+            return array(
+                'preferredEditor' => (string) ($support['preferred_editor'] ?? ''),
+                'lastImageEditorClass' => (string) ($support['last_image_editor_class'] ?? ''),
+                'lastAvifEncodeEngine' => (string) ($support['last_avif_encode_engine'] ?? ''),
+                'lastAvifEncodeError' => (string) ($support['last_avif_encode_error'] ?? ''),
+                'lastAvifEncodeFile' => (string) ($support['last_avif_encode_file'] ?? ''),
+                'lastAvifEncodeAt' => (int) ($support['last_avif_encode_at'] ?? 0),
+                'gdAvif' => !empty($support['gd_avif']),
+                'gdWebp' => !empty($support['gd_webp']),
+                'imagickAvif' => !empty($support['imagick_avif']),
+                'imagickWebp' => !empty($support['imagick_webp']),
+            );
         }
 
         private static function get_media_support_status()

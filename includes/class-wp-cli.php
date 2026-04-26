@@ -249,15 +249,27 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'brotliEnabled',
                 'gzipEnabled',
                 'avifConversionEnabled',
+                'mediaOptimizationEnabled',
                 'deferJsEnabled',
                 'delayThirdPartyJsEnabled',
                 'asyncExternalScriptsEnabled',
+                'homepageCssBundleEnabled',
+                'homepageCssBundleInlineEnabled',
+                'pageCssBundleOnEntryEnabled',
+                'criticalCssEnabled',
+                'criticalCssInlineEnabled',
+                'frontendSafeModeEnabled',
+                'sliderSafeModeEnabled',
                 'clsDimensionsEnabled',
                 'asyncCssEnabled',
+                'aggressiveAsyncCssEnabled',
+                'delayNonCriticalJsEnabled',
                 'lcpImagePriorityEnabled',
+                'mainThreadReliefEnabled',
                 'googleFontsSwapEnabled',
                 'googleFontsLocalOptimizationEnabled',
                 'selfHostedFontCssOptimizationEnabled',
+                'selfHostedFontRuntimeRewriteEnabled',
                 'speculationRulesEnabled',
                 'browserCacheRulesEnabled',
                 'varnishCliEnabled',
@@ -267,8 +279,11 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'cacheCleanupEnabled',
                 'cronWarmEnabled',
                 'cronWarmStartAfterCleanup',
+                'cronWarmStartAfterManualPurge',
+                'cronWarmStartAfterFlush',
                 'warmAfterScheduledCleanup',
                 'staleWhileRevalidateEnabled',
+                'cacheQueryStringsEnabled',
                 'redisUseTls',
                 'redisPersistent',
             );
@@ -289,10 +304,20 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             $textarea_keys = array(
                 'cacheExceptionPaths',
                 'cacheExceptionQueryArgs',
+                'deferJsForceList',
+                'deferJsExcludeList',
+                'homepageCssBundleExcludeList',
+                'criticalCssExcludeList',
+                'asyncCssExcludeList',
+                'aggressiveAsyncCssExcludeList',
+                'delayNonCriticalJsExcludeList',
+                'lcpImagePriorityOverride',
                 'varnishCliServers',
                 'varnishCliKey',
                 'varnishCliMethod',
                 'objectCacheBackend',
+                'cssBundleScope',
+                'cacheQueryStringAllowlist',
                 'redisHost',
                 'redisPassword',
                 'redisPrefix',
@@ -776,6 +801,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                         'gzipEnabled' => !empty($settings['gzipEnabled']),
                         'brotliEnabled' => !empty($settings['brotliEnabled']),
                         'avifConversionEnabled' => !empty($settings['avifConversionEnabled']),
+                        'mediaOptimizationEnabled' => !empty($settings['mediaOptimizationEnabled']),
                         'cacheSizeHuman' => (string) ($stats['cacheSizeHuman'] ?? ''),
                         'pagesCached' => (int) ($stats['pagesCached'] ?? ($stats['pageCacheFiles'] ?? 0)),
                         'pageCacheHits' => (int) ($stats['pageCacheHits'] ?? 0),
@@ -900,6 +926,11 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 $value = $this->coerce_setting_value($key, $args[2]);
                 $next = $current;
                 $next[$key] = $value;
+                if ('cronWarmStartAfterFlush' === $key) {
+                    $next['cronWarmStartAfterManualPurge'] = $value;
+                } elseif ('cronWarmStartAfterManualPurge' === $key) {
+                    $next['cronWarmStartAfterFlush'] = $value;
+                }
                 $response = Ultra_Cache_WP::persist_dashboard_settings($next);
 
                 if (is_wp_error($response)) {

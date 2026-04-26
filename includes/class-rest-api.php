@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.55.02 */
+/** Hotfix Bundle Version: 2.55.72 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -92,6 +92,39 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             return in_array(strtoupper(trim((string) $value)), array('BAN', 'PURGE'), true);
         }
 
+        public function sanitize_media_output_mode_param($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('auto', 'avif', 'webp'), true) ? $value : 'auto';
+        }
+
+        public function validate_media_output_mode_param($value)
+        {
+            return in_array(strtolower(trim((string) $value)), array('auto', 'avif', 'webp'), true);
+        }
+
+        public function sanitize_homepage_css_bundle_mode_param($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('safe', 'aggressive'), true) ? $value : 'safe';
+        }
+
+        public function validate_homepage_css_bundle_mode_param($value)
+        {
+            return in_array(strtolower(trim((string) $value)), array('safe', 'aggressive'), true);
+        }
+
+        public function sanitize_css_bundle_scope_param($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('homepage', 'shared', 'per-page'), true) ? $value : 'homepage';
+        }
+
+        public function validate_css_bundle_scope_param($value)
+        {
+            return in_array(strtolower(trim((string) $value)), array('homepage', 'shared', 'per-page'), true);
+        }
+
         public function sanitize_crawl_scope_param($value)
         {
             return ('menu' === strtolower(trim((string) $value))) ? 'menu' : 'full';
@@ -130,15 +163,49 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'brotliEnabled'                        => array('type' => 'boolean', 'required' => false),
                 'gzipEnabled'                          => array('type' => 'boolean', 'required' => false),
                 'avifConversionEnabled'                => array('type' => 'boolean', 'required' => false),
+                'mediaOptimizationEnabled'           => array('type' => 'boolean', 'required' => false),
+                'mediaGenerateOnUploadEnabled'        => array('type' => 'boolean', 'required' => false),
+                'mediaGenerateOnDemandEnabled'        => array('type' => 'boolean', 'required' => false),
+                'mediaOutputMode'                     => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_media_output_mode_param'), 'validate_callback' => array($this, 'validate_media_output_mode_param')),
                 'deferJsEnabled'                       => array('type' => 'boolean', 'required' => false),
+                'deferJsForceList'                   => array('type' => 'string', 'required' => false),
+                'deferJsExcludeList'                   => array('type' => 'string', 'required' => false),
                 'delayThirdPartyJsEnabled'             => array('type' => 'boolean', 'required' => false),
                 'asyncExternalScriptsEnabled'          => array('type' => 'boolean', 'required' => false),
+                'homepageCssBundleEnabled'             => array('type' => 'boolean', 'required' => false),
+                'homepageCssBundleInlineEnabled'       => array('type' => 'boolean', 'required' => false),
+                'homepageCssBundleExcludeList'         => array('type' => 'string', 'required' => false),
+                'homepageCssBundleMode'                => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_homepage_css_bundle_mode_param'), 'validate_callback' => array($this, 'validate_homepage_css_bundle_mode_param')),
+                'cssBundleScope'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_css_bundle_scope_param'), 'validate_callback' => array($this, 'validate_css_bundle_scope_param')),
+                'pageCssBundleOnEntryEnabled'          => array('type' => 'boolean', 'required' => false),
+                'criticalCssEnabled'                   => array('type' => 'boolean', 'required' => false),
+                'criticalCssInlineEnabled'             => array('type' => 'boolean', 'required' => false),
+                'criticalCssExcludeList'               => array('type' => 'string', 'required' => false),
+                'frontendSafeModeEnabled'            => array('type' => 'boolean', 'required' => false),
+                'sliderSafeModeEnabled'              => array('type' => 'boolean', 'required' => false),
                 'clsDimensionsEnabled'                 => array('type' => 'boolean', 'required' => false),
                 'asyncCssEnabled'                      => array('type' => 'boolean', 'required' => false),
+                'asyncCssExcludeList'                  => array('type' => 'string', 'required' => false),
+                'aggressiveAsyncCssEnabled'            => array('type' => 'boolean', 'required' => false),
+                'aggressiveAsyncCssExcludeList'        => array('type' => 'string', 'required' => false),
+                'delayNonCriticalJsEnabled'            => array('type' => 'boolean', 'required' => false),
+                'delayNonCriticalJsExcludeList'        => array('type' => 'string', 'required' => false),
                 'lcpImagePriorityEnabled'              => array('type' => 'boolean', 'required' => false),
+                'lcpImagePriorityOverride'             => array('type' => 'string', 'required' => false),
+                'mainThreadReliefEnabled'              => array('type' => 'boolean', 'required' => false),
+                'criticalRequestChainReliefEnabled'     => array('type' => 'boolean', 'required' => false),
+                'criticalResourcePreloadList'           => array('type' => 'string', 'required' => false),
+                'criticalFetchPreloadList'              => array('type' => 'string', 'required' => false),
+                'criticalRequestChainDelayList'         => array('type' => 'string', 'required' => false),
+                'assetChainCleanupEnabled'              => array('type' => 'boolean', 'required' => false),
+                'assetCleanupWooProductAssetsEnabled'   => array('type' => 'boolean', 'required' => false),
+                'assetCleanupProductFilterAssetsEnabled'=> array('type' => 'boolean', 'required' => false),
+                'assetCleanupWooBlocksCssEnabled'       => array('type' => 'boolean', 'required' => false),
+                'assetCleanupExcludeList'               => array('type' => 'string', 'required' => false),
                 'googleFontsSwapEnabled'               => array('type' => 'boolean', 'required' => false),
                 'googleFontsLocalOptimizationEnabled'  => array('type' => 'boolean', 'required' => false),
                 'selfHostedFontCssOptimizationEnabled' => array('type' => 'boolean', 'required' => false),
+                'selfHostedFontRuntimeRewriteEnabled'  => array('type' => 'boolean', 'required' => false),
                 'speculationRulesEnabled'              => array('type' => 'boolean', 'required' => false),
                 'browserCacheRulesEnabled'             => array('type' => 'boolean', 'required' => false),
                 'varnishCliEnabled'                    => array('type' => 'boolean', 'required' => false),
@@ -153,6 +220,8 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'cacheCleanupEnabled'                  => array('type' => 'boolean', 'required' => false),
                 'cronWarmEnabled'                      => array('type' => 'boolean', 'required' => false),
                 'cronWarmStartAfterCleanup'            => array('type' => 'boolean', 'required' => false),
+                'cronWarmStartAfterManualPurge'        => array('type' => 'boolean', 'required' => false),
+                'cronWarmStartAfterFlush'              => array('type' => 'boolean', 'required' => false),
                 'warmAfterScheduledCleanup'            => array('type' => 'boolean', 'required' => false),
                 'cacheCleanupIntervalHours'            => array('type' => 'integer', 'required' => false),
                 'cronWarmPagesPerMinute'               => array('type' => 'integer', 'required' => false),
@@ -162,6 +231,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'cacheMaxStaleMinutes'                 => array('type' => 'integer', 'required' => false),
                 'cacheExceptionPaths'                  => array('type' => 'string', 'required' => false),
                 'cacheExceptionQueryArgs'              => array('type' => 'string', 'required' => false),
+                'cacheQueryStringsEnabled'             => array('type' => 'boolean', 'required' => false),
                 'cacheQueryStringAllowlist'            => array('type' => 'string', 'required' => false),
             );
         }
@@ -210,6 +280,13 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
                         'callback'            => array($this, 'varnish_flush_all'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
+                '/opcache/flush' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'opcache_flush'),
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
@@ -269,6 +346,20 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'args'                => $this->get_settings_update_args(),
                     ),
                 ),
+'/delete-all-data' => array(
+    array(
+        'methods'             => WP_REST_Server::CREATABLE,
+        'callback'            => array($this, 'delete_all_plugin_data'),
+        'permission_callback' => array($this, 'check_permission'),
+        'args'                => array(
+            'confirmation' => array(
+                'type'              => 'string',
+                'required'          => true,
+                'sanitize_callback' => 'sanitize_text_field',
+            ),
+        ),
+    ),
+),
                 '/crawl-urls' => array(
                     array(
                         'methods'             => WP_REST_Server::READABLE,
@@ -310,6 +401,10 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                                 'required'          => true,
                                 'sanitize_callback' => array($this, 'sanitize_url_param'),
                                 'validate_callback' => array($this, 'validate_non_empty_url_param'),
+                            ),
+                            'buildCssBundle' => array(
+                                'type'     => 'boolean',
+                                'required' => false,
                             ),
                         ),
                     ),
@@ -394,6 +489,38 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'methods'             => WP_REST_Server::CREATABLE,
                         'callback'            => array($this, 'optimize_media'),
                         'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
+                '/action-queue' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'enqueue_action_job'),
+                        'permission_callback' => array($this, 'check_permission'),
+                        'args'                => array(
+                            'action' => array(
+                                'type'              => 'string',
+                                'required'          => true,
+                                'sanitize_callback' => 'sanitize_key',
+                            ),
+                            'params' => array(
+                                'type'     => 'object',
+                                'required' => false,
+                            ),
+                        ),
+                    ),
+                ),
+                '/action-queue/(?P<id>[A-Za-z0-9_\-]+)' => array(
+                    array(
+                        'methods'             => WP_REST_Server::READABLE,
+                        'callback'            => array($this, 'get_action_job'),
+                        'permission_callback' => array($this, 'check_permission'),
+                        'args'                => array(
+                            'id' => array(
+                                'type'              => 'string',
+                                'required'          => true,
+                                'sanitize_callback' => 'sanitize_text_field',
+                            ),
+                        ),
                     ),
                 ),
             );
@@ -600,6 +727,12 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 $current['cronWarmStartAfterCleanup'] = $request->get_param('warmAfterScheduledCleanup');
             }
 
+            if (null !== $request->get_param('cronWarmStartAfterFlush')) {
+                $current['cronWarmStartAfterManualPurge'] = $request->get_param('cronWarmStartAfterFlush');
+            } elseif (null !== $request->get_param('cronWarmStartAfterManualPurge')) {
+                $current['cronWarmStartAfterFlush'] = $request->get_param('cronWarmStartAfterManualPurge');
+            }
+
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'persist_dashboard_settings')) {
                 $response = Ultra_Cache_WP::persist_dashboard_settings($current);
                 if (is_wp_error($response)) {
@@ -618,6 +751,31 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             return new WP_REST_Response(array('success' => true, 'settings' => $client_settings), 200);
         }
 
+
+public function delete_all_plugin_data(WP_REST_Request $request)
+{
+    $confirmation = strtoupper(trim((string) $request->get_param('confirmation')));
+    if ('DELETE' !== $confirmation) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Confirmation failed. Type DELETE to remove UltraCache data and deactivate the plugin.',
+            ),
+            400
+        );
+    }
+
+    if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'delete_all_plugin_data_and_deactivate')) {
+        return new WP_REST_Response(array('success' => false, 'message' => 'Cleanup helper not available.'), 500);
+    }
+
+    $result = Ultra_Cache_WP::delete_all_plugin_data_and_deactivate();
+    if (is_wp_error($result)) {
+        return new WP_REST_Response(array('success' => false, 'message' => $result->get_error_message()), 500);
+    }
+
+    return new WP_REST_Response($result, 200);
+}
 
         public function cron_warm_start()
         {
@@ -681,6 +839,16 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
         }
 
+        public function opcache_flush()
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_opcache')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'OPcache helper not available.'), 500);
+            }
+
+            $result = Ultra_Cache_WP::flush_opcache();
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+        }
+
         public function redis_test(WP_REST_Request $request)
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'test_redis_connection')) {
@@ -713,6 +881,36 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
         }
 
 
+        private function is_dashboard_setting_enabled($key)
+        {
+            $settings = defined('UCWP_SETTINGS_KEY') ? get_option(UCWP_SETTINGS_KEY, array()) : array();
+            return is_array($settings) && !empty($settings[$key]);
+        }
+
+        private function guard_page_cache_enabled()
+        {
+            if (!$this->is_dashboard_setting_enabled('pageCacheEnabled')) {
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'message' => 'Please enable Page Caching first or select a profile before warming cache.',
+                ), 400);
+            }
+
+            return null;
+        }
+
+        private function guard_css_bundle_enabled()
+        {
+            if (!$this->is_dashboard_setting_enabled('homepageCssBundleEnabled')) {
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'message' => 'Please enable CSS Bundling before using CSS bundle actions.',
+                ), 400);
+            }
+
+            return null;
+        }
+
         public function get_urls(WP_REST_Request $request)
         {
             $engine = $this->get_engine();
@@ -744,6 +942,18 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'No URL provided.'), 400);
             }
 
+            $guard = $this->guard_page_cache_enabled();
+            if ($guard instanceof WP_REST_Response) {
+                return $guard;
+            }
+
+            if ((bool) $request->get_param('buildCssBundle')) {
+                $guard = $this->guard_css_bundle_enabled();
+                if ($guard instanceof WP_REST_Response) {
+                    return $guard;
+                }
+            }
+
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'warm_url') || !method_exists($engine, 'is_cacheable_local_url')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
@@ -753,7 +963,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Only local site URLs can be crawled.'), 400);
             }
 
-            $result = $engine->warm_url($url);
+            $result = $engine->warm_url($url, array('build_css_bundle' => (bool) $request->get_param('buildCssBundle')));
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
         }
 
@@ -774,6 +984,11 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
 
         public function build_frontpage_css()
         {
+            $guard = $this->guard_css_bundle_enabled();
+            if ($guard instanceof WP_REST_Response) {
+                return $guard;
+            }
+
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'build_frontpage_css_bundle')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
@@ -785,6 +1000,11 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
 
         public function warm_frontpage_html()
         {
+            $guard = $this->guard_page_cache_enabled();
+            if ($guard instanceof WP_REST_Response) {
+                return $guard;
+            }
+
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'warm_frontpage_html')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
@@ -796,6 +1016,16 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
 
         public function warm_frontpage_html_css()
         {
+            $guard = $this->guard_page_cache_enabled();
+            if ($guard instanceof WP_REST_Response) {
+                return $guard;
+            }
+
+            $guard = $this->guard_css_bundle_enabled();
+            if ($guard instanceof WP_REST_Response) {
+                return $guard;
+            }
+
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'warm_frontpage_html_with_css')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
@@ -848,6 +1078,185 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
 
             $media->bulk_optimize();
             return new WP_REST_Response(array('success' => true), 200);
+        }
+
+        private function get_action_queue_option_key()
+        {
+            return defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_jobs' : 'ucwp_settings_action_jobs';
+        }
+
+        private function get_allowed_action_queue_actions()
+        {
+            return array(
+                'purge_all',
+                'object_cache_flush',
+                'warm_frontpage_html',
+                'warm_frontpage_html_css',
+                'varnish_test',
+                'varnish_flush_all',
+                'opcache_flush',
+                'redis_test',
+            );
+        }
+
+        private function load_action_jobs()
+        {
+            $jobs = get_option($this->get_action_queue_option_key(), array());
+            return is_array($jobs) ? $jobs : array();
+        }
+
+        private function save_action_jobs(array $jobs)
+        {
+            $now = time();
+            foreach ($jobs as $id => $job) {
+                $created = isset($job['createdAt']) ? (int) $job['createdAt'] : $now;
+                $finished = isset($job['finishedAt']) ? (int) $job['finishedAt'] : 0;
+                $terminal = in_array((string) ($job['status'] ?? ''), array('done', 'failed'), true);
+                if (($terminal && $finished > 0 && ($now - $finished) > HOUR_IN_SECONDS) || (!$terminal && ($now - $created) > 6 * HOUR_IN_SECONDS)) {
+                    unset($jobs[$id]);
+                }
+            }
+
+            update_option($this->get_action_queue_option_key(), $jobs, false);
+        }
+
+        private function normalize_action_params($params)
+        {
+            if (!is_array($params)) {
+                return array();
+            }
+
+            $normalized = array();
+            foreach ($params as $key => $value) {
+                $key = sanitize_key((string) $key);
+                if ('' === $key) {
+                    continue;
+                }
+                if (is_scalar($value) || null === $value) {
+                    $normalized[$key] = is_string($value) ? sanitize_text_field($value) : $value;
+                }
+            }
+
+            return $normalized;
+        }
+
+        public function enqueue_action_job(WP_REST_Request $request)
+        {
+            $action = sanitize_key((string) $request->get_param('action'));
+            if (!in_array($action, $this->get_allowed_action_queue_actions(), true)) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Unsupported queued action.'), 400);
+            }
+
+            $params = $this->normalize_action_params($request->get_param('params'));
+            $id = 'ucwp_' . wp_generate_password(18, false, false);
+            $now = time();
+            $job = array(
+                'id'        => $id,
+                'action'    => $action,
+                'params'    => $params,
+                'status'    => 'queued',
+                'message'   => 'Queued.',
+                'createdAt' => $now,
+                'updatedAt' => $now,
+            );
+
+            $jobs = $this->load_action_jobs();
+            $jobs[$id] = $job;
+            $this->save_action_jobs($jobs);
+
+            return new WP_REST_Response(array('success' => true, 'job' => $job), 202);
+        }
+
+        public function get_action_job(WP_REST_Request $request)
+        {
+            $id = sanitize_text_field((string) $request->get_param('id'));
+            $jobs = $this->load_action_jobs();
+            if (empty($jobs[$id]) || !is_array($jobs[$id])) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Queued action not found.'), 404);
+            }
+
+            $job = $jobs[$id];
+            $status = (string) ($job['status'] ?? 'queued');
+            if ('queued' === $status) {
+                $job['status'] = 'running';
+                $job['message'] = 'Running.';
+                $job['startedAt'] = time();
+                $job['updatedAt'] = time();
+                $jobs[$id] = $job;
+                $this->save_action_jobs($jobs);
+
+                $result = $this->run_action_queue_job((string) ($job['action'] ?? ''), is_array($job['params'] ?? null) ? $job['params'] : array());
+                $ok = !empty($result['success']) || !empty($result['skipped']);
+                $job['status'] = $ok ? 'done' : 'failed';
+                $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
+                $job['result'] = $result;
+                $job['finishedAt'] = time();
+                $job['updatedAt'] = time();
+                $jobs[$id] = $job;
+                $this->save_action_jobs($jobs);
+            } elseif ('running' === $status && !empty($job['startedAt']) && (time() - (int) $job['startedAt']) > 300) {
+                $job['status'] = 'failed';
+                $job['message'] = 'Queued action timed out.';
+                $job['finishedAt'] = time();
+                $job['updatedAt'] = time();
+                $jobs[$id] = $job;
+                $this->save_action_jobs($jobs);
+            }
+
+            return new WP_REST_Response(array('success' => true, 'job' => $job), 200);
+        }
+
+        private function run_action_queue_job($action, array $params)
+        {
+            try {
+                switch ($action) {
+                    case 'purge_all':
+                        return $this->unwrap_rest_payload($this->purge_all());
+                    case 'object_cache_flush':
+                        return $this->unwrap_rest_payload($this->object_cache_flush());
+                    case 'warm_frontpage_html':
+                        return $this->unwrap_rest_payload($this->warm_frontpage_html());
+                    case 'warm_frontpage_html_css':
+                        return $this->unwrap_rest_payload($this->warm_frontpage_html_css());
+                    case 'varnish_test':
+                        return $this->unwrap_rest_payload($this->varnish_test());
+                    case 'varnish_flush_all':
+                        return $this->unwrap_rest_payload($this->varnish_flush_all());
+                    case 'opcache_flush':
+                        return $this->unwrap_rest_payload($this->opcache_flush());
+                    case 'redis_test':
+                        $redis_request = new WP_REST_Request('POST', '/');
+                        foreach ($params as $key => $value) {
+                            $redis_request->set_param($key, $value);
+                        }
+                        return $this->unwrap_rest_payload($this->redis_test($redis_request));
+                }
+            } catch (Throwable $error) {
+                return array('success' => false, 'message' => $error->getMessage());
+            } catch (Exception $error) {
+                return array('success' => false, 'message' => $error->getMessage());
+            }
+
+            return array('success' => false, 'message' => 'Unsupported queued action.');
+        }
+
+        private function unwrap_rest_payload($response)
+        {
+            if (is_wp_error($response)) {
+                return array('success' => false, 'message' => $response->get_error_message());
+            }
+
+            if ($response instanceof WP_REST_Response) {
+                $data = $response->get_data();
+                $status = (int) $response->get_status();
+                $payload = is_array($data) ? $data : array('data' => $data);
+                if (!array_key_exists('success', $payload)) {
+                    $payload['success'] = $status >= 200 && $status < 300;
+                }
+                return $payload;
+            }
+
+            return is_array($response) ? $response : array('success' => (bool) $response);
         }
 
         private function get_engine()

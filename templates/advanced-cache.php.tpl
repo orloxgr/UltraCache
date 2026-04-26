@@ -198,8 +198,9 @@ $ucwp_safe_readfile = static function ($file) {
     return ucwp_safe_readfile($file);
 };
 $ucwp_cache_base_dir = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache';
-$ucwp_is_cache_path = static function ($path) use ($ucwp_cache_base_dir) {
-    return ucwp_is_cache_path($path, $ucwp_cache_base_dir);
+$ucwp_is_cache_path = static function ($path, $base_dir = null, $must_exist = false) use ($ucwp_cache_base_dir) {
+    $base_dir = is_string($base_dir) && '' !== trim($base_dir) ? $base_dir : $ucwp_cache_base_dir;
+    return ucwp_is_cache_path($path, $base_dir, (bool) $must_exist);
 };
 
 $method = strtoupper((string) ucwp_server_var('REQUEST_METHOD', 'GET'));
@@ -266,14 +267,93 @@ $runtime_config = array(
     'revalidate_secret'              => '',
     'trusted_hosts'                  => array(),
 );
+$ucwp_normalize_runtime_string_list = static function ($value, $pattern = null) {
+    $items = is_array($value) ? $value : preg_split('/\r?\n/', (string) $value);
+    if (!is_array($items)) {
+        return array();
+    }
+
+    $normalized = array();
+    foreach ($items as $item) {
+        if (is_array($item) || is_object($item)) {
+            continue;
+        }
+        $item = trim((string) $item);
+        if ('' === $item) {
+            continue;
+        }
+        $item = preg_replace('/[\x00-\x1F\x7F]/', '', $item);
+        $item = is_string($item) ? trim($item) : '';
+        if ('' === $item) {
+            continue;
+        }
+        if (is_string($pattern) && '' !== $pattern) {
+            $item = preg_replace($pattern, '', strtolower($item));
+            $item = is_string($item) ? trim($item) : '';
+            if ('' === $item) {
+                continue;
+            }
+        }
+        $normalized[$item] = true;
+    }
+
+    $normalized = array_keys($normalized);
+    sort($normalized);
+    return $normalized;
+};
+$ucwp_normalize_runtime_path = static function ($path) {
+    $path = '/' . ltrim((string) $path, '/');
+    return '/' === $path ? '/' : rtrim($path, '/') . '/';
+};
+$ucwp_normalize_runtime_path_list = static function ($value) use ($ucwp_normalize_runtime_string_list, $ucwp_normalize_runtime_path) {
+    $paths = array();
+    foreach ($ucwp_normalize_runtime_string_list($value) as $path_rule) {
+        $wildcard = '*' === substr($path_rule, -1);
+        if ($wildcard) {
+            $path_rule = substr($path_rule, 0, -1);
+        }
+        $path_rule = $ucwp_normalize_runtime_path($path_rule);
+        if ('/' === $path_rule) {
+            continue;
+        }
+        $paths[$path_rule . ($wildcard ? '*' : '')] = true;
+    }
+
+    $paths = array_keys($paths);
+    sort($paths);
+    return $paths;
+};
+$ucwp_normalize_runtime_config = static function ($config) use ($runtime_config, $ucwp_normalize_runtime_string_list, $ucwp_normalize_runtime_path_list) {
+    $config = is_array($config) ? $config : array();
+
+    $cache_query_allowlist = $ucwp_normalize_runtime_string_list($config['cache_query_allowlist'] ?? $runtime_config['cache_query_allowlist'], '/[^a-z0-9_-]/');
+    $fresh_ttl_minutes = isset($config['cache_fresh_ttl_minutes']) ? (int) $config['cache_fresh_ttl_minutes'] : (int) $runtime_config['cache_fresh_ttl_minutes'];
+    $fresh_ttl_minutes = max(1, min(1440, $fresh_ttl_minutes));
+    $max_stale_minutes = isset($config['cache_max_stale_minutes']) ? (int) $config['cache_max_stale_minutes'] : (int) $runtime_config['cache_max_stale_minutes'];
+    $max_stale_minutes = max($fresh_ttl_minutes, min(10080, $max_stale_minutes));
+
+    return array(
+        'excluded_paths'                 => $ucwp_normalize_runtime_path_list($config['excluded_paths'] ?? $runtime_config['excluded_paths']),
+        'excluded_query_args'            => $ucwp_normalize_runtime_string_list($config['excluded_query_args'] ?? $runtime_config['excluded_query_args'], '/[^a-z0-9_-]/'),
+        'cache_query_strings'            => !empty($config['cache_query_strings']),
+        'cache_query_allowlist'          => $cache_query_allowlist,
+        'woo_safe_mode'                  => !empty($config['woo_safe_mode']),
+        'stale_while_revalidate_enabled' => !empty($config['stale_while_revalidate_enabled']),
+        'cache_fresh_ttl_minutes'        => $fresh_ttl_minutes,
+        'cache_max_stale_minutes'        => $max_stale_minutes,
+        'revalidate_secret'              => isset($config['revalidate_secret']) && is_scalar($config['revalidate_secret']) ? (string) $config['revalidate_secret'] : '',
+        'trusted_hosts'                  => $ucwp_normalize_runtime_string_list($config['trusted_hosts'] ?? $runtime_config['trusted_hosts']),
+    );
+};
+$runtime_config = $ucwp_normalize_runtime_config($runtime_config);
 
 $runtime_config_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/runtime-config.json';
-if ($ucwp_is_cache_path($runtime_config_file, $ucwp_cache_base_dir, true) && file_exists($runtime_config_file) && is_readable($runtime_config_file)) {
+if ($ucwp_is_cache_path($runtime_config_file, null, true) && is_file($runtime_config_file) && is_readable($runtime_config_file)) {
     $loaded_runtime_raw = $ucwp_read_file($runtime_config_file);
     if (is_string($loaded_runtime_raw) && '' !== $loaded_runtime_raw) {
         $loaded_runtime = json_decode($loaded_runtime_raw, true);
         if (is_array($loaded_runtime)) {
-            $runtime_config = array_merge($runtime_config, $loaded_runtime);
+            $runtime_config = $ucwp_normalize_runtime_config(array_merge($runtime_config, $loaded_runtime));
         }
     }
 }
@@ -327,6 +407,7 @@ foreach ($runtime_secret_candidates as $runtime_secret_file) {
         break;
     }
 }
+$runtime_config = $ucwp_normalize_runtime_config($runtime_config);
 
 $revalidate_flag = isset($_GET['ucwp_revalidate']) ? (string) $_GET['ucwp_revalidate'] : '';
 $revalidate_header = ucwp_server_var('HTTP_X_ULTRACACHE_REVALIDATE', '');
@@ -341,6 +422,11 @@ if ($is_revalidate_request) {
 }
 
 $ucwp_analytics_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/analytics.json';
+$ucwp_analytics_hit_buffer_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/analytics-hit-buffer.log';
+$ucwp_analytics_apcu_prefix = 'ucwp_analytics_hit_buffer_' . md5((string) WP_CONTENT_DIR) . '_';
+$ucwp_analytics_buffer_flush_threshold = 50;
+$ucwp_analytics_buffer_flush_interval = 30;
+$ucwp_analytics_file_flush_threshold = 65536;
 $ucwp_default_analytics = static function () {
     return array(
         'version' => 1,
@@ -377,38 +463,194 @@ $ucwp_read_analytics = static function () use ($ucwp_analytics_file, $ucwp_defau
 };
 $ucwp_write_analytics = static function ($data) use ($ucwp_analytics_file, $ucwp_make_dir, $ucwp_write_file, $ucwp_is_cache_path) {
     if (!$ucwp_is_cache_path($ucwp_analytics_file)) {
-        return;
+        return false;
     }
     $dir = dirname($ucwp_analytics_file);
     if (!file_exists($dir)) {
         $ucwp_make_dir($dir, 0755, true);
     }
-    $ucwp_write_file($ucwp_analytics_file, json_encode($data), LOCK_EX);
+    return false !== $ucwp_write_file($ucwp_analytics_file, json_encode($data), LOCK_EX);
 };
-$ucwp_record_hit = static function ($bucket, $encoding_bucket, $stale = false) use ($ucwp_read_analytics, $ucwp_write_analytics) {
+$ucwp_analytics_apcu_available = static function () {
+    if (!function_exists('apcu_fetch') || !function_exists('apcu_add') || !function_exists('apcu_inc') || !function_exists('apcu_dec') || !function_exists('apcu_delete') || !function_exists('apcu_store')) {
+        return false;
+    }
+    if (function_exists('apcu_enabled') && !apcu_enabled()) {
+        return false;
+    }
+    return true;
+};
+$ucwp_apply_analytics_hit_delta = static function (&$data, $counter, $amount) {
+    $amount = max(0, (int) $amount);
+    if ($amount <= 0) {
+        return;
+    }
+    $counter = (string) $counter;
+    if ('pageHits' === $counter || 'pageStaleHits' === $counter) {
+        $data[$counter] = (int) ($data[$counter] ?? 0) + $amount;
+        return;
+    }
+    if (0 === strpos($counter, 'bucket_')) {
+        $bucket = substr($counter, 7);
+        if (!in_array($bucket, array('orig', 'webp', 'avif'), true)) {
+            return;
+        }
+        if (!isset($data['bucketHits']) || !is_array($data['bucketHits'])) {
+            $data['bucketHits'] = array('orig' => 0, 'webp' => 0, 'avif' => 0);
+        }
+        $data['bucketHits'][$bucket] = (int) ($data['bucketHits'][$bucket] ?? 0) + $amount;
+        return;
+    }
+    if (0 === strpos($counter, 'encoding_')) {
+        $encoding = substr($counter, 9);
+        if (!in_array($encoding, array('identity', 'gzip', 'brotli'), true)) {
+            return;
+        }
+        if (!isset($data['encodingHits']) || !is_array($data['encodingHits'])) {
+            $data['encodingHits'] = array('identity' => 0, 'gzip' => 0, 'brotli' => 0);
+        }
+        $data['encodingHits'][$encoding] = (int) ($data['encodingHits'][$encoding] ?? 0) + $amount;
+    }
+};
+$ucwp_collect_apcu_analytics_hit_buffer = static function () use ($ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix) {
+    if (!$ucwp_analytics_apcu_available()) {
+        return array();
+    }
+    $deltas = array();
+    foreach (array('pageHits', 'pageStaleHits', 'bucket_orig', 'bucket_webp', 'bucket_avif', 'encoding_identity', 'encoding_gzip', 'encoding_brotli') as $counter) {
+        $ok = false;
+        $value = apcu_fetch($ucwp_analytics_apcu_prefix . $counter, $ok);
+        $value = $ok ? max(0, (int) $value) : 0;
+        if ($value > 0) {
+            $deltas[$counter] = $value;
+        }
+    }
+    return $deltas;
+};
+$ucwp_consume_file_analytics_hit_buffer = static function () use ($ucwp_analytics_hit_buffer_file, $ucwp_is_cache_path) {
+    if (!$ucwp_is_cache_path($ucwp_analytics_hit_buffer_file) || !file_exists($ucwp_analytics_hit_buffer_file) || !is_readable($ucwp_analytics_hit_buffer_file)) {
+        return array();
+    }
+    $handle = @fopen($ucwp_analytics_hit_buffer_file, 'c+');
+    if (!$handle) {
+        return array();
+    }
+    $raw = '';
+    if (@flock($handle, LOCK_EX)) {
+        rewind($handle);
+        $raw = stream_get_contents($handle);
+        ftruncate($handle, 0);
+        rewind($handle);
+        @flock($handle, LOCK_UN);
+    }
+    fclose($handle);
+    if (!is_string($raw) || '' === trim($raw)) {
+        return array();
+    }
+    $deltas = array();
+    foreach (preg_split('/\r?\n/', trim($raw)) as $line) {
+        if ('' === $line) {
+            continue;
+        }
+        $parts = explode("\t", $line);
+        if (count($parts) < 3) {
+            continue;
+        }
+        $state = strtoupper((string) $parts[0]);
+        $bucket = in_array($parts[1], array('orig', 'webp', 'avif'), true) ? $parts[1] : 'orig';
+        $encoding = in_array($parts[2], array('identity', 'gzip', 'brotli'), true) ? $parts[2] : 'identity';
+        $hit_counter = ('S' === $state) ? 'pageStaleHits' : 'pageHits';
+        foreach (array($hit_counter, 'bucket_' . $bucket, 'encoding_' . $encoding) as $counter) {
+            if (!isset($deltas[$counter])) {
+                $deltas[$counter] = 0;
+            }
+            $deltas[$counter]++;
+        }
+    }
+    return $deltas;
+};
+$ucwp_flush_analytics_hit_buffer = static function () use ($ucwp_read_analytics, $ucwp_write_analytics, $ucwp_apply_analytics_hit_delta, $ucwp_collect_apcu_analytics_hit_buffer, $ucwp_consume_file_analytics_hit_buffer, $ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix) {
+    $apcu_lock_acquired = false;
+    if ($ucwp_analytics_apcu_available()) {
+        if (!@apcu_add($ucwp_analytics_apcu_prefix . 'flush_lock', 1, 10)) {
+            return false;
+        }
+        $apcu_lock_acquired = true;
+    }
+
+    $apcu_deltas = $ucwp_collect_apcu_analytics_hit_buffer();
+    $file_deltas = $ucwp_consume_file_analytics_hit_buffer();
+    if (empty($apcu_deltas) && empty($file_deltas)) {
+        if ($apcu_lock_acquired) {
+            @apcu_delete($ucwp_analytics_apcu_prefix . 'flush_lock');
+        }
+        return false;
+    }
+
     $data = $ucwp_read_analytics();
-    if ($stale) {
-        $data['pageStaleHits'] = (int) ($data['pageStaleHits'] ?? 0) + 1;
-    } else {
-        $data['pageHits'] = (int) ($data['pageHits'] ?? 0) + 1;
+    foreach (array($apcu_deltas, $file_deltas) as $deltas) {
+        foreach ($deltas as $counter => $amount) {
+            $ucwp_apply_analytics_hit_delta($data, $counter, $amount);
+        }
     }
-    if (!isset($data['bucketHits']) || !is_array($data['bucketHits'])) {
-        $data['bucketHits'] = array('orig' => 0, 'webp' => 0, 'avif' => 0);
+
+    if (!$ucwp_write_analytics($data)) {
+        if ($apcu_lock_acquired) {
+            @apcu_delete($ucwp_analytics_apcu_prefix . 'flush_lock');
+        }
+        return false;
     }
-    if (!isset($data['bucketHits'][$bucket])) {
-        $data['bucketHits'][$bucket] = 0;
+
+    if ($ucwp_analytics_apcu_available()) {
+        foreach ($apcu_deltas as $counter => $amount) {
+            $amount = max(0, (int) $amount);
+            if ($amount > 0) {
+                @apcu_dec($ucwp_analytics_apcu_prefix . (string) $counter, $amount);
+            }
+        }
+        @apcu_delete($ucwp_analytics_apcu_prefix . 'total');
+        @apcu_store($ucwp_analytics_apcu_prefix . 'last_flush', time(), 3600);
+        @apcu_delete($ucwp_analytics_apcu_prefix . 'flush_lock');
     }
-    $data['bucketHits'][$bucket] = (int) $data['bucketHits'][$bucket] + 1;
-    if (!isset($data['encodingHits']) || !is_array($data['encodingHits'])) {
-        $data['encodingHits'] = array('identity' => 0, 'gzip' => 0, 'brotli' => 0);
-    }
-    if (!isset($data['encodingHits'][$encoding_bucket])) {
-        $data['encodingHits'][$encoding_bucket] = 0;
-    }
-    $data['encodingHits'][$encoding_bucket] = (int) $data['encodingHits'][$encoding_bucket] + 1;
-    $ucwp_write_analytics($data);
+
+    return true;
 };
-$ucwp_record_background_revalidation = static function () use ($ucwp_read_analytics, $ucwp_write_analytics) {
+$ucwp_record_hit = static function ($bucket, $encoding_bucket, $stale = false) use ($ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix, $ucwp_analytics_buffer_flush_threshold, $ucwp_analytics_buffer_flush_interval, $ucwp_analytics_hit_buffer_file, $ucwp_analytics_file_flush_threshold, $ucwp_make_dir, $ucwp_write_file, $ucwp_is_cache_path, $ucwp_flush_analytics_hit_buffer) {
+    $bucket = in_array($bucket, array('orig', 'webp', 'avif'), true) ? $bucket : 'orig';
+    $encoding_bucket = in_array($encoding_bucket, array('identity', 'gzip', 'brotli'), true) ? $encoding_bucket : 'identity';
+    $hit_counter = $stale ? 'pageStaleHits' : 'pageHits';
+    $counters = array($hit_counter, 'bucket_' . $bucket, 'encoding_' . $encoding_bucket);
+
+    if ($ucwp_analytics_apcu_available()) {
+        foreach ($counters as $counter) {
+            @apcu_add($ucwp_analytics_apcu_prefix . $counter, 0, 3600);
+            @apcu_inc($ucwp_analytics_apcu_prefix . $counter, 1);
+        }
+        @apcu_add($ucwp_analytics_apcu_prefix . 'total', 0, 3600);
+        $total = (int) @apcu_inc($ucwp_analytics_apcu_prefix . 'total', 1);
+        $last_flush = (int) @apcu_fetch($ucwp_analytics_apcu_prefix . 'last_flush');
+        if ($total >= $ucwp_analytics_buffer_flush_threshold || (time() - $last_flush) >= $ucwp_analytics_buffer_flush_interval) {
+            $ucwp_flush_analytics_hit_buffer();
+        }
+        return;
+    }
+
+    if (!$ucwp_is_cache_path($ucwp_analytics_hit_buffer_file)) {
+        return;
+    }
+    $dir = dirname($ucwp_analytics_hit_buffer_file);
+    if (!file_exists($dir)) {
+        $ucwp_make_dir($dir, 0755, true);
+    }
+    $line = ($stale ? 'S' : 'H') . "\t" . $bucket . "\t" . $encoding_bucket . "\n";
+    $ucwp_write_file($ucwp_analytics_hit_buffer_file, $line, FILE_APPEND | LOCK_EX);
+    $buffer_size = file_exists($ucwp_analytics_hit_buffer_file) ? (int) @filesize($ucwp_analytics_hit_buffer_file) : 0;
+    if ($buffer_size >= $ucwp_analytics_file_flush_threshold || 1 === mt_rand(1, $ucwp_analytics_buffer_flush_threshold)) {
+        $ucwp_flush_analytics_hit_buffer();
+    }
+};
+$ucwp_record_background_revalidation = static function () use ($ucwp_read_analytics, $ucwp_write_analytics, $ucwp_flush_analytics_hit_buffer) {
+    $ucwp_flush_analytics_hit_buffer();
     $data = $ucwp_read_analytics();
     $data['pageBackgroundRevalidations'] = (int) ($data['pageBackgroundRevalidations'] ?? 0) + 1;
     $ucwp_write_analytics($data);
@@ -563,14 +805,13 @@ $ucwp_normalize_query_vars = static function ($query_vars, $allowlist) use ($ucw
         }
     }
 
-    if (empty($lookup)) {
-        return array();
-    }
-
     $filtered = array();
     foreach ($query_vars as $query_key => $query_value) {
         $normalized_key = preg_replace('/[^a-z0-9_-]/', '', strtolower((string) $query_key));
-        if ('' === $normalized_key || !isset($lookup[$normalized_key])) {
+        if ('' === $normalized_key) {
+            continue;
+        }
+        if (!empty($lookup) && !isset($lookup[$normalized_key])) {
             continue;
         }
 
@@ -588,6 +829,33 @@ $ucwp_normalize_query_vars = static function ($query_vars, $allowlist) use ($ucw
 $ucwp_normalize_query_key = static function ($query_key) {
     $query_key = preg_replace('/[^a-z0-9_-]/', '', strtolower((string) $query_key));
     return is_string($query_key) ? $query_key : '';
+};
+
+$ucwp_get_first_non_allowlisted_query_key = static function ($query_vars, $allowlist) use ($ucwp_normalize_query_key) {
+    if (!is_array($query_vars) || empty($query_vars)) {
+        return '';
+    }
+
+    $lookup = array();
+    foreach ((array) $allowlist as $allowed_key) {
+        $allowed_key = $ucwp_normalize_query_key($allowed_key);
+        if ('' !== $allowed_key) {
+            $lookup[$allowed_key] = true;
+        }
+    }
+
+    if (empty($lookup)) {
+        return '';
+    }
+
+    foreach (array_keys($query_vars) as $query_key) {
+        $normalized_key = $ucwp_normalize_query_key($query_key);
+        if ('' === $normalized_key || !isset($lookup[$normalized_key])) {
+            return '' !== $normalized_key ? $normalized_key : (string) $query_key;
+        }
+    }
+
+    return '';
 };
 
 $ucwp_normalize_host = static function ($host) {
@@ -670,11 +938,19 @@ foreach (array_keys($query_vars) as $query_key) {
 
 $normalized_query_vars = array();
 if (!empty($query_vars)) {
+    $query_allowlist = (array) ($runtime_config['cache_query_allowlist'] ?? array());
     if (empty($runtime_config['cache_query_strings'])) {
         return;
     }
 
-    $normalized_query_vars = $ucwp_normalize_query_vars($query_vars, (array) ($runtime_config['cache_query_allowlist'] ?? array()));
+    if (!empty($query_allowlist) && '' !== $ucwp_get_first_non_allowlisted_query_key($query_vars, $query_allowlist)) {
+        return;
+    }
+
+    $normalized_query_vars = $ucwp_normalize_query_vars($query_vars, $query_allowlist);
+    if (empty($normalized_query_vars)) {
+        return;
+    }
 }
 
 if (!empty($runtime_config['woo_safe_mode'])) {
@@ -734,6 +1010,10 @@ $fresh_ttl = max(60, (int) ($runtime_config['cache_fresh_ttl_minutes'] ?? 15) * 
 $max_stale = max($fresh_ttl, (int) ($runtime_config['cache_max_stale_minutes'] ?? 60) * 60);
 $mtime = $ucwp_get_filemtime($cache_file);
 $age = $mtime ? max(0, time() - (int) $mtime) : 0;
+$serve_until = !empty($runtime_config['stale_while_revalidate_enabled']) ? $max_stale : $fresh_ttl;
+if ($age > $serve_until) {
+    return;
+}
 
 if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_ttl && $age <= $max_stale) {
     $lock_file = $ucwp_get_revalidate_lock_path($cache_file);
