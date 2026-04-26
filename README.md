@@ -1,38 +1,121 @@
 # UltraCache
 
-UltraCache is a production-oriented WordPress performance plugin focused on page-cache delivery, cache warming, object caching, media conversion, Redis-backed object caching, Varnish-aware purge workflows, and practical operator tooling.
+UltraCache is a production-oriented WordPress performance plugin focused on page-cache delivery, cache warming, Redis/APCu object caching, Varnish-aware purge workflows, media optimization, CSS bundle generation, and operator-friendly diagnostics.
 
-It is built for sites that want a managed page-cache drop-in, optional Redis-backed object cache, optional Varnish integration, image format conversion, and a diagnostics-heavy admin experience without relying on external build tooling.
+## Varnish Support and cache-backend compatibility
 
----
+| Feature / backend | Status | Recommended use | Notes |
+| --- | --- | --- | --- |
+| **Varnish Support** | Optional integration | Use when the site is behind Varnish and you want UltraCache to test, purge, or ban cached pages. | HTTP mode targets frontend BAN/PURGE endpoints. Admin mode should use localhost/private endpoints only, for example `127.0.0.1:6082`. Do not expose the Varnish admin port publicly. |
+| **Redis Object Cache** | Recommended production backend | Best persistent object-cache backend when the PHP Redis extension and a stable Redis service are available. | UltraCache stores Redis secrets in protected runtime sidecar config rather than exposing them in generated drop-ins. |
+| **APCu Object Cache** | Safe local fallback | Good for single-server sites when Redis is unavailable. | APCu is local to the PHP runtime and is cleared on PHP-FPM restart. If APCu writes fail or memory is full, UltraCache falls back safely to runtime-only behavior. |
+| **Disk Object Cache** | Advanced/debug only | Use only when explicitly testing object-cache behavior. | Not recommended for production because it can create many small files and increase filesystem I/O. It is not used automatically as a fallback. |
 
-## Current repository build
+## Current build
 
-- version: `2.55.96`
-- latest pass: added fail-safe wrappers around frontend HTML/CSS rewrites with fallback-to-original validation for suspicious transformations
-- sixth pass fixes: removed hard page reloads after Varnish Test and Flush Varnish All; the dashboard now stays on the page and refreshes through AJAX only
-- fifth pass fixes: reduced `@` suppression in non-critical helper paths and added safer internal debug logging for font CSS reads and Varnish admin socket connects
-- third pass fixes: redacted secrets from `wp ultracache status` settings/all output, added stricter local-site URL validation for single-URL CLI actions, and tightened REST validation for settings enums and URL/scope inputs
-- first pass fixes: removed auto-opening support modal, redacted secrets from WP-CLI settings output, added textdomain loading, and changed Local Google Fonts Optimization to opt-in by default for fresh installs
-- second pass fixes: tightened REST schema coverage for settings/Redis/cron inputs and improved support modal accessibility metadata
+- Version: `2.56.07`
+- Build type: CSS-scope-aware warm-up buttons and behavior
+- Runtime focus: dashboard warm-up orchestration only; no extra frontend JS
+- Default behavior: HTML-only warm actions remain separate; CSS warm actions follow the selected CSS Bundling Scope.
 
----
+## Recommended setup
 
-## 2.55.73 notes
+### Safe baseline
 
-- Disabled Warm Cache actions until Page Caching is enabled.
-- Disabled CSS-bundle warm actions until CSS Bundling is enabled.
-- Added REST guards for direct warm/CSS bundle requests when required features are off.
+1. Enable **Page Cache**.
+2. Save settings.
+3. Purge all cache.
+4. Warm the homepage/menu cache.
+5. Visit the homepage twice and confirm the second request can return `X-Ultra-Cache: HIT`.
 
-## 2.55.61 notes
+### Object cache
 
-- Removed forced all-caps dashboard styling and utility usage.
-- Added 5px spacing above the Start Media Conversion action row.
-- Added 5px left spacing to dashboard toggles.
-- Added 10px top spacing to the Advanced Settings & Exclusions textarea grid.
-- Suppressed Elementor Notes admin assets on the UltraCache dashboard to avoid React global console errors from notes.min.js and notes-app-initiator.min.js.
+Recommended order:
 
----
+1. **Redis** when available and connected.
+2. **APCu** as a local single-server fallback.
+3. **Runtime-only** when neither Redis nor APCu is available.
+4. **Disk** only when manually selected for advanced/debug testing.
+
+### Analytics hit backend
+
+UltraCache records page-cache hit analytics using the lowest-risk available backend:
+
+1. APCu
+2. Redis
+3. Disabled when neither APCu nor Redis is available
+
+It does not rely on per-hit disk logging when APCu/Redis are unavailable.
+
+### Media Optimization
+
+The Media Optimization card now uses one master switch:
+
+- **Media Optimization** = master on/off switch
+- **Output Policy** = `Auto`, `AVIF`, or `WebP`
+
+AVIF/WebP availability depends on the PHP image stack, especially Imagick/GD codec support.
+
+### CSS Bundle Summary
+
+CSS bundle status is shown as **CSS Bundle Summary** in Warm Cache and Activity Summary. It reports:
+
+- bundles built
+- styles bundled/scanned
+- skipped/unresolved stylesheets
+- last CSS bundle warm time
+- last warm message
+
+### Frontend HTML rewrite safety
+
+UltraCache uses a layered approach for frontend HTML optimizations:
+
+- `WP_HTML_Tag_Processor` is preferred for tag/attribute rewrites when available.
+- Legacy regex/string fallbacks remain for older WordPress versions or malformed edge cases.
+- Safety wrappers keep the original HTML when a rewrite returns suspicious output.
+- CSS text rewrites remain string-based where the WordPress HTML tag parser is not the right tool.
+
+## Manual JS exclusions
+
+Do not hard-code theme-specific dependencies into the plugin. If a theme or custom script has a dependency-order issue, add it to **Defer / Delay Exclusions** manually.
+
+Good exclusion candidates are usually script handles, filenames, or globals that appear in browser console errors, for example:
+
+```text
+some-theme-runtime.js
+custom-slider.js
+SomeThemeGlobal
+```
+
+Core shared systems such as WordPress, WooCommerce, Elementor, common slider runtimes, and critical dependency libraries are handled by generic built-in safeguards.
+
+## Recommended post-update test
+
+After installing a new UltraCache build:
+
+1. Save settings once.
+2. Purge all cache.
+3. Warm the homepage/menu cache.
+4. Open the homepage twice and confirm cache headers.
+5. Check browser Console for JavaScript errors.
+6. Check Network for local `/wp-content/` or `/wp-includes/` assets returning `404`, `403`, or `500`.
+7. Check homepage, product page, cart, checkout, search, menu, sliders, fonts, and mobile layout.
+8. Review Diagnostics for page cache, object cache backend, analytics backend, OPcache/APCu cards, CSS Bundle Summary, and generated drop-in versions.
+
+## Useful SSH checks
+
+Replace the URL/path as needed:
+
+```bash
+cd /path/to/wordpress
+wp ultracache status
+wp ultracache stats --format=json
+wp ultracache purge --all
+curl -I https://example.com/
+curl -I https://example.com/
+```
+
+The second public anonymous request should be eligible for a HIT when the page is cacheable.
 
 ## Main feature areas
 
@@ -40,406 +123,148 @@ It is built for sites that want a managed page-cache drop-in, optional Redis-bac
 
 UltraCache stores cacheable public pages as static files under:
 
-`wp-content/cache/ultracache/`
+```text
+wp-content/cache/ultracache/
+```
 
 The plugin manages a custom `advanced-cache.php` drop-in that can serve those files early in the WordPress bootstrap.
-
-Supported page-cache behaviors include:
-
-- public anonymous `GET` and `HEAD` requests
-- local-site URL warming
-- stale-while-revalidate delivery
-- cache buckets for `orig`, `webp`, and `avif`
-- optional compressed sidecar files when supported by the server
-
-### Object cache
-
-UltraCache can manage an `object-cache.php` drop-in with a safe backend preference:
-
-- Redis-backed object storage for production when the PHP Redis extension is available
-- APCu-backed local memory storage for single-server fallback setups
-- runtime-only fallback when no persistent memory backend is safely writable
-- disk-backed storage only as an explicit advanced/debug option
-
-Redis support requires the PHP Redis extension. APCu support requires the APCu PHP extension and is cleared on PHP-FPM restart.
-
-### Media conversion
-
-UltraCache can generate next-gen variants for uploaded images and WordPress-generated sizes.
-
-Supported output targets:
-
-- AVIF
-- WebP fallback
-
-Whether AVIF or WebP is actually available depends on the PHP/image stack on the server.
-
-### Frontend optimization features
-
-The current codebase also includes optional frontend optimization switches such as:
-
-- cumulative Defer Stages for JavaScript optimization
-- shared JS defer-stage exclusions
-- delay third-party JS and selected local enhancement scripts
-- async external scripts
-- async CSS support
-- image dimension injection for CLS reduction
-- LCP image prioritization
-- Google Fonts `display=swap`
-- localized Google Fonts stylesheet caching (opt-in; fetches Google Fonts assets only when enabled)
-- self-hosted font CSS normalization
-- speculation rules output
-- browser cache rules for `.htaccess`
 
 ### Warmup and cleanup
 
 UltraCache supports:
 
-- manual warmup
+- homepage warmup
+- menu URL warmup
+- full-site warmup
+- HTML cache warmup
+- CSS bundle warmup
 - scheduled cleanup
-- cron warm-up queue execution
-- front-page HTML warming
-- homepage/page CSS scan + bundle generation
+- optional warm after scheduled cleanup/manual purge
 
-### Reverse-proxy integration
+### Object cache
 
-UltraCache includes optional Varnish HTTP support for:
+UltraCache can manage an `object-cache.php` drop-in using Redis, APCu, runtime-only fallback, or explicit disk mode.
 
-- connection tests
-- flush-all actions
-- per-URL purge/ban workflows
+### Media optimization
 
----
+UltraCache can generate AVIF/WebP image variants when the server image stack supports them.
 
-## Admin dashboard
+### Frontend optimization
 
-The admin dashboard is designed for operators and site maintainers.
+Optional frontend optimization areas include:
 
-Major dashboard areas include:
+- JavaScript defer/delay safeguards
+- async CSS delivery
+- CSS bundle generation
+- LCP image priority hints
+- Google Fonts optimization
+- CLS image-dimension helpers
+- speculation rules
+- asset-chain cleanup
 
-- cache analytics
-- diagnostics
-- cache engine toggles
-- compression/image/object-cache settings
-- Redis connection settings
-- Varnish settings
-- warmup controls
-- cache decision tester
-- rules and scheduling
-- export/import settings
+## Troubleshooting quick guide
 
-Diagnostics cover items such as:
+### Cache never HITs
 
-- drop-in status
-- cache directory status
-- reverse-proxy detection
-- recent cache-write activity
-- object-cache backend status
-- Varnish state
-- runtime configuration state
+Check:
 
----
+- Page Cache is enabled.
+- `WP_CACHE` is present and true in `wp-config.php`.
+- `wp-content/advanced-cache.php` exists.
+- The request is anonymous and public.
+- No cart/session/login cookies are present.
+- The URL is not excluded.
+- Query-string handling is configured correctly.
 
-## REST API
+### Object cache not active
 
-UltraCache ships with admin-facing REST endpoints under:
+Check:
 
-`/wp-json/ultracache/v1/`
+- Selected backend vs active backend in Diagnostics.
+- Redis extension and connection if using Redis.
+- APCu extension if using APCu.
+- Generated `object-cache.php` version/storage format.
 
-The current codebase includes routes for actions such as:
+### Frontend script errors
 
-- `stats`
-- `settings`
-- `purge-all`
-- `crawl-urls`
-- `crawl-page`
-- `inspect-url`
-- `build-frontpage-css`
-- `warm-frontpage-html`
-- `warm-frontpage-html-css`
-- `media-ids`
-- `optimize-id`
-- `optimize-media`
-- `object-cache/redis-test`
-- `object-cache/flush`
-- `varnish/test`
-- `varnish/flush-all`
-- `cron-warm/start`
-- `cron-warm/stop`
-- `cron-warm/tick`
+Check browser Console and add only site-specific theme/custom scripts to manual **Defer / Delay Exclusions**. Avoid hard-coded theme protections in the plugin.
 
-These routes are intended for the admin application and require administrative capability checks.
+### CSS/layout issue
 
----
+Check:
 
-## WP-CLI
+- CSS Bundle Summary.
+- Skipped/unresolved stylesheet count.
+- Browser Network for missing CSS files.
+- Whether the issue disappears when CSS bundling/async CSS is disabled.
 
-UltraCache registers the `wp ultracache` command.
+## Changelog highlights
 
-Available command groups in the current build include:
+### 2.56.07
 
-- `purge`
-- `warm`
-- `warm-html-all`
-- `warm-frontpage-html`
-- `warm-frontpage-html-css`
-- `warm-html-all-css`
-- `media`
-- `status`
-- `inspect`
-- `settings`
-- `stats`
-- `varnish`
-- `cron_warm`
-- `cleanup`
+- Updated the Warm Cache button labels so they explicitly show Homepage, Shared, or Separate CSS Bundle behavior according to the selected CSS Bundling Scope.
+- Homepage/shared scope CSS warm actions now build the homepage/shared CSS bundle once, then warm the selected URL set as HTML.
+- Per-page scope CSS warm actions build separate CSS bundles for each warmed menu/full-site URL.
 
-Typical examples:
 
-```bash
-wp ultracache purge
-wp ultracache purge --cache-url=https://example.com/some-page/
+### 2.56.06
 
-wp ultracache warm
-wp ultracache warm --cache-url=https://example.com/
-wp ultracache warm --limit=100
-wp ultracache warm --buckets=orig,webp,avif
+- Scoped the WordPress admin `#wpcontent` padding-left override to the UltraCache dashboard only.
+- Removed the default WordPress left gutter from the UltraCache full-background admin UI while leaving all other wp-admin pages untouched.
 
-wp ultracache warm-frontpage-html
-wp ultracache warm-frontpage-html-css
 
-wp ultracache media optimize --limit=100
-wp ultracache inspect https://example.com/
-wp ultracache stats --format=json
+### 2.56.05
 
-wp ultracache cron_warm start
-wp ultracache cron_warm status
-wp ultracache cron_warm tick
+- Added an **LCP Optimization** master switch under **Advanced Settings**.
+- Gated **LCP Image Priority**, manual LCP image URL, and **LCP Boundary Defer** behind the new master switch while keeping backward compatibility for already-enabled installs.
+- Added SR7/Revolution Slider hashed asset discovery for generated `/revslider/o/` images, with preference for existing UltraCache AVIF/WebP cache variants.
+- LCP Boundary Defer can now use the detected SR7 module boundary as a conservative visual boundary, while existing protections still apply: WordPress core, WooCommerce core, Elementor, sliders, dependencies, and manual exclusions stay protected.
 
-wp ultracache varnish test
-wp ultracache varnish flush-all
-```
+### 2.56.02
 
-Run `wp help ultracache` for command-specific options in your installed build.
+- WP-CLI: `wp ultracache purge --all` is now accepted as an explicit full-cache purge alias for `wp ultracache purge`.
+- Settings cleanup: deprecated local-build keys no longer leak into CLI/settings output (`cronWarmStartAfterFlush`, `warmAfterScheduledCleanup`, `avifConversionEnabled`).
+- No tracking-query default changes were made.
 
----
+### 2.56.00
 
-## Files and directories managed by the plugin
+- Expanded parser-assisted HTML rewrite refactor across script/link asset cleanup and LCP image handling.
+- Added parser-assisted script/link removal for asset cleanup and frontend authoring asset stripping.
+- Improved LCP image candidate handling for `srcset`/`source`-style candidates and parser-backed priority attributes.
+- Kept legacy regex fallbacks and HTML rewrite safety bailouts active.
 
-Depending on settings, UltraCache may create or manage:
+### 2.55.98
 
-- `wp-content/advanced-cache.php`
-- `wp-content/object-cache.php`
-- `wp-content/cache/ultracache/`
-- `wp-content/cache/ultracache-avif/`
-- `wp-content/cache/ultracache-webp/`
-- `wp-content/cache/ultracache-objects/`
-- front-page CSS bundle files under the cache directory
-- Google Fonts cached stylesheets/binaries under the cache directory
+- Refactored stylesheet/link rewrite paths to prefer `WP_HTML_Tag_Processor` where possible.
+- Preserved legacy fallbacks and safe `noscript` stylesheet fallbacks.
 
-The plugin may also update:
+### 2.55.97
 
-- `wp-config.php` to manage `WP_CACHE`
-- `.htaccess` when browser cache rules are enabled
+- Added deeper parser-assisted preload duplicate checks and shared safe head injection helpers.
 
----
+### 2.55.96
 
-## WooCommerce behavior
+- Removed theme-specific built-in JS protections. Site/theme-specific issues should be solved with manual exclusions.
 
-UltraCache includes WooCommerce-safe bypass logic to avoid caching dynamic customer flows.
+### 2.55.90
 
-Typical excluded areas include:
+- Removed border styling from diagnostic/status text pills and value rows.
+- Renamed CSS Bundle Diagnostics to CSS Bundle Summary and added it to Activity Summary.
 
-- cart
-- checkout
-- my account
-- order payment / order received flows
-- payment-method flows
-- lost-password flows
-- common add-to-cart and coupon query arguments
-- common login/session/cart cookies
+### 2.55.88
 
----
+- Cleaned Media Optimization naming so `mediaOptimizationEnabled` is the master switch and output mode controls AVIF/WebP/Auto policy.
 
-## Installation
+### 2.55.84
 
-1. Upload the plugin to `wp-content/plugins/`.
-2. Activate **UltraCache** from WordPress admin.
-3. Open the **UltraCache** admin page.
-4. Review diagnostics before enabling page cache or object cache.
-5. If using Redis, confirm the PHP Redis extension is available.
-6. If using AVIF/WebP generation, confirm your Imagick or GD stack supports the required formats.
+- Added Disk Object Cache and Varnish Admin mode warnings.
+- Added analytics backend live probe for APCu/Redis.
 
----
+### 2.55.81
 
-## Recommended rollout order
-
-For production sites, a conservative rollout is recommended:
-
-1. Activate the plugin.
-2. Review Diagnostics.
-3. Enable page cache first.
-4. Test purge and warm flows.
-5. Enable media conversion if supported.
-6. Enable Redis object cache only after validating compatibility.
-7. Enable advanced frontend optimizations one by one.
-8. Re-check diagnostics and front-end behavior after each change.
-
----
-
-## Notes
-
-- This plugin is designed for real-world operators and server-aware WordPress environments.
-- Redis, AVIF, WebP, Brotli, and Varnish features depend on server support.
-- Some features intentionally modify drop-ins or runtime files and should be tested carefully on staging first.
-
----
+- Changed analytics hits to APCu → Redis → disabled.
+- Changed object cache strategy to Redis → APCu → runtime-only, with Disk only as explicit advanced/debug mode.
 
 ## License
 
 UltraCache is licensed under the **GNU General Public License v2, or any later version**.
-
-In short, you may use, modify, and redistribute this plugin under the terms of **GPLv2 or later**. This is the same license model recommended for WordPress plugins and is fully compatible with the WordPress ecosystem.
-
-- Added frontend compression detection so Gzip/Brotli toggles stay disabled when the server already applies them by default.
-
-- Automatically turns off Gzip/Brotli in the dashboard when frontend compression is already handled by the server or proxy.
-- Added a Reset Settings button beside Export/Import.
-
-- Reduced additional @ suppression in non-dropin helper paths.
-- Added safe wrappers for filesize(), tempnam(), and fread() in non-critical helpers.
-
-- latest patch: moved Redis auth out of generated `object-cache.php` into a protected sidecar config file with restrictive permissions
-
-
-## 2.55.46 notes
-
-- Added SR7/Revolution lifecycle-aware LCP priority handling that listens for `sr.module.ready` and marks first-slide image layers without relying on generated layer IDs.
-- Kept the SR7 priority fix controlled by the visible LCP Image Priority and Fix sliders / hero sections settings; it is not a hidden optimization.
-- Renamed confusing dashboard fields: Manual Priority Preloads, Additional Fetch URL Preloads, and Single LCP Image URL.
-
-- Added ID-independent SR7 first-slide LCP priority handling, so Revolution Slider image layers can receive `fetchpriority="high"` without relying on dynamic IDs such as `SR7_1_1-1-8`.
-- Added a tiny runtime guard for SR7 layers generated after the initial HTML parse.
-- Prevents generated SR7 `/revslider/o/` image-list placeholders from being manually preloaded when Slider Safe Mode or LCP Image Priority is active, avoiding Chrome `preloaded but not used` warnings.
-
-## 2.55.44 notes
-
-- Made CSS Bundle output fail-safe after the 2.55.38 frontend blank-page regression.
-- Stage 1 now injects the bundle non-destructively and keeps the original stylesheet links as the authoritative fallback.
-- Stage 2 still replaces matching source stylesheet links, but keeps async preload/noscript fallbacks for the original stylesheets.
-- Hardened the page CSS bundle replacement path so it verifies the generated bundle file before touching the document head and reconstructs the head without `preg_replace()` replacement-string side effects.
-- Moved **Cache Engine Advanced settings and exclusions** into its own one-column accordion card below the main Cache Engine / Compression settings grid.
-
-## 2.55.33 notes
-
-- Hardened the delayed JS loader so it preserves script attributes through a compact encoded attribute map.
-- Added safer delayed execution with sequential loading, an 8-second per-script fallback timeout, and compatibility fallbacks for older placeholders.
-- Added dependency safeguards so local scripts with enqueued dependents are not delayed.
-- Expanded built-in delay exclusions for builders, menus, sliders, video players, popups, forms, and fragile frontend runtimes.
-
-## 2.55.32 notes
-
-- Moved runtime self-hosted font CSS rewriting behind a separate advanced toggle and removed native DOM prototype monkey-patching from the default path.
-- Made Asset Chain Cleanup more conservative with built-in/request/HTML exclusions and a dashboard-managed exclusion list.
-- Narrowed product-filter asset cleanup to plugin-specific handles/paths instead of broad fragments such as tooltipster, icheck, html_types/slider, or by_sku.
-- Cleaned up legacy/mapping issues for scheduled cleanup warming and media-converter settings fallbacks.
-
-## 2.55.31 notes
-
-- Added frontend on-demand image conversion safeguards: per-image/per-format lock files, per-request conversion limits, and a short request-time budget before starting new conversions.
-- Kept Generate on Demand as the explicit dashboard control, but restricted runtime generation to safe frontend GET/HEAD requests.
-
-## 2.55.30 notes
-
-- Analytics hot path cleanup: page-cache HIT counters are now buffered and flushed in batches instead of reading/writing analytics.json on every cached response.
-- APCu is used for in-memory hit counters when available; a compact file buffer is used as a fallback and dashboard/CLI reads flush pending counters before reporting stats.
-
-## 2.55.29 notes
-
-- Added native `rename()` fallback to `ucwp_safe_rename()` so atomic replacements do not depend only on `WP_Filesystem`.
-- Added native recursive directory deletion fallback to `ucwp_safe_rmdir()` for cache cleanup paths when `WP_Filesystem` cannot remove directories.
-- Tightened page-cache atomic write verification so failed replacements do not silently look successful.
-- Hardened full-cache purge recursion by using safe directory scans and avoiding recursion into symlinks.
-
-## 2.55.28 notes
-
-- Fixed Redis object-cache drop-in bootstrap so the protected Redis secret config is loaded before connecting/authenticating.
-- Propagated Redis TLS and persistent-connection settings into the generated object-cache drop-in.
-- Fixed disk object-cache reads so signed payloads that contain WordPress objects can be restored instead of being rejected.
-- Moved `wp_suspend_cache_addition()` handling before runtime cache mutation so suspended additions do not pollute the in-request cache.
-
-## 2.55.27 notes
-
-- Separated JS Defer and Delay controls so third-party delay, non-critical/local delay, and native defer no longer silently enable one another.
-- Fixed the runtime mapping that incorrectly enabled non-critical/local JS delay when only third-party delay was enabled.
-
-## 2.55.26 notes
-
-- Added Critical Request Chain Relief with manual preload and chain-delay controls.
-- Added Asset Chain Cleanup for WooCommerce/product-filter request chains.
-- Frontend Safe Mode OFF now remains fully off.
-
-## 2.55.44 notes
-
-- Restores Stage 1 CSS Bundle to the legacy site-wide behavior used before the 2.55.38 CSS bundle stage/page-entry changes.
-- Keeps page-entry CSS bundle generation and the newer page-wide replacement path behind Stage 2 / Aggressive mode only.
-- This avoids changing the safe stage while retaining the new Stage 2 experimentation path.
-
-## 2.55.44 notes
-
-- Added **Fix sliders / hero sections** in Cache Engine Advanced settings and exclusions.
-- When enabled, UltraCache detects Revolution Slider/SR7 and common hero slider markup and keeps that page closer to WordPress default frontend loading.
-- Slider-safe responses skip CSS bundle replacement, async CSS rewriting, asset cleanup, self-hosted font CSS rewriting, LCP/CLS structural mutations, and HTML minification for that response.
-
-## 2.55.44 notes
-
-- Stage 2 CSS Bundle is now more aggressive: bundled source stylesheets are replaced by the generated bundle without preloading every original source.
-- Slider Safe Mode is now slider-aware for CSS bundles: SR7/Revolution/Swiper/Slick CSS stays as normal explicit links, while non-slider local CSS can still be bundled.
-- Built-in CSS bundle exclusions now protect fragile slider/hero stylesheet fragments.
-
-## UltraCache 2.55.96 Notes
-
-- Tightened JavaScript dependency safety after the expanded HTML rewrite refactor.
-- Built-in protected scripts now stay in normal blocking flow across Safe, Balanced, and Aggressive defer stages, not only Stage 1.
-- Removed theme-specific built-in JavaScript protection from 2.55.95 and kept generic dependency protection for Elementor/core/WooCommerce/shared frontend runtimes.
-- HTML rewrite safety wrappers from 2.55.89 remain active.
-
-Post-update check:
-
-- Save UltraCache settings once.
-- Purge all cache.
-- Warm cache.
-- Hard refresh the frontend and confirm browser Console no longer shows generic dependency errors. Add custom theme globals/scripts to manual Defer/Delay exclusions when needed.
-
-## UltraCache 2.55.90 Notes
-
-- Removed the small borders from diagnostic status and value text pills in Diagnostics, Advanced Diagnostics, Activity Summary, Varnish, and Object Cache status sections.
-- Renamed **CSS Bundle Diagnostics** to **CSS Bundle Summary**.
-- Added the CSS Bundle Summary block to **Activity Summary** using the same bundle counters shown in Warm Cache.
-- Cards, buttons, warning boxes, and major containers keep their functional styling.
-
-Post-update check:
-
-- Hard refresh the UltraCache dashboard after installing.
-- Check Activity Summary and Warm Cache for the CSS Bundle Summary block.
-- Confirm diagnostic/status text no longer renders with pill borders.
-
-Recommended post-update check:
-
-1. Save UltraCache settings once.
-2. Purge all cache.
-3. Check Diagnostics for page-cache switch, page-cache drop-in active, selected object-cache backend, active object-cache backend, Analytics hit backend, OPcache, and APCu.
-4. Check Runtime files, drop-ins & versions for generated build/format details.
-5. Visit the homepage twice and confirm the second request can HIT.
-
-Optional SSH quick check:
-
-```bash
-cd /path/to/wordpress
-wp option get ultracache_settings >/dev/null
-wp ultracache purge --all
-curl -I https://example.com/
-curl -I https://example.com/
-```
-
-Confirm that the generated headers and Diagnostics agree on the page-cache/drop-in state after testing.
-

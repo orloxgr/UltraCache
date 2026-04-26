@@ -56,8 +56,27 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             );
         }
 
+        private function get_deprecated_setting_keys()
+        {
+            return array(
+                'cronWarmStartAfterFlush',
+                'warmAfterScheduledCleanup',
+                'avifConversionEnabled',
+            );
+        }
+
+        private function remove_deprecated_setting_keys(array $settings)
+        {
+            foreach ($this->get_deprecated_setting_keys() as $key) {
+                unset($settings[$key]);
+            }
+
+            return $settings;
+        }
+
         private function redact_dashboard_settings_for_output(array $settings)
         {
+            $settings = $this->remove_deprecated_setting_keys($settings);
             $flag_map = $this->get_secret_configuration_flag_map();
 
             foreach ($this->get_secret_setting_keys() as $key) {
@@ -77,6 +96,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
         private function redact_single_setting_for_output($key, array $settings)
         {
             $key = (string) $key;
+            if (in_array($key, $this->get_deprecated_setting_keys(), true)) {
+                return array();
+            }
+
             $value = array_key_exists($key, $settings) ? $settings[$key] : null;
 
             if (in_array($key, $this->get_secret_setting_keys(), true)) {
@@ -248,6 +271,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'objectCacheEnabled',
                 'brotliEnabled',
                 'gzipEnabled',
+                'cacheStatsEnabled',
                 'mediaOptimizationEnabled',
                 'deferJsEnabled',
                 'delayThirdPartyJsEnabled',
@@ -264,6 +288,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'aggressiveAsyncCssEnabled',
                 'delayNonCriticalJsEnabled',
                 'lcpImagePriorityEnabled',
+                'lcpBoundaryDeferEnabled',
                 'mainThreadReliefEnabled',
                 'googleFontsSwapEnabled',
                 'googleFontsLocalOptimizationEnabled',
@@ -343,6 +368,9 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
          * [--cache-url=<url>]
          * : Purge a single local URL instead of the entire cache.
          *
+         * [--all]
+         * : Explicitly purge the entire cache. Equivalent to running `wp ultracache purge`.
+         *
          * Note: `--url` is reserved by WP-CLI as a global parameter. Use `--cache-url` here.
          */
         public function purge($args, $assoc_args)
@@ -353,6 +381,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             }
 
             $target_url = !empty($assoc_args['cache-url']) ? $assoc_args['cache-url'] : '';
+            if (!empty($target_url) && !empty($assoc_args['all'])) {
+                WP_CLI::error('Use either --all or --cache-url, not both.');
+            }
+
             if (!empty($target_url)) {
                 if (!method_exists($engine, 'purge_url')) {
                     WP_CLI::error('Single-URL purge is not available.');
@@ -453,6 +485,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             $buckets = $this->get_warm_buckets_from_assoc_args($assoc_args);
 
             $target_url = !empty($assoc_args['cache-url']) ? $assoc_args['cache-url'] : '';
+            if (!empty($target_url) && !empty($assoc_args['all'])) {
+                WP_CLI::error('Use either --all or --cache-url, not both.');
+            }
+
             if (!empty($target_url)) {
                 $urls = array($this->require_local_site_url($target_url, $engine, 'Please provide a valid local site URL for --cache-url.'));
             } else {
@@ -899,6 +935,9 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 }
 
                 $key = (string) $args[1];
+                if (in_array($key, $this->get_deprecated_setting_keys(), true)) {
+                    WP_CLI::error('Deprecated setting key: ' . $key);
+                }
                 if (!array_key_exists($key, $current)) {
                     WP_CLI::error('Unknown setting key: ' . $key);
                 }
@@ -908,6 +947,9 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             }
 
             if ('set' === $action) {
+                if (!empty($args[1]) && in_array((string) $args[1], $this->get_deprecated_setting_keys(), true)) {
+                    WP_CLI::error('Deprecated setting key: ' . (string) $args[1]);
+                }
                 if (empty($args[1]) || !array_key_exists((string) $args[1], $current)) {
                     WP_CLI::error('Please provide a valid setting key.');
                 }
@@ -1110,6 +1152,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
 
             if ('flush-url' === $action) {
                 $target_url = !empty($assoc_args['cache-url']) ? $assoc_args['cache-url'] : '';
+            if (!empty($target_url) && !empty($assoc_args['all'])) {
+                WP_CLI::error('Use either --all or --cache-url, not both.');
+            }
+
                 $url = '' !== $target_url ? $this->require_local_site_url($target_url, $this->get_engine(), 'Please provide a valid local site URL for --cache-url.') : '';
                 if ('' === $url) {
                     WP_CLI::error('Please provide a valid local site URL for --cache-url.');

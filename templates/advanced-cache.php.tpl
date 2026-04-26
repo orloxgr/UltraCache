@@ -261,6 +261,7 @@ $runtime_config = array(
     'cache_query_strings'            => false,
     'cache_query_allowlist'          => array(),
     'woo_safe_mode'                  => true,
+    'cache_stats_enabled'            => false,
     'stale_while_revalidate_enabled' => true,
     'cache_fresh_ttl_minutes'        => 1440,
     'cache_max_stale_minutes'        => 10080,
@@ -349,6 +350,7 @@ $ucwp_normalize_runtime_config = static function ($config) use ($runtime_config,
         'cache_query_strings'            => !empty($config['cache_query_strings']),
         'cache_query_allowlist'          => $cache_query_allowlist,
         'woo_safe_mode'                  => !empty($config['woo_safe_mode']),
+        'cache_stats_enabled'            => !empty($config['cache_stats_enabled']),
         'stale_while_revalidate_enabled' => !empty($config['stale_while_revalidate_enabled']),
         'cache_fresh_ttl_minutes'        => $fresh_ttl_minutes,
         'cache_max_stale_minutes'        => $max_stale_minutes,
@@ -435,6 +437,7 @@ foreach ($runtime_secret_candidates as $runtime_secret_file) {
     }
 }
 $runtime_config = $ucwp_normalize_runtime_config($runtime_config);
+$ucwp_cache_stats_enabled = !empty($runtime_config['cache_stats_enabled']);
 
 $revalidate_flag = isset($_GET['ucwp_revalidate']) ? (string) $_GET['ucwp_revalidate'] : '';
 $revalidate_header = ucwp_server_var('HTTP_X_ULTRACACHE_REVALIDATE', '');
@@ -721,7 +724,10 @@ $ucwp_consume_file_analytics_hit_buffer = static function () use ($ucwp_analytic
     }
     return $deltas;
 };
-$ucwp_flush_analytics_hit_buffer = static function () use ($ucwp_read_analytics, $ucwp_write_analytics, $ucwp_apply_analytics_hit_delta, $ucwp_collect_apcu_analytics_hit_buffer, $ucwp_consume_file_analytics_hit_buffer, $ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix, $ucwp_collect_redis_analytics_hit_buffer, $ucwp_decrement_redis_analytics_hit_buffer, $ucwp_acquire_redis_analytics_flush_lock, $ucwp_release_redis_analytics_flush_lock) {
+$ucwp_flush_analytics_hit_buffer = static function () use ($ucwp_cache_stats_enabled, $ucwp_read_analytics, $ucwp_write_analytics, $ucwp_apply_analytics_hit_delta, $ucwp_collect_apcu_analytics_hit_buffer, $ucwp_consume_file_analytics_hit_buffer, $ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix, $ucwp_collect_redis_analytics_hit_buffer, $ucwp_decrement_redis_analytics_hit_buffer, $ucwp_acquire_redis_analytics_flush_lock, $ucwp_release_redis_analytics_flush_lock) {
+    if (!$ucwp_cache_stats_enabled) {
+        return false;
+    }
     $apcu_lock_acquired = false;
     if ($ucwp_analytics_apcu_available()) {
         if (@apcu_add($ucwp_analytics_apcu_prefix . 'flush_lock', 1, 10)) {
@@ -786,7 +792,10 @@ $ucwp_flush_analytics_hit_buffer = static function () use ($ucwp_read_analytics,
 
     return true;
 };
-$ucwp_record_hit = static function ($bucket, $encoding_bucket, $stale = false) use ($ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix, $ucwp_analytics_buffer_flush_threshold, $ucwp_analytics_buffer_flush_interval, $ucwp_flush_analytics_hit_buffer, $ucwp_get_analytics_redis, $ucwp_analytics_redis_prefix) {
+$ucwp_record_hit = static function ($bucket, $encoding_bucket, $stale = false) use ($ucwp_cache_stats_enabled, $ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix, $ucwp_analytics_buffer_flush_threshold, $ucwp_analytics_buffer_flush_interval, $ucwp_flush_analytics_hit_buffer, $ucwp_get_analytics_redis, $ucwp_analytics_redis_prefix) {
+    if (!$ucwp_cache_stats_enabled) {
+        return false;
+    }
     $bucket = in_array($bucket, array('orig', 'webp', 'avif'), true) ? $bucket : 'orig';
     $encoding_bucket = in_array($encoding_bucket, array('identity', 'gzip', 'brotli'), true) ? $encoding_bucket : 'identity';
     $counters = array($stale ? 'pageStaleHits' : 'pageHits', 'bucket_' . $bucket, 'encoding_' . $encoding_bucket);
@@ -828,7 +837,10 @@ $ucwp_record_hit = static function ($bucket, $encoding_bucket, $stale = false) u
     // No APCu and no usable Redis: disable per-hit analytics entirely.
     return false;
 };
-$ucwp_record_background_revalidation = static function () use ($ucwp_read_analytics, $ucwp_write_analytics, $ucwp_flush_analytics_hit_buffer) {
+$ucwp_record_background_revalidation = static function () use ($ucwp_cache_stats_enabled, $ucwp_read_analytics, $ucwp_write_analytics, $ucwp_flush_analytics_hit_buffer) {
+    if (!$ucwp_cache_stats_enabled) {
+        return false;
+    }
     $ucwp_flush_analytics_hit_buffer();
     $data = $ucwp_read_analytics();
     $data['pageBackgroundRevalidations'] = (int) ($data['pageBackgroundRevalidations'] ?? 0) + 1;

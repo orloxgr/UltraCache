@@ -185,6 +185,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'__UCWP_DROPIN_BUILD__' => UCWP_VERSION,
 				'__UCWP_OBJECT_CACHE_DIR__' => ucwp_php_string_literal(UCWP_OBJECT_CACHE_DIR),
 				'__UCWP_SELECTED_BACKEND__' => ucwp_php_string_literal(self::get_selected_backend()),
+				'__UCWP_CACHE_STATS_ENABLED__' => !empty($settings['cache_stats_enabled']) ? 'true' : 'false',
 				'__UCWP_REDIS_SECRET_CONFIG__' => ucwp_php_string_literal(self::get_redis_secret_config_path()),
 				'__UCWP_REDIS_HOST__'       => ucwp_php_string_literal((string) ($settings['redis_host'] ?? '127.0.0.1')),
 				'__UCWP_REDIS_PORT__'       => (string) max(1, absint($settings['redis_port'] ?? 6379)),
@@ -533,12 +534,14 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			update_option('ucwp_object_cache_last_flush_report', $report, false);
 		}
 
-		public static function get_stats() {
+		public static function get_stats($full_count = false) {
 			$backend = self::get_selected_backend();
 			$entry_count = 0;
 			$bytes = 0;
 			$used_redis = false;
 			$partial = false;
+			$partial_reason = '';
+			$stats_limit = 0;
 
 			$files = self::collect_cache_files(UCWP_OBJECT_CACHE_DIR, 'cache');
 			$entry_count = count($files);
@@ -553,10 +556,12 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				$redis = self::connect_redis();
 				if ($redis instanceof Redis) {
 					$used_redis = true;
-					$redis_stats = self::collect_redis_namespace_stats($redis, self::get_redis_prefix());
+					$redis_stats = self::collect_redis_namespace_stats($redis, self::get_redis_prefix(), (bool) $full_count);
 					$entry_count += (int) ($redis_stats['entries'] ?? 0);
 					$bytes += (int) ($redis_stats['bytes'] ?? 0);
 					$partial = !empty($redis_stats['partial']);
+					$partial_reason = (string) ($redis_stats['partialReason'] ?? '');
+					$stats_limit = (int) ($redis_stats['limit'] ?? 0);
 				}
 			}
 
@@ -577,14 +582,27 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'objectCacheMisses'       => $misses,
 				'objectCacheHitRatio'     => $ratio,
 				'objectCacheStatsPartial' => (bool) $partial,
+				'objectCacheStatsLimit'   => $stats_limit,
+				'objectCacheStatsMode'    => $full_count ? 'full' : 'sampled',
+				'objectCacheStatsPartialReason' => $partial_reason,
 			);
 		}
 
-		private static function collect_redis_namespace_stats($redis, $prefix) {
+		private static function collect_redis_namespace_stats($redis, $prefix, $full_count = false) {
+			$default_max_keys = (int) apply_filters('ucwp_redis_object_cache_stats_max_keys', 5000);
+			$default_max_keys = max(250, min(50000, $default_max_keys));
+			$max_keys = $full_count ? 0 : $default_max_keys;
+			$deadline_seconds = $full_count
+				? (float) apply_filters('ucwp_redis_object_cache_stats_full_scan_timeout', 30)
+				: 1.5;
+			$deadline_seconds = $full_count ? max(5, min(120, $deadline_seconds)) : max(0.5, min(5, $deadline_seconds));
+
 			$stats = array(
 				'entries' => 0,
 				'bytes'   => 0,
 				'partial' => false,
+				'partialReason' => '',
+				'limit' => $max_keys,
 			);
 
 			if (!$redis instanceof Redis || !is_string($prefix) || '' === $prefix) {
@@ -592,8 +610,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			}
 
 			$pattern = $prefix . '*';
-			$deadline = microtime(true) + 1.5;
-			$max_keys = 5000;
+			$deadline = microtime(true) + $deadline_seconds;
 
 			try {
 				$iterator = null;
@@ -610,8 +627,15 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 								$stats['bytes'] += (int) $strlen;
 							}
 
-							if ($stats['entries'] >= $max_keys || microtime(true) >= $deadline) {
+							if (!$full_count && $max_keys > 0 && $stats['entries'] >= $max_keys) {
 								$stats['partial'] = true;
+								$stats['partialReason'] = 'sampled, Redis scan capped at ' . number_format_i18n($max_keys) . ' keys';
+								break 2;
+							}
+
+							if (microtime(true) >= $deadline) {
+								$stats['partial'] = true;
+								$stats['partialReason'] = $full_count ? 'full count timed out before scan completed' : 'sampled, Redis scan timed out';
 								break 2;
 							}
 						}
@@ -623,10 +647,16 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				}
 			} catch (Throwable $e) {
 				$stats['partial'] = true;
+				$stats['partialReason'] = 'Redis scan failed before completion';
+			}
+
+			if ($stats['partial'] && '' === $stats['partialReason'] && !$full_count && $max_keys > 0) {
+				$stats['partialReason'] = 'sampled, Redis scan capped at ' . number_format_i18n($max_keys) . ' keys';
 			}
 
 			return $stats;
 		}
+
 
 		public static function cleanup_expired_entries() {
 			$removed = self::cleanup_expired_directory(UCWP_OBJECT_CACHE_DIR);
@@ -855,6 +885,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			self::$plugin_settings_cache = array(
 				'object_cache_enabled' => !empty($saved['objectCacheEnabled']),
 				'object_cache_backend' => !empty($saved['objectCacheBackend']) ? (string) $saved['objectCacheBackend'] : 'redis',
+				'cache_stats_enabled'  => !empty($saved['cacheStatsEnabled']),
 				'redis_host'           => !empty($saved['redisHost']) ? (string) $saved['redisHost'] : '127.0.0.1',
 				'redis_port'           => isset($saved['redisPort']) ? absint($saved['redisPort']) : 6379,
 				'redis_password'       => isset($saved['redisPassword']) ? (string) $saved['redisPassword'] : '',

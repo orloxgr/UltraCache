@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.55.96 */
+/** Hotfix Bundle Version: 2.56.06 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -456,6 +456,10 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private static function flush_analytics_hit_buffer()
         {
+            if (!self::analytics_enabled()) {
+                return false;
+            }
+
             $apcu_lock_acquired = false;
             $prefix = self::get_analytics_hit_buffer_key_prefix();
             if (self::analytics_apcu_available()) {
@@ -591,9 +595,15 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return $data;
         }
 
+        private static function analytics_enabled()
+        {
+            $settings = defined('UCWP_SETTINGS_KEY') ? get_option(UCWP_SETTINGS_KEY, array()) : array();
+            return is_array($settings) && !empty($settings['cacheStatsEnabled']);
+        }
+
         private static function read_analytics($flush_hit_buffer = true)
         {
-            if ($flush_hit_buffer) {
+            if ($flush_hit_buffer && self::analytics_enabled()) {
                 self::flush_analytics_hit_buffer();
             }
 
@@ -615,8 +625,12 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return self::normalize_analytics($decoded);
         }
 
-        private static function write_analytics(array $data)
+        private static function write_analytics(array $data, $force = false)
         {
+            if (!$force && !self::analytics_enabled()) {
+                return;
+            }
+
             self::ensure_cache_directories();
             $file = self::get_analytics_file();
             ucwp_safe_file_put_contents($file, wp_json_encode(self::normalize_analytics($data)), LOCK_EX);
@@ -624,6 +638,10 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private static function mutate_analytics($callback)
         {
+            if (!self::analytics_enabled()) {
+                return;
+            }
+
             $current = self::read_analytics();
             $updated = is_callable($callback) ? call_user_func($callback, $current) : $current;
             if (!is_array($updated)) {
@@ -636,7 +654,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
         public static function reset_analytics()
         {
             self::clear_analytics_hit_buffer();
-            self::write_analytics(self::get_default_analytics());
+            self::write_analytics(self::get_default_analytics(), true);
             return true;
         }
 
@@ -2496,7 +2514,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
         public function print_delayed_script_loader()
         {
             $settings = $this->get_settings();
-            if ((empty($settings['delay_third_party_js']) && empty($settings['delay_non_critical_js'])) || is_admin()) {
+            if ((empty($settings['delay_third_party_js']) && empty($settings['delay_non_critical_js']) && empty($settings['lcp_boundary_defer'])) || is_admin()) {
                 return;
             }
 
@@ -2827,6 +2845,12 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 }
             }
 
+            if (!$safe_mode && !empty($settings['lcp_boundary_defer']) && !empty($settings['lcp_image_priority'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'lcp-boundary-defer', function ($html) use ($settings) {
+                    return $this->apply_lcp_boundary_defer_to_html($html, $settings);
+                });
+            }
+
             if (!$safe_mode) {
                 $html = $this->apply_html_rewrite_safely($html, 'safe-html-minify', function ($html) {
                     return $this->minify_html_output_safely($html);
@@ -2836,6 +2860,136 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return $html;
         }
 
+
+
+        private function apply_lcp_boundary_defer_to_html($html, array $settings = array())
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<script')) {
+                return $html;
+            }
+
+            $boundary = $this->find_lcp_boundary_offset($html);
+            if ($boundary <= 0) {
+                return $html;
+            }
+
+            if (!preg_match_all('/<script\b[^>]*\bsrc\s*=\s*(["\'])(.*?)\1[^>]*>\s*<\/script>/is', $html, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+                return $html;
+            }
+
+            $out = '';
+            $last = 0;
+            $changed = false;
+
+            foreach ($matches as $match) {
+                $tag = isset($match[0][0]) ? (string) $match[0][0] : '';
+                $offset = isset($match[0][1]) ? (int) $match[0][1] : -1;
+                if ('' === $tag || $offset < $boundary) {
+                    continue;
+                }
+
+                $replacement = $this->maybe_build_lcp_boundary_delayed_script_tag($tag, $settings);
+                if (!is_string($replacement) || '' === $replacement || $replacement === $tag) {
+                    continue;
+                }
+
+                $out .= substr($html, $last, $offset - $last) . $replacement;
+                $last = $offset + strlen($tag);
+                $changed = true;
+            }
+
+            if (!$changed) {
+                return $html;
+            }
+
+            return $out . substr($html, $last);
+        }
+
+        private function find_lcp_boundary_offset($html)
+        {
+            if (!is_string($html) || '' === $html) {
+                return -1;
+            }
+
+            $candidate = $this->find_manual_lcp_candidate($html);
+            if (null === $candidate) {
+                $candidate = $this->find_best_sr7_lcp_candidate($html);
+            }
+            if (null === $candidate) {
+                $candidate = $this->find_best_lcp_candidate_with_regex($html);
+            }
+            if (null === $candidate || empty($candidate['url'])) {
+                return -1;
+            }
+
+            if (!empty($candidate['boundary_offset'])) {
+                return max(1, (int) $candidate['boundary_offset']);
+            }
+
+            $needles = array();
+            foreach (array('raw_url', 'url') as $key) {
+                if (!empty($candidate[$key])) {
+                    $needles[] = (string) $candidate[$key];
+                    $needles[] = esc_url((string) $candidate[$key]);
+                    $needles[] = esc_attr((string) $candidate[$key]);
+                    $needles[] = str_replace('&', '&amp;', (string) $candidate[$key]);
+                }
+            }
+
+            foreach (array_values(array_unique(array_filter($needles))) as $needle) {
+                $pos = stripos($html, $needle);
+                if (false !== $pos) {
+                    return (int) $pos + strlen($needle);
+                }
+            }
+
+            return -1;
+        }
+
+        private function maybe_build_lcp_boundary_delayed_script_tag($tag, array $settings = array())
+        {
+            $tag = (string) $tag;
+            if ('' === $tag || false === stripos($tag, '<script')) {
+                return $tag;
+            }
+            if (false !== stripos($tag, 'type="text/ucwp-delayed-js"') || false !== stripos($tag, "type='text/ucwp-delayed-js'") || false !== stripos($tag, 'data-ucwp-src=')) {
+                return $tag;
+            }
+
+            $src = $this->extract_attribute_from_html_tag($tag, 'src');
+            if ('' === $src) {
+                return $tag;
+            }
+
+            $handle = $this->infer_script_handle_from_tag($tag, $src);
+            if ('' === $handle) {
+                $handle = $src;
+            }
+
+            if ($this->should_delay_non_critical_script($handle, $src, $tag, $settings)) {
+                return $this->build_delayed_script_tag($tag, $handle, $src);
+            }
+
+            return $tag;
+        }
+
+        private function infer_script_handle_from_tag($tag, $src = '')
+        {
+            $id = $this->extract_attribute_from_html_tag($tag, 'id');
+            $id = trim((string) $id);
+            if ('' !== $id) {
+                $id = preg_replace('/-js(?:-extra|-before|-after)?$/', '', $id);
+                return is_string($id) ? $id : '';
+            }
+
+            $path = (string) wp_parse_url((string) $src, PHP_URL_PATH);
+            $base = basename($path);
+            if ('' === $base) {
+                return '';
+            }
+
+            return preg_replace('/\.min\.js$|\.js$/i', '', $base);
+        }
 
         private function apply_critical_request_chain_relief($html, array $settings = array())
         {
@@ -3000,7 +3154,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 if ('' === $url || isset($seen[$url])) {
                     continue;
                 }
-                if (false !== strpos($html, 'href="' . $url . '"') || false !== strpos($html, "href='" . $url . "'")) {
+                if ($this->html_link_href_exists($html, $url)) {
                     continue;
                 }
 
@@ -3025,7 +3179,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $html;
             }
 
-            return preg_replace('/<\/head>/i', implode("\n", $tags) . "\n</head>", $html, 1);
+            return $this->insert_html_before_closing_head($html, implode("\n", $tags));
         }
 
         private function rewrite_chain_delay_stylesheet_links($html, array $settings = array())
@@ -3033,6 +3187,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $fragments = $this->get_critical_request_chain_delay_fragments($settings);
             if (empty($fragments) || false === stripos((string) $html, '<link')) {
                 return $html;
+            }
+
+            $processed = $this->rewrite_chain_delay_stylesheet_links_with_processor($html, $fragments);
+            if (is_string($processed)) {
+                return $processed;
             }
 
             $that = $this;
@@ -3053,6 +3212,64 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }, $html);
 
             return is_string($rewritten) ? $rewritten : $html;
+        }
+
+        private function rewrite_chain_delay_stylesheet_links_with_processor($html, array $fragments)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $fallbacks = array();
+                $index = 0;
+
+                while ($processor->next_tag('LINK')) {
+                    $rel = $processor->get_attribute('rel');
+                    if (!$this->html_rel_attribute_contains_stylesheet($rel)) {
+                        continue;
+                    }
+
+                    if (null !== $processor->get_attribute('data-ucwp-async-css')
+                        || null !== $processor->get_attribute('data-ucwp-frontpage-css')
+                        || null !== $processor->get_attribute('data-ucwp-page-css-bundle')) {
+                        continue;
+                    }
+
+                    if (null !== $processor->get_attribute('onload')) {
+                        continue;
+                    }
+
+                    $href = $processor->get_attribute('href');
+                    if (!is_string($href) || '' === $href || !$this->asset_matches_fragment_list('', $href, $fragments)) {
+                        continue;
+                    }
+
+                    $marker = 'ucwp-chain-delay-' . md5($href . '|' . (++$index));
+                    $fallbacks[$marker] = $this->build_async_css_noscript_fallback_link($href, $processor->get_attribute('media'));
+
+                    $processor->set_attribute('media', 'print');
+                    $processor->set_attribute('onload', "this.media='all'");
+                    $processor->set_attribute('data-ucwp-async-css', '1');
+                    $processor->set_attribute('data-ucwp-noscript-token', $marker);
+                    $changed = true;
+                }
+
+                if (!$changed) {
+                    return (string) $html;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                if (!is_string($updated_html) || '' === $updated_html) {
+                    return null;
+                }
+
+                return $this->append_async_css_noscript_fallbacks_from_markers($updated_html, $fallbacks);
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function force_async_stylesheet_link_tag($tag)
@@ -3100,10 +3317,15 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $html;
             }
 
+            $processed = $this->remove_asset_tags_matching_fragments_with_processor($html, $fragments);
+            if (is_string($processed)) {
+                return $processed;
+            }
+
             $that = $this;
             $html = preg_replace_callback('/<script\b[^>]*\bsrc=("|\')(.*?)\1[^>]*>\s*<\/script>/is', static function ($matches) use ($that, $fragments) {
                 $tag = isset($matches[0]) ? (string) $matches[0] : '';
-                $src = isset($matches[2]) ? html_entity_decode((string) $matches[2], ENT_QUOTES, 'UTF-8') : '';
+                $src = $that->extract_attribute_from_html_tag($tag, 'src');
                 return $that->asset_matches_fragment_list('', $src, $fragments) ? '' : $tag;
             }, $html);
 
@@ -3114,6 +3336,63 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }, is_string($html) ? $html : '');
 
             return is_string($html) ? $html : '';
+        }
+
+        private function remove_asset_tags_matching_fragments_with_processor($html, array $fragments)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || (false === stripos($html, '<script') && false === stripos($html, '<link'))) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $tokens = array();
+                $index = 0;
+
+                while ($processor->next_tag()) {
+                    $tag_name = strtoupper((string) $processor->get_tag());
+                    if ('SCRIPT' !== $tag_name && 'LINK' !== $tag_name) {
+                        continue;
+                    }
+
+                    $url = ('SCRIPT' === $tag_name) ? $processor->get_attribute('src') : $processor->get_attribute('href');
+                    if (!is_string($url) || '' === $url || !$this->asset_matches_fragment_list('', $url, $fragments)) {
+                        continue;
+                    }
+
+                    $token = 'ucwp-remove-asset-' . md5($tag_name . '|' . $url . '|' . (++$index));
+                    $processor->set_attribute('data-ucwp-remove-asset-token', $token);
+                    $tokens[$token] = strtolower($tag_name);
+                    $changed = true;
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                if (!is_string($updated_html) || '' === $updated_html) {
+                    return null;
+                }
+
+                foreach ($tokens as $token => $tag_name) {
+                    if ('script' === $tag_name) {
+                        $pattern = '/<script\b(?=[^>]*\bdata-ucwp-remove-asset-token=("|\')' . preg_quote($token, '/') . '\1)[^>]*>\s*<\/script>/is';
+                    } else {
+                        $pattern = '/<link\b(?=[^>]*\bdata-ucwp-remove-asset-token=("|\')' . preg_quote($token, '/') . '\1)[^>]*>/i';
+                    }
+                    $updated_html = preg_replace($pattern, '', $updated_html, 1);
+                }
+
+                if (!is_string($updated_html) || false !== stripos($updated_html, 'data-ucwp-remove-asset-token=')) {
+                    return null;
+                }
+
+                return $updated_html;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function get_asset_cleanup_exclude_fragments(array $settings = array())
@@ -3230,7 +3509,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
             $script = '<script type="speculationrules">' . $json . '</script>';
 
-            return preg_replace('/<\/head>/i', $script . "\n</head>", $html, 1);
+            return $this->insert_html_before_closing_head($html, $script);
         }
 
         private function should_inject_speculation_rules_prefetch($html, array $settings = array())
@@ -3587,6 +3866,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $result;
             }
 
+            $processed = $this->rewrite_safe_async_css_links_with_processor($html);
+            if (is_array($processed)) {
+                return $processed;
+            }
+
             $stats = $this->get_default_safe_async_css_stats();
             $updated_html = (string) preg_replace_callback(
                 '/<link\b[^>]*>/i',
@@ -3599,6 +3883,93 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $result['html'] = $updated_html;
             $result['stats'] = $stats;
             return $result;
+        }
+
+        private function rewrite_safe_async_css_links_with_processor($html)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return null;
+            }
+
+            $stats = $this->get_default_safe_async_css_stats();
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $fallbacks = array();
+                $index = 0;
+
+                while ($processor->next_tag('LINK')) {
+                    $rel = $processor->get_attribute('rel');
+                    if (!$this->html_rel_attribute_contains_stylesheet($rel)) {
+                        continue;
+                    }
+
+                    $stats['scanned']++;
+
+                    if (null !== $processor->get_attribute('data-ucwp-async-css')
+                        || null !== $processor->get_attribute('data-ucwp-frontpage-css')
+                        || null !== $processor->get_attribute('data-ucwp-page-css-bundle')) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    $href = $processor->get_attribute('href');
+                    if (!is_string($href) || '' === $href) {
+                        $stats['unresolved']++;
+                        continue;
+                    }
+
+                    $media = strtolower(trim((string) $processor->get_attribute('media')));
+                    if ('' !== $media && 'all' !== $media) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    if (null !== $processor->get_attribute('disabled') || null !== $processor->get_attribute('onload')) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    $absolute_url = $this->absolutize_public_resource_url($href, home_url('/'));
+                    if ('' === $absolute_url || !$this->is_safe_local_public_stylesheet_url($absolute_url)) {
+                        $stats['unresolved']++;
+                        continue;
+                    }
+
+                    if (!$this->should_async_css_stylesheet_url($absolute_url, '')) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    $marker = 'ucwp-safe-async-' . md5($absolute_url . '|' . (++$index));
+                    $fallbacks[$marker] = $this->build_async_css_noscript_fallback_link($href, $processor->get_attribute('media'));
+
+                    $processor->set_attribute('media', 'print');
+                    $processor->set_attribute('onload', "this.media='all'");
+                    $processor->set_attribute('data-ucwp-async-css', '1');
+                    $processor->set_attribute('data-ucwp-noscript-token', $marker);
+
+                    $stats['rewritten']++;
+                    $changed = true;
+                }
+
+                if (!$changed) {
+                    return array('html' => (string) $html, 'stats' => $stats);
+                }
+
+                $updated_html = $processor->get_updated_html();
+                if (!is_string($updated_html) || '' === $updated_html) {
+                    return null;
+                }
+
+                return array(
+                    'html' => $this->append_async_css_noscript_fallbacks_from_markers($updated_html, $fallbacks),
+                    'stats' => $stats,
+                );
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function get_default_safe_async_css_stats()
@@ -3670,7 +4041,16 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function html_tag_rel_contains_stylesheet($tag)
         {
-            $rel = strtolower(trim((string) $this->extract_attribute_from_html_tag($tag, 'rel')));
+            return $this->html_rel_attribute_contains_stylesheet($this->extract_attribute_from_html_tag($tag, 'rel'));
+        }
+
+        private function html_rel_attribute_contains_stylesheet($rel)
+        {
+            if (null === $rel || false === $rel) {
+                return false;
+            }
+
+            $rel = strtolower(trim((string) $rel));
             if ('' === $rel) {
                 return false;
             }
@@ -3681,6 +4061,54 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             return in_array('stylesheet', $parts, true) && !in_array('preload', $parts, true) && !in_array('alternate', $parts, true);
+        }
+
+        private function build_async_css_noscript_fallback_link($href, $media = null)
+        {
+            $href = trim((string) $href);
+            if ('' === $href) {
+                return '';
+            }
+
+            $attrs = 'rel="stylesheet" href="' . esc_url($href) . '"';
+            $media = is_scalar($media) ? trim((string) $media) : '';
+            if ('' !== $media && 'all' !== strtolower($media) && 'print' !== strtolower($media)) {
+                $attrs .= ' media="' . esc_attr($media) . '"';
+            }
+
+            return '<noscript><link ' . $attrs . ' data-ucwp-async-css-fallback="1" /></noscript>';
+        }
+
+        private function append_async_css_noscript_fallbacks_from_markers($html, array $fallbacks)
+        {
+            if (empty($fallbacks) || !is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            foreach ($fallbacks as $marker => $fallback) {
+                $marker = (string) $marker;
+                $fallback = (string) $fallback;
+                if ('' === $marker) {
+                    continue;
+                }
+
+                $pattern = '/<link\b(?=[^>]*\bdata-ucwp-noscript-token=("|\')' . preg_quote($marker, '/') . '\1)[^>]*>/i';
+                $updated = preg_replace_callback($pattern, function ($matches) use ($marker, $fallback) {
+                    $tag = (string) ($matches[0] ?? '');
+                    if ('' === $tag) {
+                        return $tag;
+                    }
+
+                    $tag = $this->remove_html_tag_attribute($tag, 'data-ucwp-noscript-token');
+                    return $tag . $fallback;
+                }, $html, 1);
+
+                if (is_string($updated) && '' !== $updated) {
+                    $html = $updated;
+                }
+            }
+
+            return $html;
         }
 
 
@@ -4478,6 +4906,58 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return (string) preg_replace('/\s*\/?>$/', ' ' . $attribute . '="' . $quoted_value . '"$0', (string) $html, 1);
         }
 
+        private function html_link_href_exists($html, $href)
+        {
+            $href = html_entity_decode((string) $href, ENT_QUOTES, 'UTF-8');
+            if ('' === $href || !is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return false;
+            }
+
+            if ($this->html_tag_processor_available()) {
+                try {
+                    $processor = new WP_HTML_Tag_Processor($html);
+                    $target = $this->normalize_public_resource_url($href);
+                    while ($processor->next_tag('LINK')) {
+                        $current = $processor->get_attribute('href');
+                        if (!is_string($current) || '' === $current) {
+                            continue;
+                        }
+
+                        $decoded_current = html_entity_decode($current, ENT_QUOTES, 'UTF-8');
+                        if ($current === $href || $decoded_current === $href) {
+                            return true;
+                        }
+
+                        if ('' !== $target && $this->normalize_public_resource_url($decoded_current) === $target) {
+                            return true;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // Fall through to the conservative string checks below.
+                }
+            }
+
+            $escaped = esc_attr($href);
+            return false !== strpos($html, 'href="' . $escaped . '"')
+                || false !== strpos($html, "href='" . $escaped . "'")
+                || false !== strpos($html, 'href="' . $href . '"')
+                || false !== strpos($html, "href='" . $href . "'");
+        }
+
+        private function insert_html_before_closing_head($html, $markup)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '</head')) {
+                return $html;
+            }
+
+            $markup = (string) $markup;
+            if ('' === trim($markup)) {
+                return $html;
+            }
+
+            $updated = preg_replace('/<\/head>/i', rtrim($markup) . "\n</head>", $html, 1);
+            return is_string($updated) && '' !== $updated ? $updated : $html;
+        }
         private function rewrite_google_fonts_display_swap_in_html($html)
         {
             if (false === stripos((string) $html, 'fonts.googleapis.com')) {
@@ -4769,9 +5249,20 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $this->inject_lcp_preload_link($html, $manual_candidate['url']);
             }
 
+            $sr7_first_slide_candidates = $this->find_sr7_first_slide_lcp_candidates($html, 3);
+            if (!empty($sr7_first_slide_candidates)) {
+                $updated = $html;
+                foreach ($sr7_first_slide_candidates as $candidate) {
+                    if (!empty($candidate['url'])) {
+                        $updated = $this->inject_lcp_preload_link($updated, $candidate['url']);
+                    }
+                }
+                return $updated;
+            }
+
             $sr7_candidate = $this->find_best_sr7_lcp_candidate($html);
             if (null !== $sr7_candidate && !empty($sr7_candidate['url'])) {
-                if ($this->is_sr7_generated_image_list_url($sr7_candidate['url'])) {
+                if ($this->is_sr7_generated_image_list_url($sr7_candidate['url']) && empty($sr7_candidate['sr7_verified_first_slide'])) {
                     return $html;
                 }
                 return $this->inject_lcp_preload_link($html, $sr7_candidate['url']);
@@ -4789,6 +5280,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
             if (false === stripos($html, '<sr7-') && false === stripos($html, 'sr7-module')) {
                 return $html;
+            }
+
+            $processed = $this->apply_sr7_first_slide_lcp_priority_markup_with_processor($html);
+            if (is_string($processed)) {
+                return $this->inject_sr7_lcp_priority_runtime_script($processed);
             }
 
             $html = preg_replace_callback(
@@ -4823,6 +5319,63 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return $this->inject_sr7_lcp_priority_runtime_script($html);
         }
 
+        private function apply_sr7_first_slide_lcp_priority_markup_with_processor($html)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $marked = 0;
+
+                while ($processor->next_tag()) {
+                    $tag_name = strtoupper((string) $processor->get_tag());
+                    if ('SR7-IMG' !== $tag_name && 'IMG' !== $tag_name) {
+                        continue;
+                    }
+
+                    $src = $processor->get_attribute('src');
+                    $data_src = $processor->get_attribute('data-src');
+                    $dbsrc = $processor->get_attribute('data-dbsrc');
+                    $has_source = (is_string($src) && '' !== $src) || (is_string($data_src) && '' !== $data_src) || (is_string($dbsrc) && '' !== $dbsrc);
+                    if (!$has_source) {
+                        continue;
+                    }
+
+                    if ('high' !== (string) $processor->get_attribute('fetchpriority')) {
+                        $processor->set_attribute('fetchpriority', 'high');
+                        $changed = true;
+                    }
+
+                    $loading = $processor->get_attribute('loading');
+                    if (null === $loading || false === $loading || 'lazy' === strtolower((string) $loading)) {
+                        $processor->set_attribute('loading', 'eager');
+                        $changed = true;
+                    }
+
+                    if (null === $processor->get_attribute('data-ucwp-sr7-lcp')) {
+                        $processor->set_attribute('data-ucwp-sr7-lcp', '1');
+                        $changed = true;
+                    }
+
+                    $marked++;
+                    if ($marked >= 2) {
+                        break;
+                    }
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
         private function add_lcp_priority_attributes_to_start_tag($tag, $include_loading = false)
         {
             $tag = (string) $tag;
@@ -4830,20 +5383,16 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $tag;
             }
 
-            $replacement = $tag;
-            if (false === stripos($replacement, 'fetchpriority=')) {
-                $replacement = rtrim(substr($replacement, 0, -1)) . ' fetchpriority="high">';
-            }
+            $replacement = $this->set_or_add_html_tag_attribute($tag, 'fetchpriority', 'high');
 
             if ($include_loading) {
-                if (preg_match('~\sloading=("|\')lazy\1~i', $replacement)) {
-                    $replacement = preg_replace('~\sloading=("|\')lazy\1~i', ' loading="eager"', $replacement, 1);
-                } elseif (false === stripos($replacement, ' loading=')) {
-                    $replacement = rtrim(substr($replacement, 0, -1)) . ' loading="eager">';
+                $loading = strtolower((string) $this->extract_attribute_from_html_tag($replacement, 'loading'));
+                if ('' === $loading || 'lazy' === $loading) {
+                    $replacement = $this->set_or_add_html_tag_attribute($replacement, 'loading', 'eager');
                 }
             }
 
-            return $replacement;
+            return is_string($replacement) && '' !== $replacement ? $replacement : $tag;
         }
 
         private function inject_sr7_lcp_priority_runtime_script($html)
@@ -4860,7 +5409,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
 <script id="ucwp-sr7-lcp-priority">(function(){"use strict";if(window.__ucwpSr7LcpPriority){return;}window.__ucwpSr7LcpPriority=1;var MAX=8;function tagName(n){return n&&n.tagName?String(n.tagName).toLowerCase():"";}function mark(n){try{if(!n||n.nodeType!==1){return false;}var t=tagName(n);if(t!=="sr7-img"&&t!=="img"){return false;}n.setAttribute("fetchpriority","high");n.setAttribute("data-ucwp-sr7-lcp","1");if(!n.hasAttribute("loading")||n.getAttribute("loading")==="lazy"){n.setAttribute("loading","eager");}if(!n.hasAttribute("decoding")){n.setAttribute("decoding","sync");}return true;}catch(e){return false;}}function firstSlide(m){if(!m){return null;}return m.querySelector('sr7-slide[data-key="1"]')||m.querySelector('sr7-slide:not([aria-hidden="true"])')||m.querySelector("sr7-slide");}function markSlide(s){if(!s){return false;}var nodes=s.querySelectorAll("sr7-img,img");var did=false;for(var i=0;i<nodes.length&&i<MAX;i++){did=mark(nodes[i])||did;var inner=nodes[i].querySelectorAll?nodes[i].querySelectorAll("img"):[];for(var j=0;j<inner.length&&j<MAX;j++){did=mark(inner[j])||did;}}return did;}function markModule(m){return markSlide(firstSlide(m));}function markAll(){var did=false;var modules=document.querySelectorAll("sr7-module,rs-module");if(modules.length){for(var i=0;i<modules.length;i++){did=markModule(modules[i])||did;}}else{var slides=document.querySelectorAll('sr7-slide[data-key="1"],sr7-slide');for(var k=0;k<slides.length&&k<2;k++){did=markSlide(slides[k])||did;}}return did;}function schedule(){markAll();requestAnimationFrame(function(){markAll();});}document.addEventListener("sr.module.ready",function(){schedule();},true);document.addEventListener("sr.slide.afterChange",function(){schedule();},true);document.addEventListener("SR7_MODULE_READY",function(){schedule();},true);if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",schedule,{once:true});}else{schedule();}var tries=[100,300,800,1500,3000,5000];for(var x=0;x<tries.length;x++){setTimeout(schedule,tries[x]);}var mo;if("MutationObserver" in window){mo=new MutationObserver(function(muts){for(var i=0;i<muts.length;i++){for(var j=0;j<muts[i].addedNodes.length;j++){var n=muts[i].addedNodes[j];if(!n||n.nodeType!==1){continue;}var tn=tagName(n);if(tn==="sr7-img"||tn==="img"||tn==="sr7-slide"||tn==="sr7-module"||tn==="rs-module"||(n.querySelector&&(n.querySelector("sr7-img,img,sr7-slide,sr7-module,rs-module")))){schedule();return;}}}});mo.observe(document.documentElement,{childList:true,subtree:true});setTimeout(function(){try{if(mo){mo.disconnect();}}catch(e){}schedule();},8000);}}());</script>
 HTML;
 
-            return preg_replace('/<\/head>/i', $script . "\n</head>", $html, 1);
+            return $this->insert_html_before_closing_head($html, $script);
         }
 
         private function find_manual_lcp_candidate($html)
@@ -5059,7 +5608,7 @@ HTML;
         private function extract_best_lcp_candidate_from_current_tag($processor)
         {
             $tag = strtoupper((string) $processor->get_tag());
-            if (in_array($tag, array('SCRIPT', 'LINK', 'META', 'NOSCRIPT', 'STYLE', 'SOURCE', 'IFRAME'), true)) {
+            if (in_array($tag, array('SCRIPT', 'LINK', 'META', 'NOSCRIPT', 'STYLE', 'IFRAME'), true)) {
                 return null;
             }
 
@@ -5222,6 +5771,7 @@ HTML;
                 'SECTION' => 10,
                 'FIGURE' => 8,
                 'PICTURE' => 8,
+                'SOURCE' => 10,
                 'A' => 4,
                 'SR7-IMG' => 110,
                 'SR7-SLIDE' => 35,
@@ -5329,6 +5879,426 @@ HTML;
             return $preload;
         }
 
+
+        private function extract_sr7_first_slide_layer_image_candidates($html)
+        {
+            $html = str_replace('\/', '/', (string) $html);
+            if ('' === $html || false === stripos($html, 'sr7')) {
+                return array();
+            }
+
+            $slice = '';
+            if (preg_match('~"slides"\s*:\s*\{\s*"1"\s*:\s*\{(.+?)(?:,"2"\s*:|,"3"\s*:|,"4"\s*:|\}\s*\}\s*[,;])~s', $html, $match)) {
+                $slice = (string) $match[1];
+            } else {
+                $pos = strpos($html, '"slides":{"1"');
+                if (false !== $pos) {
+                    $slice = substr($html, $pos, 120000);
+                }
+            }
+
+            if ('' === $slice) {
+                return array();
+            }
+
+            $candidates = array();
+            $patterns = array(
+                '~"subtype"\s*:\s*"image".{0,6500}?"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif)(?:\?[^"]*)?)"~is',
+                '~"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif)(?:\?[^"]*)?)".{0,6500}?"subtype"\s*:\s*"image"~is',
+                '~"bg"\s*:\s*\{.{0,6500}?"image"\s*:\s*\{.{0,2500}?"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif)(?:\?[^"]*)?)"~is',
+            );
+
+            foreach ($patterns as $pattern) {
+                if (!preg_match_all($pattern, $slice, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+                    continue;
+                }
+
+                foreach ($matches as $match) {
+                    $url = isset($match[1][0]) ? (string) $match[1][0] : '';
+                    $offset = isset($match[0][1]) ? (int) $match[0][1] : 0;
+                    $url = html_entity_decode(trim($url), ENT_QUOTES, 'UTF-8');
+                    if (0 === strpos($url, '/')) {
+                        $url = $this->absolutize_public_resource_url($url);
+                    }
+                    $url = $this->normalize_public_resource_url($url);
+                    if ('' === $url || !$this->is_lcp_candidate_image_url($url)) {
+                        continue;
+                    }
+
+                    $context = substr($slice, max(0, $offset - 2200), 5200);
+                    $width = 0;
+                    $height = 0;
+                    if (preg_match('~"size"\s*:\s*\{.{0,900}?"w"\s*:\s*\[\s*"?(\d+)px"?.{0,500}?"h"\s*:\s*\[\s*"?(\d+)px"?~s', $context, $dim)) {
+                        $width = (int) $dim[1];
+                        $height = (int) $dim[2];
+                    }
+
+                    if (($width <= 0 || $height <= 0) && preg_match('~"w"\s*:\s*\[\s*"?(\d+)px"?.{0,500}?"h"\s*:\s*\[\s*"?(\d+)px"?~s', $context, $dim)) {
+                        $width = (int) $dim[1];
+                        $height = (int) $dim[2];
+                    }
+
+                    $id = '';
+                    if (preg_match('~"id"\s*:\s*"?([^",}\]]+)"?~', $context, $id_match)) {
+                        $id = (string) $id_match[1];
+                    }
+
+                    $candidates[$url] = array(
+                        'url' => $url,
+                        'width' => $width,
+                        'height' => $height,
+                        'layer' => $id,
+                        'offset' => $offset,
+                        'context' => strtolower($context),
+                    );
+                }
+            }
+
+            return array_values($candidates);
+        }
+
+        private function prefer_existing_nextgen_public_image_url($url)
+        {
+            $url = $this->normalize_public_resource_url($url);
+            if ('' === $url) {
+                return '';
+            }
+
+            if ($this->is_sr7_generated_image_list_url($url)) {
+                return $this->prefer_existing_nextgen_revslider_url($url);
+            }
+
+            $path = (string) wp_parse_url($url, PHP_URL_PATH);
+            if ('' === $path || false === strpos($path, '/wp-content/uploads/')) {
+                return $url;
+            }
+
+            $relative = ltrim((string) substr($path, strpos($path, '/wp-content/uploads/') + strlen('/wp-content/uploads/')), '/');
+            if ('' === $relative || !preg_match('/\.(png|jpe?g|webp|avif)$/i', $relative)) {
+                return $url;
+            }
+
+            $relative_no_ext = preg_replace('/\.(png|jpe?g|webp|avif)$/i', '', $relative);
+            if (!is_string($relative_no_ext) || '' === $relative_no_ext) {
+                return $url;
+            }
+
+            if (defined('UCWP_AVIF_DIR') && defined('UCWP_AVIF_URL')) {
+                $avif_path = trailingslashit(UCWP_AVIF_DIR) . $relative_no_ext . '.avif';
+                if (is_readable($avif_path)) {
+                    return $this->normalize_public_resource_url(trailingslashit(UCWP_AVIF_URL) . $relative_no_ext . '.avif');
+                }
+            }
+
+            if (defined('UCWP_WEBP_DIR') && defined('UCWP_WEBP_URL')) {
+                $webp_path = trailingslashit(UCWP_WEBP_DIR) . $relative_no_ext . '.webp';
+                if (is_readable($webp_path)) {
+                    return $this->normalize_public_resource_url(trailingslashit(UCWP_WEBP_URL) . $relative_no_ext . '.webp');
+                }
+            }
+
+            return $url;
+        }
+
+        private function find_sr7_first_slide_lcp_candidates($html, $limit = 3)
+        {
+            $html = (string) $html;
+            $limit = max(1, min(5, (int) $limit));
+            if ('' === $html || (false === stripos($html, 'sr7') && false === stripos($html, '/revslider/o/'))) {
+                return array();
+            }
+
+            $layer_candidates = $this->extract_sr7_first_slide_layer_image_candidates($html);
+            $generated_urls = $this->extract_sr7_generated_image_urls_from_html($html);
+            if (empty($layer_candidates) && empty($generated_urls)) {
+                return array();
+            }
+
+            $target_dimensions = $this->extract_sr7_first_slide_layer_dimensions($html);
+            $candidates = array();
+
+            foreach ($layer_candidates as $index => $layer) {
+                $raw_url = isset($layer['url']) ? (string) $layer['url'] : '';
+                $preferred_url = $this->prefer_existing_nextgen_public_image_url($raw_url);
+                $dimensions = array(
+                    'width' => isset($layer['width']) ? (int) $layer['width'] : 0,
+                    'height' => isset($layer['height']) ? (int) $layer['height'] : 0,
+                );
+                if ($dimensions['width'] <= 0 || $dimensions['height'] <= 0) {
+                    $dimensions = $this->get_public_image_dimensions($preferred_url);
+                }
+                if (empty($dimensions)) {
+                    $dimensions = $this->get_public_image_dimensions($raw_url);
+                }
+
+                $width = isset($dimensions['width']) ? (int) $dimensions['width'] : 0;
+                $height = isset($dimensions['height']) ? (int) $dimensions['height'] : 0;
+                if ($width <= 0 || $height <= 0) {
+                    $width = isset($layer['width']) ? (int) $layer['width'] : 0;
+                    $height = isset($layer['height']) ? (int) $layer['height'] : 0;
+                }
+
+                $candidate = $this->build_lcp_candidate_from_values($preferred_url, array(
+                    'tag' => 'SR7-IMG',
+                    'attribute' => 'sr7-json',
+                    'class' => 'sr7 first-slide revslider json layer',
+                    'id' => isset($layer['layer']) ? (string) $layer['layer'] : '',
+                    'style' => 'sr7 first slide layer image ' . (isset($layer['context']) ? (string) $layer['context'] : ''),
+                    'width' => $width > 0 ? (string) $width : '',
+                    'height' => $height > 0 ? (string) $height : '',
+                ));
+                if (null === $candidate) {
+                    continue;
+                }
+
+                $area = max(0, $width * $height);
+                $candidate['is_sr7'] = true;
+                $candidate['sr7_verified_first_slide'] = true;
+                $candidate['sr7_json_layer'] = true;
+                $candidate['source_url'] = $this->normalize_public_resource_url($raw_url);
+                $candidate['raw_url'] = $preferred_url;
+                $candidate['score'] += 900 + max(0, 150 - ((int) $index * 6)) + min(500, (int) floor($area / 1000));
+                if ($this->matches_sr7_dimension_target($width, $height, $target_dimensions)) {
+                    $candidate['score'] += 250;
+                }
+                if ($width >= 800 || $height >= 520) {
+                    $candidate['score'] += 260;
+                }
+
+                $boundary_offset = $this->find_sr7_visual_boundary_offset($html);
+                if ($boundary_offset > 0) {
+                    $candidate['boundary_offset'] = $boundary_offset;
+                }
+
+                $candidates[] = $candidate;
+            }
+
+            foreach ($generated_urls as $index => $url) {
+                $preferred_url = $this->prefer_existing_nextgen_revslider_url($url);
+                $dimensions = $this->get_public_image_dimensions($preferred_url);
+                if (empty($dimensions)) {
+                    $dimensions = $this->get_public_image_dimensions($url);
+                }
+
+                $width = isset($dimensions['width']) ? (int) $dimensions['width'] : 0;
+                $height = isset($dimensions['height']) ? (int) $dimensions['height'] : 0;
+                if ($width <= 0 || $height <= 0) {
+                    continue;
+                }
+
+                $matched_target = $this->matches_sr7_dimension_target($width, $height, $target_dimensions);
+
+                $candidate = $this->build_lcp_candidate_from_values($preferred_url, array(
+                    'tag' => 'SR7-IMG',
+                    'attribute' => 'script',
+                    'class' => 'sr7 first-slide revslider optimized',
+                    'style' => 'sr7 first slide generated optimized image',
+                    'width' => (string) $width,
+                    'height' => (string) $height,
+                ));
+                if (null === $candidate) {
+                    continue;
+                }
+
+                $area = $width * $height;
+                $candidate['is_sr7'] = true;
+                $candidate['sr7_verified_first_slide'] = true;
+                $candidate['sr7_generated'] = true;
+                $candidate['source_url'] = $this->normalize_public_resource_url($url);
+                $candidate['raw_url'] = $preferred_url;
+                $candidate['score'] += 700 + max(0, 120 - ((int) $index * 4)) + min(500, (int) floor($area / 1000));
+                if ($matched_target) {
+                    $candidate['score'] += 300;
+                }
+                if ($width >= 800 || $height >= 520) {
+                    $candidate['score'] += 160;
+                }
+
+                $boundary_offset = $this->find_sr7_visual_boundary_offset($html);
+                if ($boundary_offset > 0) {
+                    $candidate['boundary_offset'] = $boundary_offset;
+                }
+
+                $candidates[] = $candidate;
+            }
+
+            if (empty($candidates)) {
+                return array();
+            }
+
+            usort($candidates, function ($left, $right) {
+                return (int) $right['score'] <=> (int) $left['score'];
+            });
+
+            $unique = array();
+            $seen = array();
+            foreach ($candidates as $candidate) {
+                $key = $this->normalize_public_resource_url(isset($candidate['url']) ? $candidate['url'] : '');
+                if ('' === $key || isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $unique[] = $candidate;
+                if (count($unique) >= $limit) {
+                    break;
+                }
+            }
+
+            return $unique;
+        }
+
+
+        private function extract_sr7_first_slide_layer_dimensions($html)
+        {
+            $html = str_replace('\/', '/', (string) $html);
+            $slice = '';
+            if (preg_match('~"slides"\s*:\s*\{\s*"1"\s*:\s*\{(.+?)(?:,"2"\s*:|,"3"\s*:|,"4"\s*:)~s', $html, $match)) {
+                $slice = (string) $match[1];
+            } else {
+                $pos = strpos($html, '"slides":{"1"');
+                if (false !== $pos) {
+                    $slice = substr($html, $pos, 80000);
+                }
+            }
+
+            if ('' === $slice) {
+                return array();
+            }
+
+            $targets = array();
+            if (preg_match_all('~"subtype"\s*:\s*"image".{0,1800}?"size"\s*:\s*\{.{0,800}?"w"\s*:\s*\[\s*"?(\d+)px"?.{0,300}?"h"\s*:\s*\[\s*"?(\d+)px"?~s', $slice, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $match) {
+                    $width = isset($match[1]) ? (int) $match[1] : 0;
+                    $height = isset($match[2]) ? (int) $match[2] : 0;
+                    if ($width > 0 && $height > 0 && $width <= 5000 && $height <= 5000) {
+                        $targets[$width . 'x' . $height] = array('width' => $width, 'height' => $height);
+                    }
+                }
+            }
+
+            return array_values($targets);
+        }
+
+        private function matches_sr7_dimension_target($width, $height, array $targets)
+        {
+            $width = (int) $width;
+            $height = (int) $height;
+            if ($width <= 0 || $height <= 0 || empty($targets)) {
+                return false;
+            }
+
+            foreach ($targets as $target) {
+                $target_width = isset($target['width']) ? (int) $target['width'] : 0;
+                $target_height = isset($target['height']) ? (int) $target['height'] : 0;
+                if ($target_width <= 0 || $target_height <= 0) {
+                    continue;
+                }
+                if (abs($width - $target_width) <= 3 && abs($height - $target_height) <= 3) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function extract_sr7_generated_image_urls_from_html($html)
+        {
+            $html = str_replace('\/', '/', (string) $html);
+            $urls = array();
+
+            // Deliberately stop at whitespace, quotes, or tag delimiters. These are generated SR7 hash assets, not hardcoded IDs.
+            $patterns = array(
+                "~https?://[^\s\"'<>\)\(]+/wp-content/(?:uploads|cache/ultracache-(?:avif|webp))/revslider/o/[^\s\"'<>\)\(]+~i",
+                "~/wp-content/(?:uploads|cache/ultracache-(?:avif|webp))/revslider/o/[^\s\"'<>\)\(]+~i",
+            );
+
+            foreach ($patterns as $pattern) {
+                if (!preg_match_all($pattern, $html, $matches)) {
+                    continue;
+                }
+                foreach ($matches[0] as $raw_url) {
+                    $url = trim((string) $raw_url);
+                    $url = trim($url, " \t\n\r\0\x0B\"'()[]{}.,;");
+                    if (0 === strpos($url, '/')) {
+                        $url = $this->absolutize_public_resource_url($url);
+                    }
+                    if ('' !== $url && $this->is_lcp_candidate_image_url($url) && $this->is_sr7_generated_image_list_url($url)) {
+                        $normalized = $this->normalize_public_resource_url($url);
+                        $urls[$normalized] = $normalized;
+                    }
+                }
+            }
+
+            return array_values($urls);
+        }
+
+        private function prefer_existing_nextgen_revslider_url($url)
+        {
+            $url = $this->normalize_public_resource_url($url);
+            if ('' === $url) {
+                return '';
+            }
+
+            $path = (string) wp_parse_url($url, PHP_URL_PATH);
+            if ('' === $path || !preg_match('#/wp-content/(?:uploads|cache/ultracache-(?:avif|webp))/revslider/o/(.+?)\.(avif|webp|png|jpe?g)(?:$|\?)#i', $path, $match)) {
+                return $url;
+            }
+
+            $relative_no_ext = isset($match[1]) ? ltrim((string) $match[1], '/') : '';
+            if ('' === $relative_no_ext) {
+                return $url;
+            }
+
+            if (defined('UCWP_AVIF_DIR') && defined('UCWP_AVIF_URL')) {
+                $avif_path = trailingslashit(UCWP_AVIF_DIR) . 'revslider/o/' . $relative_no_ext . '.avif';
+                if (is_readable($avif_path)) {
+                    return $this->normalize_public_resource_url(trailingslashit(UCWP_AVIF_URL) . 'revslider/o/' . $relative_no_ext . '.avif');
+                }
+            }
+
+            if (defined('UCWP_WEBP_DIR') && defined('UCWP_WEBP_URL')) {
+                $webp_path = trailingslashit(UCWP_WEBP_DIR) . 'revslider/o/' . $relative_no_ext . '.webp';
+                if (is_readable($webp_path)) {
+                    return $this->normalize_public_resource_url(trailingslashit(UCWP_WEBP_URL) . 'revslider/o/' . $relative_no_ext . '.webp');
+                }
+            }
+
+            return $url;
+        }
+
+        private function get_public_image_dimensions($url)
+        {
+            $path = $this->resolve_local_path_from_public_url($url);
+            if ('' === $path || !is_readable($path)) {
+                return array();
+            }
+
+            $size = @getimagesize($path);
+            if (!is_array($size) || empty($size[0]) || empty($size[1])) {
+                return array();
+            }
+
+            return array('width' => (int) $size[0], 'height' => (int) $size[1]);
+        }
+
+        private function find_sr7_visual_boundary_offset($html)
+        {
+            $html = (string) $html;
+            foreach (array('</sr7-module>', '</rs-module>', '</sr7-slide>') as $needle) {
+                $pos = stripos($html, $needle);
+                if (false !== $pos) {
+                    return (int) $pos + strlen($needle);
+                }
+            }
+            foreach (array('<sr7-module', '<rs-module', '<sr7-slide') as $needle) {
+                $pos = stripos($html, $needle);
+                if (false !== $pos) {
+                    return (int) $pos;
+                }
+            }
+            return -1;
+        }
+
         private function find_best_sr7_lcp_candidate($html)
         {
             $html = (string) $html;
@@ -5341,6 +6311,10 @@ HTML;
             }
 
             $candidates = array();
+
+            foreach ($this->find_sr7_first_slide_lcp_candidates($html, 3) as $first_slide_candidate) {
+                $candidates[] = $first_slide_candidate;
+            }
 
             if (preg_match_all('/<sr7-img\b[^>]*>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
                 foreach ($matches[0] as $match) {
@@ -5540,12 +6514,15 @@ HTML;
 
             $tag = strtoupper((string) $tag);
             $tag_name = ('SR7-IMG' === $tag) ? 'SR7-IMG' : $tag;
+            $attribute = strtolower((string) $attribute);
+            $normalized_raw_url = $this->normalize_public_resource_url($raw_url);
+
             try {
                 $processor = new WP_HTML_Tag_Processor($html);
                 $changed = false;
                 while ($processor->next_tag($tag_name)) {
                     $value = $processor->get_attribute($attribute);
-                    if (!is_string($value) || $value !== $raw_url) {
+                    if (!$this->lcp_candidate_attribute_value_matches($value, $attribute, $normalized_raw_url, $raw_url)) {
                         continue;
                     }
 
@@ -5558,6 +6535,11 @@ HTML;
                         $loading = $processor->get_attribute('loading');
                         if (null === $loading || false === $loading || 'lazy' === strtolower((string) $loading)) {
                             $processor->set_attribute('loading', 'eager');
+                            $changed = true;
+                        }
+
+                        if (null === $processor->get_attribute('decoding')) {
+                            $processor->set_attribute('decoding', 'sync');
                             $changed = true;
                         }
                     }
@@ -5576,6 +6558,34 @@ HTML;
             }
         }
 
+        private function lcp_candidate_attribute_value_matches($value, $attribute, $normalized_raw_url, $raw_url = '')
+        {
+            if (!is_string($value) || '' === trim($value)) {
+                return false;
+            }
+
+            $attribute = strtolower((string) $attribute);
+            if (in_array($attribute, array('srcset', 'data-srcset', 'data-lazy-srcset', 'data-lazyload-srcset'), true)) {
+                foreach ($this->extract_candidate_urls_from_srcset($value) as $candidate_url) {
+                    if ($this->normalize_public_resource_url($candidate_url) === $normalized_raw_url) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            if ('style' === $attribute) {
+                foreach ($this->extract_candidate_urls_from_style($value) as $candidate_url) {
+                    if ($this->normalize_public_resource_url($candidate_url) === $normalized_raw_url) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            return $this->normalize_public_resource_url($value) === $normalized_raw_url || ('' !== (string) $raw_url && (string) $value === (string) $raw_url);
+        }
+
         private function is_sr7_generated_image_list_url($url)
         {
             $url = $this->normalize_public_resource_url($url);
@@ -5583,7 +6593,9 @@ HTML;
                 return false;
             }
 
-            return false !== stripos($url, '/wp-content/uploads/revslider/o/');
+            return false !== stripos($url, '/wp-content/uploads/revslider/o/')
+                || false !== stripos($url, '/wp-content/cache/ultracache-avif/revslider/o/')
+                || false !== stripos($url, '/wp-content/cache/ultracache-webp/revslider/o/');
         }
         private function is_lcp_candidate_image_url($src)
         {
@@ -5640,7 +6652,7 @@ HTML;
                 return $html;
             }
 
-            return preg_replace('/<\/head>/i', $link . "\n</head>", $html, 1);
+            return $this->insert_html_before_closing_head($html, $link);
         }
 
         private function ensure_lcp_preload_link_with_processor($html, $src)
@@ -5873,8 +6885,8 @@ HTML;
                 '/<link\b[^>]*\bhref=(\"|\')(.*?)\1[^>]*>/is',
                 function ($matches) use (&$preload_urls) {
                     $tag = (string) $matches[0];
-                    $href = isset($matches[2]) ? (string) $matches[2] : '';
-                    if (false === stripos($tag, 'rel=') || false === stripos(strtolower($tag), 'stylesheet')) {
+                    $href = $this->extract_attribute_from_html_tag($tag, 'href');
+                    if (!$this->html_tag_rel_contains_stylesheet($tag)) {
                         return $tag;
                     }
 
@@ -5908,7 +6920,7 @@ HTML;
                     }
 
                     $replacement_url = esc_url($asset['css_url']);
-                    return preg_replace('/\bhref=(\"|\')(.*?)\1/i', 'href="' . $replacement_url . '"', $tag, 1);
+                    return $this->set_or_add_html_tag_attribute($tag, 'href', $replacement_url);
                 },
                 $html
             );
@@ -6067,7 +7079,7 @@ HTML;
 
             $script = '<script data-ucwp-font-css-map="1">(function(){var map=' . $json . ';if(!map||typeof map!=="object"){return;}var toAbs=function(url){if(!url){return "";}try{return new URL(url, document.baseURI).href;}catch(e){try{var a=document.createElement("a");a.href=url;return a.href||url;}catch(err){return url;}}};var rewrite=function(node){if(!node||node.nodeType!==1){return;}var tag=String(node.tagName||"").toLowerCase();if(tag!=="link"){return;}var rel=String(node.getAttribute("rel")||"").toLowerCase();if(rel.indexOf("stylesheet")===-1){return;}var href=node.getAttribute("href")||node.href||"";if(!href){return;}var abs=toAbs(href);if(abs&&map[abs]&&abs!==map[abs]){node.setAttribute("href",map[abs]);try{node.href=map[abs];}catch(e){}}};var scan=function(root){try{var links=(root||document).querySelectorAll? (root||document).querySelectorAll("link[rel][href]") : [];for(var i=0;i<links.length;i++){rewrite(links[i]);}}catch(e){}};scan(document);try{var mo=new MutationObserver(function(list){for(var i=0;i<list.length;i++){var added=list[i]&&list[i].addedNodes?list[i].addedNodes:[];for(var j=0;j<added.length;j++){var node=added[j];rewrite(node);scan(node);}}});mo.observe(document.documentElement||document.head||document.body,{childList:true,subtree:true});}catch(e){}})();</script>';
 
-            return preg_replace('/<\/head>/i', $script . "\n</head>", $html, 1);
+            return $this->insert_html_before_closing_head($html, $script);
         }
 
         private function get_runtime_local_font_css_url_map()
@@ -6283,9 +7295,8 @@ HTML;
                 return $html;
             }
 
-            return preg_replace('/<\/head>/i', implode("
-", $links) . "
-</head>", $html, 1);
+            return $this->insert_html_before_closing_head($html, implode("
+", $links));
         }
 
         private function normalize_local_path_for_compare($path)
@@ -6428,6 +7439,11 @@ HTML;
                 return $html;
             }
 
+            $processed = $this->strip_probable_frontend_authoring_assets_with_processor($html);
+            if (is_string($processed)) {
+                return $processed;
+            }
+
             foreach (array(
                 '/<script\b[^>]*\bsrc=(\"|\')(.*?)\1[^>]*>\s*<\/script>/is',
                 '/<link\b[^>]*\bhref=(\"|\')(.*?)\1[^>]*>/is',
@@ -6436,7 +7452,7 @@ HTML;
                     $pattern,
                     function ($matches) {
                         $tag = (string) $matches[0];
-                        $url = isset($matches[2]) ? (string) $matches[2] : '';
+                        $url = $this->extract_attribute_from_html_tag($tag, false !== stripos($tag, '<script') ? 'src' : 'href');
                         if ($this->should_strip_probable_frontend_authoring_asset($url, $tag)) {
                             return '';
                         }
@@ -6447,6 +7463,68 @@ HTML;
             }
 
             return $html;
+        }
+
+        private function strip_probable_frontend_authoring_assets_with_processor($html)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || (false === stripos($html, '<script') && false === stripos($html, '<link'))) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $tokens = array();
+                $index = 0;
+
+                while ($processor->next_tag()) {
+                    $tag_name = strtoupper((string) $processor->get_tag());
+                    if ('SCRIPT' !== $tag_name && 'LINK' !== $tag_name) {
+                        continue;
+                    }
+
+                    $url = ('SCRIPT' === $tag_name) ? $processor->get_attribute('src') : $processor->get_attribute('href');
+                    if (!is_string($url) || '' === $url) {
+                        continue;
+                    }
+
+                    $tag_markup = $this->get_current_html_processor_tag_markup($processor, strtolower($tag_name));
+                    if (!$this->should_strip_probable_frontend_authoring_asset($url, $tag_markup)) {
+                        continue;
+                    }
+
+                    $token = 'ucwp-strip-authoring-' . md5($tag_name . '|' . $url . '|' . (++$index));
+                    $processor->set_attribute('data-ucwp-strip-authoring-token', $token);
+                    $tokens[$token] = strtolower($tag_name);
+                    $changed = true;
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                if (!is_string($updated_html) || '' === $updated_html) {
+                    return null;
+                }
+
+                foreach ($tokens as $token => $tag_name) {
+                    if ('script' === $tag_name) {
+                        $pattern = '/<script\b(?=[^>]*\bdata-ucwp-strip-authoring-token=(\"|\')' . preg_quote($token, '/') . '\1)[^>]*>\s*<\/script>/is';
+                    } else {
+                        $pattern = '/<link\b(?=[^>]*\bdata-ucwp-strip-authoring-token=(\"|\')' . preg_quote($token, '/') . '\1)[^>]*>/i';
+                    }
+                    $updated_html = preg_replace($pattern, '', $updated_html, 1);
+                }
+
+                if (!is_string($updated_html) || false !== stripos($updated_html, 'data-ucwp-strip-authoring-token=')) {
+                    return null;
+                }
+
+                return $updated_html;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function should_strip_probable_frontend_authoring_asset($url, $tag_html)

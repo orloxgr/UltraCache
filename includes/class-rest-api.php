@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.55.96 */
+/** Hotfix Bundle Version: 2.56.06 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -162,6 +162,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'redisReadTimeoutMs'                   => array('type' => 'integer', 'required' => false),
                 'brotliEnabled'                        => array('type' => 'boolean', 'required' => false),
                 'gzipEnabled'                          => array('type' => 'boolean', 'required' => false),
+                'cacheStatsEnabled'                    => array('type' => 'boolean', 'required' => false),
                 'mediaOptimizationEnabled'           => array('type' => 'boolean', 'required' => false),
                 'mediaGenerateOnUploadEnabled'        => array('type' => 'boolean', 'required' => false),
                 'mediaGenerateOnDemandEnabled'        => array('type' => 'boolean', 'required' => false),
@@ -190,6 +191,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'delayNonCriticalJsEnabled'            => array('type' => 'boolean', 'required' => false),
                 'delayNonCriticalJsExcludeList'        => array('type' => 'string', 'required' => false),
                 'lcpImagePriorityEnabled'              => array('type' => 'boolean', 'required' => false),
+                'lcpBoundaryDeferEnabled'              => array('type' => 'boolean', 'required' => false),
                 'lcpImagePriorityOverride'             => array('type' => 'string', 'required' => false),
                 'mainThreadReliefEnabled'              => array('type' => 'boolean', 'required' => false),
                 'criticalRequestChainReliefEnabled'     => array('type' => 'boolean', 'required' => false),
@@ -884,6 +886,18 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
         }
 
 
+        public function object_cache_full_count()
+        {
+            $stats = $this->resolve_engine_stats(true);
+
+            return new WP_REST_Response(array(
+                'success' => true,
+                'message' => 'Full object-cache count completed.',
+                'stats' => $stats,
+            ), 200);
+        }
+
+
         private function is_dashboard_setting_enabled($key)
         {
             $settings = defined('UCWP_SETTINGS_KEY') ? get_option(UCWP_SETTINGS_KEY, array()) : array();
@@ -1093,6 +1107,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             return array(
                 'purge_all',
                 'object_cache_flush',
+                'object_cache_full_count',
                 'warm_frontpage_html',
                 'warm_frontpage_html_css',
                 'varnish_test',
@@ -1218,6 +1233,8 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         return $this->unwrap_rest_payload($this->purge_all());
                     case 'object_cache_flush':
                         return $this->unwrap_rest_payload($this->object_cache_flush());
+                    case 'object_cache_full_count':
+                        return $this->unwrap_rest_payload($this->object_cache_full_count());
                     case 'warm_frontpage_html':
                         return $this->unwrap_rest_payload($this->warm_frontpage_html());
                     case 'warm_frontpage_html_css':
@@ -1306,7 +1323,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             );
         }
 
-        private function resolve_engine_stats()
+        private function resolve_engine_stats($full_object_count = false)
         {
             $stats = array();
             $engine = $this->get_engine();
@@ -1316,7 +1333,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             }
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_stats')) {
-                $object_stats = Ultra_Cache_Object_Cache_Manager::get_stats();
+                $object_stats = Ultra_Cache_Object_Cache_Manager::get_stats((bool) $full_object_count);
                 if (is_array($object_stats)) {
                     $stats = array_merge($stats, $object_stats);
                     $stats['cacheSizeBytes'] = (int) ($stats['cacheSizeBytes'] ?? 0) + (int) ($object_stats['objectCacheSizeBytes'] ?? 0);

@@ -94,6 +94,7 @@ if (!class_exists('WP_Object_Cache')) {
 			'misses' => 0,
 		);
 		private $selected_backend = __UCWP_SELECTED_BACKEND__;
+		private $metrics_enabled = __UCWP_CACHE_STATS_ENABLED__;
 		private $active_backend = 'runtime';
 		private $redis = null;
 		private $redis_enabled = false;
@@ -123,7 +124,9 @@ if (!class_exists('WP_Object_Cache')) {
 			$this->ensure_base_dir();
 			$this->load_redis_secret_config();
 			$this->bootstrap_backend();
-			register_shutdown_function(array($this, 'persist_metrics'));
+			if ($this->metrics_enabled) {
+				register_shutdown_function(array($this, 'persist_metrics'));
+			}
 		}
 
 		public function get_backend() {
@@ -369,6 +372,9 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		public function persist_metrics() {
+			if (!$this->metrics_enabled) {
+				return;
+			}
 			$hits = (int) ($this->stats['hits'] ?? 0);
 			$misses = (int) ($this->stats['misses'] ?? 0);
 			if ($hits <= 0 && $misses <= 0) {

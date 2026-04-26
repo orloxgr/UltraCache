@@ -3,13 +3,13 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.55.96
+ * Version: 2.56.07
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
  * Domain Path: /languages
- * Hotfix Bundle Version: 2.55.96
+ * Hotfix Bundle Version: 2.56.07
  */
 
 if (!defined('ABSPATH')) {
@@ -17,10 +17,10 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.55.96');
+    define('UCWP_VERSION', '2.56.07');
 }
 if (!defined('UCWP_HOTFIX_BUNDLE_VERSION')) {
-    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.55.96');
+    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.56.07');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1232,6 +1232,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'redisReadTimeoutMs'         => 200,
                 'brotliEnabled'              => false,
                 'gzipEnabled'                => false,
+                'cacheStatsEnabled'          => false,
                 'mediaOptimizationEnabled'     => false,
                 'mediaGenerateOnUploadEnabled' => false,
                 'mediaGenerateOnDemandEnabled' => false,
@@ -1260,6 +1261,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'delayNonCriticalJsEnabled'  => false,
                 'delayNonCriticalJsExcludeList' => '',
                 'lcpImagePriorityEnabled'    => false,
+                'lcpBoundaryDeferEnabled'    => false,
                 'lcpImagePriorityOverride'   => '',
                 'mainThreadReliefEnabled'    => false,
                 'criticalRequestChainReliefEnabled' => false,
@@ -1772,6 +1774,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'objectCacheEnabled',
                 'brotliEnabled',
                 'gzipEnabled',
+                'cacheStatsEnabled',
                 'mediaOptimizationEnabled',
                 'mediaGenerateOnUploadEnabled',
                 'mediaGenerateOnDemandEnabled',
@@ -1790,6 +1793,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'aggressiveAsyncCssEnabled',
                 'delayNonCriticalJsEnabled',
                 'lcpImagePriorityEnabled',
+                'lcpBoundaryDeferEnabled',
                 'mainThreadReliefEnabled',
                 'criticalRequestChainReliefEnabled',
                 'assetChainCleanupEnabled',
@@ -1904,6 +1908,11 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             $settings['cronWarmStartAfterCleanup'] = !empty($settings['cronWarmStartAfterCleanup']);
             $settings['cronWarmStartAfterManualPurge'] = !empty($settings['cronWarmStartAfterManualPurge']);
+
+            // Keep the public settings payload canonical. Stored options may still contain
+            // old keys from previous local builds, but they must not leak back to CLI, REST,
+            // exports, or runtime settings after sanitization.
+            $settings = array_intersect_key($settings, $defaults);
 
             return $settings;
         }
@@ -2054,6 +2063,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_query_allowlist'        => $query_allowlist,
                 'gzip_enabled'                 => !empty($ui['gzipEnabled']),
                 'brotli_enabled'               => !empty($ui['brotliEnabled']),
+                'cache_stats_enabled'          => !empty($ui['cacheStatsEnabled']),
                 'preload_on_save'              => !empty($ui['preRenderOnSave']),
                 'defer_js'                     => $defer_js_enabled,
                 'defer_stage_safe'             => $defer_js_enabled,
@@ -2084,6 +2094,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'delay_non_critical_js_aggressive' => $defer_stage_aggressive,
                 'delay_non_critical_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayNonCriticalJsExcludeList'])),
                 'lcp_image_priority'           => !empty($ui['lcpImagePriorityEnabled']),
+                'lcp_boundary_defer'           => !empty($ui['lcpBoundaryDeferEnabled']),
                 'lcp_image_priority_override_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['lcpImagePriorityOverride'])),
                 'main_thread_relief'          => !empty($ui['mainThreadReliefEnabled']),
                 'critical_request_chain_relief' => !empty($ui['criticalRequestChainReliefEnabled']),
@@ -2205,7 +2216,8 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function render_runtime_secret_php(array $runtime)
         {
             $secret = isset($runtime['revalidate_secret']) ? (string) $runtime['revalidate_secret'] : '';
-            return "<?php\n/** UltraCache managed runtime secrets. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn array(\n    'revalidate_secret' => " . ucwp_php_string_literal($secret) . ",\n);\n";
+            $redis_password = isset($runtime['redis_password']) ? (string) $runtime['redis_password'] : '';
+            return "<?php\n/** UltraCache managed runtime secrets. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn array(\n    'revalidate_secret' => " . ucwp_php_string_literal($secret) . ",\n    'redis_password' => " . ucwp_php_string_literal($redis_password) . ",\n);\n";
         }
 
         private static function load_runtime_secret_file($path = null)
@@ -2239,6 +2251,7 @@ if (!class_exists('Ultra_Cache_WP')) {
 
                 return array(
                     'revalidate_secret' => isset($loaded['revalidate_secret']) ? (string) $loaded['revalidate_secret'] : '',
+                    'redis_password' => isset($loaded['redis_password']) ? (string) $loaded['redis_password'] : '',
                 );
             }
 
@@ -2255,6 +2268,18 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_query_strings'             => !empty($settings['cache_query_strings']),
                 'cache_query_allowlist'           => !empty($settings['cache_query_allowlist']) ? self::parse_textarea_setting(self::sanitize_setting_key_list((array) $settings['cache_query_allowlist'])) : array(),
                 'woo_safe_mode'                   => !empty($settings['woo_safe_mode']),
+                'cache_stats_enabled'             => !empty($settings['cache_stats_enabled']),
+                'object_cache_enabled'            => !empty($settings['object_cache_enabled']),
+                'object_cache_backend'            => self::sanitize_object_cache_backend($settings['object_cache_backend'] ?? 'redis'),
+                'redis_host'                      => (string) ($settings['redis_host'] ?? '127.0.0.1'),
+                'redis_port'                      => max(1, absint($settings['redis_port'] ?? 6379)),
+                'redis_password'                  => (string) ($settings['redis_password'] ?? ''),
+                'redis_database'                  => max(0, absint($settings['redis_database'] ?? 0)),
+                'redis_prefix'                    => preg_replace('/[^A-Za-z0-9:_\\-]/', '', (string) ($settings['redis_prefix'] ?? '')),
+                'redis_use_tls'                   => !empty($settings['redis_use_tls']),
+                'redis_persistent'                => !empty($settings['redis_persistent']),
+                'redis_connect_timeout_ms'        => max(50, absint($settings['redis_connect_timeout_ms'] ?? 200)),
+                'redis_read_timeout_ms'           => max(50, absint($settings['redis_read_timeout_ms'] ?? 200)),
                 'stale_while_revalidate_enabled'  => !empty($settings['stale_while_revalidate_enabled']),
                 'cache_fresh_ttl_minutes'         => max(1, absint($settings['cache_fresh_ttl_minutes'])),
                 'cache_max_stale_minutes'         => max(absint($settings['cache_fresh_ttl_minutes']), absint($settings['cache_max_stale_minutes'])),
@@ -2340,6 +2365,18 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_query_strings'            => !empty($runtime['cache_query_strings']),
                 'cache_query_allowlist'          => self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($runtime['cache_query_allowlist'] ?? array()))),
                 'woo_safe_mode'                  => !empty($runtime['woo_safe_mode']),
+                'cache_stats_enabled'            => !empty($runtime['cache_stats_enabled']),
+                'object_cache_enabled'           => !empty($runtime['object_cache_enabled']),
+                'object_cache_backend'           => self::sanitize_object_cache_backend($runtime['object_cache_backend'] ?? 'redis'),
+                'redis_host'                     => trim((string) ($runtime['redis_host'] ?? '127.0.0.1')) ?: '127.0.0.1',
+                'redis_port'                     => max(1, min(65535, absint($runtime['redis_port'] ?? 6379))),
+                'redis_password'                 => (string) ($runtime['redis_password'] ?? ''),
+                'redis_database'                 => max(0, absint($runtime['redis_database'] ?? 0)),
+                'redis_prefix'                   => preg_replace('/[^A-Za-z0-9:_\\-]/', '', (string) ($runtime['redis_prefix'] ?? '')),
+                'redis_use_tls'                  => !empty($runtime['redis_use_tls']),
+                'redis_persistent'               => !empty($runtime['redis_persistent']),
+                'redis_connect_timeout_ms'       => max(50, min(10000, absint($runtime['redis_connect_timeout_ms'] ?? 200))),
+                'redis_read_timeout_ms'          => max(50, min(10000, absint($runtime['redis_read_timeout_ms'] ?? 200))),
                 'stale_while_revalidate_enabled' => !empty($runtime['stale_while_revalidate_enabled']),
                 'cache_fresh_ttl_minutes'        => $fresh_minutes,
                 'cache_max_stale_minutes'        => $max_stale_minutes,
@@ -4301,7 +4338,7 @@ public static function delete_all_plugin_data_and_deactivate()
             return self::clear_apcu_user_cache(true);
         }
 
-        public static function get_engine_stats()
+        public static function get_engine_stats($full_object_count = false)
         {
             $stats = array();
             $candidates = array('Ultra_Cache_Engine');
@@ -4314,7 +4351,7 @@ public static function delete_all_plugin_data_and_deactivate()
             }
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_stats')) {
-                $object_stats = Ultra_Cache_Object_Cache_Manager::get_stats();
+                $object_stats = Ultra_Cache_Object_Cache_Manager::get_stats((bool) $full_object_count);
                 if (is_array($object_stats)) {
                     $stats = array_merge($stats, $object_stats);
                     $stats['cacheSizeBytes'] = (int) ($stats['cacheSizeBytes'] ?? 0) + (int) ($object_stats['objectCacheSizeBytes'] ?? 0);

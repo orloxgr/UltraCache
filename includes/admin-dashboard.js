@@ -26,7 +26,7 @@
 	const CLEAR_NOTICE_DELAY = 4200;
 	const SYSTEM_NOTICE_DELAY = 7000;
 	const SYSTEM_NOTICE_COOLDOWN = 24 * 60 * 60 * 1000;
-	const STATS_REFRESH_INTERVAL = 30000;
+	const STATS_REFRESH_INTERVAL = 15000;
 	const SETTINGS_SAVE_DEBOUNCE_MS = 700;
 	const ACTION_QUEUE_POLL_DELAY = 750;
 	const ACTION_QUEUE_MAX_POLLS = 160;
@@ -53,6 +53,7 @@
 		'redisReadTimeoutMs',
 		'brotliEnabled',
 		'gzipEnabled',
+		'cacheStatsEnabled',
 		'mediaOptimizationEnabled',
 		'mediaGenerateOnUploadEnabled',
 		'mediaGenerateOnDemandEnabled',
@@ -82,6 +83,7 @@
 		'delayNonCriticalJsEnabled',
 		'delayNonCriticalJsExcludeList',
 		'lcpImagePriorityEnabled',
+		'lcpBoundaryDeferEnabled',
 		'lcpImagePriorityOverride',
 		'mainThreadReliefEnabled',
 		'criticalRequestChainReliefEnabled',
@@ -133,25 +135,25 @@
 	};
 	const PERFORMANCE_PROFILES = {
 		off: { label: 'All Off', description: 'Disable page cache, object cache, media, CSS, JS, fonts, prefetch, warmup, and scheduled jobs. Best for first install or troubleshooting.', patch: {
-			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
+			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
 			deferJsEnabled: false, delayThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, pageCssBundleOnEntryEnabled: false, criticalCssEnabled: false, criticalCssInlineEnabled: false,
-			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
+			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
 			homepageCssBundleMode: 'safe', cssBundleScope: 'homepage', mediaOutputMode: 'auto',
 		} },
 		safe: { label: 'Safe', description: 'Enables page caching, WooCommerce-safe bypasses, browser cache headers, save-time warmup, and stale protection. No JS/CSS/media rewrites.', patch: {
-			pageCacheEnabled: true, objectCacheEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, deferJsEnabled: false, delayThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false,
+			pageCacheEnabled: true, objectCacheEnabled: false, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, deferJsEnabled: false, delayThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false,
 		} },
 		balanced: { label: 'Balanced', description: 'Adds object cache, media optimization, Safe CLS/LCP image hints, conservative JS defer, safe CSS bundling, and font-display improvements.', patch: {
-			pageCacheEnabled: true, objectCacheEnabled: true, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
 			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'safe', cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: false, criticalCssEnabled: true, criticalCssInlineEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, cronWarmEnabled: false, cacheCleanupEnabled: false, cacheQueryStringsEnabled: false,
 		} },
 		aggressive: { label: 'Aggressive', description: 'Balanced plus delayed third-party JS, main-thread relief, aggressive CSS bundling, CSS bundles on warm, speculation prefetch, cron warmup, and scheduled cleanup.', patch: {
-			pageCacheEnabled: true, objectCacheEnabled: true, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
 			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: true, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
 			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'aggressive', cssBundleScope: 'per-page', pageCssBundleOnEntryEnabled: true, criticalCssEnabled: true, criticalCssInlineEnabled: false, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: true, cronWarmEnabled: true, cronWarmStartAfterCleanup: true, cronWarmStartAfterManualPurge: true, cacheCleanupEnabled: true, cacheQueryStringsEnabled: false,
@@ -375,6 +377,106 @@
 		return Number.isNaN(parsed) ? String(value) : new Date(parsed).toLocaleString();
 	}
 
+
+	function formatObjectEntries(stats) {
+		const value = formatNumber(stats && typeof stats.objectCacheEntries !== 'undefined' ? stats.objectCacheEntries : 0);
+		return stats && stats.objectCacheStatsPartial ? value + '+' : value;
+	}
+
+	function getObjectEntriesHint(stats) {
+		const parts = [];
+		if (stats && stats.objectCacheSizeHuman) {
+			parts.push(stats.objectCacheSizeHuman);
+		}
+		if (stats && stats.objectCacheStatsPartial) {
+			parts.push(stats.objectCacheStatsPartialReason || ('sampled, Redis scan capped at ' + formatNumber(stats.objectCacheStatsLimit || 5000) + ' keys'));
+		}
+		if (!parts.length) {
+			parts.push('File object cache');
+		}
+		return parts.join(' · ');
+	}
+
+	function CacheStatisticsPanel({ settings, stats, diagnostics, busy, asyncActions, onToggleStats, onFullObjectCount }) {
+		const enabled = !!(settings && settings.cacheStatsEnabled);
+		return h('div', { className: 'uc-card uc-cache-stats-panel', key: 'cache-statistics-panel' }, [
+			h('div', { className: 'flex flex-col md:flex-row md:items-start md:justify-between gap-4', key: 'head' }, [
+				h('div', { key: 'copy' }, [
+					h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-1', key: 'eyebrow' }, 'Cache Statistics'),
+					h('h3', { className: 'text-lg font-black tracking-tight text-white m-0', key: 'title' }, 'Count Cache stats'),
+					h('p', { className: 'text-xs text-zinc-500 mt-2 mb-0 max-w-3xl', key: 'desc' }, 'Track cache hits, misses, bypasses and object-cache counters. Disabling this avoids counter writes during frontend requests.'),
+				]),
+				h('label', {
+					className: classNames('uc-toggle', busy ? 'opacity-60 pointer-events-none' : ''),
+					key: 'toggle',
+				}, [
+					h('input', {
+						type: 'checkbox',
+						checked: enabled,
+						disabled: !!busy,
+						onChange: (event) => onToggleStats(event.target.checked),
+					}),
+					h('span', { className: 'slider' }),
+				]),
+			]),
+			enabled
+				? h('div', { className: 'uc-warning-box mt-4', key: 'warning' }, 'Enabling cache statistics may add a small performance overhead because UltraCache needs to update counters during requests. If you use Varnish, nginx full-page cache, Cloudflare, or another reverse proxy, stats may under-report requests served before WordPress.')
+				: h('div', { className: 'text-xs text-zinc-500 mt-4', key: 'disabled-copy' }, 'Stats are disabled. The dashboard will not refresh or write live request counters until this switch is enabled.'),
+			enabled
+				? h('details', { className: 'uc-accordion uc-accordion--card mt-4', open: true, key: 'details' }, [
+					h('summary', { key: 'summary' }, 'Show detailed stats'),
+					h('div', { className: 'uc-summary-grid mt-4', key: 'grid' }, [
+						h(StatCard, {
+							label: 'Cached Pages',
+							value: formatNumber(typeof stats.pagesCached !== 'undefined' ? stats.pagesCached : stats.pageCacheFiles),
+							hint: 'Stored HTML cache files',
+							key: 'pages',
+						}),
+						h(StatCard, {
+							label: 'Optimized Images',
+							value: formatNumber(typeof stats.imagesOptimized !== 'undefined' ? stats.imagesOptimized : stats.optimizedImages),
+							hint: formatNumber(typeof stats.avifImagesOptimized !== 'undefined' ? stats.avifImagesOptimized : stats.avifFiles) + ' AVIF · ' + formatNumber(typeof stats.webpImagesOptimized !== 'undefined' ? stats.webpImagesOptimized : stats.webpFiles) + ' WebP',
+							key: 'images',
+						}),
+						h(StatCard, {
+							label: 'Object Entries',
+							value: formatObjectEntries(stats),
+							hint: getObjectEntriesHint(stats),
+							action: {
+								label: '+',
+								title: 'Run full object-cache count',
+								onClick: onFullObjectCount,
+								disabled: busy || !!(asyncActions && asyncActions.object_cache_full_count),
+							},
+							key: 'object-cache',
+						}),
+						h(StatCard, { label: 'Cache Size', value: stats.cacheSizeHuman || '0 B', hint: 'Total cache footprint', key: 'size' }),
+						h(StatCard, { key: 'hits', label: 'Cache Hits', value: formatNumber(stats.pageCacheHits), hint: diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache' }),
+						h(StatCard, { key: 'misses', label: 'Render Misses', value: formatNumber(stats.pageCacheMisses), hint: 'Reached WordPress render path' }),
+						h(StatCard, { key: 'bypasses', label: 'Bypasses', value: formatNumber(stats.pageCacheBypasses), hint: 'Skipped before buffering' }),
+						h(StatCard, { key: 'ratio', label: 'Hit Ratio', value: formatPercent(stats.pageCacheHitRatio), hint: 'Hits ÷ (hits + misses)' }),
+					]),
+				])
+				: h('details', { className: 'uc-accordion uc-accordion--card mt-4', key: 'manual-details' }, [
+					h('summary', { key: 'summary' }, 'Manual object-cache diagnostics'),
+					h('div', { className: 'uc-summary-grid mt-4', key: 'grid' }, [
+						h(StatCard, {
+							label: 'Object Entries',
+							value: formatObjectEntries(stats),
+							hint: getObjectEntriesHint(stats),
+							action: {
+								label: '+',
+								title: 'Run full object-cache count',
+								onClick: onFullObjectCount,
+								disabled: busy || !!(asyncActions && asyncActions.object_cache_full_count),
+							},
+							key: 'object-cache',
+						}),
+						h(StatCard, { label: 'Cache Size', value: stats.cacheSizeHuman || '0 B', hint: 'Static cache footprint', key: 'size' }),
+					]),
+				]),
+		]);
+	}
 
 	function formatBytes(value) {
 		const num = Number(value || 0);
@@ -600,16 +702,61 @@
 		};
 	}
 
+	const WARM_HTML_JOB_TYPES = ['warm', 'warm_menu'];
+	const WARM_CSS_JOB_TYPES = [
+		'warm_css',
+		'warm_menu_css',
+		'warm_css_homepage',
+		'warm_menu_css_homepage',
+		'warm_css_shared',
+		'warm_menu_css_shared',
+		'warm_css_per_page',
+		'warm_menu_css_per_page',
+	];
+	const WARM_PER_PAGE_CSS_JOB_TYPES = ['warm_css', 'warm_menu_css', 'warm_css_per_page', 'warm_menu_css_per_page'];
+
+	function normalizeCssBundleScopeValue(scope) {
+		scope = String(scope || 'homepage').toLowerCase();
+		return ['homepage', 'shared', 'per-page'].indexOf(scope) !== -1 ? scope : 'homepage';
+	}
+
+	function getCssWarmJobType(baseScope, cssBundleScope) {
+		const prefix = baseScope === 'menu' ? 'warm_menu_css' : 'warm_css';
+		const scope = normalizeCssBundleScopeValue(cssBundleScope);
+		if ('shared' === scope) {
+			return prefix + '_shared';
+		}
+		if ('per-page' === scope) {
+			return prefix + '_per_page';
+		}
+		return prefix + '_homepage';
+	}
+
+	function getCssWarmBundleLabel(scope, plural) {
+		scope = normalizeCssBundleScopeValue(scope);
+		if ('shared' === scope) {
+			return plural ? 'Shared CSS Bundles' : 'Shared CSS Bundle';
+		}
+		if ('per-page' === scope) {
+			return plural ? 'Separate CSS Bundles' : 'Separate CSS Bundle';
+		}
+		return plural ? 'Homepage CSS Bundles' : 'Homepage CSS Bundle';
+	}
+
 	function isWarmJobType(type) {
-		return ['warm', 'warm_css', 'warm_menu', 'warm_menu_css'].indexOf(type) !== -1;
+		return WARM_HTML_JOB_TYPES.indexOf(type) !== -1 || WARM_CSS_JOB_TYPES.indexOf(type) !== -1;
 	}
 
 	function isWarmCssJobType(type) {
-		return ['warm_css', 'warm_menu_css'].indexOf(type) !== -1;
+		return WARM_CSS_JOB_TYPES.indexOf(type) !== -1;
+	}
+
+	function shouldBuildCssBundleForWarmJob(type) {
+		return WARM_PER_PAGE_CSS_JOB_TYPES.indexOf(type) !== -1;
 	}
 
 	function getWarmScopeForType(type) {
-		return ['warm_menu', 'warm_menu_css'].indexOf(type) !== -1 ? 'menu' : 'full';
+		return String(type || '').indexOf('warm_menu') === 0 ? 'menu' : 'full';
 	}
 
 	async function processJobItem(type, item) {
@@ -619,7 +766,7 @@
 		while (attempt <= MAX_ITEM_RETRIES) {
 			try {
 				if (isWarmJobType(type)) {
-					const result = await apiRequest('crawl_page', { url: item, buildCssBundle: isWarmCssJobType(type) });
+					const result = await apiRequest('crawl_page', { url: item, buildCssBundle: shouldBuildCssBundleForWarmJob(type) });
 					const detail = result && result.message ? ' — ' + result.message : '';
 					await sleep(40);
 					return ((result && result.cached !== false) ? 'Cached: ' : 'Skipped: ') + item + detail;
@@ -828,11 +975,21 @@
 		]);
 	}
 
-	function StatCard({ label, value, hint }) {
-		return h('div', { className: 'uc-card' }, [
-			h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-2', key: 'label' }, label),
-			h('div', { className: 'text-3xl font-black tracking-tight text-white', key: 'value' }, value),
-			h('div', { className: 'text-xs text-zinc-500 mt-2', key: 'hint' }, hint || '\u00A0'),
+	function StatCard({ label, value, hint, action }) {
+		return h('div', { className: 'uc-card relative' }, [
+			h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-2 pr-8', key: 'label' }, label),
+			h('div', { className: 'text-3xl font-black tracking-tight text-white pr-8', key: 'value' }, value),
+			h('div', { className: 'text-xs text-zinc-500 mt-2 pr-8', key: 'hint' }, hint || '\u00A0'),
+			action
+				? h('button', {
+					type: 'button',
+					className: 'uc-stat-card-action',
+					title: action.title || '',
+					onClick: action.onClick,
+					disabled: !!action.disabled,
+					key: 'action',
+				}, action.label || '+')
+				: null,
 		]);
 	}
 
@@ -1158,7 +1315,7 @@
 		const variant = tone || (ok ? 'success' : 'neutral');
 		return h('span', {
 			className: classNames(
-				'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wider',
+				'inline-flex items-center justify-end text-right px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wider',
 				'success' === variant
 					? 'bg-emerald-500/15 text-emerald-400 '
 					: ('warning' === variant
@@ -2108,6 +2265,10 @@
 		}, []);
 
 		useEffect(() => {
+			if (!settings.cacheStatsEnabled) {
+				return undefined;
+			}
+
 			let interval = null;
 
 			const runRefresh = async () => {
@@ -2154,7 +2315,7 @@
 				stopInterval();
 				document.removeEventListener('visibilitychange', handleVisibilityChange);
 			};
-		}, []);
+		}, [settings.cacheStatsEnabled]);
 
 		useEffect(() => {
 			setAdvancedForm({
@@ -2409,6 +2570,15 @@
 			}, 'object_cache_flush');
 		}
 
+		async function runFullObjectCount() {
+			await queueDashboardAction('object_cache_full_count', {}, {
+				queued: 'Full object-cache count processing via dashboard…',
+				success: 'Full object-cache count finished.',
+				failed: 'Full object-cache count failed.',
+				runningLabel: 'Counting…',
+			}, 'object_cache_full_count');
+		}
+
 		async function saveVarnishSettings() {
 			if (busy) {
 				return;
@@ -2598,7 +2768,7 @@
 				if (typeof afterResult === 'function') {
 					afterResult(result, completed);
 				}
-				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'apcu_flush', 'varnish_flush_all'].indexOf(action) !== -1) {
+				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'object_cache_full_count', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'apcu_flush', 'varnish_flush_all'].indexOf(action) !== -1) {
 					try {
 						await refreshStats();
 					} catch (error) {}
@@ -2677,6 +2847,27 @@
 			settingsSaveTimerRef.current = window.setTimeout(flushQueuedSettings, SETTINGS_SAVE_DEBOUNCE_MS);
 		}
 
+		function getCurrentCssBundleScope() {
+			return normalizeCssBundleScopeValue(settingsRef.current && settingsRef.current.cssBundleScope);
+		}
+
+		async function buildHomepageCssBundleBeforeWarm(scope, actionKey) {
+			scope = normalizeCssBundleScopeValue(scope);
+			if ('per-page' === scope) {
+				return true;
+			}
+
+			const label = getCssWarmBundleLabel(scope, false);
+			const completed = await queueDashboardAction('warm_frontpage_html_css', {}, {
+				queued: label + ' build processing via dashboard…',
+				success: label + ' built and homepage HTML warmed.',
+				failed: label + ' build failed.',
+				runningLabel: 'Building CSS…',
+			}, actionKey || ('prepare_' + scope + '_css_bundle'));
+
+			return !!(completed && completed.status === 'done');
+		}
+
 		async function warmFrontpageHtml() {
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
@@ -2728,7 +2919,11 @@
 				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
 				return;
 			}
-			const controls = getJobControls('warm_css');
+
+			const cssScope = getCurrentCssBundleScope();
+			const jobType = getCssWarmJobType('full', cssScope);
+			const bundleLabel = getCssWarmBundleLabel(cssScope, true);
+			const controls = getJobControls(jobType);
 			if (!forceRestart && controls.canResume) {
 				await runJob(savedJob, false);
 				return;
@@ -2738,19 +2933,31 @@
 				return;
 			}
 
-			await runJob({
-				type: 'warm_css',
-				label: 'Warming Full Site HTML Cache + CSS Bundles',
-				cursor: '',
-				nextCursor: '',
-				processed: 0,
-				total: 0,
-				pendingItems: [],
-				hasMore: true,
-				logs: ['Starting full site crawler + CSS Bundles…'],
-				startTime: Date.now(),
-				batchSize: DEFAULT_QUEUE_BATCH_SIZE,
-			}, !!forceRestart);
+			setAllUrlsCssBusy(true);
+			try {
+				if ('per-page' !== cssScope) {
+					const prepared = await buildHomepageCssBundleBeforeWarm(cssScope, 'warm_full_prepare_' + cssScope + '_css');
+					if (!prepared) {
+						return;
+					}
+				}
+
+				await runJob({
+					type: jobType,
+					label: 'Warming Full Site HTML Cache + ' + bundleLabel,
+					cursor: '',
+					nextCursor: '',
+					processed: 0,
+					total: 0,
+					pendingItems: [],
+					hasMore: true,
+					logs: ['Starting full site crawler + ' + bundleLabel + '…'],
+					startTime: Date.now(),
+					batchSize: DEFAULT_QUEUE_BATCH_SIZE,
+				}, !!forceRestart);
+			} finally {
+				setAllUrlsCssBusy(false);
+			}
 		}
 
 		async function startMenuWarming(forceRestart = false) {
@@ -2793,7 +3000,11 @@
 				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
 				return;
 			}
-			const controls = getJobControls('warm_menu_css');
+
+			const cssScope = getCurrentCssBundleScope();
+			const jobType = getCssWarmJobType('menu', cssScope);
+			const bundleLabel = getCssWarmBundleLabel(cssScope, true);
+			const controls = getJobControls(jobType);
 			if (!forceRestart && controls.canResume) {
 				await runJob(savedJob, false);
 				return;
@@ -2803,20 +3014,32 @@
 				return;
 			}
 
-			await runJob({
-				type: 'warm_menu_css',
-				scope: 'menu',
-				label: 'Warming Menu HTML Cache + CSS Bundles',
-				cursor: '',
-				nextCursor: '',
-				processed: 0,
-				total: 0,
-				pendingItems: [],
-				hasMore: true,
-				logs: ['Starting menu URL crawler + CSS Bundles…'],
-				startTime: Date.now(),
-				batchSize: DEFAULT_QUEUE_BATCH_SIZE,
-			}, !!forceRestart);
+			setMenuUrlsCssBusy(true);
+			try {
+				if ('per-page' !== cssScope) {
+					const prepared = await buildHomepageCssBundleBeforeWarm(cssScope, 'warm_menu_prepare_' + cssScope + '_css');
+					if (!prepared) {
+						return;
+					}
+				}
+
+				await runJob({
+					type: jobType,
+					scope: 'menu',
+					label: 'Warming Menu HTML Cache + ' + bundleLabel,
+					cursor: '',
+					nextCursor: '',
+					processed: 0,
+					total: 0,
+					pendingItems: [],
+					hasMore: true,
+					logs: ['Starting menu URL crawler + ' + bundleLabel + '…'],
+					startTime: Date.now(),
+					batchSize: DEFAULT_QUEUE_BATCH_SIZE,
+				}, !!forceRestart);
+			} finally {
+				setMenuUrlsCssBusy(false);
+			}
 		}
 
 		function updateSetting(key, value) {
@@ -3071,9 +3294,10 @@
 				if (completed) {
 					let finalNotice = { type: 'success', text: isWarmJobType(state.type) ? 'Cache warming complete.' : 'Media optimization complete.' };
 					if (isWarmCssJobType(state.type)) {
+						const warmedScopeLabel = getWarmScopeForType(state.type) === 'menu' ? 'Menu URLs' : 'Full site HTML';
 						finalNotice = {
 							type: 'success',
-							text: 'warm_menu_css' === state.type ? 'Menu URLs warmed and CSS bundles built.' : 'Full site HTML warmed and CSS bundles built.',
+							text: warmedScopeLabel + ' warmed and CSS bundle action completed.',
 						};
 					}
 					await refreshStats();
@@ -3315,6 +3539,12 @@ async function deleteAllPluginDataAndDeactivate() {
 		const activePerformanceProfile = getActivePerformanceProfile(settings);
 		const pageCacheReady = !!settings.pageCacheEnabled;
 		const cssBundleReady = pageCacheReady && !!settings.homepageCssBundleEnabled;
+		const cssWarmScope = normalizeCssBundleScopeValue(settings.cssBundleScope || 'homepage');
+		const menuCssWarmJobType = getCssWarmJobType('menu', cssWarmScope);
+		const fullCssWarmJobType = getCssWarmJobType('full', cssWarmScope);
+		const homepageCssButtonLabel = 'Warm Up Homepage HTML Cache + Homepage CSS Bundle';
+		const menuCssButtonLabel = 'Warm Up Menu HTML Cache + ' + getCssWarmBundleLabel(cssWarmScope, true);
+		const fullCssButtonLabel = 'Warm Up Full Site HTML Cache + ' + getCssWarmBundleLabel(cssWarmScope, true);
 			const cssBundleDiagnostics = {
 				bundlesBuilt: typeof stats.homepageCssBundlesBuilt !== 'undefined' ? stats.homepageCssBundlesBuilt : stats.frontpageCssBundlesBuilt,
 				stylesBundled: typeof stats.homepageCssStylesBundled !== 'undefined' ? stats.homepageCssStylesBundled : stats.frontpageCssStylesBundled,
@@ -3354,45 +3584,16 @@ async function deleteAllPluginDataAndDeactivate() {
 
 			h(ProgressPanel, { process, etaText, onCancel: requestCancel, key: 'progress' }),
 
-			h('div', { className: 'uc-summary-grid', key: 'stats' }, [
-				h(StatCard, {
-					label: 'Cached Pages',
-					value: formatNumber(
-						typeof stats.pagesCached !== 'undefined' ? stats.pagesCached : stats.pageCacheFiles
-					),
-					hint: 'Stored HTML cache files',
-					key: 'pages',
-				}),
-				h(StatCard, {
-					label: 'Optimized Images',
-					value: formatNumber(
-						typeof stats.imagesOptimized !== 'undefined' ? stats.imagesOptimized : stats.optimizedImages
-					),
-					hint:
-						formatNumber(
-							typeof stats.avifImagesOptimized !== 'undefined' ? stats.avifImagesOptimized : stats.avifFiles
-						) + ' AVIF · ' + formatNumber(
-							typeof stats.webpImagesOptimized !== 'undefined' ? stats.webpImagesOptimized : stats.webpFiles
-						) + ' WebP',
-					key: 'images',
-				}),
-				h(StatCard, {
-					label: 'Object Entries',
-					value: formatNumber(stats.objectCacheEntries),
-					hint: stats.objectCacheSizeHuman || 'File object cache',
-					key: 'object-cache',
-				}),
-				h(StatCard, {
-					label: 'Cache Size',
-					value: stats.cacheSizeHuman || '0 B',
-					hint: 'Total cache footprint',
-					key: 'size',
-				}),
-				h(StatCard, { key: 'hits', label: 'Cache Hits', value: formatNumber(stats.pageCacheHits), hint: 'Served from advanced-cache' }),
-				h(StatCard, { key: 'misses', label: 'Render Misses', value: formatNumber(stats.pageCacheMisses), hint: 'Reached WordPress render path' }),
-				h(StatCard, { key: 'bypasses', label: 'Bypasses', value: formatNumber(stats.pageCacheBypasses), hint: 'Skipped before buffering' }),
-				h(StatCard, { key: 'ratio', label: 'Hit Ratio', value: formatPercent(stats.pageCacheHitRatio), hint: 'Hits ÷ (hits + misses)' }),
-			]),
+			h(CacheStatisticsPanel, {
+				settings,
+				stats,
+				diagnostics,
+				busy,
+				asyncActions,
+				onToggleStats: (value) => updateSetting('cacheStatsEnabled', value),
+				onFullObjectCount: runFullObjectCount,
+				key: 'cache-statistics-panel',
+			}),
 
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4', key: 'jobs' }, [
 				h(
@@ -3421,7 +3622,7 @@ async function deleteAllPluginDataAndDeactivate() {
 									onClick: warmFrontpageHtmlCss,
 									disabled: !cssBundleReady || warmBusy,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !homepageHtmlCssBusy ? 'Engine Busy' : (homepageHtmlCssBusy ? 'Warming Homepage HTML + CSS Bundle…' : 'Warm Up Homepage HTML Cache + CSS Bundle')))
+								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !homepageHtmlCssBusy ? 'Engine Busy' : (homepageHtmlCssBusy ? 'Warming Homepage HTML + Homepage CSS Bundle…' : homepageCssButtonLabel)))
 							),
 							h(
 								'button',
@@ -3439,7 +3640,7 @@ async function deleteAllPluginDataAndDeactivate() {
 									onClick: () => startMenuWarmingWithFrontpageCss(false),
 									disabled: !cssBundleReady || warmBusy,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !menuUrlsCssBusy ? 'Engine Busy' : (menuUrlsCssBusy ? 'Building CSS Bundles…' : (getJobControls('warm_menu_css').canResume ? 'Resume Warm Up Menu HTML Cache + CSS Bundles' : 'Warm Up Menu HTML Cache + CSS Bundles'))))
+								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !menuUrlsCssBusy ? 'Engine Busy' : (menuUrlsCssBusy ? 'Warming Menu HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(menuCssWarmJobType).canResume ? 'Resume ' + menuCssButtonLabel : menuCssButtonLabel))))
 							),
 							h(
 								'button',
@@ -3457,7 +3658,7 @@ async function deleteAllPluginDataAndDeactivate() {
 									onClick: () => startWarmingAllWithFrontpageCss(false),
 									disabled: !cssBundleReady || warmBusy,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !allUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Building CSS Bundles…' : (getJobControls('warm_css').canResume ? 'Resume Warm Up Full Site HTML Cache + CSS Bundles' : 'Warm Up Full Site HTML Cache + CSS Bundles'))))
+								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !allUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Warming Full Site HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(fullCssWarmJobType).canResume ? 'Resume ' + fullCssButtonLabel : fullCssButtonLabel))))
 							)
 						]),
 						h('div', { className: 'uc-diagnostic-group mt-5', key: 'warm-css-bundle-diagnostics' }, [
@@ -3538,7 +3739,7 @@ async function deleteAllPluginDataAndDeactivate() {
 					}),
 					h(ToggleRow, {
 						label: 'LCP Image Priority',
-						description: 'Prioritize the likely hero/LCP image. When Fix sliders / hero sections is enabled, SR7 first-slide image layers are marked through the SR7 lifecycle without hardcoded IDs.',
+						description: 'Prioritize likely hero/LCP images. When Fix sliders / hero sections is enabled, SR7/Revolution Slider first-slide image layers are discovered from SR7 JSON and verified optimized image candidates, so hashed revslider assets do not need to be hardcoded.',
 						checked: settings.lcpImagePriorityEnabled,
 						onChange: (value) => updateSetting('lcpImagePriorityEnabled', value),
 						disabled: busy || !mediaOptimizationEnabled || !!settings.frontendSafeModeEnabled,
@@ -3737,6 +3938,14 @@ h(ToggleRow, {
 									onChange: (value) => updateSetting('criticalRequestChainReliefEnabled', value),
 									disabled: busy,
 									key: 'critical-request-chain-relief',
+								}),
+h(ToggleRow, {
+									label: 'LCP Boundary Defer',
+									description: 'Use the detected LCP image or verified SR7 first-slide image as a conservative visual boundary and delay eligible local enhancement scripts printed after that boundary. Core, WooCommerce, Elementor, sliders, dependencies, and manual exclusions stay protected. Off by default and not enabled by any profile.',
+									checked: !!settings.lcpBoundaryDeferEnabled,
+									onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
+									disabled: busy || !settings.lcpImagePriorityEnabled || !!settings.frontendSafeModeEnabled,
+									key: 'lcp-boundary-defer',
 								})
 					]
 				),
@@ -4149,11 +4358,11 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 			h(APCuCard, { stats, settings, busy: busy || !!asyncActions.apcu_flush, onFlush: flushApcu, onToggleScheduledCleanup: (value) => updateSetting('apcuFlushOnScheduledCleanup', value), key: 'apcu-card' }),
 			]),
 
-			h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
+			settings.cacheStatsEnabled ? h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
 				h(DiagnosticsCard, { diagnostics, stats, key: 'diagnostics' }),
 				h(ActivitySummaryCard, { stats, cssBundleDiagnostics, key: 'activity-summary' }),
-			]),
-			h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }),
+			]) : null,
+			settings.cacheStatsEnabled ? h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }) : null,
 
 			h(
 				Card,
@@ -4266,12 +4475,12 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					h('div', { className: 'space-y-3' }, [
 						h('p', { className: 'm-0' }, 'Enable Page Caching, save settings, then run Flush All Cache once.'),
 						h('div', { className: 'space-y-1' }, [
-							h('div', { key: 'w1' }, 'Warm Up Homepage HTML Cache: homepage only.'),
-							h('div', { key: 'w2' }, 'Warm Up Homepage HTML Cache + CSS Bundle: homepage HTML plus homepage CSS bundle rebuild.'),
-							h('div', { key: 'w3' }, 'Warm Up Menu HTML Cache: URLs found in public menus.'),
-							h('div', { key: 'w4' }, 'Warm Up Menu HTML Cache + CSS Bundles: menu URLs plus CSS bundling based on the selected CSS Bundling Scope.'),
-							h('div', { key: 'w5' }, 'Warm Up Full Site HTML Cache: crawl all public crawlable URLs.'),
-							h('div', { key: 'w6' }, 'Warm Up Full Site HTML Cache + CSS Bundles: full crawl plus CSS bundling based on the selected CSS Bundling Scope.'),
+							h('div', { key: 'w1' }, 'Warm Up Homepage HTML Cache: homepage HTML only.'),
+							h('div', { key: 'w2' }, 'Warm Up Homepage HTML Cache + Homepage CSS Bundle: homepage HTML plus the homepage CSS bundle.'),
+							h('div', { key: 'w3' }, 'Warm Up Menu HTML Cache: URLs found in public menus, HTML only.'),
+							h('div', { key: 'w4' }, 'Warm Up Menu HTML Cache + Homepage/Shared/Separate CSS Bundles: follows the selected CSS Bundling Scope.'),
+							h('div', { key: 'w5' }, 'Warm Up Full Site HTML Cache: crawl all public crawlable URLs, HTML only.'),
+							h('div', { key: 'w6' }, 'Warm Up Full Site HTML Cache + Homepage/Shared/Separate CSS Bundles: follows the selected CSS Bundling Scope.'),
 						]),
 						h('div', { className: 'space-y-1' }, [
 							h('div', { className: 'text-zinc-300 font-semibold', key: 'cli-title' }, 'WP-CLI examples'),
