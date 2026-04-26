@@ -53,7 +53,6 @@
 		'redisReadTimeoutMs',
 		'brotliEnabled',
 		'gzipEnabled',
-		'avifConversionEnabled',
 		'mediaOptimizationEnabled',
 		'mediaGenerateOnUploadEnabled',
 		'mediaGenerateOnDemandEnabled',
@@ -109,11 +108,10 @@
 		'preRenderOnSave',
 		'woocommerceSafeModeEnabled',
 		'cacheCleanupEnabled',
+		'apcuFlushOnScheduledCleanup',
 		'cronWarmEnabled',
 		'cronWarmStartAfterCleanup',
 		'cronWarmStartAfterManualPurge',
-		'cronWarmStartAfterFlush',
-		'warmAfterScheduledCleanup',
 		'cronWarmPagesPerMinute',
 		'scheduledWarmLimit',
 		'staleWhileRevalidateEnabled',
@@ -135,28 +133,28 @@
 	};
 	const PERFORMANCE_PROFILES = {
 		off: { label: 'All Off', description: 'Disable page cache, object cache, media, CSS, JS, fonts, prefetch, warmup, and scheduled jobs. Best for first install or troubleshooting.', patch: {
-			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, avifConversionEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
+			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
 			deferJsEnabled: false, delayThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, pageCssBundleOnEntryEnabled: false, criticalCssEnabled: false, criticalCssInlineEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
-			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, cronWarmStartAfterFlush: false, warmAfterScheduledCleanup: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
+			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
 			homepageCssBundleMode: 'safe', cssBundleScope: 'homepage', mediaOutputMode: 'auto',
 		} },
 		safe: { label: 'Safe', description: 'Enables page caching, WooCommerce-safe bypasses, browser cache headers, save-time warmup, and stale protection. No JS/CSS/media rewrites.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			cronWarmEnabled: false, cacheCleanupEnabled: false, avifConversionEnabled: false, mediaOptimizationEnabled: false, deferJsEnabled: false, delayThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false,
+			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, deferJsEnabled: false, delayThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false,
 		} },
 		balanced: { label: 'Balanced', description: 'Adds object cache, media optimization, Safe CLS/LCP image hints, conservative JS defer, safe CSS bundling, and font-display improvements.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: true, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			avifConversionEnabled: true, mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
+			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'safe', cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: false, criticalCssEnabled: true, criticalCssInlineEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, cronWarmEnabled: false, cacheCleanupEnabled: false, cacheQueryStringsEnabled: false,
 		} },
 		aggressive: { label: 'Aggressive', description: 'Balanced plus delayed third-party JS, main-thread relief, aggressive CSS bundling, CSS bundles on warm, speculation prefetch, cron warmup, and scheduled cleanup.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: true, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			avifConversionEnabled: true, mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: true, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
+			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: true, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
 			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'aggressive', cssBundleScope: 'per-page', pageCssBundleOnEntryEnabled: true, criticalCssEnabled: true, criticalCssInlineEnabled: false, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
-			speculationRulesEnabled: true, cronWarmEnabled: true, cronWarmStartAfterCleanup: true, cronWarmStartAfterManualPurge: true, cronWarmStartAfterFlush: true, warmAfterScheduledCleanup: true, cacheCleanupEnabled: true, cacheQueryStringsEnabled: false,
+			speculationRulesEnabled: true, cronWarmEnabled: true, cronWarmStartAfterCleanup: true, cronWarmStartAfterManualPurge: true, cacheCleanupEnabled: true, cacheQueryStringsEnabled: false,
 		} },
 	};
 
@@ -468,6 +466,7 @@
 			varnish_test: { path: 'varnish/test', method: 'POST' },
 			varnish_flush_all: { path: 'varnish/flush-all', method: 'POST' },
 			opcache_flush: { path: 'opcache/flush', method: 'POST' },
+			apcu_flush: { path: 'apcu/flush', method: 'POST' },
 			redis_test: { path: 'object-cache/redis-test', method: 'POST' },
 			object_cache_flush: { path: 'object-cache/flush', method: 'POST' },
 			cron_warm_start: { path: 'cron-warm/start', method: 'POST' },
@@ -859,7 +858,7 @@
 	}
 
 	function ToggleRow({ label, description, checked, onChange, disabled }) {
-		return h('div', { className: 'flex items-center justify-between py-4 border-b border-white/5 last:border-0' }, [
+		return h('div', { className: 'flex items-center justify-between py-4' }, [
 			h('div', { key: 'left' }, [
 				h('div', { className: 'text-sm font-medium text-white' }, label),
 				h('div', { className: 'text-xs text-zinc-500' }, description),
@@ -1009,7 +1008,7 @@
 			return null;
 		}
 
-		return h('div', { className: 'flex flex-col gap-1 py-2 border-b border-white/5 last:border-0' }, [
+		return h('div', { className: 'flex flex-col gap-1 py-2' }, [
 			h('div', { className: 'text-[11px] tracking-widest text-zinc-500' }, label),
 			h('div', { className: classNames('text-sm text-white break-all', mono ? 'font-mono text-[12px]' : '') }, String(value)),
 		]);
@@ -1053,7 +1052,7 @@
 					h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, 'Top bypass reasons'),
 					reasonEntries.length
 						? h('div', { className: 'space-y-2' }, reasonEntries.map(([reason, count]) =>
-							h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0', key: reason }, [
+							h('div', { className: 'flex items-center justify-between gap-4 py-2', key: reason }, [
 								h('div', { className: 'text-sm text-white break-all' }, reason),
 								h('div', { className: 'text-xs font-mono text-zinc-400' }, formatNumber(count)),
 							])
@@ -1064,7 +1063,7 @@
 		]);
 	}
 
-	function ActivitySummaryCard({ stats }) {
+	function ActivitySummaryCard({ stats, cssBundleDiagnostics }) {
 		const lastPurge = stats && stats.lastPurge ? stats.lastPurge : {};
 		const lastWarm = stats && stats.lastWarm ? stats.lastWarm : {};
 		const counterRows = [
@@ -1087,15 +1086,24 @@
 			['Last warm time', formatLooseTime(lastWarm)],
 		];
 
+		const cssSummary = cssBundleDiagnostics || {};
+		const cssSummaryRows = [
+			['Bundles built', false, formatNumber(cssSummary.bundlesBuilt || 0)],
+			['Styles bundled/scanned', false, formatNumber(cssSummary.stylesBundled || 0) + ' / ' + formatNumber(cssSummary.stylesScanned || 0)],
+			['Skipped/unresolved', false, formatNumber(cssSummary.stylesSkipped || 0) + ' / ' + formatNumber(cssSummary.stylesUnresolved || 0)],
+			['Last CSS bundle warm', false, formatLooseTime(cssSummary.lastWarm || null)],
+		];
+		const cssSummaryMessage = cssSummary.lastWarm && cssSummary.lastWarm.message ? cssSummary.lastWarm.message : '';
+
 		function renderSummaryRows(rows) {
-			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0', key: row[0] }, [
+			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 				h('div', { className: 'text-sm text-white' }, row[0]),
 				h(StatusPill, { ok: false, text: row[2], tone: 'neutral' }),
 			])));
 		}
 
 		function renderStackRows(rows) {
-			return h('div', { className: 'space-y-3' }, rows.filter((row) => row[1] !== null && typeof row[1] !== 'undefined' && row[1] !== '').map((row) => h('div', { className: 'py-2 border-b border-white/5 last:border-0', key: row[0] }, [
+			return h('div', { className: 'space-y-3' }, rows.filter((row) => row[1] !== null && typeof row[1] !== 'undefined' && row[1] !== '').map((row) => h('div', { className: 'py-2', key: row[0] }, [
 				h('div', { className: 'text-sm text-white mb-1' }, row[0]),
 				h('div', { className: 'text-xs text-zinc-300 break-all whitespace-pre-wrap' }, String(row[1])),
 			])));
@@ -1112,6 +1120,11 @@
 			h('div', { className: 'uc-diagnostic-group', key: 'activity-status' }, [
 				h('div', { className: 'uc-section-title' }, 'Recent status'),
 				renderSummaryRows(statusRows),
+			]),
+			h('div', { className: 'uc-diagnostic-group', key: 'activity-css-bundle-summary' }, [
+				h('div', { className: 'uc-section-title' }, 'CSS Bundle Summary'),
+				renderSummaryRows(cssSummaryRows),
+				cssSummaryMessage ? h('div', { className: 'text-xs text-zinc-500 pt-1' }, cssSummaryMessage) : null,
 			]),
 			h('div', { className: 'uc-diagnostic-group', key: 'activity-timeline' }, [
 				h('div', { className: 'uc-section-title' }, 'Recent activity'),
@@ -1147,10 +1160,10 @@
 			className: classNames(
 				'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wider',
 				'success' === variant
-					? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
+					? 'bg-emerald-500/15 text-emerald-400 '
 					: ('warning' === variant
-						? 'bg-cyan-500/5 text-cyan-400 border border-cyan-500/20'
-						: 'bg-zinc-700/40 text-zinc-300 border border-zinc-600/40')
+						? 'bg-cyan-500/5 text-cyan-400 '
+						: 'bg-zinc-700/40 text-zinc-300 ')
 			),
 		}, text);
 	}
@@ -1163,7 +1176,9 @@
 		const runtimeConfigDiag = pathDiagnostics.runtimeConfig || {};
 		const environmentDiag = diagnostics.environment || {};
 		const mediaRuntimeDiag = diagnostics.mediaRuntime || {};
+		const analyticsBackend = diagnostics.analytics || {};
 		const analyticsDiag = pathDiagnostics.analytics || {};
+		const analyticsProbeText = analyticsBackend && analyticsBackend.enabled ? ((analyticsBackend.readWrite === false) ? ' · probe failed' : (analyticsBackend.readWrite ? ' · probe passed' : '')) : '';
 		const advancedCacheDiag = pathDiagnostics.advancedCache || {};
 		const objectCacheDiag = pathDiagnostics.objectCache || {};
 		const cacheDirDiag = pathDiagnostics.cacheDir || {};
@@ -1180,11 +1195,33 @@
 		const queryStringCachingText = loadedRuntime.cache_query_strings
 			? ('Enabled' + (allowlist.length ? ' - Whitelist: ' + allowlist.join(', ') : ' - Whitelist empty: caching all non-excluded query variants'))
 			: 'Disabled';
+		const objectCacheStatus = diagnostics.objectCache || {};
+		const pageCacheStatus = diagnostics.pageCache || {};
+		const selectedObjectBackend = objectCacheStatus.selectedBackend || 'redis';
+		const activeObjectBackend = objectCacheStatus.activeBackend || selectedObjectBackend;
+		const selectedObjectBackendText = selectedObjectBackend ? String(selectedObjectBackend).toUpperCase() : 'Unavailable';
+		const activeObjectBackendText = activeObjectBackend ? String(activeObjectBackend).toUpperCase() : 'Unavailable';
+
+		function describeDropIn(diag) {
+			if (!diag || !diag.exists) {
+				return 'Missing';
+			}
+			const parts = ['Present', diag.managed ? 'Managed by UltraCache' : 'Not managed'];
+			if (diag.dropInBuild) {
+				parts.push('Build ' + diag.dropInBuild);
+			}
+			return parts.join(' · ');
+		}
+
 		const statusRows = [
-			['Page Cache', diagnostics.pageCache && diagnostics.pageCache.active, diagnostics.pageCache && diagnostics.pageCache.active ? 'Active' : diagnostics.pageCache && diagnostics.pageCache.enabled ? 'Configured' : 'Disabled'],
-			['Object Cache', diagnostics.objectCache && diagnostics.objectCache.active, diagnostics.objectCache && diagnostics.objectCache.active ? ('Active · ' + (diagnostics.objectCache.activeBackend || diagnostics.objectCache.selectedBackend || 'disk')) : diagnostics.objectCache && diagnostics.objectCache.enabled ? ('Configured · ' + (diagnostics.objectCache.selectedBackend || 'disk')) : 'Disabled'],
+			['Page cache switch', !!pageCacheStatus.enabled, pageCacheStatus.enabled ? 'Enabled' : 'Disabled'],
+			['Page cache drop-in active', !!pageCacheStatus.active, pageCacheStatus.active ? 'Active' : (pageCacheStatus.enabled ? 'Configured · drop-in inactive' : 'Disabled')],
+			['Object cache switch', !!objectCacheStatus.enabled, objectCacheStatus.enabled ? 'Enabled' : 'Disabled'],
+			['Selected object cache backend', !!objectCacheStatus.enabled, objectCacheStatus.enabled ? selectedObjectBackendText : 'Disabled'],
+			['Active object cache backend', !!objectCacheStatus.active, objectCacheStatus.active ? activeObjectBackendText : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled')],
+			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : ('Disabled' + (analyticsBackend.message ? ' · ' + analyticsBackend.message : ''))],
 			['Cron Warm Up', diagnostics.cronWarm && diagnostics.cronWarm.active, diagnostics.cronWarm && diagnostics.cronWarm.active ? ('Running · ' + formatNumber(diagnostics.cronWarm.processed || 0) + '/' + formatNumber(diagnostics.cronWarm.total || 0)) : diagnostics.cronWarm && diagnostics.cronWarm.enabled ? ((diagnostics.cronWarm.completed ? 'Completed' : 'Enabled') + ' · ' + formatNumber(diagnostics.cronWarm.pagesPerMinute || 0) + '/min') : 'Disabled'],
-				['Varnish', diagnostics.varnish && diagnostics.varnish.enabled, diagnostics.varnish && diagnostics.varnish.enabled ? ('Varnish mode: ' + (diagnostics.varnish.mode || 'http') + ' · ' + (((diagnostics.varnish.mode || 'http') === 'admin') ? 'BAN' : (diagnostics.varnish.method || 'BAN')) + ' · ' + ((diagnostics.varnish.servers || '').trim() || 'No endpoints')) : 'Disabled'],
+			['Varnish', diagnostics.varnish && diagnostics.varnish.enabled, diagnostics.varnish && diagnostics.varnish.enabled ? ('Varnish mode: ' + (diagnostics.varnish.mode || 'http') + ' · ' + (((diagnostics.varnish.mode || 'http') === 'admin') ? 'BAN' : (diagnostics.varnish.method || 'BAN')) + ' · ' + ((diagnostics.varnish.servers || '').trim() || 'No endpoints')) : 'Disabled'],
 			['Reverse Proxy', !!reverseProxy.detected, reverseProxyText],
 			['Brotli Compression', compressionStatus.brotli && compressionStatus.brotli.available, compressionStatus.brotli && compressionStatus.brotli.available ? (compressionStatus.preferred === 'brotli' ? 'Available · Preferred' : 'Available') : 'Unavailable'],
 			['Gzip Compression', compressionStatus.gzip && compressionStatus.gzip.available, compressionStatus.gzip && compressionStatus.gzip.available ? (compressionStatus.preferred === 'gzip' ? 'Available · Preferred' : 'Available') : 'Unavailable'],
@@ -1194,8 +1231,12 @@
 		];
 		const runtimeRows = [
 			['Cache directory', !!cacheDirDiag.exists, cacheDirDiag.exists ? (cacheDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
-			['Advanced cache drop-in', !!advancedCacheDiag.exists, advancedCacheDiag.exists ? (advancedCacheDiag.managed ? 'Present · Managed by UltraCache' : 'Present · Not managed') : 'Missing'],
-			['Object cache drop-in', !!objectCacheDiag.exists, objectCacheDiag.exists ? (objectCacheDiag.managed ? 'Present · Managed by UltraCache' : 'Present · Not managed') : 'Missing'],
+			['Advanced cache drop-in', !!advancedCacheDiag.exists, describeDropIn(advancedCacheDiag)],
+			['Advanced-cache generated version', !!advancedCacheDiag.dropInBuild, advancedCacheDiag.dropInBuild ? ('Build ' + advancedCacheDiag.dropInBuild) : 'Unavailable'],
+			['Object cache drop-in', !!objectCacheDiag.exists, describeDropIn(objectCacheDiag)],
+			['Object-cache generated version', !!objectCacheDiag.dropInBuild, objectCacheDiag.dropInBuild ? ('Build ' + objectCacheDiag.dropInBuild) : 'Unavailable'],
+			['Object-cache storage format', !!objectCacheDiag.storageFormat, objectCacheDiag.storageFormat || 'Unavailable'],
+			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : ('Disabled' + (analyticsBackend.message ? ' · ' + analyticsBackend.message : ''))],
 			['Runtime config', !!runtimeConfigDiag.exists && !!runtimeConfigDiag.valid, runtimeConfigDiag.exists ? (runtimeConfigDiag.valid ? 'Present · Valid' : 'Present · Invalid') : 'Missing'],
 			['Analytics file', !!analyticsDiag.exists && !!analyticsDiag.validJson, analyticsDiag.exists ? (analyticsDiag.validJson ? 'Present · Valid JSON' : 'Present · Invalid JSON') : 'Missing'],
 			['Browser cache rules', !!browserCacheRulesDiag.exists && !!browserCacheRulesDiag.managed, browserCacheRulesDiag.exists ? (browserCacheRulesDiag.managed ? 'Present · Managed block found' : 'Present · No UltraCache block') : 'Missing'],
@@ -1215,7 +1256,7 @@
 		] : [];
 
 		function renderRows(rows, tone) {
-			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0', key: row[0] }, [
+			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 				h('div', { className: 'text-sm text-white' }, row[0]),
 				h(StatusPill, { ok: !!row[1], text: row[2], tone: tone || (typeof row[1] === 'boolean' ? (row[1] ? 'success' : 'neutral') : 'neutral') }),
 			])));
@@ -1223,11 +1264,11 @@
 
 		return h(Card, { title: 'Diagnostics', description: 'Live cache status' }, [
 			h('div', { className: 'uc-diagnostic-group', key: 'status-group' }, [
-				h('div', { className: 'uc-section-title' }, 'Capabilities'),
+				h('div', { className: 'uc-section-title' }, 'Runtime status'),
 				renderRows(statusRows),
 			]),
 			h('div', { className: 'uc-diagnostic-group', key: 'runtime-group' }, [
-				h('div', { className: 'uc-section-title' }, 'Runtime files & paths'),
+				h('div', { className: 'uc-section-title' }, 'Runtime files, drop-ins & versions'),
 				renderRows(runtimeRows),
 			]),
 			runtimeConfigRows.length ? h('div', { className: 'uc-diagnostic-group', key: 'runtime-config-group' }, [
@@ -1254,7 +1295,9 @@
 		const runtimeConfigDiag = pathDiagnostics.runtimeConfig || {};
 		const environmentDiag = diagnostics.environment || {};
 		const mediaRuntimeDiag = diagnostics.mediaRuntime || {};
+		const analyticsBackend = diagnostics.analytics || {};
 		const analyticsDiag = pathDiagnostics.analytics || {};
+		const analyticsProbeText = analyticsBackend && analyticsBackend.enabled ? ((analyticsBackend.readWrite === false) ? ' · probe failed' : (analyticsBackend.readWrite ? ' · probe passed' : '')) : '';
 		const advancedCacheDiag = pathDiagnostics.advancedCache || {};
 		const objectCacheDiag = pathDiagnostics.objectCache || {};
 		const cacheDirDiag = pathDiagnostics.cacheDir || {};
@@ -1270,6 +1313,9 @@
 			['Write skips', false, formatNumber(stats.pageCacheStoreSkips || 0)],
 			['Stale hits', false, formatNumber(stats.pageCacheStaleHits || 0)],
 			['Background refreshes', false, formatNumber(stats.pageCacheBackgroundRevalidations || 0)],
+			['Selected object cache backend', false, objectCacheStatus.selectedBackend ? String(objectCacheStatus.selectedBackend).toUpperCase() : 'Unavailable'],
+			['Active object cache backend', !!objectCacheStatus.active, objectCacheStatus.active ? String(objectCacheStatus.activeBackend || objectCacheStatus.selectedBackend || 'redis').toUpperCase() : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled')],
+			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : 'Disabled'],
 			['CLS images scanned', false, formatNumber(stats.clsImagesScanned || 0)],
 			['CLS dimensions injected', false, formatNumber(stats.clsDimensionsInjected || 0)],
 			['CLS skipped', false, formatNumber(stats.clsImagesSkipped || 0)],
@@ -1306,7 +1352,7 @@
 		];
 
 		function renderRows(rows, tone) {
-			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0', key: row[0] }, [
+			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 				h('div', { className: 'text-sm text-white' }, row[0]),
 				h(StatusPill, { ok: !!row[1], text: row[2], tone: tone || (typeof row[1] === 'boolean' ? (row[1] ? 'success' : 'neutral') : 'neutral') }),
 			])));
@@ -1325,6 +1371,8 @@
 					h(DetailRow, { label: 'Writable', value: diag.writable ? 'Yes' : 'No' }),
 					!diag.exists ? h(DetailRow, { label: 'Parent writable', value: diag.parentWritable ? 'Yes' : 'No' }) : null,
 					diag.managed ? h(DetailRow, { label: 'Managed by UltraCache', value: 'Yes' }) : null,
+					diag.dropInBuild ? h(DetailRow, { label: 'Generated build', value: diag.dropInBuild }) : null,
+					diag.storageFormat ? h(DetailRow, { label: 'Storage format', value: diag.storageFormat }) : null,
 					diag.size ? h(DetailRow, { label: 'Size', value: formatBytes(diag.size) }) : null,
 					diag.modified ? h(DetailRow, { label: 'Modified', value: formatLooseTime(diag.modified) }) : null,
 					diag.valid ? h(DetailRow, { label: 'Valid', value: 'Yes' }) : null,
@@ -1410,6 +1458,7 @@
 						compressionStatus.serverDefault && compressionStatus.serverDefault.message ? h('div', { key: 'compression-server-default-note' }, 'Frontend compression: ' + compressionStatus.serverDefault.message) : null,
 						diagnostics && diagnostics.loopbackSsl && diagnostics.loopbackSsl.fallbackUsed && diagnostics.loopbackSsl.message ? h('div', { key: 'loopback-ssl-note' }, 'Loopback SSL: ' + diagnostics.loopbackSsl.message) : null,
 						wpCacheStatus.message ? h('div', { key: 'wp-cache-note' }, 'WP_CACHE: ' + wpCacheStatus.message) : null,
+						analyticsBackend.message ? h('div', { key: 'analytics-backend-note' }, 'Analytics hits: ' + analyticsBackend.message) : null,
 						!objectCacheStatus.available && objectCacheStatus.message ? h('div', { key: 'object-cache-note' }, 'File object cache: ' + objectCacheStatus.message) : null,
 						reverseProxy.message ? h('div', { key: 'reverse-proxy-note' }, 'Reverse proxy: ' + reverseProxy.message) : null,
 					]),
@@ -1429,7 +1478,7 @@
 			? ('Attachments ' + process.attachmentsProcessed + ' / ' + process.attachmentsTotal)
 			: '';
 
-		return h('div', { className: 'bg-emerald-500/5 border border-emerald-500/20 p-6 rounded' }, [
+		return h('div', { className: 'bg-emerald-500/5  p-6 rounded' }, [
 			h('div', { className: 'flex justify-between items-center mb-3 gap-3', key: 'head' }, [
 				h(
 					'h4',
@@ -1506,6 +1555,7 @@
 				onChange: (value) => onFieldChange('varnishCliEnabled', value),
 				disabled: busy || !varnish.available,
 			}),
+			isAdminMode ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, 'Security warning: Varnish admin mode uses a plain TCP socket. Use localhost/private endpoints only, such as 127.0.0.1:6082, and never expose the Varnish admin port publicly.') : null,
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(SelectField, {
 					label: 'Mode',
@@ -1576,19 +1626,19 @@
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
 				h('div', { className: 'uc-section-title' }, 'Status'),
 				h('div', { className: 'space-y-3' }, [
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Support'),
 						h(StatusPill, { ok: !!varnish.available, text: varnish.available ? 'Available' : 'Unavailable', tone: varnish.available ? 'success' : 'neutral' }),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Mode'),
 						h(StatusPill, { ok: true, text: (form.varnishCliMode || 'http'), tone: 'neutral' }),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Configured endpoints'),
 						h(StatusPill, { ok: false, text: form.varnishCliServers ? form.varnishCliServers : '—', tone: 'neutral' }),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Last result'),
 						h(StatusPill, { ok: !!last.success, text: last.message || 'No Varnish action yet', tone: last.message ? (!!last.success ? 'success' : 'warning') : 'neutral' }),
 					]),
@@ -1629,7 +1679,7 @@
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
 				h('div', { className: 'uc-section-title' }, 'Status'),
-				h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0', key: row[0] }, [
+				h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 					h('div', { className: 'text-sm text-white' }, row[0]),
 					h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
 				]))),
@@ -1638,11 +1688,68 @@
 		]);
 	}
 
+	function APCuCard({ stats, settings, busy, onFlush, onToggleScheduledCleanup }) {
+		const apcu = stats && stats.apcu ? stats.apcu : {};
+		const isAvailable = !!apcu.available;
+		const isEnabled = !!apcu.enabled;
+		const statusText = !isAvailable ? 'Unavailable' : (isEnabled ? 'Enabled' : 'Disabled');
+		const memoryUsage = typeof apcu.memoryUsagePercent !== 'undefined' ? Number(apcu.memoryUsagePercent) : 0;
+		const apcuWarnings = [];
+		if (memoryUsage >= 85) {
+			apcuWarnings.push('APCu memory usage is above 85%. Consider increasing apc.shm_size if object-cache hit rate drops or expunges increase.');
+		}
+		if (Number(apcu.expunges || 0) > 0) {
+			apcuWarnings.push('APCu has expunges. This means entries were cleared to make room for new writes.');
+		}
+		const usageText = typeof apcu.memoryUsagePercent !== 'undefined' ? formatPercent(apcu.memoryUsagePercent) : '—';
+		const rows = [
+			['Status', statusText],
+			['Used memory', apcu.memoryUsedHuman || '—'],
+			['Free memory', apcu.memoryFreeHuman || '—'],
+			['Total memory', apcu.memoryTotalHuman || '—'],
+			['Memory usage', usageText],
+			['Cached entries', typeof apcu.cachedEntries !== 'undefined' ? formatNumber(apcu.cachedEntries) : '—'],
+			['Hit rate', typeof apcu.hitRate !== 'undefined' ? formatPercent(apcu.hitRate) : '—'],
+			['Hits / Misses', (typeof apcu.hits !== 'undefined' ? formatNumber(apcu.hits) : '—') + ' / ' + (typeof apcu.misses !== 'undefined' ? formatNumber(apcu.misses) : '—')],
+			['Inserts', typeof apcu.inserts !== 'undefined' ? formatNumber(apcu.inserts) : '—'],
+			['Expunges', typeof apcu.expunges !== 'undefined' ? formatNumber(apcu.expunges) : '—'],
+			['Started', apcu.startTimeHuman || '—'],
+		];
+
+		return h(Card, {
+			title: 'APCu',
+			description: 'Local shared-memory cache used for lightweight hit analytics and as the safe local object-cache fallback when Redis is unavailable.',
+		}, [
+			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
+				h(Button, { onClick: onFlush, disabled: busy || !isAvailable || !isEnabled, variant: 'primary' }, busy ? 'Working…' : 'Flush APCu Cache'),
+			]),
+			h('div', { className: 'mt-4' }, [
+				h(ToggleField, {
+					label: 'Include APCu Flush on Scheduled Cache Cleanup',
+					description: 'Warning: this clears the whole APCu user cache for this PHP runtime, including entries used by other plugins/apps in the same PHP-FPM context.',
+					checked: !!(settings && settings.apcuFlushOnScheduledCleanup),
+					onChange: onToggleScheduledCleanup,
+					disabled: busy,
+				}),
+			]),
+			h('div', { className: 'uc-diagnostic-group mt-5' }, [
+				h('div', { className: 'uc-section-title' }, 'Status'),
+				h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
+					h('div', { className: 'text-sm text-white' }, row[0]),
+					h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
+				]))),
+				(apcu.message ? h('div', { className: 'text-xs text-zinc-500 mt-4' }, apcu.message) : null),
+				apcuWarnings.length ? h('div', { className: 'space-y-2 mt-3' }, apcuWarnings.map((warning, index) => h('div', { className: 'text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', key: 'apcu-warning-' + index }, warning))) : null,
+			]),
+		]);
+	}
+
 	function RedisCard({ form, diagnostics, busy, objectCacheEnabled, onObjectCacheEnabledChange, onFieldChange, onSave, onTest, onFlush }) {
 		const objectCache = diagnostics.objectCache || {};
 		const redis = objectCache.redis || {};
-		const backend = form.objectCacheBackend || 'disk';
-		const redisSupportText = redis.available ? 'PHP Redis extension detected on this server.' : (redis.message || 'PHP Redis extension not detected. Disk remains available as the fallback backend.');
+		const backend = form.objectCacheBackend || 'redis';
+		const apcu = objectCache.apcu || {};
+		const redisSupportText = redis.available ? 'PHP Redis extension detected on this server.' : (redis.message || 'PHP Redis extension not detected. APCu will be used when available; otherwise object cache is runtime-only.');
 		const transportText = [form.redisUseTls ? 'TLS' : 'TCP', form.redisPersistent ? 'Persistent connections ON' : 'Persistent connections OFF'].join(' · ');
 		const statusText = objectCache.active
 			? ('Active backend: ' + (objectCache.activeBackend || backend))
@@ -1653,34 +1760,43 @@
 
 		return h(Card, {
 			title: 'Object Cache',
-			description: 'Enable the WordPress object-cache.php drop-in and choose Disk or Redis as the backend. Disk is the fallback backend.',
+			description: 'Enable the WordPress object-cache.php drop-in. Redis is preferred; APCu is the safe local fallback. Disk is advanced-only and never used automatically.',
 		}, [
 			h(ToggleField, {
 				label: 'Enable Object Cache',
-				description: 'Enable the WordPress object-cache.php drop-in. Choose Disk or Redis below.',
+				description: 'Enable the WordPress object-cache.php drop-in. Use Redis when possible; APCu is the safe local fallback.',
 				checked: !!objectCacheEnabled,
 				onChange: onObjectCacheEnabledChange,
 				disabled: busy,
 				key: 'object-cache-enabled',
 			}),
-			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
-				h(ToggleField, {
-					label: 'Use Disk',
-					description: 'Use the local filesystem for persistent object cache storage.',
-					checked: backend !== 'redis',
-					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'disk') : null,
-					disabled: busy,
-					key: 'backend-disk',
-				}),
+			h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4 mt-4' }, [
 				h(ToggleField, {
 					label: 'Use Redis',
-					description: 'Use Redis when available. If Redis cannot connect, or a cache value is too large or complex, UltraCache falls back to Disk automatically.',
+					description: 'Recommended production backend. If Redis cannot connect, UltraCache falls back to APCu when available, then runtime-only.',
 					checked: backend === 'redis',
 					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'redis') : null,
 					disabled: busy,
 					key: 'backend-redis',
 				}),
+				h(ToggleField, {
+					label: 'Use APCu',
+					description: 'Local memory backend for single-server sites. Faster and safer than disk, but cleared on PHP-FPM restart.',
+					checked: backend === 'apcu',
+					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'apcu') : null,
+					disabled: busy,
+					key: 'backend-apcu',
+				}),
+				h(ToggleField, {
+					label: 'Use Disk',
+					description: 'Advanced/debug only. Not recommended for production because it can create many small files.',
+					checked: backend === 'disk',
+					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'disk') : null,
+					disabled: busy,
+					key: 'backend-disk',
+				}),
 			]),
+			backend === 'disk' ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, 'Disk object cache is advanced/debug only and is not recommended for production. It can create many small files and may be slower than leaving persistent object cache disabled.') : null,
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(TextField, {
 					label: 'Redis host',
@@ -1775,27 +1891,35 @@
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
 				h('div', { className: 'uc-section-title' }, 'Status'),
 				h('div', { className: 'space-y-3' }, [
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Selected backend'),
-						h(StatusPill, { ok: backend === 'redis' ? !!redis.available : true, text: backend === 'redis' ? 'Redis' : 'Disk', tone: backend === 'redis' ? (redis.available ? 'success' : 'warning') : 'neutral' }),
+						h(StatusPill, {
+								ok: backend === 'redis' ? !!redis.available : (backend === 'apcu' ? !!apcu.available : true),
+								text: backend === 'redis' ? 'Redis' : (backend === 'apcu' ? 'APCu' : 'Disk'),
+								tone: backend === 'disk' ? 'warning' : ((backend === 'redis' ? !!redis.available : !!apcu.available) ? 'success' : 'warning')
+							}),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Fallback backend'),
-						h(StatusPill, { ok: true, text: objectCache.fallbackBackend || 'disk', tone: 'neutral' }),
+						h(StatusPill, { ok: true, text: objectCache.fallbackBackend || 'apcu', tone: 'neutral' }),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Redis support'),
 						h(StatusPill, { ok: !!redis.available, text: redis.available ? 'Available' : 'Unavailable', tone: redis.available ? 'success' : 'warning' }),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
+						h('div', { className: 'text-sm text-white' }, 'APCu support'),
+						h(StatusPill, { ok: !!apcu.available, text: apcu.available ? 'Available' : 'Unavailable', tone: apcu.available ? 'success' : 'warning' }),
+					]),
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Redis connection'),
 						h(StatusPill, { ok: !!redis.connected, text: connectionText, tone: redis.connected ? 'success' : (backend === 'redis' ? 'warning' : 'neutral') }),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Runtime status'),
 						h(StatusPill, { ok: !!objectCache.active, text: statusText, tone: objectCache.active ? 'success' : 'neutral' }),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2 border-b border-white/5' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Effective prefix'),
 						h('code', { className: 'text-xs text-zinc-300 break-all' }, redis.prefix || 'auto'),
 					]),
@@ -1836,7 +1960,7 @@
 			varnishCliKeyConfigured: !!initialSettings.varnishCliKeyConfigured,
 		});
 		const [redisForm, setRedisForm] = useState({
-			objectCacheBackend: initialSettings.objectCacheBackend || 'disk',
+			objectCacheBackend: initialSettings.objectCacheBackend || 'redis',
 			redisHost: initialSettings.redisHost || '127.0.0.1',
 			redisPort: initialSettings.redisPort || 6379,
 			redisPassword: initialSettings.redisPassword || '',
@@ -2079,7 +2203,7 @@
 
 		useEffect(() => {
 			setRedisForm({
-				objectCacheBackend: settings.objectCacheBackend || 'disk',
+				objectCacheBackend: settings.objectCacheBackend || 'redis',
 				redisHost: settings.redisHost || '127.0.0.1',
 				redisPort: settings.redisPort || 6379,
 				redisPassword: settings.redisPassword || '',
@@ -2181,6 +2305,10 @@
 
 		function updateRedisField(key, value) {
 			setRedisForm((current) => Object.assign({}, current, { [key]: value }));
+
+			if (key === 'objectCacheBackend') {
+				queueSettingsPatch({ objectCacheBackend: value });
+			}
 		}
 
 		function getCompressionLockState(sourceDiagnostics, browserProbe) {
@@ -2261,7 +2389,7 @@
 			}
 
 			await queueDashboardAction('redis_test', payload, {
-				queued: 'Redis connection test queued…',
+				queued: 'Redis connection test processing via dashboard…',
 				success: 'Redis connection test finished.',
 				failed: 'Redis connection test failed.',
 			}, 'redis_test', (result) => {
@@ -2275,7 +2403,7 @@
 
 		async function flushObjectCache() {
 			await queueDashboardAction('object_cache_flush', {}, {
-				queued: 'Object cache flush queued…',
+				queued: 'Object cache flush processing via dashboard…',
 				success: 'Object cache flush finished.',
 				failed: 'Object cache flush failed.',
 			}, 'object_cache_flush');
@@ -2312,7 +2440,7 @@
 		}
 		async function runVarnishTest() {
 			await queueDashboardAction('varnish_test', {}, {
-				queued: 'Varnish test queued…',
+				queued: 'Varnish test processing via dashboard…',
 				success: 'Varnish test completed.',
 				failed: 'Varnish test failed.',
 			}, 'varnish_test');
@@ -2320,7 +2448,7 @@
 
 		async function runVarnishFlushAll() {
 			await queueDashboardAction('varnish_flush_all', {}, {
-				queued: 'Varnish flush queued…',
+				queued: 'Varnish flush processing via dashboard…',
 				success: 'Varnish flush finished.',
 				failed: 'Varnish flush failed.',
 			}, 'varnish_flush_all');
@@ -2329,10 +2457,18 @@
 
 		async function flushOpcache() {
 			await queueDashboardAction('opcache_flush', {}, {
-				queued: 'OPcache flush queued…',
+				queued: 'OPcache flush processing via dashboard…',
 				success: 'OPcache flush finished.',
 				failed: 'OPcache flush failed.',
 			}, 'opcache_flush');
+		}
+
+		async function flushApcu() {
+			await queueDashboardAction('apcu_flush', {}, {
+				queued: 'APCu flush processing via dashboard…',
+				success: 'APCu flush finished.',
+				failed: 'APCu flush failed.',
+			}, 'apcu_flush');
 		}
 
 		function normalizeStatsResponse(payload) {
@@ -2354,7 +2490,8 @@
 				typeof freshStats.cacheSizeHuman !== 'undefined' ||
 				typeof freshStats.optimizedImages !== 'undefined' ||
 				typeof freshStats.imagesOptimized !== 'undefined' ||
-				typeof freshStats.opcache !== 'undefined'
+				typeof freshStats.opcache !== 'undefined' ||
+				typeof freshStats.apcu !== 'undefined'
 			);
 
 			if (hasMeaningfulStats) {
@@ -2435,24 +2572,24 @@
 				}
 				await sleep(ACTION_QUEUE_POLL_DELAY);
 			}
-			throw new Error('Queued action timed out.');
+			throw new Error('Dashboard processing action timed out.');
 		}
 
 		async function queueDashboardAction(action, params, labels, key, afterResult) {
 			const actionKey = key || action;
 			if (queuedActionKeysRef.current[actionKey]) {
-				pushToast({ type: 'info', text: (labels && labels.alreadyQueued) || 'This action is already queued.' });
+				pushToast({ type: 'info', text: (labels && labels.alreadyQueued) || 'This dashboard action is already processing.' });
 				return null;
 			}
 
-			setAsyncActionState(actionKey, true, (labels && labels.runningLabel) || 'Queued…');
-			pushToast({ id: 'ucwp-action-' + actionKey, type: 'info', text: (labels && labels.queued) || 'Action queued…', duration: 2200 });
+			setAsyncActionState(actionKey, true, (labels && labels.runningLabel) || 'Processing via dashboard…');
+			pushToast({ id: 'ucwp-action-' + actionKey, type: 'info', text: (labels && labels.queued) || 'Processing via dashboard…', duration: 2200 });
 
 			try {
 				const queued = await apiRequest('queue_action', { action, params: params || {} });
 				const job = queued && queued.job ? queued.job : null;
 				if (!job || !job.id) {
-					throw new Error('Queued action was not created.');
+					throw new Error('Dashboard processing action was not created.');
 				}
 
 				const completed = await pollQueuedAction(job.id);
@@ -2461,7 +2598,7 @@
 				if (typeof afterResult === 'function') {
 					afterResult(result, completed);
 				}
-				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'varnish_flush_all'].indexOf(action) !== -1) {
+				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'apcu_flush', 'varnish_flush_all'].indexOf(action) !== -1) {
 					try {
 						await refreshStats();
 					} catch (error) {}
@@ -2473,7 +2610,7 @@
 				});
 				return completed;
 			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : ((labels && labels.failed) || 'Queued action failed.') });
+				pushToast({ type: 'error', text: error && error.message ? error.message : ((labels && labels.failed) || 'Dashboard processing action failed.') });
 				return null;
 			} finally {
 				setAsyncActionState(actionKey, false);
@@ -2551,7 +2688,7 @@
 
 			setHomepageHtmlBusy(true);
 			await queueDashboardAction('warm_frontpage_html', {}, {
-				queued: 'Frontpage HTML warm queued…',
+				queued: 'Frontpage HTML warm processing via dashboard…',
 				success: 'Frontpage HTML warm completed.',
 				failed: 'Frontpage HTML warm failed.',
 				runningLabel: 'Warming…',
@@ -2574,7 +2711,7 @@
 
 			setHomepageHtmlCssBusy(true);
 			await queueDashboardAction('warm_frontpage_html_css', {}, {
-				queued: 'Homepage HTML + CSS bundle warm queued…',
+				queued: 'Homepage HTML + CSS bundle warm processing via dashboard…',
 				success: 'Homepage HTML + CSS bundle warm completed.',
 				failed: 'Homepage HTML + CSS bundle warm failed.',
 				runningLabel: 'Warming…',
@@ -2689,17 +2826,8 @@
 		function updateMediaOptimizationSetting(value) {
 			queueSettingsPatch({
 				mediaOptimizationEnabled: value,
-				avifConversionEnabled: value,
 			});
 		}
-
-		function updateManualPurgeWarmSetting(value) {
-			queueSettingsPatch({
-				cronWarmStartAfterManualPurge: value,
-				cronWarmStartAfterFlush: value,
-			});
-		}
-
 
 		function applyPerformanceProfile(profileKey) {
 			const profile = PERFORMANCE_PROFILES[profileKey];
@@ -3163,7 +3291,7 @@ async function deleteAllPluginDataAndDeactivate() {
 
 		async function purgeCache() {
 			await queueDashboardAction('purge_all', {}, {
-				queued: 'Full cache purge queued…',
+				queued: 'Full cache purge processing via dashboard…',
 				success: 'All cache files cleared.',
 				failed: 'Failed to purge cache.',
 			}, 'purge_all');
@@ -3183,10 +3311,18 @@ async function deleteAllPluginDataAndDeactivate() {
 			setSupportModalOpen(false);
 		}
 
-		const mediaOptimizationEnabled = typeof settings.mediaOptimizationEnabled === 'undefined' ? !!settings.avifConversionEnabled : !!settings.mediaOptimizationEnabled;
+		const mediaOptimizationEnabled = !!settings.mediaOptimizationEnabled;
 		const activePerformanceProfile = getActivePerformanceProfile(settings);
 		const pageCacheReady = !!settings.pageCacheEnabled;
 		const cssBundleReady = pageCacheReady && !!settings.homepageCssBundleEnabled;
+			const cssBundleDiagnostics = {
+				bundlesBuilt: typeof stats.homepageCssBundlesBuilt !== 'undefined' ? stats.homepageCssBundlesBuilt : stats.frontpageCssBundlesBuilt,
+				stylesBundled: typeof stats.homepageCssStylesBundled !== 'undefined' ? stats.homepageCssStylesBundled : stats.frontpageCssStylesBundled,
+				stylesScanned: typeof stats.homepageCssStylesScanned !== 'undefined' ? stats.homepageCssStylesScanned : stats.frontpageCssStylesScanned,
+				stylesSkipped: typeof stats.homepageCssStylesSkipped !== 'undefined' ? stats.homepageCssStylesSkipped : stats.frontpageCssStylesSkipped,
+				stylesUnresolved: typeof stats.homepageCssStylesUnresolved !== 'undefined' ? stats.homepageCssStylesUnresolved : stats.frontpageCssStylesUnresolved,
+				lastWarm: stats.lastFrontpageCssWarm || null,
+			};
 		const warmBusy = busy || process.active || homepageHtmlBusy || homepageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy;
 		const warmDisabledMessage = !pageCacheReady
 			? 'Please enable Page Caching first or select a profile before warming cache.'
@@ -3203,7 +3339,7 @@ async function deleteAllPluginDataAndDeactivate() {
 					),
 				]),
 				h('div', { className: 'flex flex-wrap gap-3', key: 'actions' }, [
-					h(Button, { onClick: purgeCache, disabled: busy || !!asyncActions.purge_all, variant: 'primary' }, asyncActions.purge_all ? 'Queued…' : (busy ? 'Working…' : 'Flush All Cache')),
+					h(Button, { onClick: purgeCache, disabled: busy || !!asyncActions.purge_all, variant: 'primary' }, asyncActions.purge_all ? 'Processing via dashboard…' : (busy ? 'Working…' : 'Flush All Cache')),
 				]),
 			]),
 
@@ -3324,13 +3460,14 @@ async function deleteAllPluginDataAndDeactivate() {
 								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !allUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Building CSS Bundles…' : (getJobControls('warm_css').canResume ? 'Resume Warm Up Full Site HTML Cache + CSS Bundles' : 'Warm Up Full Site HTML Cache + CSS Bundles'))))
 							)
 						]),
-						h('div', { className: 'mt-4 text-xs text-zinc-400 space-y-1' }, [
-							h('div', { key: 'fp-css-1' }, 'CSS bundles built: ' + formatNumber(stats.homepageCssBundlesBuilt || 0)),
-							h('div', { key: 'fp-css-2' }, 'Page styles bundled: ' + formatNumber(stats.homepageCssStylesBundled || 0) + ' / ' + formatNumber(stats.homepageCssStylesScanned || 0)),
-							h('div', { key: 'fp-css-3' }, 'Skipped: ' + formatNumber(stats.homepageCssStylesSkipped || 0) + ' · Unresolved: ' + formatNumber(stats.homepageCssStylesUnresolved || 0)),
-							h('div', { key: 'fp-css-4' }, 'Last CSS bundle warm: ' + formatLooseTime(stats.lastFrontpageCssWarm || null)),
-							(stats.lastFrontpageCssWarm && stats.lastFrontpageCssWarm.message)
-								? h('div', { key: 'fp-css-5', className: 'text-zinc-500' }, stats.lastFrontpageCssWarm.message)
+						h('div', { className: 'uc-diagnostic-group mt-5', key: 'warm-css-bundle-diagnostics' }, [
+							h('div', { className: 'uc-section-title' }, 'CSS Bundle Summary'),
+							h('div', { key: 'fp-css-1' }, 'Bundles built: ' + formatNumber(cssBundleDiagnostics.bundlesBuilt || 0)),
+							h('div', { key: 'fp-css-2' }, 'Styles bundled/scanned: ' + formatNumber(cssBundleDiagnostics.stylesBundled || 0) + ' / ' + formatNumber(cssBundleDiagnostics.stylesScanned || 0)),
+							h('div', { key: 'fp-css-3' }, 'Skipped/unresolved: ' + formatNumber(cssBundleDiagnostics.stylesSkipped || 0) + ' / ' + formatNumber(cssBundleDiagnostics.stylesUnresolved || 0)),
+							h('div', { key: 'fp-css-4' }, 'Last CSS bundle warm: ' + formatLooseTime(cssBundleDiagnostics.lastWarm || null)),
+							(cssBundleDiagnostics.lastWarm && cssBundleDiagnostics.lastWarm.message)
+								? h('div', { key: 'fp-css-5', className: 'text-zinc-500' }, cssBundleDiagnostics.lastWarm.message)
 								: null,
 						]),
 					]
@@ -3339,8 +3476,8 @@ async function deleteAllPluginDataAndDeactivate() {
 				Card,
 				{
 					title: 'Media Optimization',
-					description: 'Generate and serve AVIF/WebP variants, including upload-time, guarded on-demand conversion, and batch conversion for existing uploads.',
-					key: 'avif',
+					description: 'Master switch for next-gen image generation, frontend rewriting, upload-time conversion, on-demand conversion, and batch conversion.',
+					key: 'media-optimization',
 				},
 				[
 					h(ToggleRow, {
@@ -3662,16 +3799,6 @@ h(ToggleRow, {
 							disabled: busy,
 							key: 'async-css',
 						}),
-			
-h('div', { className: 'uc-diagnostic-group mt-5', key: 'css-bundle-diagnostics' }, [
-							h('div', { className: 'uc-section-title' }, 'CSS Bundle Diagnostics'),
-							h('div', { className: 'space-y-2 text-xs text-zinc-400' }, [
-								h('div', { key: 'css-d1' }, 'Bundles built: ' + formatNumber(stats.homepageCssBundlesBuilt || 0)),
-								h('div', { key: 'css-d2' }, 'Styles bundled/scanned: ' + formatNumber(stats.homepageCssStylesBundled || 0) + ' / ' + formatNumber(stats.homepageCssStylesScanned || 0)),
-								h('div', { key: 'css-d3' }, 'Skipped/unresolved: ' + formatNumber(stats.homepageCssStylesSkipped || 0) + ' / ' + formatNumber(stats.homepageCssStylesUnresolved || 0)),
-								h('div', { key: 'css-d4' }, 'Last CSS bundle warm: ' + formatLooseTime(stats.lastFrontpageCssWarm || null)),
-							]),
-						]),
 					]
 				),
 h(
@@ -3949,8 +4076,8 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 						h(ToggleRow, {
 							label: 'Start after Flush All Cache',
 							description: 'Start the cron warm queue after a manual full cache purge.',
-							checked: typeof settings.cronWarmStartAfterFlush === 'undefined' ? settings.cronWarmStartAfterManualPurge : settings.cronWarmStartAfterFlush,
-							onChange: updateManualPurgeWarmSetting,
+							checked: !!settings.cronWarmStartAfterManualPurge,
+							onChange: (value) => updateSetting('cronWarmStartAfterManualPurge', value),
 							disabled: busy || !settings.cronWarmEnabled,
 							key: 'manual-purge-warm',
 						}),
@@ -4017,11 +4144,14 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 			),
 
 			h(VarnishCard, { form: varnishForm, diagnostics, busy: busy || !!asyncActions.varnish_test || !!asyncActions.varnish_flush_all, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onTest: runVarnishTest, onFlushAll: runVarnishFlushAll, key: 'varnish-card' }),
+			h('div', { className: 'uc-info-grid', key: 'php-cache-cards' }, [
 			h(OPcacheCard, { stats, busy: busy || !!asyncActions.opcache_flush, onFlush: flushOpcache, key: 'opcache-card' }),
+			h(APCuCard, { stats, settings, busy: busy || !!asyncActions.apcu_flush, onFlush: flushApcu, onToggleScheduledCleanup: (value) => updateSetting('apcuFlushOnScheduledCleanup', value), key: 'apcu-card' }),
+			]),
 
 			h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
 				h(DiagnosticsCard, { diagnostics, stats, key: 'diagnostics' }),
-				h(ActivitySummaryCard, { stats, key: 'activity-summary' }),
+				h(ActivitySummaryCard, { stats, cssBundleDiagnostics, key: 'activity-summary' }),
 			]),
 			h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }),
 

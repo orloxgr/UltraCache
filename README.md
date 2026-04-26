@@ -8,8 +8,8 @@ It is built for sites that want a managed page-cache drop-in, optional Redis-bac
 
 ## Current repository build
 
-- version: `2.55.80`
-- latest pass: safer fresh-install defaults for page cache, object cache, and Browser Cache Headers; backward-compatible Media Optimization aliasing; safer .htaccess warning behavior
+- version: `2.55.96`
+- latest pass: added fail-safe wrappers around frontend HTML/CSS rewrites with fallback-to-original validation for suspicious transformations
 - sixth pass fixes: removed hard page reloads after Varnish Test and Flush Varnish All; the dashboard now stays on the page and refreshes through AJAX only
 - fifth pass fixes: reduced `@` suppression in non-critical helper paths and added safer internal debug logging for font CSS reads and Varnish admin socket connects
 - third pass fixes: redacted secrets from `wp ultracache status` settings/all output, added stricter local-site URL validation for single-URL CLI actions, and tightened REST validation for settings enums and URL/scope inputs
@@ -54,12 +54,14 @@ Supported page-cache behaviors include:
 
 ### Object cache
 
-UltraCache can manage an `object-cache.php` drop-in and use either:
+UltraCache can manage an `object-cache.php` drop-in with a safe backend preference:
 
-- disk-backed object storage
-- Redis-backed object storage
+- Redis-backed object storage for production when the PHP Redis extension is available
+- APCu-backed local memory storage for single-server fallback setups
+- runtime-only fallback when no persistent memory backend is safely writable
+- disk-backed storage only as an explicit advanced/debug option
 
-Redis support requires the PHP Redis extension.
+Redis support requires the PHP Redis extension. APCu support requires the APCu PHP extension and is cleared on PHP-FPM restart.
 
 ### Media conversion
 
@@ -393,3 +395,51 @@ In short, you may use, modify, and redistribute this plugin under the terms of *
 - Stage 2 CSS Bundle is now more aggressive: bundled source stylesheets are replaced by the generated bundle without preloading every original source.
 - Slider Safe Mode is now slider-aware for CSS bundles: SR7/Revolution/Swiper/Slick CSS stays as normal explicit links, while non-slider local CSS can still be bundled.
 - Built-in CSS bundle exclusions now protect fragile slider/hero stylesheet fragments.
+
+## UltraCache 2.55.96 Notes
+
+- Tightened JavaScript dependency safety after the expanded HTML rewrite refactor.
+- Built-in protected scripts now stay in normal blocking flow across Safe, Balanced, and Aggressive defer stages, not only Stage 1.
+- Removed theme-specific built-in JavaScript protection from 2.55.95 and kept generic dependency protection for Elementor/core/WooCommerce/shared frontend runtimes.
+- HTML rewrite safety wrappers from 2.55.89 remain active.
+
+Post-update check:
+
+- Save UltraCache settings once.
+- Purge all cache.
+- Warm cache.
+- Hard refresh the frontend and confirm browser Console no longer shows generic dependency errors. Add custom theme globals/scripts to manual Defer/Delay exclusions when needed.
+
+## UltraCache 2.55.90 Notes
+
+- Removed the small borders from diagnostic status and value text pills in Diagnostics, Advanced Diagnostics, Activity Summary, Varnish, and Object Cache status sections.
+- Renamed **CSS Bundle Diagnostics** to **CSS Bundle Summary**.
+- Added the CSS Bundle Summary block to **Activity Summary** using the same bundle counters shown in Warm Cache.
+- Cards, buttons, warning boxes, and major containers keep their functional styling.
+
+Post-update check:
+
+- Hard refresh the UltraCache dashboard after installing.
+- Check Activity Summary and Warm Cache for the CSS Bundle Summary block.
+- Confirm diagnostic/status text no longer renders with pill borders.
+
+Recommended post-update check:
+
+1. Save UltraCache settings once.
+2. Purge all cache.
+3. Check Diagnostics for page-cache switch, page-cache drop-in active, selected object-cache backend, active object-cache backend, Analytics hit backend, OPcache, and APCu.
+4. Check Runtime files, drop-ins & versions for generated build/format details.
+5. Visit the homepage twice and confirm the second request can HIT.
+
+Optional SSH quick check:
+
+```bash
+cd /path/to/wordpress
+wp option get ultracache_settings >/dev/null
+wp ultracache purge --all
+curl -I https://example.com/
+curl -I https://example.com/
+```
+
+Confirm that the generated headers and Diagnostics agree on the page-cache/drop-in state after testing.
+

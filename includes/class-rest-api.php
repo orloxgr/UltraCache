@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.55.72 */
+/** Hotfix Bundle Version: 2.55.96 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -64,12 +64,12 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
         public function sanitize_object_cache_backend_param($value)
         {
             $value = strtolower(trim((string) $value));
-            return in_array($value, array('disk', 'redis'), true) ? $value : 'disk';
+            return in_array($value, array('redis', 'apcu', 'disk'), true) ? $value : 'redis';
         }
 
         public function validate_object_cache_backend_param($value)
         {
-            return in_array(strtolower(trim((string) $value)), array('disk', 'redis'), true);
+            return in_array(strtolower(trim((string) $value)), array('redis', 'apcu', 'disk'), true);
         }
 
         public function sanitize_varnish_mode_param($value)
@@ -162,7 +162,6 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'redisReadTimeoutMs'                   => array('type' => 'integer', 'required' => false),
                 'brotliEnabled'                        => array('type' => 'boolean', 'required' => false),
                 'gzipEnabled'                          => array('type' => 'boolean', 'required' => false),
-                'avifConversionEnabled'                => array('type' => 'boolean', 'required' => false),
                 'mediaOptimizationEnabled'           => array('type' => 'boolean', 'required' => false),
                 'mediaGenerateOnUploadEnabled'        => array('type' => 'boolean', 'required' => false),
                 'mediaGenerateOnDemandEnabled'        => array('type' => 'boolean', 'required' => false),
@@ -218,11 +217,10 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'preRenderOnSave'                      => array('type' => 'boolean', 'required' => false),
                 'woocommerceSafeModeEnabled'           => array('type' => 'boolean', 'required' => false),
                 'cacheCleanupEnabled'                  => array('type' => 'boolean', 'required' => false),
+                'apcuFlushOnScheduledCleanup'          => array('type' => 'boolean', 'required' => false),
                 'cronWarmEnabled'                      => array('type' => 'boolean', 'required' => false),
                 'cronWarmStartAfterCleanup'            => array('type' => 'boolean', 'required' => false),
                 'cronWarmStartAfterManualPurge'        => array('type' => 'boolean', 'required' => false),
-                'cronWarmStartAfterFlush'              => array('type' => 'boolean', 'required' => false),
-                'warmAfterScheduledCleanup'            => array('type' => 'boolean', 'required' => false),
                 'cacheCleanupIntervalHours'            => array('type' => 'integer', 'required' => false),
                 'cronWarmPagesPerMinute'               => array('type' => 'integer', 'required' => false),
                 'scheduledWarmLimit'                   => array('type' => 'integer', 'required' => false),
@@ -290,6 +288,13 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
+                '/apcu/flush' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'apcu_flush'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/object-cache/redis-test' => array(
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
@@ -346,20 +351,20 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'args'                => $this->get_settings_update_args(),
                     ),
                 ),
-'/delete-all-data' => array(
-    array(
-        'methods'             => WP_REST_Server::CREATABLE,
-        'callback'            => array($this, 'delete_all_plugin_data'),
-        'permission_callback' => array($this, 'check_permission'),
-        'args'                => array(
-            'confirmation' => array(
-                'type'              => 'string',
-                'required'          => true,
-                'sanitize_callback' => 'sanitize_text_field',
-            ),
-        ),
-    ),
-),
+                '/delete-all-data' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'delete_all_plugin_data'),
+                        'permission_callback' => array($this, 'check_permission'),
+                        'args'                => array(
+                            'confirmation' => array(
+                                'type'              => 'string',
+                                'required'          => true,
+                                'sanitize_callback' => 'sanitize_text_field',
+                            ),
+                        ),
+                    ),
+                ),
                 '/crawl-urls' => array(
                     array(
                         'methods'             => WP_REST_Server::READABLE,
@@ -721,18 +726,6 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                     $current[$key] = $request->get_param($key);
                 }
             }
-            if (null !== $request->get_param('cronWarmStartAfterCleanup') && null === $request->get_param('warmAfterScheduledCleanup')) {
-                $current['warmAfterScheduledCleanup'] = $request->get_param('cronWarmStartAfterCleanup');
-            } elseif (null !== $request->get_param('warmAfterScheduledCleanup') && null === $request->get_param('cronWarmStartAfterCleanup')) {
-                $current['cronWarmStartAfterCleanup'] = $request->get_param('warmAfterScheduledCleanup');
-            }
-
-            if (null !== $request->get_param('cronWarmStartAfterFlush')) {
-                $current['cronWarmStartAfterManualPurge'] = $request->get_param('cronWarmStartAfterFlush');
-            } elseif (null !== $request->get_param('cronWarmStartAfterManualPurge')) {
-                $current['cronWarmStartAfterFlush'] = $request->get_param('cronWarmStartAfterManualPurge');
-            }
-
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'persist_dashboard_settings')) {
                 $response = Ultra_Cache_WP::persist_dashboard_settings($current);
                 if (is_wp_error($response)) {
@@ -752,30 +745,30 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
         }
 
 
-public function delete_all_plugin_data(WP_REST_Request $request)
-{
-    $confirmation = strtoupper(trim((string) $request->get_param('confirmation')));
-    if ('DELETE' !== $confirmation) {
-        return new WP_REST_Response(
-            array(
-                'success' => false,
-                'message' => 'Confirmation failed. Type DELETE to remove UltraCache data and deactivate the plugin.',
-            ),
-            400
-        );
-    }
+        public function delete_all_plugin_data(WP_REST_Request $request)
+        {
+            $confirmation = strtoupper(trim((string) $request->get_param('confirmation')));
+            if ('DELETE' !== $confirmation) {
+                return new WP_REST_Response(
+                    array(
+                        'success' => false,
+                        'message' => 'Confirmation failed. Type DELETE to remove UltraCache data and deactivate the plugin.',
+                    ),
+                    400
+                );
+            }
 
-    if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'delete_all_plugin_data_and_deactivate')) {
-        return new WP_REST_Response(array('success' => false, 'message' => 'Cleanup helper not available.'), 500);
-    }
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'delete_all_plugin_data_and_deactivate')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Cleanup helper not available.'), 500);
+            }
 
-    $result = Ultra_Cache_WP::delete_all_plugin_data_and_deactivate();
-    if (is_wp_error($result)) {
-        return new WP_REST_Response(array('success' => false, 'message' => $result->get_error_message()), 500);
-    }
+            $result = Ultra_Cache_WP::delete_all_plugin_data_and_deactivate();
+            if (is_wp_error($result)) {
+                return new WP_REST_Response(array('success' => false, 'message' => $result->get_error_message()), 500);
+            }
 
-    return new WP_REST_Response($result, 200);
-}
+            return new WP_REST_Response($result, 200);
+        }
 
         public function cron_warm_start()
         {
@@ -846,6 +839,16 @@ public function delete_all_plugin_data(WP_REST_Request $request)
             }
 
             $result = Ultra_Cache_WP::flush_opcache();
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+        }
+
+        public function apcu_flush()
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_apcu')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'APCu helper not available.'), 500);
+            }
+
+            $result = Ultra_Cache_WP::flush_apcu();
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
         }
 
@@ -1095,6 +1098,7 @@ public function delete_all_plugin_data(WP_REST_Request $request)
                 'varnish_test',
                 'varnish_flush_all',
                 'opcache_flush',
+                'apcu_flush',
                 'redis_test',
             );
         }
@@ -1144,7 +1148,7 @@ public function delete_all_plugin_data(WP_REST_Request $request)
         {
             $action = sanitize_key((string) $request->get_param('action'));
             if (!in_array($action, $this->get_allowed_action_queue_actions(), true)) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Unsupported queued action.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => 'Unsupported dashboard processing action.'), 400);
             }
 
             $params = $this->normalize_action_params($request->get_param('params'));
@@ -1155,7 +1159,7 @@ public function delete_all_plugin_data(WP_REST_Request $request)
                 'action'    => $action,
                 'params'    => $params,
                 'status'    => 'queued',
-                'message'   => 'Queued.',
+                'message'   => 'Waiting for dashboard processing.',
                 'createdAt' => $now,
                 'updatedAt' => $now,
             );
@@ -1172,14 +1176,14 @@ public function delete_all_plugin_data(WP_REST_Request $request)
             $id = sanitize_text_field((string) $request->get_param('id'));
             $jobs = $this->load_action_jobs();
             if (empty($jobs[$id]) || !is_array($jobs[$id])) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Queued action not found.'), 404);
+                return new WP_REST_Response(array('success' => false, 'message' => 'Dashboard processing action not found.'), 404);
             }
 
             $job = $jobs[$id];
             $status = (string) ($job['status'] ?? 'queued');
             if ('queued' === $status) {
                 $job['status'] = 'running';
-                $job['message'] = 'Running.';
+                $job['message'] = 'Processing via dashboard.';
                 $job['startedAt'] = time();
                 $job['updatedAt'] = time();
                 $jobs[$id] = $job;
@@ -1196,7 +1200,7 @@ public function delete_all_plugin_data(WP_REST_Request $request)
                 $this->save_action_jobs($jobs);
             } elseif ('running' === $status && !empty($job['startedAt']) && (time() - (int) $job['startedAt']) > 300) {
                 $job['status'] = 'failed';
-                $job['message'] = 'Queued action timed out.';
+                $job['message'] = 'Dashboard processing action timed out.';
                 $job['finishedAt'] = time();
                 $job['updatedAt'] = time();
                 $jobs[$id] = $job;
@@ -1224,6 +1228,8 @@ public function delete_all_plugin_data(WP_REST_Request $request)
                         return $this->unwrap_rest_payload($this->varnish_flush_all());
                     case 'opcache_flush':
                         return $this->unwrap_rest_payload($this->opcache_flush());
+                    case 'apcu_flush':
+                        return $this->unwrap_rest_payload($this->apcu_flush());
                     case 'redis_test':
                         $redis_request = new WP_REST_Request('POST', '/');
                         foreach ($params as $key => $value) {
@@ -1237,7 +1243,7 @@ public function delete_all_plugin_data(WP_REST_Request $request)
                 return array('success' => false, 'message' => $error->getMessage());
             }
 
-            return array('success' => false, 'message' => 'Unsupported queued action.');
+            return array('success' => false, 'message' => 'Unsupported dashboard processing action.');
         }
 
         private function unwrap_rest_payload($response)
@@ -1317,6 +1323,15 @@ public function delete_all_plugin_data(WP_REST_Request $request)
                     if (function_exists('size_format')) {
                         $stats['cacheSizeHuman'] = size_format((int) $stats['cacheSizeBytes'], 2);
                     }
+                }
+            }
+
+            if (class_exists('Ultra_Cache_WP')) {
+                if (method_exists('Ultra_Cache_WP', 'get_opcache_status_summary')) {
+                    $stats['opcache'] = Ultra_Cache_WP::get_opcache_status_summary();
+                }
+                if (method_exists('Ultra_Cache_WP', 'get_apcu_status_summary')) {
+                    $stats['apcu'] = Ultra_Cache_WP::get_apcu_status_summary();
                 }
             }
 

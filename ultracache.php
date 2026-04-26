@@ -3,13 +3,13 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.55.80
+ * Version: 2.55.96
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
  * Domain Path: /languages
- * Hotfix Bundle Version: 2.55.80
+ * Hotfix Bundle Version: 2.55.96
  */
 
 if (!defined('ABSPATH')) {
@@ -17,10 +17,10 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.55.80');
+    define('UCWP_VERSION', '2.55.96');
 }
 if (!defined('UCWP_HOTFIX_BUNDLE_VERSION')) {
-    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.55.80');
+    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.55.96');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1220,7 +1220,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             return array(
                 'pageCacheEnabled'           => false,
                 'objectCacheEnabled'         => false,
-                'objectCacheBackend'         => 'disk',
+                'objectCacheBackend'         => 'redis',
                 'redisHost'                  => '127.0.0.1',
                 'redisPort'                  => 6379,
                 'redisPassword'              => '',
@@ -1232,7 +1232,6 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'redisReadTimeoutMs'         => 200,
                 'brotliEnabled'              => false,
                 'gzipEnabled'                => false,
-                'avifConversionEnabled'      => false,
                 'mediaOptimizationEnabled'     => false,
                 'mediaGenerateOnUploadEnabled' => false,
                 'mediaGenerateOnDemandEnabled' => false,
@@ -1248,7 +1247,6 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'homepageCssBundleMode'      => 'safe',
                 'cssBundleScope'            => 'homepage',
                 'pageCssBundleOnEntryEnabled' => false,
-                // Legacy aliases kept so older exported settings remain readable.
                 'criticalCssEnabled'         => false,
                 'criticalCssInlineEnabled'   => false,
                 'criticalCssExcludeList'     => '',
@@ -1289,13 +1287,12 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'preRenderOnSave'            => false,
                 'woocommerceSafeModeEnabled' => false,
                 'cacheCleanupEnabled'        => false,
+                'apcuFlushOnScheduledCleanup'=> false,
                 'cacheCleanupIntervalHours'  => 24,
                 'cronWarmEnabled'            => false,
                 'cronWarmStartAfterCleanup'  => false,
                 'cronWarmStartAfterManualPurge' => false,
-                'cronWarmStartAfterFlush'  => false,
                 'cronWarmPagesPerMinute'     => 2,
-                'warmAfterScheduledCleanup'  => false,
                 'scheduledWarmLimit'         => $default_scheduled_warm_limit,
                 'staleWhileRevalidateEnabled'=> false,
                 'cacheFreshTtlMinutes'       => 15,
@@ -1545,7 +1542,7 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function sanitize_object_cache_backend($value)
         {
             $value = strtolower(trim((string) $value));
-            return in_array($value, array('disk', 'redis'), true) ? $value : 'disk';
+            return in_array($value, array('redis', 'apcu', 'disk'), true) ? $value : 'redis';
         }
 
         private static function sanitize_homepage_css_bundle_mode($value)
@@ -1752,20 +1749,6 @@ if (!class_exists('Ultra_Cache_WP')) {
             $defaults = self::get_dashboard_defaults();
             $settings = wp_parse_args($settings, $defaults);
 
-            if (array_key_exists('cronWarmStartAfterCleanup', $raw_settings)) {
-                $settings['cronWarmStartAfterCleanup'] = $raw_settings['cronWarmStartAfterCleanup'];
-            } elseif (array_key_exists('warmAfterScheduledCleanup', $raw_settings)) {
-                $settings['cronWarmStartAfterCleanup'] = $raw_settings['warmAfterScheduledCleanup'];
-            }
-
-            if (array_key_exists('cronWarmStartAfterFlush', $raw_settings)) {
-                $settings['cronWarmStartAfterFlush'] = $raw_settings['cronWarmStartAfterFlush'];
-                $settings['cronWarmStartAfterManualPurge'] = $raw_settings['cronWarmStartAfterFlush'];
-            } elseif (array_key_exists('cronWarmStartAfterManualPurge', $raw_settings)) {
-                $settings['cronWarmStartAfterManualPurge'] = $raw_settings['cronWarmStartAfterManualPurge'];
-                $settings['cronWarmStartAfterFlush'] = $raw_settings['cronWarmStartAfterManualPurge'];
-            }
-
             if (array_key_exists('cronWarmPagesPerMinute', $raw_settings)) {
                 $settings['cronWarmPagesPerMinute'] = $raw_settings['cronWarmPagesPerMinute'];
             }
@@ -1784,21 +1767,11 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['homepageCssBundleExcludeList'] = $raw_settings['criticalCssExcludeList'];
             }
 
-            // Media Optimization is the semantic setting name. Keep the legacy
-            // avifConversionEnabled key as a compatibility alias for existing
-            // options, exports, REST clients, and older dashboard bundles.
-            if (array_key_exists('mediaOptimizationEnabled', $raw_settings)) {
-                $settings['avifConversionEnabled'] = $raw_settings['mediaOptimizationEnabled'];
-            } elseif (array_key_exists('avifConversionEnabled', $raw_settings)) {
-                $settings['mediaOptimizationEnabled'] = $raw_settings['avifConversionEnabled'];
-            }
-
             $boolean_keys = array(
                 'pageCacheEnabled',
                 'objectCacheEnabled',
                 'brotliEnabled',
                 'gzipEnabled',
-                'avifConversionEnabled',
                 'mediaOptimizationEnabled',
                 'mediaGenerateOnUploadEnabled',
                 'mediaGenerateOnDemandEnabled',
@@ -1834,11 +1807,10 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'preRenderOnSave',
                 'woocommerceSafeModeEnabled',
                 'cacheCleanupEnabled',
+                'apcuFlushOnScheduledCleanup',
                 'cronWarmEnabled',
                 'cronWarmStartAfterCleanup',
                 'cronWarmStartAfterManualPurge',
-                'cronWarmStartAfterFlush',
-                'warmAfterScheduledCleanup',
                 'staleWhileRevalidateEnabled',
                 'cacheQueryStringsEnabled',
                 'redisUseTls',
@@ -1920,7 +1892,6 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             $media_support = self::get_media_support_status();
             if (empty($media_support['supported'])) {
-                $settings['avifConversionEnabled'] = false;
                 $settings['mediaOptimizationEnabled'] = false;
                 $settings['mediaGenerateOnUploadEnabled'] = false;
                 $settings['mediaGenerateOnDemandEnabled'] = false;
@@ -1931,18 +1902,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['varnishCliEnabled'] = false;
             }
 
-            // Keep scheduled cleanup warming independent from the normal cron warm-start switch.
-            $settings['warmAfterScheduledCleanup'] = !empty($settings['warmAfterScheduledCleanup']);
-
-            // Keep the manual purge/flush warm-start aliases in lock-step.
-            $manual_purge_warm = !empty($settings['cronWarmStartAfterFlush']) && !empty($settings['cronWarmStartAfterManualPurge']);
-            $settings['cronWarmStartAfterFlush'] = $manual_purge_warm;
-            $settings['cronWarmStartAfterManualPurge'] = $manual_purge_warm;
-
-            // Keep both dashboard keys in lock-step. The old key stays exported
-            // for backwards compatibility; new code can read the semantic key.
-            $settings['mediaOptimizationEnabled'] = !empty($settings['avifConversionEnabled']);
-
+            $settings['cronWarmStartAfterCleanup'] = !empty($settings['cronWarmStartAfterCleanup']);
+            $settings['cronWarmStartAfterManualPurge'] = !empty($settings['cronWarmStartAfterManualPurge']);
 
             return $settings;
         }
@@ -2078,7 +2039,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'enabled'                      => !empty($ui['pageCacheEnabled']),
                 'object_cache_enabled'         => !empty($ui['objectCacheEnabled']),
                 'object_cache_backend'         => self::sanitize_object_cache_backend($ui['objectCacheBackend']),
-                'object_cache_fallback_backend'=> 'disk',
+                'object_cache_fallback_backend'=> 'apcu',
                 'redis_host'                   => self::sanitize_redis_host($ui['redisHost']),
                 'redis_port'                   => self::sanitize_bounded_integer_setting($ui['redisPort'], 6379, 1, 65535),
                 'redis_password'               => trim((string) $ui['redisPassword']),
@@ -2147,19 +2108,18 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'varnish_cli_timeout_seconds'  => max(1, min(30, absint($ui['varnishCliTimeoutSeconds']))),
                 'varnish_cli_method'           => ('PURGE' === strtoupper(trim((string) $ui['varnishCliMethod']))) ? 'PURGE' : 'BAN',
                 'varnish_cli_debug'            => !empty($ui['varnishCliDebug']),
-                'avif_enabled'                 => !empty($ui['avifConversionEnabled']) || !empty($ui['mediaOptimizationEnabled']),
-                'media_optimization_enabled'   => !empty($ui['avifConversionEnabled']) || !empty($ui['mediaOptimizationEnabled']),
+                'media_optimization_enabled'   => !empty($ui['mediaOptimizationEnabled']),
                 'media_generate_on_upload'     => !empty($ui['mediaGenerateOnUploadEnabled']),
                 'media_generate_on_demand'     => !empty($ui['mediaGenerateOnDemandEnabled']),
                 'media_output_mode'            => self::sanitize_media_output_mode($ui['mediaOutputMode']),
                 'woo_safe_mode'                => !empty($ui['woocommerceSafeModeEnabled']),
                 'cache_cleanup_enabled'        => !empty($ui['cacheCleanupEnabled']),
+                'apcu_flush_on_scheduled_cleanup' => !empty($ui['apcuFlushOnScheduledCleanup']),
                 'cache_cleanup_interval_hours' => max(1, absint($ui['cacheCleanupIntervalHours'])),
                 'cron_warm_enabled'            => !empty($ui['cronWarmEnabled']),
                 'cron_warm_start_after_cleanup'=> !empty($ui['cronWarmStartAfterCleanup']),
-                'cron_warm_start_after_manual_purge'=> !empty($ui['cronWarmStartAfterManualPurge']) || !empty($ui['cronWarmStartAfterFlush']),
+                'cron_warm_start_after_manual_purge'=> !empty($ui['cronWarmStartAfterManualPurge']),
                 'cron_warm_pages_per_minute'   => max(0, absint($ui['cronWarmPagesPerMinute'])),
-                'warm_after_cleanup'           => !empty($ui['warmAfterScheduledCleanup']),
                 'scheduled_warm_limit'         => max(0, absint($ui['scheduledWarmLimit'])),
                 'stale_while_revalidate_enabled' => !empty($ui['staleWhileRevalidateEnabled']),
                 'cache_fresh_ttl_minutes'      => max(1, absint($ui['cacheFreshTtlMinutes'])),
@@ -2327,7 +2287,7 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function render_runtime_config_json(array $runtime)
         {
             $public_runtime = self::normalize_runtime_config($runtime);
-            unset($public_runtime['revalidate_secret']);
+            unset($public_runtime['revalidate_secret'], $public_runtime['redis_password']);
 
             $encoded = wp_json_encode($public_runtime, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
             if (!is_string($encoded) || '' === $encoded) {
@@ -2618,6 +2578,8 @@ if (!class_exists('Ultra_Cache_WP')) {
             $warmed   = 0;
             $queue_started = false;
             $object_cache_removed = 0;
+            $apcu_flushed = false;
+            $apcu_flush_message = '';
 
             if ($engine && method_exists($engine, 'purge_all')) {
                 self::$suppress_after_purge_warm = true;
@@ -2632,6 +2594,12 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $object_cache_removed = (int) Ultra_Cache_Object_Cache_Manager::cleanup_expired_entries();
             }
 
+            if (!empty($settings['apcu_flush_on_scheduled_cleanup'])) {
+                $apcu_flush_result = self::clear_apcu_user_cache(false);
+                $apcu_flushed = !empty($apcu_flush_result['success']);
+                $apcu_flush_message = isset($apcu_flush_result['message']) ? (string) $apcu_flush_result['message'] : '';
+            }
+
             if ($purged) {
                 $start_result = self::maybe_start_cron_warmup_after_purge('scheduled_cleanup', false);
                 $queue_started = !empty($start_result['success']) && !empty(($start_result['state']['active'] ?? false));
@@ -2639,10 +2607,12 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             return array(
-                'success' => ($purged || $object_cache_removed > 0),
+                'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed),
                 'warmed'  => $warmed,
                 'queueStarted' => $queue_started,
                 'objectCacheRemoved' => $object_cache_removed,
+                'apcuFlushed' => $apcu_flushed,
+                'apcuFlushMessage' => $apcu_flush_message,
             );
         }
 
@@ -2816,6 +2786,92 @@ if (!class_exists('Ultra_Cache_WP')) {
             );
         }
 
+        private static function get_cron_warm_lock_option_name()
+        {
+            return UCWP_CRON_WARM_LOCK_KEY . '_atomic';
+        }
+
+        private static function decode_cron_warm_lock($raw_lock)
+        {
+            if (is_array($raw_lock)) {
+                return $raw_lock;
+            }
+
+            if (!is_string($raw_lock) || '' === $raw_lock) {
+                return array();
+            }
+
+            $decoded = json_decode($raw_lock, true);
+            return is_array($decoded) ? $decoded : array();
+        }
+
+        private static function acquire_cron_warm_lock($lock_token, $lock_ttl)
+        {
+            $now = time();
+            $lock_ttl = max(10, (int) $lock_ttl);
+            $option_name = self::get_cron_warm_lock_option_name();
+            $existing = self::decode_cron_warm_lock(get_option($option_name, ''));
+
+            if (!empty($existing['token']) && !empty($existing['expiresAt']) && (int) $existing['expiresAt'] > $now) {
+                return false;
+            }
+
+            if (!empty($existing)) {
+                delete_option($option_name);
+            }
+
+            $lock = array(
+                'token' => (string) $lock_token,
+                'startedAt' => $now,
+                'expiresAt' => $now + $lock_ttl,
+            );
+
+            $payload = function_exists('wp_json_encode') ? wp_json_encode($lock) : json_encode($lock);
+            if (!add_option($option_name, $payload, '', 'no')) {
+                return false;
+            }
+
+            set_transient(UCWP_CRON_WARM_LOCK_KEY, $lock, $lock_ttl);
+            return true;
+        }
+
+        private static function renew_cron_warm_lock($lock_token, $lock_ttl)
+        {
+            $lock_ttl = max(10, (int) $lock_ttl);
+            $option_name = self::get_cron_warm_lock_option_name();
+            $existing = self::decode_cron_warm_lock(get_option($option_name, ''));
+
+            if (empty($existing['token']) || !hash_equals((string) $existing['token'], (string) $lock_token)) {
+                return false;
+            }
+
+            $lock = array(
+                'token' => (string) $lock_token,
+                'startedAt' => !empty($existing['startedAt']) ? (int) $existing['startedAt'] : time(),
+                'expiresAt' => time() + $lock_ttl,
+            );
+
+            $payload = function_exists('wp_json_encode') ? wp_json_encode($lock) : json_encode($lock);
+            update_option($option_name, $payload, false);
+            set_transient(UCWP_CRON_WARM_LOCK_KEY, $lock, $lock_ttl);
+            return true;
+        }
+
+        private static function release_cron_warm_lock($lock_token)
+        {
+            $option_name = self::get_cron_warm_lock_option_name();
+            $existing = self::decode_cron_warm_lock(get_option($option_name, ''));
+
+            if (!empty($existing['token']) && hash_equals((string) $existing['token'], (string) $lock_token)) {
+                delete_option($option_name);
+            }
+
+            $latest_lock = get_transient(UCWP_CRON_WARM_LOCK_KEY);
+            if (is_array($latest_lock) && isset($latest_lock['token']) && hash_equals((string) $latest_lock['token'], (string) $lock_token)) {
+                delete_transient(UCWP_CRON_WARM_LOCK_KEY);
+            }
+        }
+
         public static function run_cron_warm_tick(array $args = array())
         {
             $state = self::get_cron_warm_state();
@@ -2831,8 +2887,8 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             $lock_ttl = 90;
             $now = time();
-            $current_lock = get_transient(UCWP_CRON_WARM_LOCK_KEY);
-            if (is_array($current_lock) && !empty($current_lock['token']) && !empty($current_lock['expiresAt']) && (int) $current_lock['expiresAt'] > $now) {
+            $lock_token = wp_generate_password(20, false, false);
+            if (!self::acquire_cron_warm_lock($lock_token, $lock_ttl)) {
                 return array(
                     'success' => true,
                     'message' => self::maybe_translate('Cron warm up tick skipped because another run is active.'),
@@ -2840,13 +2896,6 @@ if (!class_exists('Ultra_Cache_WP')) {
                     'state' => self::get_cron_warm_status(),
                 );
             }
-
-            $lock_token = wp_generate_password(20, false, false);
-            set_transient(UCWP_CRON_WARM_LOCK_KEY, array(
-                'token' => $lock_token,
-                'startedAt' => $now,
-                'expiresAt' => $now + $lock_ttl,
-            ), $lock_ttl);
 
             try {
                 $settings = self::get_settings();
@@ -2981,11 +3030,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     $state['lastMessage'] = sprintf('Processed %d/%d URL(s) in the current cron warm batch.', $state['batchIndex'], count($current_batch));
                     self::save_cron_warm_state($state);
 
-                    set_transient(UCWP_CRON_WARM_LOCK_KEY, array(
-                        'token' => $lock_token,
-                        'startedAt' => time(),
-                        'expiresAt' => time() + $lock_ttl,
-                    ), $lock_ttl);
+                    self::renew_cron_warm_lock($lock_token, $lock_ttl);
                 }
 
                 $completed = false;
@@ -3051,10 +3096,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     'state' => self::get_cron_warm_status(),
                 );
             } finally {
-                $latest_lock = get_transient(UCWP_CRON_WARM_LOCK_KEY);
-                if (is_array($latest_lock) && isset($latest_lock['token']) && hash_equals((string) $latest_lock['token'], (string) $lock_token)) {
-                    delete_transient(UCWP_CRON_WARM_LOCK_KEY);
-                }
+                self::release_cron_warm_lock($lock_token);
             }
         }
 
@@ -3065,6 +3107,7 @@ private static function delete_plugin_options_and_transients()
     $option_names = array(
         UCWP_SETTINGS_KEY,
         UCWP_CRON_WARM_STATE_KEY,
+        UCWP_CRON_WARM_LOCK_KEY . '_atomic',
         UCWP_WP_CACHE_MANAGED_KEY,
         UCWP_SETTINGS_KEY . '_action_jobs',
         'ucwp_media_conversion_queue',
@@ -4159,6 +4202,105 @@ public static function delete_all_plugin_data_and_deactivate()
             return $response;
         }
 
+        public static function get_apcu_status_summary()
+        {
+            if (!function_exists('apcu_fetch') || !function_exists('apcu_store') || !function_exists('apcu_cache_info') || !function_exists('apcu_sma_info')) {
+                return array(
+                    'available' => false,
+                    'enabled'   => false,
+                    'message'   => 'APCu functions are unavailable on this server.',
+                );
+            }
+
+            if (function_exists('apcu_enabled') && !apcu_enabled()) {
+                return array(
+                    'available' => true,
+                    'enabled'   => false,
+                    'message'   => 'APCu is loaded but disabled for the current PHP SAPI.',
+                );
+            }
+
+            $cache_info = @apcu_cache_info(true);
+            $sma_info   = @apcu_sma_info(true);
+            if (!is_array($cache_info) || !is_array($sma_info)) {
+                return array(
+                    'available' => true,
+                    'enabled'   => false,
+                    'message'   => 'APCu status could not be read for the current PHP SAPI.',
+                );
+            }
+
+            $num_segments = max(1, (int) ($sma_info['num_seg'] ?? 1));
+            $segment_size = (int) ($sma_info['seg_size'] ?? 0);
+            $total_memory = $segment_size > 0 ? ($num_segments * $segment_size) : 0;
+            $free_memory  = (int) ($sma_info['avail_mem'] ?? 0);
+            $used_memory  = $total_memory > 0 ? max(0, $total_memory - $free_memory) : (int) ($cache_info['mem_size'] ?? 0);
+            $hits         = (int) ($cache_info['num_hits'] ?? 0);
+            $misses       = (int) ($cache_info['num_misses'] ?? 0);
+            $requests     = $hits + $misses;
+            $hit_rate     = $requests > 0 ? round(($hits / $requests) * 100, 2) : 0.0;
+            $usage_rate   = $total_memory > 0 ? round(($used_memory / $total_memory) * 100, 2) : 0.0;
+            $entries      = (int) ($cache_info['num_entries'] ?? 0);
+            if (!$entries && isset($cache_info['cache_list']) && is_array($cache_info['cache_list'])) {
+                $entries = count($cache_info['cache_list']);
+            }
+
+            return array(
+                'available'            => true,
+                'enabled'              => true,
+                'message'              => '',
+                'memoryTotalBytes'     => $total_memory,
+                'memoryUsedBytes'      => $used_memory,
+                'memoryFreeBytes'      => $free_memory,
+                'memoryTotalHuman'     => function_exists('size_format') ? size_format($total_memory, 2) : (string) $total_memory,
+                'memoryUsedHuman'      => function_exists('size_format') ? size_format($used_memory, 2) : (string) $used_memory,
+                'memoryFreeHuman'      => function_exists('size_format') ? size_format($free_memory, 2) : (string) $free_memory,
+                'memoryUsagePercent'   => $usage_rate,
+                'cachedEntries'        => $entries,
+                'hits'                 => $hits,
+                'misses'               => $misses,
+                'hitRate'              => $hit_rate,
+                'inserts'              => (int) ($cache_info['num_inserts'] ?? 0),
+                'expunges'             => (int) ($cache_info['expunges'] ?? 0),
+                'startTime'            => (int) ($cache_info['start_time'] ?? 0),
+                'startTimeHuman'       => !empty($cache_info['start_time']) ? gmdate('Y-m-d H:i:s', (int) $cache_info['start_time']) . ' UTC' : '—',
+            );
+        }
+
+        private static function clear_apcu_user_cache($include_stats = true)
+        {
+            if (!function_exists('apcu_clear_cache')) {
+                return array(
+                    'success' => false,
+                    'message' => 'APCu clear cache is unavailable on this server.',
+                );
+            }
+
+            if (function_exists('apcu_enabled') && !apcu_enabled()) {
+                return array(
+                    'success' => false,
+                    'message' => 'APCu is loaded but disabled for the current PHP SAPI.',
+                );
+            }
+
+            $success = (bool) @apcu_clear_cache();
+            $response = array(
+                'success' => $success,
+                'message' => $success ? 'APCu user cache flushed successfully.' : 'APCu user cache flush failed.',
+            );
+
+            if ($include_stats && method_exists(__CLASS__, 'get_engine_stats')) {
+                $response['stats'] = self::get_engine_stats();
+            }
+
+            return $response;
+        }
+
+        public static function flush_apcu()
+        {
+            return self::clear_apcu_user_cache(true);
+        }
+
         public static function get_engine_stats()
         {
             $stats = array();
@@ -4192,6 +4334,7 @@ public static function delete_all_plugin_data_and_deactivate()
 
             $stats['cronWarm'] = self::get_cron_warm_status();
             $stats['opcache'] = self::get_opcache_status_summary();
+            $stats['apcu'] = self::get_apcu_status_summary();
             $stats['diagnostics'] = self::get_dashboard_diagnostics();
             return $stats;
         }
@@ -5181,7 +5324,7 @@ public static function delete_all_plugin_data_and_deactivate()
                                 && file_exists($object_cache_path))
                         ),
                         'selectedBackend' => self::sanitize_object_cache_backend($settings['objectCacheBackend']),
-                        'fallbackBackend' => 'disk',
+                        'fallbackBackend' => 'apcu',
                         'activeBackend'   => (
                             class_exists('Ultra_Cache_Object_Cache_Manager')
                             && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_active_backend')
@@ -5243,6 +5386,7 @@ public static function delete_all_plugin_data_and_deactivate()
                 ),
                 'reverseProxy' => self::get_reverse_proxy_status(),
                 'loopbackSsl' => ucwp_get_loopback_ssl_status(),
+                'analytics' => self::get_analytics_hit_backend_diagnostic($settings),
                 'environment' => self::get_advanced_environment_diagnostic(),
                 'mediaRuntime' => self::get_media_runtime_diagnostic(),
                 'cronWarm' => self::get_cron_warm_status(),
@@ -5270,6 +5414,8 @@ public static function delete_all_plugin_data_and_deactivate()
             $modified        = 0;
             $size            = 0;
             $managed         = false;
+            $drop_in_build   = '';
+            $storage_format  = '';
             $read_error      = '';
             $readable        = $exists ? is_readable($path) : false;
             $writable        = $exists ? ucwp_path_is_writable($path) : ($parent && file_exists($parent) ? ucwp_path_is_writable($parent) : false);
@@ -5286,7 +5432,16 @@ public static function delete_all_plugin_data_and_deactivate()
                     if (false === $contents) {
                         $read_error = self::maybe_translate('Read failed');
                     } else {
-                        $managed = false !== strpos((string) $contents, $managed_marker);
+                        $contents_string = (string) $contents;
+                        $managed = false !== strpos($contents_string, $managed_marker);
+
+                        if (preg_match('/Drop-in Build:\s*([^\r\n]+)/i', $contents_string, $matches)) {
+                            $drop_in_build = trim((string) $matches[1]);
+                        }
+
+                        if (preg_match('/Storage format:\s*([^\r\n]+)/i', $contents_string, $matches)) {
+                            $storage_format = trim((string) $matches[1]);
+                        }
                     }
                 }
             }
@@ -5301,6 +5456,8 @@ public static function delete_all_plugin_data_and_deactivate()
                 'size'           => (int) max(0, (int) $size),
                 'modified'       => (int) max(0, (int) $modified),
                 'managed'        => (bool) $managed,
+                'dropInBuild'    => (string) $drop_in_build,
+                'storageFormat'  => (string) $storage_format,
                 'readError'      => (string) $read_error,
             );
         }
@@ -5375,6 +5532,107 @@ public static function delete_all_plugin_data_and_deactivate()
             }
 
             return $diag;
+        }
+
+        private static function get_analytics_hit_backend_diagnostic(array $settings = array())
+        {
+            if (empty($settings)) {
+                $settings = self::get_dashboard_settings();
+            }
+
+            $apcu_available = function_exists('apcu_fetch')
+                && function_exists('apcu_inc')
+                && function_exists('apcu_dec')
+                && function_exists('apcu_delete')
+                && (!function_exists('apcu_enabled') || apcu_enabled());
+
+            if ($apcu_available) {
+                $probe_key = 'ucwp_analytics_probe_' . md5(uniqid('ucwp', true));
+                $probe_value = 'ucwp:' . md5($probe_key . '|' . microtime(true));
+                $probe_ok = false;
+                $probe_message = self::maybe_translate('APCu read/write probe failed.');
+
+                try {
+                    $stored = @apcu_store($probe_key, $probe_value, 30);
+                    $fetch_success = false;
+                    $fetched = @apcu_fetch($probe_key, $fetch_success);
+                    @apcu_delete($probe_key);
+                    $probe_ok = (bool) $stored && (bool) $fetch_success && ((string) $fetched === (string) $probe_value);
+                    if ($probe_ok) {
+                        $probe_message = self::maybe_translate('APCu read/write probe passed.');
+                    }
+                } catch (Throwable $e) {
+                    $probe_message = $e->getMessage();
+                }
+
+                return array(
+                    'enabled' => true,
+                    'activeBackend' => 'apcu',
+                    'apcuAvailable' => true,
+                    'redisAvailable' => class_exists('Redis') || extension_loaded('redis'),
+                    'readWrite' => $probe_ok,
+                    'probeStatus' => $probe_ok ? 'passed' : 'failed',
+                    'message' => $probe_ok ? self::maybe_translate('Realtime cache-hit analytics are stored in APCu. Read/write probe passed.') : $probe_message,
+                );
+            }
+
+            $redis_selected = !empty($settings['objectCacheEnabled']) && 'redis' === self::sanitize_object_cache_backend($settings['objectCacheBackend']);
+            $redis_support = self::get_redis_support_status();
+            $redis_available = !empty($redis_support['available']);
+            $redis_connected = false;
+            $redis_message = !empty($redis_support['message']) ? (string) $redis_support['message'] : '';
+
+            $redis_read_write = false;
+            if ($redis_selected && $redis_available && class_exists('Ultra_Cache_Object_Cache_Manager')) {
+                if (method_exists('Ultra_Cache_Object_Cache_Manager', 'test_redis_read_write')) {
+                    $redis_test = Ultra_Cache_Object_Cache_Manager::test_redis_read_write();
+                    $redis_connected = !empty($redis_test['connected']);
+                    $redis_read_write = !empty($redis_test['readWrite']);
+                    if (empty($redis_test['success']) && !empty($redis_test['message'])) {
+                        $redis_message = (string) $redis_test['message'];
+                    }
+                } elseif (method_exists('Ultra_Cache_Object_Cache_Manager', 'test_redis_connection')) {
+                    $redis_test = Ultra_Cache_Object_Cache_Manager::test_redis_connection();
+                    $redis_connected = !empty($redis_test['success']);
+                    $redis_read_write = $redis_connected;
+                    if (!$redis_connected && !empty($redis_test['message'])) {
+                        $redis_message = (string) $redis_test['message'];
+                    }
+                }
+            }
+
+            if ($redis_selected && $redis_available && $redis_connected && $redis_read_write) {
+                return array(
+                    'enabled' => true,
+                    'activeBackend' => 'redis',
+                    'apcuAvailable' => false,
+                    'redisAvailable' => true,
+                    'redisSelected' => true,
+                    'redisConnected' => true,
+                    'readWrite' => true,
+                    'probeStatus' => 'passed',
+                    'message' => self::maybe_translate('Realtime cache-hit analytics are stored in Redis because APCu is unavailable. Read/write probe passed.'),
+                );
+            }
+
+            $message = self::maybe_translate('Realtime cache-hit analytics are disabled because APCu is unavailable and Redis is not connected as the active backend.');
+            if ($redis_selected && $redis_available && '' !== $redis_message) {
+                $message = self::maybe_translate('Realtime cache-hit analytics are disabled because APCu is unavailable and Redis is not connected.') . ' ' . $redis_message;
+            } elseif (!$redis_selected && $redis_available) {
+                $message = self::maybe_translate('Realtime cache-hit analytics are disabled because APCu is unavailable and Redis is not selected as the object cache backend.');
+            }
+
+            return array(
+                'enabled' => false,
+                'activeBackend' => 'disabled',
+                'apcuAvailable' => false,
+                'redisAvailable' => $redis_available,
+                'redisSelected' => $redis_selected,
+                'redisConnected' => $redis_connected,
+                'readWrite' => $redis_read_write,
+                'probeStatus' => $redis_read_write ? 'passed' : 'failed',
+                'message' => $message,
+            );
         }
 
         private static function get_page_cache_activity_snapshot()
@@ -5453,9 +5711,15 @@ public static function delete_all_plugin_data_and_deactivate()
                 }
             }
 
+            $apcu_available = function_exists('apcu_fetch') && function_exists('apcu_store') && (!function_exists('apcu_enabled') || apcu_enabled());
+
             return array(
                 'available' => $available,
                 'message'   => $message,
+                'apcu'      => array(
+                    'available' => $apcu_available,
+                    'message'   => $apcu_available ? '' : self::maybe_translate('APCu extension is not loaded or not enabled.'),
+                ),
             );
         }
 

@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.55.73
+Stable tag: 2.55.96
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -52,9 +52,29 @@ Use **Warm Up Full Site HTML Cache** or **Warm Up Full Site HTML Cache + CSS Bun
 
 = Does it support Redis and Varnish? =
 
-Yes. UltraCache can manage Redis-backed object caching and includes Varnish-aware purge workflows when your server stack supports them.
+Yes. UltraCache can manage Redis-backed object caching, use APCu as a local fallback when available, and includes Varnish-aware purge workflows when your server stack supports them.
 
 == Changelog ==
+
+= 2.55.96 =
+* Tightened JavaScript dependency safety after the expanded HTML rewrite refactor.
+* Built-in protected scripts now stay normal blocking flow across all defer stages.
+* Removed theme-specific built-in JavaScript protection; keep custom theme scripts in manual Defer/Delay exclusions when needed.
+
+= 2.55.90 =
+* Removed border styling from diagnostic status pills and value rows in Diagnostics, Advanced Diagnostics, Activity Summary, Varnish, and Object Cache status sections.
+* Renamed CSS Bundle Diagnostics to CSS Bundle Summary.
+* Added CSS Bundle Summary to Activity Summary while keeping the Warm Cache copy.
+
+= 2.55.89 =
+* Added fail-safe wrappers around frontend HTML/CSS rewrites so failed or suspicious transformations return the original HTML.
+* Protected critical request-chain relief, asset cleanup, CSS bundle replacement, async CSS, CLS, font, speculation rules, LCP, and minify transforms with HTML-shape validation.
+* Records conservative rewrite safety bailouts in analytics for troubleshooting without changing frontend output.
+
+= 2.55.88 =
+* Fixed CSS bundle counters so Warm Cache and CSS Bundle Diagnostics read the canonical frontpage bundle analytics instead of staying at 0.
+* Added homepage* compatibility aliases for CSS bundle stats returned by the engine.
+* Moved CSS Bundle Diagnostics out of CSS Delivery and kept a single copy under Warm Cache.
 
 = 2.55.73 =
 * Disabled Warm Cache actions until Page Caching is enabled.
@@ -127,13 +147,13 @@ Yes. UltraCache can manage Redis-backed object caching and includes Varnish-awar
 * Kept defer/delay exclusions authoritative across both the `script_loader_tag` path and the cached HTML rewrite path to stabilize fragile hero and slider runtimes.
 
 = 2.55.20 =
-* Expanded built-in defer and delay JS protection for Revolution Slider, SR7 runtime, Elementor frontend runtime, Bokifa theme runtime, navigation helpers, and related slider dependencies so homepage hero modules stay stable during normal navigation as well as hard reloads.
-* Added broader pattern-based safety exclusions for script optimization paths touching revslider, SR7, Elementor frontend, smartmenus, header/footer Elementor, Swiper, and Bokifa runtime assets.
+* Expanded built-in defer and delay JS protection for Revolution Slider, SR7 runtime, Elementor frontend runtime, navigation helpers, and related slider dependencies so homepage hero modules stay stable during normal navigation as well as hard reloads.
+* Added broader pattern-based safety exclusions for script optimization paths touching revslider, SR7, Elementor frontend, smartmenus, header/footer Elementor, Swiper, and generic runtime assets.
 * Replaced the OPcache panel helper copy with production-ready operator wording focused on post-deployment opcode invalidation.
 
 = 2.55.17 =
 * Hardened Aggressive Async CSS with built-in protection for theme, builder, WooCommerce, local font, and common layout-critical stylesheet families.
-* Hardened Delay Non-Critical JavaScript with built-in protection for Elementor, WooCommerce, Bokifa, navigation, slider, quick-view, search, and other interaction-critical scripts.
+* Hardened Delay Non-Critical JavaScript with built-in protection for Elementor, WooCommerce, navigation, slider, quick-view, search, and other interaction-critical scripts.
 * Narrowed the non-critical JS matcher so experimental delay mode targets only lower-risk enhancement scripts by default.
 
 = 2.55.15 =
@@ -240,3 +260,38 @@ Repository cleanup and compatibility improvements for WordPress.org submission.
 = 2.55.44 =
 * Restored Stage 1 CSS Bundle to legacy site-wide behavior.
 * Limited page-entry CSS bundle generation/replacement to Stage 2 / Aggressive mode.
+
+## UltraCache 2.55.89 Notes
+
+- Added conservative fail-safe wrappers around frontend HTML/CSS rewrites.
+- If a rewrite throws, returns a non-string result, empties the document, removes required document markers, or produces a suspiciously truncated result, UltraCache keeps the original HTML for that response.
+- Protected critical request-chain relief, asset cleanup, CSS bundle replacement, async CSS, CLS, Google/self-hosted font rewrites, speculation rules, LCP markup, and safe minify paths.
+- Safety bailouts are counted in analytics as `htmlRewriteSafetyBailouts` with the last label/reason for troubleshooting.
+
+Post-update check:
+
+- Save settings once.
+- Purge cache.
+- Test the homepage and a few inner pages with the aggressive frontend options enabled.
+- Confirm the frontend still renders normally before checking PageSpeed again.
+
+Recommended post-update check:
+
+1. Save UltraCache settings once.
+2. Purge all cache.
+3. Check Diagnostics for page-cache switch, page-cache drop-in active, selected object-cache backend, active object-cache backend, Analytics hit backend, OPcache, and APCu.
+4. Check Runtime files, drop-ins & versions for generated build/format details.
+5. Visit the homepage twice and confirm the second request can HIT.
+
+Optional SSH quick check:
+
+```bash
+cd /path/to/wordpress
+wp option get ultracache_settings >/dev/null
+wp ultracache purge --all
+curl -I https://example.com/
+curl -I https://example.com/
+```
+
+Confirm that the generated headers and Diagnostics agree on the page-cache/drop-in state after testing.
+

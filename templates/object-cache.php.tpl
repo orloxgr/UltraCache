@@ -3,7 +3,7 @@
  * UltraCache generated object-cache drop-in.
  * Drop-in Build: __UCWP_DROPIN_BUILD__
  * Safe to overwrite.
- * Storage format: hybrid-disk-redis-v3 with signed-payload-v1 metrics.
+ * Storage format: redis-apcu-runtime-v4 with explicit disk-only mode and signed-payload-v1 metrics.
  */
 
 defined('ABSPATH') || exit;
@@ -94,9 +94,11 @@ if (!class_exists('WP_Object_Cache')) {
 			'misses' => 0,
 		);
 		private $selected_backend = __UCWP_SELECTED_BACKEND__;
-		private $active_backend = 'disk';
+		private $active_backend = 'runtime';
 		private $redis = null;
 		private $redis_enabled = false;
+		private $apcu_enabled = false;
+		private $apcu_prefix = '';
 		private $redis_host = __UCWP_REDIS_HOST__;
 		private $redis_port = __UCWP_REDIS_PORT__;
 		private $redis_password = __UCWP_REDIS_PASSWORD__;
@@ -132,7 +134,11 @@ if (!class_exists('WP_Object_Cache')) {
 			return array(
 				'selected' => (string) $this->selected_backend,
 				'active'   => (string) $this->active_backend,
-				'fallback' => 'disk',
+				'fallback' => 'apcu',
+				'apcu'     => array(
+					'enabled'   => (bool) $this->apcu_enabled,
+					'available' => (bool) $this->apcu_available(),
+				),
 				'redis'    => array(
 					'enabled'  => (bool) $this->redis_enabled,
 					'host'     => (string) $this->redis_host,
@@ -172,15 +178,37 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function bootstrap_backend() {
-			$this->active_backend = 'disk';
+			$this->active_backend = 'runtime';
+			$this->apcu_prefix = $this->build_apcu_prefix();
 
-			if ('redis' !== $this->selected_backend) {
+			if ('redis' === $this->selected_backend) {
+				$this->bootstrap_redis_backend();
+				if ($this->is_redis_backend()) {
+					return;
+				}
+
+				// Redis is preferred, but APCu is the safe local fallback. Do not
+				// silently fall back to Disk because it can create thousands of files.
+				if ($this->bootstrap_apcu_backend()) {
+					return;
+				}
 				return;
 			}
 
+			if ('apcu' === $this->selected_backend) {
+				$this->bootstrap_apcu_backend();
+				return;
+			}
+
+			if ('disk' === $this->selected_backend) {
+				$this->active_backend = 'disk';
+			}
+		}
+
+		private function bootstrap_redis_backend() {
 			if (!class_exists('Redis')) {
 				$this->redis_error = 'PHP Redis extension not loaded.';
-				return;
+				return false;
 			}
 
 			try {
@@ -205,7 +233,7 @@ if (!class_exists('WP_Object_Cache')) {
 					if ('' === $this->redis_error) {
 						$this->redis_error = 'Could not connect to Redis.';
 					}
-					return;
+					return false;
 				}
 
 				if (defined('Redis::OPT_SERIALIZER') && defined('Redis::SERIALIZER_NONE')) {
@@ -229,7 +257,7 @@ if (!class_exists('WP_Object_Cache')) {
 						if ('' === $this->redis_error) {
 							$this->redis_error = 'Redis authentication failed.';
 						}
-						return;
+						return false;
 					}
 				}
 
@@ -241,19 +269,41 @@ if (!class_exists('WP_Object_Cache')) {
 						if ('' === $this->redis_error) {
 							$this->redis_error = 'Redis database select failed.';
 						}
-						return;
+						return false;
 					}
 				}
 
 				$this->redis = $redis;
 				$this->redis_enabled = true;
 				$this->active_backend = 'redis';
+				return true;
 			} catch (Throwable $e) {
 				$this->redis_error = $e->getMessage();
 				$this->redis = null;
 				$this->redis_enabled = false;
-				$this->active_backend = 'disk';
+				$this->active_backend = 'runtime';
+				return false;
 			}
+		}
+
+		private function apcu_available() {
+			if (!function_exists('apcu_fetch') || !function_exists('apcu_store') || !function_exists('apcu_delete') || !function_exists('apcu_add')) {
+				return false;
+			}
+			if (function_exists('apcu_enabled') && !apcu_enabled()) {
+				return false;
+			}
+			return true;
+		}
+
+		private function bootstrap_apcu_backend() {
+			if (!$this->apcu_available()) {
+				$this->apcu_enabled = false;
+				return false;
+			}
+			$this->apcu_enabled = true;
+			$this->active_backend = 'apcu';
+			return true;
 		}
 
 		private function get_redis_connection_host() {
@@ -368,14 +418,22 @@ if (!class_exists('WP_Object_Cache')) {
 
 			if ($this->is_redis_backend()) {
 				if ($this->write_redis_payload($key, $group, $payload, (int) $expire)) {
-					$this->delete_disk_payload($key, $group);
 					return true;
 				}
-
 				$this->delete_redis_payload($key, $group);
 			}
 
-			return $this->write_disk_payload_for_key($key, $group, $payload);
+			if ($this->is_apcu_backend() && $this->write_apcu_payload($key, $group, $payload, (int) $expire)) {
+				return true;
+			}
+
+			if ('disk' === $this->active_backend) {
+				return $this->write_disk_payload_for_key($key, $group, $payload);
+			}
+
+			// Runtime-only fallback: keep the value in memory for this request,
+			// but do not create disk object-cache files automatically.
+			return true;
 		}
 
 		public function get($key, $group = 'default', $force = false, &$found = null) {
@@ -397,10 +455,11 @@ if (!class_exists('WP_Object_Cache')) {
 			$payload = false;
 			if ($this->is_redis_backend()) {
 				$payload = $this->read_redis_payload($key, $group);
-				if (!is_array($payload) || !array_key_exists('value', $payload)) {
-					$payload = $this->read_disk_payload($key, $group);
-				}
-			} else {
+			}
+			if ((!is_array($payload) || !array_key_exists('value', $payload)) && $this->is_apcu_backend()) {
+				$payload = $this->read_apcu_payload($key, $group);
+			}
+			if ((!is_array($payload) || !array_key_exists('value', $payload)) && 'disk' === $this->active_backend) {
 				$payload = $this->read_disk_payload($key, $group);
 			}
 
@@ -436,19 +495,25 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 
 			if ($this->is_redis_backend()) {
-				$redis_deleted = $this->delete_redis_payload($key, $group);
-				$disk_deleted  = $this->delete_disk_payload($key, $group);
-				return $redis_deleted && $disk_deleted;
+				$this->delete_redis_payload($key, $group);
 			}
-
-			return $this->delete_disk_payload($key, $group);
+			if ($this->apcu_enabled) {
+				$this->delete_apcu_payload($key, $group);
+			}
+			if ('disk' === $this->active_backend) {
+				$this->delete_disk_payload($key, $group);
+			}
+			return true;
 		}
 
 		public function flush() {
 			$this->cache = array();
-			$this->flush_disk_cache();
 			$this->flush_redis_cache();
-			$this->ensure_base_dir();
+			$this->flush_apcu_cache();
+			if ('disk' === $this->active_backend) {
+				$this->flush_disk_cache();
+				$this->ensure_base_dir();
+			}
 			return true;
 		}
 
@@ -464,10 +529,14 @@ if (!class_exists('WP_Object_Cache')) {
 			if ($this->is_redis_backend()) {
 				$this->flush_redis_group($group);
 			}
-
-			$path = $this->get_group_dir($group);
-			if ($path && is_dir($path)) {
-				$this->recursive_delete($path);
+			if ($this->apcu_enabled) {
+				$this->flush_apcu_group($group);
+			}
+			if ('disk' === $this->active_backend) {
+				$path = $this->get_group_dir($group);
+				if ($path && is_dir($path)) {
+					$this->recursive_delete($path);
+				}
 			}
 
 			return true;
@@ -723,6 +792,118 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function is_redis_backend() {
 			return 'redis' === $this->active_backend && $this->redis_enabled && $this->redis instanceof Redis;
+		}
+
+		private function is_apcu_backend() {
+			return 'apcu' === $this->active_backend && $this->apcu_enabled && $this->apcu_available();
+		}
+
+		private function build_apcu_prefix() {
+			$seed = implode('|', array(
+				defined('DB_NAME') ? DB_NAME : '',
+				defined('DB_USER') ? DB_USER : '',
+				defined('ABSPATH') ? ABSPATH : '',
+				defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : '',
+				(string) $this->redis_prefix,
+			));
+			$hash = function_exists('hash') ? hash('sha256', 'ucwp-apcu|' . $seed) : md5('ucwp-apcu|' . $seed);
+			return 'ucwp_apcu:' . substr((string) $hash, 0, 16) . ':';
+		}
+
+		private function get_apcu_namespace() {
+			if (!$this->apcu_available()) {
+				return '';
+			}
+			$key = $this->apcu_prefix . 'namespace';
+			$success = false;
+			$namespace = apcu_fetch($key, $success);
+			if ($success && is_string($namespace) && '' !== $namespace) {
+				return $namespace;
+			}
+			$namespace = sha1(uniqid('ucwp-apcu-', true));
+			@apcu_add($key, $namespace);
+			$stored = apcu_fetch($key, $success);
+			return ($success && is_string($stored) && '' !== $stored) ? $stored : $namespace;
+		}
+
+		private function get_apcu_group_version($group) {
+			if (!$this->apcu_available()) {
+				return '1';
+			}
+			$key = $this->apcu_prefix . 'group_version:' . $this->get_redis_scope($group) . ':' . $this->get_redis_group_slug($group);
+			$success = false;
+			$version = apcu_fetch($key, $success);
+			if ($success && is_scalar($version) && '' !== (string) $version) {
+				return (string) $version;
+			}
+			@apcu_add($key, '1');
+			return '1';
+		}
+
+		private function get_apcu_key($key, $group) {
+			return $this->apcu_prefix . $this->get_apcu_namespace() . ':' . $this->get_apcu_group_version($group) . ':' . $this->get_redis_scope($group) . ':' . $this->get_redis_group_slug($group) . ':' . sha1($key);
+		}
+
+		private function write_apcu_payload($key, $group, $payload, $expire) {
+			if (!$this->is_apcu_backend() || !is_array($payload)) {
+				return false;
+			}
+			$value = $payload['value'] ?? null;
+			if ($this->payload_contains_complex_types($value) || !(is_scalar($value) || null === $value || is_array($value))) {
+				return false;
+			}
+			$serialized = serialize($payload);
+			$envelope = $this->build_signed_envelope($serialized);
+			if (!is_array($envelope)) {
+				return false;
+			}
+			$data = serialize($envelope);
+			$ttl = max(0, (int) $expire);
+			return (bool) @apcu_store($this->get_apcu_key($key, $group), $data, $ttl);
+		}
+
+		private function read_apcu_payload($key, $group) {
+			if (!$this->is_apcu_backend()) {
+				return false;
+			}
+			$success = false;
+			$data = apcu_fetch($this->get_apcu_key($key, $group), $success);
+			if (!$success || !is_string($data) || '' === $data) {
+				return false;
+			}
+			$envelope = $this->deserialize_signed_envelope($data, $this->redis_payload_max_bytes * 2);
+			if (!is_array($envelope)) {
+				return false;
+			}
+			$payload_serialized = $this->decode_envelope_payload($envelope, $this->redis_payload_max_bytes);
+			if (false === $payload_serialized || !$this->verify_signature($payload_serialized, (string) $envelope['sig'])) {
+				return false;
+			}
+			$payload = $this->deserialize_cache_payload($payload_serialized, false);
+			return (is_array($payload) && $this->is_valid_cache_payload($payload, $key, $group)) ? $payload : false;
+		}
+
+		private function delete_apcu_payload($key, $group) {
+			if (!$this->apcu_enabled || !$this->apcu_available()) {
+				return true;
+			}
+			@apcu_delete($this->get_apcu_key($key, $group));
+			return true;
+		}
+
+		private function flush_apcu_group($group) {
+			if (!$this->apcu_enabled || !$this->apcu_available()) {
+				return;
+			}
+			$key = $this->apcu_prefix . 'group_version:' . $this->get_redis_scope($group) . ':' . $this->get_redis_group_slug($group);
+			@apcu_store($key, sha1(uniqid('ucwp-apcu-group-', true)));
+		}
+
+		private function flush_apcu_cache() {
+			if (!$this->apcu_enabled || !$this->apcu_available()) {
+				return;
+			}
+			@apcu_store($this->apcu_prefix . 'namespace', sha1(uniqid('ucwp-apcu-flush-', true)));
 		}
 
 		private function get_redis_scope($group) {

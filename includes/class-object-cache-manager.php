@@ -41,7 +41,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		public static function get_unavailable_reason() {
 			$settings = self::get_plugin_settings();
 			if (!empty($settings['object_cache_enabled']) && 'redis' === self::get_selected_backend() && !self::redis_supported()) {
-				return 'Redis backend selected, but the PHP Redis extension is not loaded. The fallback backend is Disk.';
+				return 'Redis backend selected, but the PHP Redis extension is not loaded. UltraCache will use APCu when available, otherwise runtime-only object caching.';
 			}
 
 			return '';
@@ -54,8 +54,8 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 
 		public static function get_selected_backend() {
 			$settings = self::get_plugin_settings();
-			$backend = isset($settings['object_cache_backend']) ? strtolower(trim((string) $settings['object_cache_backend'])) : 'disk';
-			return in_array($backend, array('disk', 'redis'), true) ? $backend : 'disk';
+			$backend = isset($settings['object_cache_backend']) ? strtolower(trim((string) $settings['object_cache_backend'])) : 'redis';
+			return in_array($backend, array('redis', 'apcu', 'disk'), true) ? $backend : 'redis';
 		}
 
 		public static function get_active_backend() {
@@ -346,6 +346,68 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				$result['success'] = $result['connected'];
 				$result['message'] = $result['connected'] ? 'Connected to Redis successfully.' : 'Redis connected but did not respond to ping.';
 			} catch (Throwable $e) {
+				$result['message'] = $e->getMessage();
+			}
+
+			return $result;
+		}
+
+
+		public static function test_redis_read_write($override = array()) {
+			$settings = self::get_plugin_settings();
+			if (is_array($override) && !empty($override)) {
+				$settings = array_merge($settings, array_filter(array(
+					'redis_host' => isset($override['redisHost']) ? (string) $override['redisHost'] : (isset($override['redis_host']) ? (string) $override['redis_host'] : null),
+					'redis_port' => isset($override['redisPort']) ? absint($override['redisPort']) : (isset($override['redis_port']) ? absint($override['redis_port']) : null),
+					'redis_password' => array_key_exists('redisPassword', $override) ? (string) $override['redisPassword'] : (array_key_exists('redis_password', $override) ? (string) $override['redis_password'] : null),
+					'redis_database' => isset($override['redisDatabase']) ? absint($override['redisDatabase']) : (isset($override['redis_database']) ? absint($override['redis_database']) : null),
+					'redis_prefix' => isset($override['redisPrefix']) ? (string) $override['redisPrefix'] : (isset($override['redis_prefix']) ? (string) $override['redis_prefix'] : null),
+					'redis_use_tls' => isset($override['redisUseTls']) ? (bool) $override['redisUseTls'] : (isset($override['redis_use_tls']) ? (bool) $override['redis_use_tls'] : null),
+					'redis_persistent' => isset($override['redisPersistent']) ? (bool) $override['redisPersistent'] : (isset($override['redis_persistent']) ? (bool) $override['redis_persistent'] : null),
+					'redis_connect_timeout_ms' => isset($override['redisConnectTimeoutMs']) ? absint($override['redisConnectTimeoutMs']) : (isset($override['redis_connect_timeout_ms']) ? absint($override['redis_connect_timeout_ms']) : null),
+					'redis_read_timeout_ms' => isset($override['redisReadTimeoutMs']) ? absint($override['redisReadTimeoutMs']) : (isset($override['redis_read_timeout_ms']) ? absint($override['redis_read_timeout_ms']) : null),
+				), static function($value) { return null !== $value; }));
+			}
+
+			$result = self::test_redis_connection($override);
+			$result['readWrite'] = false;
+			$result['probeKey'] = '';
+
+			if (empty($result['success'])) {
+				return $result;
+			}
+
+			$redis = self::connect_redis($settings);
+			if (!$redis instanceof Redis) {
+				$result['success'] = false;
+				$result['connected'] = false;
+				$result['message'] = '' !== self::$redis_last_error ? self::$redis_last_error : 'Could not reconnect to Redis for read/write probe.';
+				return $result;
+			}
+
+			$prefix = self::get_redis_prefix($settings);
+			$key = $prefix . 'analytics-probe:' . md5(uniqid('ucwp', true));
+			$value = 'ucwp:' . md5($key . '|' . microtime(true));
+
+			try {
+				$written = self::with_redis_error_handler_static(function () use ($redis, $key, $value) {
+					return $redis->setex($key, 30, $value);
+				}, false);
+				$fetched = self::with_redis_error_handler_static(function () use ($redis, $key) {
+					return $redis->get($key);
+				}, false);
+				self::with_redis_error_handler_static(function () use ($redis, $key) {
+					$redis->del($key);
+					return true;
+				}, true);
+
+				$result['readWrite'] = (bool) $written && ((string) $fetched === (string) $value);
+				$result['probeKey'] = $key;
+				$result['message'] = $result['readWrite'] ? 'Redis read/write probe passed.' : 'Redis ping passed, but the read/write probe failed.';
+				$result['success'] = (bool) $result['readWrite'];
+			} catch (Throwable $e) {
+				$result['success'] = false;
+				$result['readWrite'] = false;
 				$result['message'] = $e->getMessage();
 			}
 
@@ -792,7 +854,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 
 			self::$plugin_settings_cache = array(
 				'object_cache_enabled' => !empty($saved['objectCacheEnabled']),
-				'object_cache_backend' => !empty($saved['objectCacheBackend']) ? (string) $saved['objectCacheBackend'] : 'disk',
+				'object_cache_backend' => !empty($saved['objectCacheBackend']) ? (string) $saved['objectCacheBackend'] : 'redis',
 				'redis_host'           => !empty($saved['redisHost']) ? (string) $saved['redisHost'] : '127.0.0.1',
 				'redis_port'           => isset($saved['redisPort']) ? absint($saved['redisPort']) : 6379,
 				'redis_password'       => isset($saved['redisPassword']) ? (string) $saved['redisPassword'] : '',

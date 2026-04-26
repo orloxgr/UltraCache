@@ -226,7 +226,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return array
 		 */
 		public function maybe_generate_avif_on_upload($metadata, $attachment_id) {
-			if (!$this->is_avif_feature_enabled() || !$this->is_generate_on_upload_enabled()) {
+			if (!$this->is_media_optimization_enabled() || !$this->is_generate_on_upload_enabled()) {
 				return $metadata;
 			}
 
@@ -350,7 +350,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return void
 		 */
 		public function process_background_generation_queue() {
-			if (!$this->is_avif_feature_enabled() || !$this->is_generate_on_upload_enabled() || !$this->is_supported()) {
+			if (!$this->is_media_optimization_enabled() || !$this->is_generate_on_upload_enabled() || !$this->is_supported()) {
 				return;
 			}
 
@@ -954,7 +954,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return array
 		 */
 		public function filter_attachment_image_attributes($attr, $attachment, $size) {
-			if (!$this->is_avif_feature_enabled()) {
+			if (!$this->is_media_optimization_enabled()) {
 				return $attr;
 			}
 
@@ -982,7 +982,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return array|false
 		 */
 		public function filter_attachment_image_srcset($sources, $size_array, $image_src, $image_meta, $attachment_id) {
-			if (!$this->is_avif_feature_enabled()) {
+			if (!$this->is_media_optimization_enabled()) {
 				return $sources;
 			}
 
@@ -1018,7 +1018,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 				return;
 			}
 
-			if (!$this->is_avif_feature_enabled()) {
+			if (!$this->is_media_optimization_enabled()) {
 				return;
 			}
 
@@ -1064,7 +1064,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return string
 		 */
 		public function rewrite_html_image_urls($html) {
-			if (!$this->is_avif_feature_enabled()) {
+			if (!$this->is_media_optimization_enabled()) {
 				return $html;
 			}
 
@@ -1350,7 +1350,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return bool
 		 */
 		private function can_serve_avif() {
-			if (!$this->is_avif_feature_enabled() || !$this->media_output_mode_allows('avif')) {
+			if (!$this->is_media_optimization_enabled() || !$this->media_output_mode_allows('avif')) {
 				return false;
 			}
 
@@ -1363,7 +1363,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 * @return bool
 		 */
 		private function can_serve_webp() {
-			if (!$this->is_avif_feature_enabled() || !$this->media_output_mode_allows('webp')) {
+			if (!$this->is_media_optimization_enabled() || !$this->media_output_mode_allows('webp')) {
 				return false;
 			}
 
@@ -1399,18 +1399,14 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 *
 		 * @return bool
 		 */
-		private function is_avif_feature_enabled() {
+		private function is_media_optimization_enabled() {
 			if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
 				$settings = Ultra_Cache_WP::get_settings();
-				return !empty($settings['avif_enabled']);
+				return !empty($settings['media_optimization_enabled']);
 			}
 
 			$settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
-			if (isset($settings['mediaOptimizationEnabled']) || isset($settings['avifConversionEnabled'])) {
-				return !empty($settings['mediaOptimizationEnabled']) || !empty($settings['avifConversionEnabled']);
-			}
-
-			return false;
+			return !empty($settings['mediaOptimizationEnabled']);
 		}
 
 		private function get_media_output_mode() {
@@ -2368,7 +2364,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			$source_file = (string) $source_file;
 			$format      = strtolower((string) $format);
 
-			if (!$this->is_avif_feature_enabled() || !$this->is_generate_on_demand_enabled() || !$this->media_output_mode_allows($format)) {
+			if (!$this->is_media_optimization_enabled() || !$this->is_generate_on_demand_enabled() || !$this->media_output_mode_allows($format)) {
 				return false;
 			}
 

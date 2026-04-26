@@ -1,5 +1,5 @@
 <?php
-/** Hotfix Bundle Version: 2.55.72 */
+/** Hotfix Bundle Version: 2.55.96 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -119,6 +119,169 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             return true;
+        }
+
+        private static function get_analytics_redis_prefix()
+        {
+            $settings = defined('UCWP_SETTINGS_KEY') ? get_option(UCWP_SETTINGS_KEY, array()) : array();
+            $prefix = is_array($settings) && isset($settings['redisPrefix']) ? preg_replace('/[^A-Za-z0-9:_\-]/', '', (string) $settings['redisPrefix']) : '';
+            $prefix = trim((string) $prefix, ':');
+            if ('' !== $prefix) {
+                $prefix .= ':';
+            } else {
+                $seed = implode('|', array(
+                    defined('DB_NAME') ? DB_NAME : '',
+                    defined('ABSPATH') ? ABSPATH : '',
+                    defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : '',
+                ));
+                $prefix = 'ucwp:' . substr((string) (function_exists('hash') ? hash('sha256', 'ucwp-redis|' . $seed) : md5('ucwp-redis|' . $seed)), 0, 12) . ':';
+            }
+
+            return $prefix . 'analytics-hit-buffer:';
+        }
+
+        private static function connect_analytics_redis()
+        {
+            static $redis = null;
+            static $attempted = false;
+
+            if ($attempted) {
+                return $redis;
+            }
+            $attempted = true;
+
+            if (!class_exists('Redis') || !defined('UCWP_SETTINGS_KEY')) {
+                return null;
+            }
+
+            $settings = get_option(UCWP_SETTINGS_KEY, array());
+            if (!is_array($settings) || empty($settings['objectCacheEnabled']) || 'redis' !== strtolower(trim((string) ($settings['objectCacheBackend'] ?? 'redis')))) {
+                return null;
+            }
+
+            try {
+                $client = new Redis();
+                $host = trim((string) ($settings['redisHost'] ?? '127.0.0.1'));
+                if ('' === $host) {
+                    $host = '127.0.0.1';
+                }
+                if (!empty($settings['redisUseTls']) && 0 !== strpos($host, 'tls://')) {
+                    $host = 'tls://' . ltrim($host, '/');
+                }
+
+                $port = max(1, min(65535, (int) ($settings['redisPort'] ?? 6379)));
+                $database = max(0, (int) ($settings['redisDatabase'] ?? 0));
+                $connect_timeout = max(0.05, ((int) ($settings['redisConnectTimeoutMs'] ?? 200)) / 1000);
+                $read_timeout = max(0.05, ((int) ($settings['redisReadTimeoutMs'] ?? 200)) / 1000);
+                $persistent = !empty($settings['redisPersistent']);
+
+                if ($persistent) {
+                    $connected = @$client->pconnect($host, $port, $connect_timeout, 'ucwp-analytics-' . md5($host . '|' . $port . '|' . $database));
+                } else {
+                    $connected = @$client->connect($host, $port, $connect_timeout);
+                }
+                if (!$connected) {
+                    return null;
+                }
+
+                if (defined('Redis::OPT_SERIALIZER') && defined('Redis::SERIALIZER_NONE')) {
+                    @$client->setOption(Redis::OPT_SERIALIZER, Redis::SERIALIZER_NONE);
+                }
+                if (defined('Redis::OPT_READ_TIMEOUT')) {
+                    @$client->setOption(Redis::OPT_READ_TIMEOUT, $read_timeout);
+                }
+
+                $password = isset($settings['redisPassword']) ? (string) $settings['redisPassword'] : '';
+                if ('' !== $password && !@$client->auth($password)) {
+                    return null;
+                }
+
+                if ($database > 0 && !@$client->select($database)) {
+                    return null;
+                }
+
+                $redis = $client;
+                return $redis;
+            } catch (Throwable $e) {
+                return null;
+            }
+        }
+
+        private static function snapshot_redis_analytics_hit_buffer()
+        {
+            $redis = self::connect_analytics_redis();
+            if (!$redis instanceof Redis) {
+                return array();
+            }
+
+            $prefix = self::get_analytics_redis_prefix();
+            $deltas = array();
+            foreach (self::get_analytics_hit_buffer_counters() as $counter) {
+                try {
+                    $value = $redis->get($prefix . $counter);
+                } catch (Throwable $e) {
+                    $value = false;
+                }
+                $value = is_numeric($value) ? max(0, (int) $value) : 0;
+                if ($value > 0) {
+                    $deltas[$counter] = $value;
+                }
+            }
+
+            return $deltas;
+        }
+
+        private static function decrement_redis_analytics_hit_buffer(array $deltas)
+        {
+            $redis = self::connect_analytics_redis();
+            if (!$redis instanceof Redis || empty($deltas)) {
+                return;
+            }
+
+            $prefix = self::get_analytics_redis_prefix();
+            foreach ($deltas as $counter => $amount) {
+                $amount = max(0, (int) $amount);
+                if ($amount <= 0) {
+                    continue;
+                }
+                try {
+                    $redis->decrBy($prefix . (string) $counter, $amount);
+                } catch (Throwable $e) {
+                }
+            }
+
+            try {
+                $redis->del($prefix . 'total');
+                $redis->setEx($prefix . 'last_flush', 3600, (string) time());
+            } catch (Throwable $e) {
+            }
+        }
+
+        private static function acquire_redis_analytics_flush_lock()
+        {
+            $redis = self::connect_analytics_redis();
+            if (!$redis instanceof Redis) {
+                return false;
+            }
+
+            try {
+                return (bool) $redis->set(self::get_analytics_redis_prefix() . 'flush_lock', '1', array('nx', 'ex' => 10));
+            } catch (Throwable $e) {
+                return false;
+            }
+        }
+
+        private static function release_redis_analytics_flush_lock()
+        {
+            $redis = self::connect_analytics_redis();
+            if (!$redis instanceof Redis) {
+                return;
+            }
+
+            try {
+                $redis->del(self::get_analytics_redis_prefix() . 'flush_lock');
+            } catch (Throwable $e) {
+            }
         }
 
         private static function get_analytics_hit_buffer_counters()
@@ -271,6 +434,23 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 @apcu_delete($prefix . 'flush_lock');
             }
 
+            $redis = self::connect_analytics_redis();
+            if ($redis instanceof Redis) {
+                $prefix = self::get_analytics_redis_prefix();
+                foreach (self::get_analytics_hit_buffer_counters() as $counter) {
+                    try {
+                        $redis->del($prefix . $counter);
+                    } catch (Throwable $e) {
+                    }
+                }
+                try {
+                    $redis->del($prefix . 'total');
+                    $redis->del($prefix . 'last_flush');
+                    $redis->del($prefix . 'flush_lock');
+                } catch (Throwable $e) {
+                }
+            }
+
             ucwp_safe_unlink(self::get_analytics_hit_buffer_file(), 'analytics_hit_buffer_clear');
         }
 
@@ -284,17 +464,30 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 }
             }
 
+            $redis_lock_acquired = self::acquire_redis_analytics_flush_lock();
+            if (!$apcu_lock_acquired && !$redis_lock_acquired) {
+                return false;
+            }
+
             $apcu_deltas = $apcu_lock_acquired ? self::snapshot_apcu_analytics_hit_buffer() : array();
+            $redis_deltas = $redis_lock_acquired ? self::snapshot_redis_analytics_hit_buffer() : array();
+
+            // Legacy drain only. New advanced-cache hits do not write to this file
+            // when APCu/Redis is unavailable.
             $file_deltas = self::consume_file_analytics_hit_buffer();
-            if (empty($apcu_deltas) && empty($file_deltas)) {
+
+            if (empty($apcu_deltas) && empty($redis_deltas) && empty($file_deltas)) {
                 if ($apcu_lock_acquired) {
                     @apcu_delete($prefix . 'flush_lock');
+                }
+                if ($redis_lock_acquired) {
+                    self::release_redis_analytics_flush_lock();
                 }
                 return false;
             }
 
             $analytics = self::read_analytics(false);
-            foreach (array($apcu_deltas, $file_deltas) as $deltas) {
+            foreach (array($apcu_deltas, $redis_deltas, $file_deltas) as $deltas) {
                 foreach ($deltas as $counter => $amount) {
                     self::apply_analytics_hit_delta($analytics, $counter, $amount);
                 }
@@ -305,6 +498,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
             if ($apcu_lock_acquired) {
                 @apcu_delete($prefix . 'total');
                 @apcu_delete($prefix . 'flush_lock');
+            }
+
+            if ($redis_lock_acquired) {
+                self::decrement_redis_analytics_hit_buffer($redis_deltas);
+                self::release_redis_analytics_flush_lock();
             }
 
             return true;
@@ -485,6 +683,13 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'frontpageCssStylesUnresolved' => (int) ($analytics['frontpageCssStylesUnresolved'] ?? 0),
                 'frontpageCssBundlesBuilt' => (int) ($analytics['frontpageCssBundlesBuilt'] ?? 0),
                 'lastFrontpageCssWarm' => is_array($analytics['lastFrontpageCssWarm']) ? $analytics['lastFrontpageCssWarm'] : array(),
+                // Backward/client compatibility aliases. The UI historically reads the homepage* names,
+                // while the analytics writer stores the canonical frontpage* counters.
+                'homepageCssStylesScanned' => (int) ($analytics['frontpageCssStylesScanned'] ?? 0),
+                'homepageCssStylesBundled' => (int) ($analytics['frontpageCssStylesBundled'] ?? 0),
+                'homepageCssStylesSkipped' => (int) ($analytics['frontpageCssStylesSkipped'] ?? 0),
+                'homepageCssStylesUnresolved' => (int) ($analytics['frontpageCssStylesUnresolved'] ?? 0),
+                'homepageCssBundlesBuilt' => (int) ($analytics['frontpageCssBundlesBuilt'] ?? 0),
                 'sr7LcpDetected' => (int) ($analytics['sr7LcpDetected'] ?? 0),
                 'sr7LcpPreloadsInjected' => (int) ($analytics['sr7LcpPreloadsInjected'] ?? 0),
                 'sr7LcpSkipped' => (int) ($analytics['sr7LcpSkipped'] ?? 0),
@@ -952,8 +1157,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $tag;
             }
 
-            if (1 === $defer_stage && $this->is_script_safe_stage_excluded($handle, $src, $tag, $settings)) {
-                return $tag;
+            if (0 < $defer_stage && $this->is_script_safe_stage_excluded($handle, $src, $tag, $settings)) {
+                return $this->strip_native_loading_attributes_from_script_tag($tag);
             }
 
             if (2 <= $defer_stage && !empty($settings['delay_third_party_js']) && $this->should_delay_script($handle, $src, $tag, $settings)) {
@@ -1003,19 +1208,23 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $tag;
             }
 
-            $tag = preg_replace('/\s(async|defer)(?=(\s|>))/i', '', $tag);
-            $tag = preg_replace('/\sdata-wp-strategy=("|\")(?:async|defer)\1/i', '', $tag);
-            $tag = preg_replace("/\sdata-wp-strategy=(')(?:async|defer)\1/i", '', $tag);
-            $tag = preg_replace('/\sdata-wp-strategy=(?:async|defer)(?=(\s|>))/i', '', $tag);
+            $tag = $this->remove_html_tag_attribute($tag, 'async');
+            $tag = $this->remove_html_tag_attribute($tag, 'defer');
+            $tag = $this->remove_html_tag_attribute($tag, 'data-wp-strategy');
             $tag = preg_replace('/\s{2,}/', ' ', $tag);
 
-            return $tag;
+            return is_string($tag) ? $tag : '';
         }
 
         private function normalize_protected_script_loading_attributes_in_html($html, array $settings = array())
         {
             if (!is_string($html) || '' === $html || false === stripos($html, '<script')) {
                 return $html;
+            }
+
+            $processed = $this->normalize_protected_script_loading_attributes_with_processor($html, $settings);
+            if (is_string($processed)) {
+                return $processed;
             }
 
             $that = $this;
@@ -1029,19 +1238,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
                     return $tag;
                 }
 
-                $handle = '';
-                if (preg_match('/\sid=("|\")(.*?)\1/i', $tag, $id_matches) && isset($id_matches[2])) {
-                    $handle = html_entity_decode((string) $id_matches[2], ENT_QUOTES, 'UTF-8');
-                } elseif (preg_match("/\sid=(')(.*?)\1/i", $tag, $id_matches) && isset($id_matches[2])) {
-                    $handle = html_entity_decode((string) $id_matches[2], ENT_QUOTES, 'UTF-8');
-                }
-
-                $src = '';
-                if (preg_match('/\ssrc=("|\")(.*?)\1/i', $tag, $src_matches) && isset($src_matches[2])) {
-                    $src = html_entity_decode((string) $src_matches[2], ENT_QUOTES, 'UTF-8');
-                } elseif (preg_match("/\ssrc=(')(.*?)\1/i", $tag, $src_matches) && isset($src_matches[2])) {
-                    $src = html_entity_decode((string) $src_matches[2], ENT_QUOTES, 'UTF-8');
-                }
+                $handle = $that->extract_attribute_from_html_tag($tag, 'id');
+                $src = $that->extract_attribute_from_html_tag($tag, 'src');
 
                 if ($that->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
                     return $that->add_defer_attribute_to_script_tag($tag, true);
@@ -1055,6 +1253,59 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }, $html);
 
             return is_string($rewritten) ? $rewritten : $html;
+        }
+
+        private function normalize_protected_script_loading_attributes_with_processor($html, array $settings = array())
+        {
+            if (!$this->html_tag_processor_available()) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $html);
+                $changed = false;
+
+                while ($processor->next_tag('SCRIPT')) {
+                    $async = $processor->get_attribute('async');
+                    $defer = $processor->get_attribute('defer');
+                    $strategy = $processor->get_attribute('data-wp-strategy');
+                    if (null === $async && null === $defer && null === $strategy) {
+                        continue;
+                    }
+
+                    $handle = $processor->get_attribute('id');
+                    $src = $processor->get_attribute('src');
+                    $handle = (null === $handle || false === $handle) ? '' : html_entity_decode((string) $handle, ENT_QUOTES, 'UTF-8');
+                    $src = (null === $src || false === $src) ? '' : html_entity_decode((string) $src, ENT_QUOTES, 'UTF-8');
+                    $tag = $this->get_current_html_processor_tag_markup($processor, 'script');
+
+                    if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+                        $processor->remove_attribute('async');
+                        $processor->remove_attribute('data-wp-strategy');
+                        $processor->set_attribute('defer', 'defer');
+                        $changed = true;
+                        continue;
+                    }
+
+                    if (!$this->is_script_force_blocking($handle, $src, $tag, $settings)) {
+                        continue;
+                    }
+
+                    $processor->remove_attribute('async');
+                    $processor->remove_attribute('defer');
+                    $processor->remove_attribute('data-wp-strategy');
+                    $changed = true;
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function script_handle_has_inline_segments($handle)
@@ -1146,10 +1397,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             if ($force) {
-                $tag = preg_replace('/\sasync(?=(\s|>))/i', '', $tag);
-                $tag = preg_replace('/\sdata-wp-strategy=("|\")(?:async|defer)\1/i', '', $tag);
-                $tag = preg_replace("/\sdata-wp-strategy=(')(?:async|defer)\1/i", '', $tag);
-                $tag = preg_replace('/\sdata-wp-strategy=(?:async|defer)(?=(\s|>))/i', '', $tag);
+                $tag = $this->remove_html_tag_attribute($tag, 'async');
+                $tag = $this->remove_html_tag_attribute($tag, 'data-wp-strategy');
                 $tag = preg_replace('/\s{2,}/', ' ', $tag);
             }
 
@@ -1157,8 +1406,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $tag;
             }
 
-            $deferred = preg_replace('/\ssrc=/i', ' defer src=', $tag, 1);
-            return is_string($deferred) ? $deferred : $tag;
+            return $this->set_or_add_html_tag_attribute($tag, 'defer', 'defer');
         }
 
         private function add_async_attribute_to_script_tag($tag)
@@ -1173,10 +1421,10 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             if (false !== stripos($tag, ' defer')) {
-                return preg_replace('/\sdefer(?=(\s|>))/i', ' async', $tag, 1);
+                $tag = $this->remove_html_tag_attribute($tag, 'defer');
             }
 
-            return str_replace(' src=', ' async src=', $tag);
+            return $this->set_or_add_html_tag_attribute($tag, 'async', 'async');
         }
 
         private function should_async_external_script($handle, $src, $tag, array $settings = array())
@@ -1287,7 +1535,15 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'wc-address-i18n',
                 'wc-credit-card-form',
                 'selectwoo',
-            );
+                'elementor',
+                'elementor-frontend',
+                'elementor-frontend-modules',
+                'frontend-modules',
+                'elementor-webpack-runtime',
+                'elementor-pro-webpack-runtime',
+                'pro-elements-handlers',
+                'swiper',
+                'swiper-bundle',            );
 
             foreach ($patterns as $pattern) {
                 if (false !== strpos($haystack, $pattern)) {
@@ -1473,8 +1729,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'complianz',
                 'sourcebuster',
                 'order-attribution',
-                'eael-general',
-            );
+                'eael-general',                'elementor-frontend.js',            );
         }
 
         private function get_force_blocking_script_handles(array $settings = array())
@@ -1543,14 +1798,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'metaslider-flex-slider',
                 'metaslider-responsive-slides',
                 'hfe-frontend-js-js',
-                'smartmenus-js',
-                'bokifa-theme-js',
-                'bokifa-elementor-frontend-js',
-                'bokifa-elementor-products-js',
-                'bokifa-elementor-posts-grid-js',
-                'bokifa-nav-mobile-js',
-                'bokifa-megamenu-frontend-js',
-            );
+                'smartmenus-js',            );
         }
 
         private function get_defer_excluded_handles(array $settings = array())
@@ -1609,6 +1857,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 '/plugins/woocommerce/assets/js/',
                 'elementor',
                 'elementor-pro',
+                'elementor-frontend',
+                'elementor-frontend.js',
                 'frontend-modules',
                 'pro-elements-handlers',
                 'swiper',
@@ -1672,8 +1922,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'wpforms',
                 'fluentform',
                 'forminator',
-                'gravityforms',
-            );
+                'gravityforms',            );
 
             $filtered = apply_filters('ucwp_delay_js_blocking_fragments', $fragments);
             if (is_array($filtered)) {
@@ -1956,11 +2205,16 @@ if (!class_exists('Ultra_Cache_Engine')) {
         {
             $attributes = array();
             $tag = (string) $tag;
-            if ('' === $tag || false === stripos($tag, '<script')) {
+            if ('' === $tag || false === strpos($tag, '<')) {
                 return $attributes;
             }
 
-            $inside = preg_replace('/^\s*<script\b/i', '', $tag, 1);
+            $processed = $this->extract_html_tag_attributes_with_processor($tag);
+            if (is_array($processed)) {
+                return $processed;
+            }
+
+            $inside = preg_replace('/^\s*<[a-zA-Z][a-zA-Z0-9:-]*\b/i', '', $tag, 1);
             $inside = preg_replace('/>.*$/s', '', is_string($inside) ? $inside : '');
             if (!is_string($inside) || '' === trim($inside)) {
                 return $attributes;
@@ -1989,6 +2243,44 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             return $attributes;
+        }
+
+        private function extract_html_tag_attributes_with_processor($tag)
+        {
+            if (!$this->html_tag_processor_available()) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $tag);
+                if (!$processor->next_tag()) {
+                    return null;
+                }
+
+                $attributes = array();
+                $tag_markup = $this->get_current_html_processor_tag_markup($processor, (string) $processor->get_tag());
+                if (preg_match_all('/\s+([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>`]+)))?/i', $tag_markup, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $match) {
+                        if (empty($match[1])) {
+                            continue;
+                        }
+
+                        $name = strtolower((string) $match[1]);
+                        $value = $processor->get_attribute($name);
+                        if (true === $value) {
+                            $attributes[$name] = $name;
+                        } elseif (false === $value || null === $value) {
+                            $attributes[$name] = '';
+                        } else {
+                            $attributes[$name] = html_entity_decode((string) $value, ENT_QUOTES, 'UTF-8');
+                        }
+                    }
+                }
+
+                return $attributes;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function is_delayable_external_script_tag($tag)
@@ -2246,6 +2538,138 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return add_query_arg('display', 'swap', $url);
         }
 
+
+
+        private function apply_html_rewrite_safely($html, $label, callable $callback)
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            $original = $html;
+            try {
+                $candidate = $callback($html);
+            } catch (\Throwable $e) {
+                $this->record_html_rewrite_safety_bailout($label, 'exception');
+                return $original;
+            }
+
+            if (!is_string($candidate)) {
+                $this->record_html_rewrite_safety_bailout($label, 'non-string');
+                return $original;
+            }
+
+            if (!$this->is_safe_html_rewrite_result($original, $candidate)) {
+                $this->record_html_rewrite_safety_bailout($label, 'invalid-html-shape');
+                return $original;
+            }
+
+            return $candidate;
+        }
+
+        private function apply_html_array_rewrite_safely($html, $label, callable $callback)
+        {
+            $result = array(
+                'html' => $html,
+                'safe' => true,
+            );
+
+            if (!is_string($html) || '' === $html) {
+                return $result;
+            }
+
+            try {
+                $candidate = $callback($html);
+            } catch (\Throwable $e) {
+                $this->record_html_rewrite_safety_bailout($label, 'exception');
+                $result['safe'] = false;
+                return $result;
+            }
+
+            if (!is_array($candidate)) {
+                $this->record_html_rewrite_safety_bailout($label, 'non-array');
+                $result['safe'] = false;
+                return $result;
+            }
+
+            $candidate_html = isset($candidate['html']) && is_string($candidate['html']) ? $candidate['html'] : $html;
+            if (!$this->is_safe_html_rewrite_result($html, $candidate_html)) {
+                $this->record_html_rewrite_safety_bailout($label, 'invalid-html-shape');
+                $result['safe'] = false;
+                return $result;
+            }
+
+            $candidate['html'] = $candidate_html;
+            $candidate['safe'] = true;
+            return $candidate;
+        }
+
+        private function is_safe_html_rewrite_result($original, $candidate)
+        {
+            if (!is_string($original) || !is_string($candidate)) {
+                return false;
+            }
+
+            if ('' === $candidate) {
+                return '' === $original;
+            }
+
+            $original_trimmed = trim($original);
+            $candidate_trimmed = trim($candidate);
+            if ('' !== $original_trimmed && '' === $candidate_trimmed) {
+                return false;
+            }
+
+            $original_length = strlen($original);
+            $candidate_length = strlen($candidate);
+            if ($original_length > 1000 && $candidate_length < max(250, (int) floor($original_length * 0.25))) {
+                return false;
+            }
+
+            foreach (array('</head>', '<body', '</body>', '</html>') as $marker) {
+                if (false !== stripos($original, $marker) && false === stripos($candidate, $marker)) {
+                    return false;
+                }
+            }
+
+            if (false !== stripos($original, '<head') && false === stripos($candidate, '<head')) {
+                return false;
+            }
+
+            $original_lt = substr_count($original, '<');
+            $candidate_lt = substr_count($candidate, '<');
+            if ($original_lt > 20 && $candidate_lt < (int) floor($original_lt * 0.35)) {
+                return false;
+            }
+
+            return true;
+        }
+
+        private function record_html_rewrite_safety_bailout($label, $reason)
+        {
+            $label = sanitize_key((string) $label);
+            $reason = sanitize_key((string) $reason);
+            if ('' === $label) {
+                $label = 'unknown';
+            }
+            if ('' === $reason) {
+                $reason = 'unknown';
+            }
+
+            $analytics = self::read_analytics();
+            if (!is_array($analytics)) {
+                $analytics = array();
+            }
+            $analytics['htmlRewriteSafetyBailouts'] = isset($analytics['htmlRewriteSafetyBailouts']) ? (int) $analytics['htmlRewriteSafetyBailouts'] + 1 : 1;
+            $analytics['htmlRewriteLastBailout'] = array(
+                'label' => $label,
+                'reason' => $reason,
+                'time' => current_time('timestamp'),
+                'time_mysql' => current_time('mysql'),
+            );
+            self::write_analytics($analytics);
+        }
+
         private function apply_frontend_performance_optimizations($html)
         {
             if (!is_string($html) || '' === $html) {
@@ -2259,7 +2683,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             $settings = $this->get_settings();
-            $html = $this->normalize_protected_script_loading_attributes_in_html($html, $settings);
+            $html = $this->apply_html_rewrite_safely($html, 'normalize-script-loading-attrs', function ($html) use ($settings) {
+                return $this->normalize_protected_script_loading_attributes_in_html($html, $settings);
+            });
             $slider_safe_mode = !empty($settings['slider_safe_mode']) && $this->should_use_safe_frontend_optimization_mode($html);
             $safe_mode = !empty($settings['frontend_safe_mode']) || $slider_safe_mode;
 
@@ -2267,21 +2693,31 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 if ($slider_safe_mode) {
                     // Slider Safe Mode protects fragile slider runtime/CSS from delay/rewrite
                     // transforms, but manual priority preloads are safe and still useful for LCP.
-                    $html = $this->inject_manual_critical_preload_links($html, $settings);
-                    $html = $this->inject_detected_slider_fetch_preloads($html, $settings);
+                    $html = $this->apply_html_rewrite_safely($html, 'manual-critical-preloads', function ($html) use ($settings) {
+                        return $this->inject_manual_critical_preload_links($html, $settings);
+                    });
+                    $html = $this->apply_html_rewrite_safely($html, 'slider-fetch-preloads', function ($html) use ($settings) {
+                        return $this->inject_detected_slider_fetch_preloads($html, $settings);
+                    });
                 } else {
-                    $html = $this->apply_critical_request_chain_relief($html, $settings);
+                    $html = $this->apply_html_rewrite_safely($html, 'critical-request-chain-relief', function ($html) use ($settings) {
+                        return $this->apply_critical_request_chain_relief($html, $settings);
+                    });
                 }
             }
 
             if (!$slider_safe_mode && !empty($settings['asset_chain_cleanup']) && !$this->current_request_matches_asset_cleanup_exclusion($settings)) {
-                $html = $this->apply_asset_chain_cleanup_to_html($html, $settings);
+                $html = $this->apply_html_rewrite_safely($html, 'asset-chain-cleanup', function ($html) use ($settings) {
+                    return $this->apply_asset_chain_cleanup_to_html($html, $settings);
+                });
             }
 
             // Frontend Safe Mode is user-controlled. When it is off, UltraCache does not silently
             // re-enable it from automatic SR7/Elementor heuristics.
             if (!$safe_mode) {
-                $html = $this->strip_probable_frontend_authoring_assets($html);
+                $html = $this->apply_html_rewrite_safely($html, 'strip-authoring-assets', function ($html) {
+                    return $this->strip_probable_frontend_authoring_assets($html);
+                });
             }
 
             if (!empty($settings['homepage_css_bundle']) || !empty($settings['critical_css'])) {
@@ -2305,47 +2741,71 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 if ('' !== $bundle_mode) {
                     if ('homepage' === $bundle_scope) {
                         if ($this->is_frontpage_request_url()) {
-                            $html = $this->maybe_replace_page_stylesheet_links_with_bundle($html, home_url('/'));
+                            $html = $this->apply_html_rewrite_safely($html, 'replace-homepage-css-bundle', function ($html) {
+                                return $this->maybe_replace_page_stylesheet_links_with_bundle($html, home_url('/'));
+                            });
                         }
                     } elseif ('shared' === $bundle_scope) {
-                        $html = $this->maybe_replace_page_stylesheet_links_with_bundle($html, home_url('/'));
+                        $html = $this->apply_html_rewrite_safely($html, 'replace-shared-css-bundle', function ($html) {
+                            return $this->maybe_replace_page_stylesheet_links_with_bundle($html, home_url('/'));
+                        });
                     } else {
-                        $html = $this->maybe_replace_page_stylesheet_links_with_bundle($html);
+                        $html = $this->apply_html_rewrite_safely($html, 'replace-page-css-bundle', function ($html) {
+                            return $this->maybe_replace_page_stylesheet_links_with_bundle($html);
+                        });
                     }
                 }
             }
 
             if (!$slider_safe_mode && (!empty($settings['async_css']) || !empty($settings['aggressive_async_css']))) {
-                $safe_async_css_result = $this->rewrite_safe_async_css_links($html);
+                $safe_async_css_result = $this->apply_html_array_rewrite_safely($html, 'async-css-links', function ($html) {
+                    return $this->rewrite_safe_async_css_links($html);
+                });
                 if (is_array($safe_async_css_result)) {
-                    $html = isset($safe_async_css_result['html']) && is_string($safe_async_css_result['html']) ? $safe_async_css_result['html'] : $html;
-                    $this->record_analytics_safe_async_css(isset($safe_async_css_result['stats']) && is_array($safe_async_css_result['stats']) ? $safe_async_css_result['stats'] : array());
+                    if (!empty($safe_async_css_result['safe'])) {
+                        $html = isset($safe_async_css_result['html']) && is_string($safe_async_css_result['html']) ? $safe_async_css_result['html'] : $html;
+                        $this->record_analytics_safe_async_css(isset($safe_async_css_result['stats']) && is_array($safe_async_css_result['stats']) ? $safe_async_css_result['stats'] : array());
+                    }
                 }
             }
 
             if (!empty($settings['cls_dimensions'])) {
-                $cls_dimensions_result = $this->inject_safe_cls_dimensions($html);
+                $cls_dimensions_result = $this->apply_html_array_rewrite_safely($html, 'cls-dimensions', function ($html) {
+                    return $this->inject_safe_cls_dimensions($html);
+                });
                 if (is_array($cls_dimensions_result)) {
-                    $html = isset($cls_dimensions_result['html']) && is_string($cls_dimensions_result['html']) ? $cls_dimensions_result['html'] : $html;
-                    $this->record_analytics_cls_dimensions(isset($cls_dimensions_result['stats']) && is_array($cls_dimensions_result['stats']) ? $cls_dimensions_result['stats'] : array());
+                    if (!empty($cls_dimensions_result['safe'])) {
+                        $html = isset($cls_dimensions_result['html']) && is_string($cls_dimensions_result['html']) ? $cls_dimensions_result['html'] : $html;
+                        $this->record_analytics_cls_dimensions(isset($cls_dimensions_result['stats']) && is_array($cls_dimensions_result['stats']) ? $cls_dimensions_result['stats'] : array());
+                    }
                 }
             }
 
             if (!empty($settings['google_fonts_local_optimization'])) {
-                $html = $this->rewrite_google_fonts_links_to_local_in_html($html);
+                $html = $this->apply_html_rewrite_safely($html, 'google-fonts-local-links', function ($html) {
+                    return $this->rewrite_google_fonts_links_to_local_in_html($html);
+                });
             } elseif (!empty($settings['google_fonts_swap'])) {
-                $html = $this->rewrite_google_fonts_display_swap_in_html($html);
+                $html = $this->apply_html_rewrite_safely($html, 'google-fonts-display-swap', function ($html) {
+                    return $this->rewrite_google_fonts_display_swap_in_html($html);
+                });
             }
 
             if (!$slider_safe_mode && !empty($settings['self_hosted_font_css_optimization'])) {
-                $html = $this->optimize_self_hosted_font_css_links($html);
+                $html = $this->apply_html_rewrite_safely($html, 'self-hosted-font-css-links', function ($html) {
+                    return $this->optimize_self_hosted_font_css_links($html);
+                });
                 if (!$safe_mode && !empty($settings['self_hosted_font_runtime_rewrite'])) {
-                    $html = $this->inject_runtime_font_css_url_map($html);
+                    $html = $this->apply_html_rewrite_safely($html, 'runtime-font-css-map', function ($html) {
+                        return $this->inject_runtime_font_css_url_map($html);
+                    });
                 }
             }
 
             if (!empty($settings['speculation_rules_enabled'])) {
-                $html = $this->inject_speculation_rules_prefetch($html, $settings);
+                $html = $this->apply_html_rewrite_safely($html, 'speculation-rules-prefetch', function ($html) use ($settings) {
+                    return $this->inject_speculation_rules_prefetch($html, $settings);
+                });
             }
 
             if (!empty($settings['lcp_image_priority'])) {
@@ -2353,16 +2813,24 @@ if (!class_exists('Ultra_Cache_Engine')) {
                     // Frontend Safe Mode avoids broad structural rewrites. When Slider Safe Mode is
                     // actually active on this page, apply only the SR7 lifecycle-aware priority guard.
                     if ($slider_safe_mode) {
-                        $html = $this->apply_sr7_first_slide_lcp_priority_markup($html);
+                        $html = $this->apply_html_rewrite_safely($html, 'sr7-first-slide-lcp-priority', function ($html) {
+                            return $this->apply_sr7_first_slide_lcp_priority_markup($html);
+                        });
                     }
-                    $html = $this->inject_safe_lcp_priority_preloads($html);
+                    $html = $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
+                        return $this->inject_safe_lcp_priority_preloads($html);
+                    });
                 } else {
-                    $html = $this->optimize_lcp_image_markup($html);
+                    $html = $this->apply_html_rewrite_safely($html, 'lcp-image-markup', function ($html) {
+                        return $this->optimize_lcp_image_markup($html);
+                    });
                 }
             }
 
             if (!$safe_mode) {
-                $html = $this->minify_html_output_safely($html);
+                $html = $this->apply_html_rewrite_safely($html, 'safe-html-minify', function ($html) {
+                    return $this->minify_html_output_safely($html);
+                });
             }
 
             return $html;
@@ -3434,6 +3902,109 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return false;
         }
 
+        private function html_tag_processor_available()
+        {
+            return class_exists('WP_HTML_Tag_Processor');
+        }
+
+        private function get_current_html_processor_tag_markup($processor, $fallback_tag = 'tag')
+        {
+            $fallback_tag = preg_replace('/[^A-Za-z0-9:-]/', '', (string) $fallback_tag);
+            if ('' === $fallback_tag) {
+                $fallback_tag = 'tag';
+            }
+
+            if (!is_object($processor) || !method_exists($processor, 'get_updated_html')) {
+                return '<' . $fallback_tag . '>';
+            }
+
+            try {
+                $html = (string) $processor->get_updated_html();
+                if (preg_match('/<' . preg_quote($fallback_tag, '/') . '\b[^>]*>/i', $html, $matches)) {
+                    return (string) $matches[0];
+                }
+
+                if (preg_match('/<([a-zA-Z][a-zA-Z0-9:-]*)\b[^>]*>/i', $html, $matches)) {
+                    return (string) $matches[0];
+                }
+            } catch (\Throwable $e) {
+                // Fall through to minimal synthetic markup.
+            }
+
+            return '<' . $fallback_tag . '>';
+        }
+
+        private function get_html_tag_attribute_with_processor($html, $attribute)
+        {
+            if (!$this->html_tag_processor_available()) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $html);
+                if (!$processor->next_tag()) {
+                    return null;
+                }
+
+                $value = $processor->get_attribute((string) $attribute);
+                if (null === $value) {
+                    return null;
+                }
+
+                if (true === $value) {
+                    return (string) $attribute;
+                }
+
+                if (false === $value) {
+                    return '';
+                }
+
+                return html_entity_decode((string) $value, ENT_QUOTES, 'UTF-8');
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        private function set_html_tag_attribute_with_processor($html, $attribute, $value)
+        {
+            if (!$this->html_tag_processor_available()) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $html);
+                if (!$processor->next_tag()) {
+                    return null;
+                }
+
+                $processor->set_attribute((string) $attribute, (string) $value);
+                $updated = $processor->get_updated_html();
+                return is_string($updated) && '' !== $updated ? $updated : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        private function remove_html_tag_attribute_with_processor($html, $attribute)
+        {
+            if (!$this->html_tag_processor_available()) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $html);
+                if (!$processor->next_tag()) {
+                    return null;
+                }
+
+                $processor->remove_attribute((string) $attribute);
+                $updated = $processor->get_updated_html();
+                return is_string($updated) && '' !== $updated ? $updated : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
         private function remove_html_tag_attribute($html, $attribute)
         {
             $attribute = trim((string) $attribute);
@@ -3441,7 +4012,12 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return (string) $html;
             }
 
-            return (string) preg_replace('/\s+' . preg_quote($attribute, '/') . '=(\"|\').*?\1/i', '', (string) $html);
+            $processed = $this->remove_html_tag_attribute_with_processor($html, $attribute);
+            if (is_string($processed)) {
+                return $processed;
+            }
+
+            return (string) preg_replace('/\s+' . preg_quote($attribute, '/') . '(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s"\'=<>`]+))?/i', '', (string) $html);
         }
 
         private function inject_safe_cls_dimensions($html)
@@ -3888,8 +4464,13 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return (string) $html;
             }
 
+            $processed = $this->set_html_tag_attribute_with_processor($html, $attribute, $value);
+            if (is_string($processed)) {
+                return $processed;
+            }
+
             $quoted_value = esc_attr((string) $value);
-            $pattern = '/\\b' . preg_quote($attribute, '/') . '=(\"|\')(.*?)(\\1)/i';
+            $pattern = '/\b' . preg_quote($attribute, '/') . '(?:\s*=\s*("|\')(.*?)(\1)|\s*=\s*[^\s"\'=<>`]+)?/i';
             if (preg_match($pattern, (string) $html)) {
                 return (string) preg_replace($pattern, $attribute . '="' . $quoted_value . '"', (string) $html, 1);
             }
@@ -3899,8 +4480,13 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function rewrite_google_fonts_display_swap_in_html($html)
         {
-            if (false === stripos($html, 'fonts.googleapis.com')) {
+            if (false === stripos((string) $html, 'fonts.googleapis.com')) {
                 return $html;
+            }
+
+            $processed = $this->rewrite_google_fonts_link_hrefs_with_processor($html, false);
+            if (is_string($processed)) {
+                return $processed;
             }
 
             return (string) preg_replace_callback(
@@ -3908,7 +4494,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 function ($matches) {
                     return $this->append_google_fonts_display_swap($matches[0]);
                 },
-                $html
+                (string) $html
             );
         }
 
@@ -3916,6 +4502,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
         {
             if (!is_string($html) || '' === $html || false === stripos($html, 'fonts.googleapis.com')) {
                 return $html;
+            }
+
+            $processed = $this->rewrite_google_fonts_link_hrefs_with_processor($html, true);
+            if (is_string($processed)) {
+                return $processed;
             }
 
             return (string) preg_replace_callback(
@@ -3927,6 +4518,56 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 },
                 $html
             );
+        }
+
+        private function rewrite_google_fonts_link_hrefs_with_processor($html, $localize = false)
+        {
+            if (!$this->html_tag_processor_available()) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $html);
+                $changed = false;
+
+                while ($processor->next_tag()) {
+                    if ('LINK' !== strtoupper((string) $processor->get_tag())) {
+                        continue;
+                    }
+
+                    $href = $processor->get_attribute('href');
+                    if (null === $href || false === $href) {
+                        continue;
+                    }
+
+                    $href = html_entity_decode((string) $href, ENT_QUOTES, 'UTF-8');
+                    if ('' === $href || false === stripos($href, 'fonts.googleapis.com')) {
+                        continue;
+                    }
+
+                    $updated_href = $this->append_google_fonts_display_swap($href);
+                    if (!empty($localize)) {
+                        $localized_href = $this->maybe_get_local_google_fonts_stylesheet_url($updated_href);
+                        if (is_string($localized_href) && '' !== $localized_href) {
+                            $updated_href = $localized_href;
+                        }
+                    }
+
+                    if ($updated_href !== $href) {
+                        $processor->set_attribute('href', $updated_href);
+                        $changed = true;
+                    }
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function maybe_get_local_google_fonts_stylesheet_url($url)
@@ -4830,9 +5471,19 @@ HTML;
 
         private function extract_attribute_from_html_tag($html, $attribute)
         {
-            $attribute = preg_quote((string) $attribute, '/');
-            if (preg_match('/\b' . $attribute . '=(\"|\')(.*?)\1/i', (string) $html, $matches) && isset($matches[2])) {
-                return (string) $matches[2];
+            $attribute_name = (string) $attribute;
+            $processed = $this->get_html_tag_attribute_with_processor($html, $attribute_name);
+            if (null !== $processed) {
+                return (string) $processed;
+            }
+
+            $attribute = preg_quote($attribute_name, '/');
+            if (preg_match('/\b' . $attribute . '\s*=\s*("|\')(.*?)\1/i', (string) $html, $matches) && isset($matches[2])) {
+                return html_entity_decode((string) $matches[2], ENT_QUOTES, 'UTF-8');
+            }
+
+            if (preg_match('/\b' . $attribute . '\s*=\s*([^\s"\'=<>`]+)/i', (string) $html, $matches) && isset($matches[1])) {
+                return html_entity_decode((string) $matches[1], ENT_QUOTES, 'UTF-8');
             }
 
             return '';
@@ -4849,6 +5500,11 @@ HTML;
 
             if ('IMG' !== $tag && 'VIDEO' !== $tag && 'SR7-IMG' !== $tag) {
                 return $html;
+            }
+
+            $processed = $this->boost_lcp_candidate_markup_with_processor($html, $candidate, $tag, $attribute, $raw_url);
+            if (is_string($processed)) {
+                return $processed;
             }
 
             $tag_name = ('SR7-IMG' === $tag) ? 'sr7-img' : strtolower($tag);
@@ -4874,6 +5530,50 @@ HTML;
                 $html,
                 1
             );
+        }
+
+        private function boost_lcp_candidate_markup_with_processor($html, array $candidate, $tag, $attribute, $raw_url)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html) {
+                return null;
+            }
+
+            $tag = strtoupper((string) $tag);
+            $tag_name = ('SR7-IMG' === $tag) ? 'SR7-IMG' : $tag;
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                while ($processor->next_tag($tag_name)) {
+                    $value = $processor->get_attribute($attribute);
+                    if (!is_string($value) || $value !== $raw_url) {
+                        continue;
+                    }
+
+                    if ('high' !== (string) $processor->get_attribute('fetchpriority')) {
+                        $processor->set_attribute('fetchpriority', 'high');
+                        $changed = true;
+                    }
+
+                    if ('IMG' === $tag || 'SR7-IMG' === $tag) {
+                        $loading = $processor->get_attribute('loading');
+                        if (null === $loading || false === $loading || 'lazy' === strtolower((string) $loading)) {
+                            $processor->set_attribute('loading', 'eager');
+                            $changed = true;
+                        }
+                    }
+
+                    break;
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function is_sr7_generated_image_list_url($url)
@@ -4910,6 +5610,11 @@ HTML;
                 return $html;
             }
 
+            $processed = $this->ensure_lcp_preload_link_with_processor($html, $src);
+            if (is_string($processed)) {
+                return $processed;
+            }
+
             $pattern = '~<link\b[^>]*\brel=(["\'])preload\1[^>]*\bas=(["\'])image\2[^>]*\bhref=(["\'])' . preg_quote($src, '~') . '\3[^>]*>~i';
             if (preg_match($pattern, $html, $matches)) {
                 $existing = (string) $matches[0];
@@ -4924,7 +5629,7 @@ HTML;
                 }
 
                 if ($replacement !== $existing) {
-                    $html = preg_replace($pattern, addcslashes($replacement, '\\\$'), $html, 1);
+                    $html = preg_replace($pattern, addcslashes($replacement, '\\$'), $html, 1);
                 }
 
                 return $html;
@@ -4935,8 +5640,62 @@ HTML;
                 return $html;
             }
 
-            return preg_replace('/<\/head>/i', $link . "
-</head>", $html, 1);
+            return preg_replace('/<\/head>/i', $link . "\n</head>", $html, 1);
+        }
+
+        private function ensure_lcp_preload_link_with_processor($html, $src)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $found = false;
+                $normalized_src = $this->normalize_public_resource_url($src);
+
+                while ($processor->next_tag('LINK')) {
+                    $rel = $processor->get_attribute('rel');
+                    $as = $processor->get_attribute('as');
+                    $href = $processor->get_attribute('href');
+                    if (!is_string($rel) || !is_string($as) || !is_string($href)) {
+                        continue;
+                    }
+
+                    if (false === stripos($rel, 'preload') || 'image' !== strtolower(trim($as))) {
+                        continue;
+                    }
+
+                    if ($this->normalize_public_resource_url($href) !== $normalized_src) {
+                        continue;
+                    }
+
+                    $found = true;
+                    if ('high' !== (string) $processor->get_attribute('fetchpriority')) {
+                        $processor->set_attribute('fetchpriority', 'high');
+                        $changed = true;
+                    }
+                    if (null === $processor->get_attribute('crossorigin')) {
+                        $processor->set_attribute('crossorigin', 'anonymous');
+                        $changed = true;
+                    }
+                    break;
+                }
+
+                if (!$found) {
+                    return null;
+                }
+
+                if (!$changed) {
+                    return (string) $html;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function should_skip_lcp_preload_url($url)
@@ -4987,12 +5746,17 @@ HTML;
                 $scheme = is_ssl() ? 'https' : 'http';
             }
 
+            $processed = $this->normalize_protocol_relative_tag_attributes_with_processor($html, $scheme);
+            if (is_string($processed)) {
+                $html = $processed;
+            }
+
             $html = (string) preg_replace_callback(
                 "/(\b(?:src|href|poster|data-src|data-lazy-src|data-bg|data-background|data-bg-image|data-background-image)=)([\"'])(?:\/\/)/i",
                 function ($matches) use ($scheme) {
                     return $matches[1] . $matches[2] . $scheme . '://';
                 },
-                $html
+                (string) $html
             );
 
             $html = (string) preg_replace_callback(
@@ -5030,11 +5794,78 @@ HTML;
             return $html;
         }
 
+        private function normalize_protocol_relative_tag_attributes_with_processor($html, $scheme)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || false === strpos($html, '//')) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $url_attributes = array('src', 'href', 'poster', 'data-src', 'data-lazy-src', 'data-bg', 'data-background', 'data-bg-image', 'data-background-image');
+
+                while ($processor->next_tag()) {
+                    foreach ($url_attributes as $attribute) {
+                        $value = $processor->get_attribute($attribute);
+                        if (!is_string($value) || '' === $value || 0 !== strpos($value, '//')) {
+                            continue;
+                        }
+
+                        $processor->set_attribute($attribute, (string) $scheme . ':' . $value);
+                        $changed = true;
+                    }
+
+                    $srcset = $processor->get_attribute('srcset');
+                    if (is_string($srcset) && false !== strpos($srcset, '//')) {
+                        $parts = array_map('trim', explode(',', $srcset));
+                        $srcset_changed = false;
+                        foreach ($parts as $index => $part) {
+                            $segments = preg_split('/\s+/', $part, 2);
+                            if (!empty($segments[0]) && 0 === strpos($segments[0], '//')) {
+                                $segments[0] = (string) $scheme . ':' . $segments[0];
+                                $parts[$index] = trim(implode(' ', array_filter($segments, 'strlen')));
+                                $srcset_changed = true;
+                            }
+                        }
+
+                        if ($srcset_changed) {
+                            $processor->set_attribute('srcset', implode(', ', $parts));
+                            $changed = true;
+                        }
+                    }
+
+                    $style = $processor->get_attribute('style');
+                    if (is_string($style) && false !== strpos($style, 'url(//')) {
+                        $updated_style = (string) preg_replace('/url\((\s*[\"\']?)\/\//i', 'url($1' . $scheme . '://', $style);
+                        if ($updated_style !== $style) {
+                            $processor->set_attribute('style', $updated_style);
+                            $changed = true;
+                        }
+                    }
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
 
         private function optimize_self_hosted_font_css_links($html)
         {
             if (false === stripos($html, '<link') || false === stripos($html, '.css')) {
                 return $html;
+            }
+
+            $processed = $this->optimize_self_hosted_font_css_links_with_processor($html);
+            if (is_string($processed)) {
+                return $processed;
             }
 
             $preload_urls = array();
@@ -5087,6 +5918,85 @@ HTML;
             }
 
             return $html;
+        }
+
+        private function optimize_self_hosted_font_css_links_with_processor($html)
+        {
+            if (!$this->html_tag_processor_available()) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $html);
+                $changed = false;
+                $preload_urls = array();
+
+                while ($processor->next_tag('LINK')) {
+                    $href = $processor->get_attribute('href');
+                    if (!is_string($href) || '' === $href) {
+                        continue;
+                    }
+
+                    $rel = $processor->get_attribute('rel');
+                    if (!is_string($rel) || false === stripos($rel, 'stylesheet')) {
+                        continue;
+                    }
+
+                    if (null !== $processor->get_attribute('data-ucwp-frontpage-css') || null !== $processor->get_attribute('data-ucwp-page-css-bundle')) {
+                        continue;
+                    }
+
+                    $id = $processor->get_attribute('id');
+                    if (is_string($id) && in_array($id, array('ucwp-page-css-bundle', 'ucwp-frontpage-css'), true)) {
+                        continue;
+                    }
+
+                    $normalized_href = $this->normalize_public_resource_url($href);
+                    if ('' !== $normalized_href) {
+                        $normalized_path = strtolower((string) wp_parse_url($normalized_href, PHP_URL_PATH));
+                        if (false !== strpos($normalized_path, '/cache/ultracache/css-bundles/')) {
+                            continue;
+                        }
+                    }
+
+                    $asset = $this->build_optimized_font_css_asset($href);
+                    if (empty($asset['css_url'])) {
+                        continue;
+                    }
+
+                    if (!empty($asset['preload_urls']) && is_array($asset['preload_urls'])) {
+                        foreach ($asset['preload_urls'] as $preload_url) {
+                            if (count($preload_urls) >= 2) {
+                                break;
+                            }
+                            $preload_url = esc_url_raw((string) $preload_url);
+                            if ('' !== $preload_url && !in_array($preload_url, $preload_urls, true)) {
+                                $preload_urls[] = $preload_url;
+                            }
+                        }
+                    }
+
+                    $processor->set_attribute('href', esc_url($asset['css_url']));
+                    $changed = true;
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                if (!is_string($updated_html) || '' === $updated_html) {
+                    return null;
+                }
+
+                if (!empty($preload_urls)) {
+                    $updated_html = $this->inject_font_preload_links($updated_html, $preload_urls);
+                }
+
+                return $updated_html;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function build_optimized_font_css_asset($url)
@@ -5628,9 +6538,22 @@ HTML;
                 return false;
             }
 
+            $lookup = array();
+            foreach ($excluded_query_args as $excluded_query_arg) {
+                $normalized_arg = sanitize_key((string) $excluded_query_arg);
+                if ('' !== $normalized_arg) {
+                    $lookup[$normalized_arg] = true;
+                }
+            }
+
+            if (empty($lookup)) {
+                return false;
+            }
+
             parse_str((string) $query, $query_vars);
             foreach (array_keys($query_vars) as $query_key) {
-                if (in_array((string) $query_key, $excluded_query_args, true)) {
+                $normalized_key = sanitize_key((string) $query_key);
+                if ('' !== $normalized_key && isset($lookup[$normalized_key])) {
                     return true;
                 }
             }
@@ -5795,10 +6718,23 @@ HTML;
                 return '';
             }
 
+            $lookup = array();
+            foreach ($candidate_args as $candidate_arg) {
+                $normalized_arg = sanitize_key((string) $candidate_arg);
+                if ('' !== $normalized_arg) {
+                    $lookup[$normalized_arg] = true;
+                }
+            }
+
+            if (empty($lookup)) {
+                return '';
+            }
+
             parse_str((string) $query, $query_vars);
             foreach (array_keys($query_vars) as $query_key) {
-                if (in_array((string) $query_key, $candidate_args, true)) {
-                    return (string) $query_key;
+                $normalized_key = sanitize_key((string) $query_key);
+                if ('' !== $normalized_key && isset($lookup[$normalized_key])) {
+                    return $normalized_key;
                 }
             }
 
@@ -8005,15 +8941,57 @@ HTML;
             );
         }
 
+        private function get_current_request_scheme()
+        {
+            $is_ssl = ucwp_server_flag_enabled('HTTPS')
+                || ('443' === ucwp_server_value('SERVER_PORT'));
+
+            if ($is_ssl) {
+                return 'https';
+            }
+
+            $forwarded_proto_parts = explode(',', ucwp_server_value('HTTP_X_FORWARDED_PROTO'));
+            $forwarded_proto = strtolower(trim((string) reset($forwarded_proto_parts)));
+            if ('https' === $forwarded_proto) {
+                return 'https';
+            }
+
+            $forwarded_scheme = strtolower(trim((string) ucwp_server_value('HTTP_X_FORWARDED_SCHEME')));
+            if ('https' === $forwarded_scheme) {
+                return 'https';
+            }
+
+            $forwarded_ssl = strtolower(trim((string) ucwp_server_value('HTTP_X_FORWARDED_SSL')));
+            if (in_array($forwarded_ssl, array('on', '1', 'true', 'https'), true)) {
+                return 'https';
+            }
+
+            $frontend_https = strtolower(trim((string) ucwp_server_value('HTTP_FRONT_END_HTTPS')));
+            if (in_array($frontend_https, array('on', '1', 'true'), true)) {
+                return 'https';
+            }
+
+            $cloudfront_proto = strtolower(trim((string) ucwp_server_value('HTTP_CLOUDFRONT_FORWARDED_PROTO')));
+            if ('https' === $cloudfront_proto) {
+                return 'https';
+            }
+
+            $cf_visitor = (string) ucwp_server_value('HTTP_CF_VISITOR');
+            if (false !== stripos($cf_visitor, '"scheme":"https"')) {
+                return 'https';
+            }
+
+            return 'http';
+        }
+
         private function get_current_request_url()
         {
             if (empty($_SERVER['HTTP_HOST']) || empty($_SERVER['REQUEST_URI'])) {
                 return '';
             }
 
-            $is_ssl = ucwp_server_flag_enabled('HTTPS')
-                || ('443' === ucwp_server_value('SERVER_PORT'));
-            $scheme = $is_ssl ? 'https://' : 'http://';
+            $scheme_value = $this->get_current_request_scheme();
+            $scheme = $scheme_value . '://';
             $host = ucwp_get_validated_http_host(ucwp_server_value('HTTP_HOST'), 'engine_current_request_url');
             if ('' === $host) {
                 return '';

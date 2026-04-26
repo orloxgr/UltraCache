@@ -248,7 +248,6 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'objectCacheEnabled',
                 'brotliEnabled',
                 'gzipEnabled',
-                'avifConversionEnabled',
                 'mediaOptimizationEnabled',
                 'deferJsEnabled',
                 'delayThirdPartyJsEnabled',
@@ -280,8 +279,6 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'cronWarmEnabled',
                 'cronWarmStartAfterCleanup',
                 'cronWarmStartAfterManualPurge',
-                'cronWarmStartAfterFlush',
-                'warmAfterScheduledCleanup',
                 'staleWhileRevalidateEnabled',
                 'cacheQueryStringsEnabled',
                 'redisUseTls',
@@ -800,7 +797,6 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                         'objectCacheAvailable' => !empty($diagnostics['objectCache']['available']),
                         'gzipEnabled' => !empty($settings['gzipEnabled']),
                         'brotliEnabled' => !empty($settings['brotliEnabled']),
-                        'avifConversionEnabled' => !empty($settings['avifConversionEnabled']),
                         'mediaOptimizationEnabled' => !empty($settings['mediaOptimizationEnabled']),
                         'cacheSizeHuman' => (string) ($stats['cacheSizeHuman'] ?? ''),
                         'pagesCached' => (int) ($stats['pagesCached'] ?? ($stats['pageCacheFiles'] ?? 0)),
@@ -926,11 +922,6 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 $value = $this->coerce_setting_value($key, $args[2]);
                 $next = $current;
                 $next[$key] = $value;
-                if ('cronWarmStartAfterFlush' === $key) {
-                    $next['cronWarmStartAfterManualPurge'] = $value;
-                } elseif ('cronWarmStartAfterManualPurge' === $key) {
-                    $next['cronWarmStartAfterFlush'] = $value;
-                }
                 $response = Ultra_Cache_WP::persist_dashboard_settings($next);
 
                 if (is_wp_error($response)) {

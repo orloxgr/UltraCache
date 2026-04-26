@@ -266,6 +266,17 @@ $runtime_config = array(
     'cache_max_stale_minutes'        => 10080,
     'revalidate_secret'              => '',
     'trusted_hosts'                  => array(),
+    'object_cache_enabled'           => false,
+    'object_cache_backend'           => 'redis',
+    'redis_host'                     => '127.0.0.1',
+    'redis_port'                     => 6379,
+    'redis_password'                 => '',
+    'redis_database'                 => 0,
+    'redis_prefix'                   => '',
+    'redis_use_tls'                  => false,
+    'redis_persistent'               => false,
+    'redis_connect_timeout_ms'       => 200,
+    'redis_read_timeout_ms'          => 200,
 );
 $ucwp_normalize_runtime_string_list = static function ($value, $pattern = null) {
     $items = is_array($value) ? $value : preg_split('/\r?\n/', (string) $value);
@@ -343,6 +354,17 @@ $ucwp_normalize_runtime_config = static function ($config) use ($runtime_config,
         'cache_max_stale_minutes'        => $max_stale_minutes,
         'revalidate_secret'              => isset($config['revalidate_secret']) && is_scalar($config['revalidate_secret']) ? (string) $config['revalidate_secret'] : '',
         'trusted_hosts'                  => $ucwp_normalize_runtime_string_list($config['trusted_hosts'] ?? $runtime_config['trusted_hosts']),
+        'object_cache_enabled'           => !empty($config['object_cache_enabled']),
+        'object_cache_backend'           => in_array(strtolower(trim((string) ($config['object_cache_backend'] ?? 'redis'))), array('redis', 'apcu', 'disk'), true) ? strtolower(trim((string) ($config['object_cache_backend'] ?? 'redis'))) : 'redis',
+        'redis_host'                     => isset($config['redis_host']) && is_scalar($config['redis_host']) ? trim((string) $config['redis_host']) : '127.0.0.1',
+        'redis_port'                     => max(1, min(65535, (int) ($config['redis_port'] ?? 6379))),
+        'redis_password'                 => isset($config['redis_password']) && is_scalar($config['redis_password']) ? (string) $config['redis_password'] : '',
+        'redis_database'                 => max(0, (int) ($config['redis_database'] ?? 0)),
+        'redis_prefix'                   => isset($config['redis_prefix']) && is_scalar($config['redis_prefix']) ? preg_replace('/[^A-Za-z0-9:_\-]/', '', (string) $config['redis_prefix']) : '',
+        'redis_use_tls'                  => !empty($config['redis_use_tls']),
+        'redis_persistent'               => !empty($config['redis_persistent']),
+        'redis_connect_timeout_ms'       => max(50, min(5000, (int) ($config['redis_connect_timeout_ms'] ?? 200))),
+        'redis_read_timeout_ms'          => max(50, min(5000, (int) ($config['redis_read_timeout_ms'] ?? 200))),
     );
 };
 $runtime_config = $ucwp_normalize_runtime_config($runtime_config);
@@ -402,8 +424,13 @@ foreach ($runtime_secret_candidates as $runtime_secret_file) {
     }
 
     $loaded_runtime_secret = require $runtime_secret_file;
-    if (is_array($loaded_runtime_secret) && isset($loaded_runtime_secret['revalidate_secret']) && is_scalar($loaded_runtime_secret['revalidate_secret'])) {
-        $runtime_config['revalidate_secret'] = (string) $loaded_runtime_secret['revalidate_secret'];
+    if (is_array($loaded_runtime_secret)) {
+        if (isset($loaded_runtime_secret['revalidate_secret']) && is_scalar($loaded_runtime_secret['revalidate_secret'])) {
+            $runtime_config['revalidate_secret'] = (string) $loaded_runtime_secret['revalidate_secret'];
+        }
+        if (isset($loaded_runtime_secret['redis_password']) && is_scalar($loaded_runtime_secret['redis_password'])) {
+            $runtime_config['redis_password'] = (string) $loaded_runtime_secret['redis_password'];
+        }
         break;
     }
 }
@@ -479,6 +506,131 @@ $ucwp_analytics_apcu_available = static function () {
         return false;
     }
     return true;
+};
+$ucwp_analytics_counters = array('pageHits', 'pageStaleHits', 'bucket_orig', 'bucket_webp', 'bucket_avif', 'encoding_identity', 'encoding_gzip', 'encoding_brotli');
+$ucwp_analytics_redis = null;
+$ucwp_analytics_redis_attempted = false;
+$ucwp_analytics_redis_prefix = static function () use (&$runtime_config) {
+    $prefix = isset($runtime_config['redis_prefix']) ? preg_replace('/[^A-Za-z0-9:_\-]/', '', (string) $runtime_config['redis_prefix']) : '';
+    $prefix = trim((string) $prefix, ':');
+    if ('' !== $prefix) {
+        $prefix .= ':';
+    } else {
+        $seed = (defined('DB_NAME') ? DB_NAME : '') . '|' . (defined('ABSPATH') ? ABSPATH : '') . '|' . (defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : '');
+        $prefix = 'ucwp:' . substr((string) (function_exists('hash') ? hash('sha256', 'ucwp-redis|' . $seed) : md5('ucwp-redis|' . $seed)), 0, 12) . ':';
+    }
+    return $prefix . 'analytics-hit-buffer:';
+};
+$ucwp_get_analytics_redis = static function () use (&$ucwp_analytics_redis, &$ucwp_analytics_redis_attempted, &$runtime_config) {
+    if ($ucwp_analytics_redis_attempted) {
+        return $ucwp_analytics_redis;
+    }
+    $ucwp_analytics_redis_attempted = true;
+    if (empty($runtime_config['object_cache_enabled']) || 'redis' !== (string) ($runtime_config['object_cache_backend'] ?? '') || !class_exists('Redis')) {
+        return null;
+    }
+    try {
+        $redis = new Redis();
+        $host = trim((string) ($runtime_config['redis_host'] ?? '127.0.0.1'));
+        if ('' === $host) {
+            $host = '127.0.0.1';
+        }
+        if (!empty($runtime_config['redis_use_tls']) && 0 !== strpos($host, 'tls://')) {
+            $host = 'tls://' . ltrim($host, '/');
+        }
+        $port = max(1, min(65535, (int) ($runtime_config['redis_port'] ?? 6379)));
+        $connect_timeout = max(0.05, ((int) ($runtime_config['redis_connect_timeout_ms'] ?? 200)) / 1000);
+        $read_timeout = max(0.05, ((int) ($runtime_config['redis_read_timeout_ms'] ?? 200)) / 1000);
+        $database = max(0, (int) ($runtime_config['redis_database'] ?? 0));
+        $persistent = !empty($runtime_config['redis_persistent']);
+        if ($persistent) {
+            $connected = @$redis->pconnect($host, $port, $connect_timeout, 'ucwp-analytics-' . md5($host . '|' . $port . '|' . $database));
+        } else {
+            $connected = @$redis->connect($host, $port, $connect_timeout);
+        }
+        if (!$connected) {
+            return null;
+        }
+        if (defined('Redis::OPT_SERIALIZER') && defined('Redis::SERIALIZER_NONE')) {
+            @$redis->setOption(Redis::OPT_SERIALIZER, Redis::SERIALIZER_NONE);
+        }
+        if (defined('Redis::OPT_READ_TIMEOUT')) {
+            @$redis->setOption(Redis::OPT_READ_TIMEOUT, $read_timeout);
+        }
+        $password = isset($runtime_config['redis_password']) ? (string) $runtime_config['redis_password'] : '';
+        if ('' !== $password && !@$redis->auth($password)) {
+            return null;
+        }
+        if ($database > 0 && !@$redis->select($database)) {
+            return null;
+        }
+        $ucwp_analytics_redis = $redis;
+        return $ucwp_analytics_redis;
+    } catch (Throwable $e) {
+        return null;
+    }
+};
+$ucwp_collect_redis_analytics_hit_buffer = static function () use ($ucwp_get_analytics_redis, $ucwp_analytics_redis_prefix, $ucwp_analytics_counters) {
+    $redis = $ucwp_get_analytics_redis();
+    if (!$redis instanceof Redis) {
+        return array();
+    }
+    $prefix = $ucwp_analytics_redis_prefix();
+    $deltas = array();
+    foreach ($ucwp_analytics_counters as $counter) {
+        try {
+            $value = $redis->get($prefix . $counter);
+        } catch (Throwable $e) {
+            $value = false;
+        }
+        $value = is_numeric($value) ? max(0, (int) $value) : 0;
+        if ($value > 0) {
+            $deltas[$counter] = $value;
+        }
+    }
+    return $deltas;
+};
+$ucwp_decrement_redis_analytics_hit_buffer = static function ($deltas) use ($ucwp_get_analytics_redis, $ucwp_analytics_redis_prefix) {
+    $redis = $ucwp_get_analytics_redis();
+    if (!$redis instanceof Redis || empty($deltas)) {
+        return;
+    }
+    $prefix = $ucwp_analytics_redis_prefix();
+    foreach ($deltas as $counter => $amount) {
+        $amount = max(0, (int) $amount);
+        if ($amount <= 0) {
+            continue;
+        }
+        try {
+            $redis->decrBy($prefix . (string) $counter, $amount);
+        } catch (Throwable $e) {
+        }
+    }
+    try {
+        $redis->del($prefix . 'total');
+        $redis->setEx($prefix . 'last_flush', 3600, (string) time());
+    } catch (Throwable $e) {
+    }
+};
+$ucwp_acquire_redis_analytics_flush_lock = static function () use ($ucwp_get_analytics_redis, $ucwp_analytics_redis_prefix) {
+    $redis = $ucwp_get_analytics_redis();
+    if (!$redis instanceof Redis) {
+        return false;
+    }
+    try {
+        return (bool) $redis->set($ucwp_analytics_redis_prefix() . 'flush_lock', '1', array('nx', 'ex' => 10));
+    } catch (Throwable $e) {
+        return false;
+    }
+};
+$ucwp_release_redis_analytics_flush_lock = static function () use ($ucwp_get_analytics_redis, $ucwp_analytics_redis_prefix) {
+    $redis = $ucwp_get_analytics_redis();
+    if ($redis instanceof Redis) {
+        try {
+            $redis->del($ucwp_analytics_redis_prefix() . 'flush_lock');
+        } catch (Throwable $e) {
+        }
+    }
 };
 $ucwp_apply_analytics_hit_delta = static function (&$data, $counter, $amount) {
     $amount = max(0, (int) $amount);
@@ -569,26 +721,38 @@ $ucwp_consume_file_analytics_hit_buffer = static function () use ($ucwp_analytic
     }
     return $deltas;
 };
-$ucwp_flush_analytics_hit_buffer = static function () use ($ucwp_read_analytics, $ucwp_write_analytics, $ucwp_apply_analytics_hit_delta, $ucwp_collect_apcu_analytics_hit_buffer, $ucwp_consume_file_analytics_hit_buffer, $ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix) {
+$ucwp_flush_analytics_hit_buffer = static function () use ($ucwp_read_analytics, $ucwp_write_analytics, $ucwp_apply_analytics_hit_delta, $ucwp_collect_apcu_analytics_hit_buffer, $ucwp_consume_file_analytics_hit_buffer, $ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix, $ucwp_collect_redis_analytics_hit_buffer, $ucwp_decrement_redis_analytics_hit_buffer, $ucwp_acquire_redis_analytics_flush_lock, $ucwp_release_redis_analytics_flush_lock) {
     $apcu_lock_acquired = false;
     if ($ucwp_analytics_apcu_available()) {
-        if (!@apcu_add($ucwp_analytics_apcu_prefix . 'flush_lock', 1, 10)) {
-            return false;
+        if (@apcu_add($ucwp_analytics_apcu_prefix . 'flush_lock', 1, 10)) {
+            $apcu_lock_acquired = true;
         }
-        $apcu_lock_acquired = true;
     }
 
-    $apcu_deltas = $ucwp_collect_apcu_analytics_hit_buffer();
+    $redis_lock_acquired = $ucwp_acquire_redis_analytics_flush_lock();
+    if (!$apcu_lock_acquired && !$redis_lock_acquired) {
+        return false;
+    }
+
+    $apcu_deltas = $apcu_lock_acquired ? $ucwp_collect_apcu_analytics_hit_buffer() : array();
+    $redis_deltas = $redis_lock_acquired ? $ucwp_collect_redis_analytics_hit_buffer() : array();
+
+    // Legacy drain only: old builds may have left this buffer behind. New hits
+    // never write to disk when APCu/Redis is unavailable.
     $file_deltas = $ucwp_consume_file_analytics_hit_buffer();
-    if (empty($apcu_deltas) && empty($file_deltas)) {
+
+    if (empty($apcu_deltas) && empty($redis_deltas) && empty($file_deltas)) {
         if ($apcu_lock_acquired) {
             @apcu_delete($ucwp_analytics_apcu_prefix . 'flush_lock');
+        }
+        if ($redis_lock_acquired) {
+            $ucwp_release_redis_analytics_flush_lock();
         }
         return false;
     }
 
     $data = $ucwp_read_analytics();
-    foreach (array($apcu_deltas, $file_deltas) as $deltas) {
+    foreach (array($apcu_deltas, $redis_deltas, $file_deltas) as $deltas) {
         foreach ($deltas as $counter => $amount) {
             $ucwp_apply_analytics_hit_delta($data, $counter, $amount);
         }
@@ -598,10 +762,13 @@ $ucwp_flush_analytics_hit_buffer = static function () use ($ucwp_read_analytics,
         if ($apcu_lock_acquired) {
             @apcu_delete($ucwp_analytics_apcu_prefix . 'flush_lock');
         }
+        if ($redis_lock_acquired) {
+            $ucwp_release_redis_analytics_flush_lock();
+        }
         return false;
     }
 
-    if ($ucwp_analytics_apcu_available()) {
+    if ($apcu_lock_acquired) {
         foreach ($apcu_deltas as $counter => $amount) {
             $amount = max(0, (int) $amount);
             if ($amount > 0) {
@@ -612,14 +779,17 @@ $ucwp_flush_analytics_hit_buffer = static function () use ($ucwp_read_analytics,
         @apcu_store($ucwp_analytics_apcu_prefix . 'last_flush', time(), 3600);
         @apcu_delete($ucwp_analytics_apcu_prefix . 'flush_lock');
     }
+    if ($redis_lock_acquired) {
+        $ucwp_decrement_redis_analytics_hit_buffer($redis_deltas);
+        $ucwp_release_redis_analytics_flush_lock();
+    }
 
     return true;
 };
-$ucwp_record_hit = static function ($bucket, $encoding_bucket, $stale = false) use ($ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix, $ucwp_analytics_buffer_flush_threshold, $ucwp_analytics_buffer_flush_interval, $ucwp_analytics_hit_buffer_file, $ucwp_analytics_file_flush_threshold, $ucwp_make_dir, $ucwp_write_file, $ucwp_is_cache_path, $ucwp_flush_analytics_hit_buffer) {
+$ucwp_record_hit = static function ($bucket, $encoding_bucket, $stale = false) use ($ucwp_analytics_apcu_available, $ucwp_analytics_apcu_prefix, $ucwp_analytics_buffer_flush_threshold, $ucwp_analytics_buffer_flush_interval, $ucwp_flush_analytics_hit_buffer, $ucwp_get_analytics_redis, $ucwp_analytics_redis_prefix) {
     $bucket = in_array($bucket, array('orig', 'webp', 'avif'), true) ? $bucket : 'orig';
     $encoding_bucket = in_array($encoding_bucket, array('identity', 'gzip', 'brotli'), true) ? $encoding_bucket : 'identity';
-    $hit_counter = $stale ? 'pageStaleHits' : 'pageHits';
-    $counters = array($hit_counter, 'bucket_' . $bucket, 'encoding_' . $encoding_bucket);
+    $counters = array($stale ? 'pageStaleHits' : 'pageHits', 'bucket_' . $bucket, 'encoding_' . $encoding_bucket);
 
     if ($ucwp_analytics_apcu_available()) {
         foreach ($counters as $counter) {
@@ -632,22 +802,31 @@ $ucwp_record_hit = static function ($bucket, $encoding_bucket, $stale = false) u
         if ($total >= $ucwp_analytics_buffer_flush_threshold || (time() - $last_flush) >= $ucwp_analytics_buffer_flush_interval) {
             $ucwp_flush_analytics_hit_buffer();
         }
-        return;
+        return true;
     }
 
-    if (!$ucwp_is_cache_path($ucwp_analytics_hit_buffer_file)) {
-        return;
+    $redis = $ucwp_get_analytics_redis();
+    if ($redis instanceof Redis) {
+        $prefix = $ucwp_analytics_redis_prefix();
+        try {
+            foreach ($counters as $counter) {
+                $redis->incr($prefix . $counter);
+                $redis->expire($prefix . $counter, 3600);
+            }
+            $total = (int) $redis->incr($prefix . 'total');
+            $redis->expire($prefix . 'total', 3600);
+            $last_flush = (int) $redis->get($prefix . 'last_flush');
+            if ($total >= $ucwp_analytics_buffer_flush_threshold || (time() - $last_flush) >= $ucwp_analytics_buffer_flush_interval) {
+                $ucwp_flush_analytics_hit_buffer();
+            }
+            return true;
+        } catch (Throwable $e) {
+            return false;
+        }
     }
-    $dir = dirname($ucwp_analytics_hit_buffer_file);
-    if (!file_exists($dir)) {
-        $ucwp_make_dir($dir, 0755, true);
-    }
-    $line = ($stale ? 'S' : 'H') . "\t" . $bucket . "\t" . $encoding_bucket . "\n";
-    $ucwp_write_file($ucwp_analytics_hit_buffer_file, $line, FILE_APPEND | LOCK_EX);
-    $buffer_size = file_exists($ucwp_analytics_hit_buffer_file) ? (int) @filesize($ucwp_analytics_hit_buffer_file) : 0;
-    if ($buffer_size >= $ucwp_analytics_file_flush_threshold || 1 === mt_rand(1, $ucwp_analytics_buffer_flush_threshold)) {
-        $ucwp_flush_analytics_hit_buffer();
-    }
+
+    // No APCu and no usable Redis: disable per-hit analytics entirely.
+    return false;
 };
 $ucwp_record_background_revalidation = static function () use ($ucwp_read_analytics, $ucwp_write_analytics, $ucwp_flush_analytics_hit_buffer) {
     $ucwp_flush_analytics_hit_buffer();
@@ -700,9 +879,10 @@ $ucwp_queue_revalidate = static function ($target_url, $secret) {
             curl_setopt($ch, CURLOPT_FORBID_REUSE, true);
             curl_setopt($ch, CURLOPT_FRESH_CONNECT, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, array('X-UltraCache-Revalidate: 1', 'Connection: close'));
-            curl_exec($ch);
+            $result = curl_exec($ch);
+            $errno = curl_errno($ch);
             curl_close($ch);
-            return true;
+            return false !== $result && 0 === (int) $errno;
         }
     }
 
@@ -899,11 +1079,50 @@ if ('' === $incoming_host || empty($ucwp_trusted_hosts) || !isset($ucwp_trusted_
     return;
 }
 
-$https_value = strtolower((string) ucwp_server_var('HTTPS', ''));
-$server_port = ucwp_server_var('SERVER_PORT', '');
-$is_ssl = ('' !== $https_value && 'off' !== $https_value)
-    || ('443' === $server_port);
-$scheme = $is_ssl ? 'https' : 'http';
+$ucwp_detect_request_scheme = static function () {
+    $https_value = strtolower((string) ucwp_server_var('HTTPS', ''));
+    $server_port = ucwp_server_var('SERVER_PORT', '');
+    $is_ssl = ('' !== $https_value && 'off' !== $https_value)
+        || ('443' === $server_port);
+
+    if ($is_ssl) {
+        return 'https';
+    }
+
+    $forwarded_proto_parts = explode(',', ucwp_server_var('HTTP_X_FORWARDED_PROTO', ''));
+    $forwarded_proto = strtolower(trim((string) reset($forwarded_proto_parts)));
+    if ('https' === $forwarded_proto) {
+        return 'https';
+    }
+
+    $forwarded_scheme = strtolower(trim((string) ucwp_server_var('HTTP_X_FORWARDED_SCHEME', '')));
+    if ('https' === $forwarded_scheme) {
+        return 'https';
+    }
+
+    $forwarded_ssl = strtolower(trim((string) ucwp_server_var('HTTP_X_FORWARDED_SSL', '')));
+    if (in_array($forwarded_ssl, array('on', '1', 'true', 'https'), true)) {
+        return 'https';
+    }
+
+    $frontend_https = strtolower(trim((string) ucwp_server_var('HTTP_FRONT_END_HTTPS', '')));
+    if (in_array($frontend_https, array('on', '1', 'true'), true)) {
+        return 'https';
+    }
+
+    $cloudfront_proto = strtolower(trim((string) ucwp_server_var('HTTP_CLOUDFRONT_FORWARDED_PROTO', '')));
+    if ('https' === $cloudfront_proto) {
+        return 'https';
+    }
+
+    $cf_visitor = (string) ucwp_server_var('HTTP_CF_VISITOR', '');
+    if (false !== stripos($cf_visitor, '"scheme":"https"')) {
+        return 'https';
+    }
+
+    return 'http';
+};
+$scheme = $ucwp_detect_request_scheme();
 $url = $scheme . '://' . $incoming_host . $request_uri;
 $parts = parse_url($url);
 if (empty($parts['host'])) {
