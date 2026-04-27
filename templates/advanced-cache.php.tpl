@@ -15,11 +15,30 @@ if (!function_exists('ucwp_safe_file_get_contents')) {
 }
 
 if (!function_exists('ucwp_safe_file_put_contents')) {
-    function ucwp_safe_file_put_contents($file, $data, $flags = 0) {
-        return file_put_contents($file, $data, $flags);
+    function ucwp_safe_file_put_contents($file, $data, $flags = 0, $context = '') {
+        $file = (string) $file;
+        $dir = dirname($file);
+        if ('' === $file) {
+            return false;
+        }
+        if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
+            if (function_exists('ucwp_safe_mkdir')) {
+                ucwp_safe_mkdir($dir, 0755, true);
+            } else {
+                @mkdir($dir, 0755, true);
+            }
+        }
+        if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !is_writable($dir))) {
+            if (is_dir($dir)) {
+                @chmod($dir, 0755);
+            }
+            if (!is_dir($dir) || !is_writable($dir)) {
+                return false;
+            }
+        }
+        return @file_put_contents($file, $data, $flags);
     }
 }
-
 if (!function_exists('ucwp_safe_unlink')) {
     function ucwp_safe_unlink($file) {
         return !file_exists($file) ? true : unlink($file);
@@ -34,10 +53,14 @@ if (!function_exists('ucwp_safe_rename')) {
 
 if (!function_exists('ucwp_safe_mkdir')) {
     function ucwp_safe_mkdir($dir, $mode = 0755, $recursive = true) {
+        $dir = is_string($dir) ? trim($dir) : '';
+        if ('' === $dir) {
+            return false;
+        }
         if (is_dir($dir)) {
             return true;
         }
-        return mkdir($dir, $mode, $recursive) || is_dir($dir);
+        return @mkdir($dir, $mode, $recursive) || is_dir($dir);
     }
 }
 
@@ -189,7 +212,7 @@ $ucwp_make_dir = static function ($dir, $mode = 0755, $recursive = true) {
     if (is_dir($dir)) {
         return true;
     }
-    return mkdir($dir, $mode, $recursive) || is_dir($dir);
+    return @mkdir($dir, $mode, $recursive) || is_dir($dir);
 };
 $ucwp_get_filemtime = static function ($file) {
     return ucwp_safe_filemtime($file);

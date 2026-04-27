@@ -573,6 +573,8 @@
 			build_frontpage_css: { path: 'build-frontpage-css', method: 'POST' },
 			warm_frontpage_html: { path: 'warm-frontpage-html', method: 'POST' },
 			warm_frontpage_html_css: { path: 'warm-frontpage-html-css', method: 'POST' },
+			warm_homepage_google_fonts: { path: 'warm-homepage-google-fonts', method: 'POST' },
+			warm_menu_google_fonts: { path: 'warm-menu-google-fonts', method: 'POST' },
 			get_media_ids: { path: 'media-ids', method: 'GET' },
 			optimize_id: { path: 'optimize-id', method: 'POST' },
 			optimize_media: { path: 'optimize-media', method: 'POST' },
@@ -2279,6 +2281,8 @@
 		const [inspectResult, setInspectResult] = useState(null);
 		const [homepageHtmlBusy, setHomepageHtmlBusy] = useState(false);
 		const [homepageHtmlCssBusy, setHomepageHtmlCssBusy] = useState(false);
+		const [homepageGoogleFontsBusy, setHomepageGoogleFontsBusy] = useState(false);
+		const [menuGoogleFontsBusy, setMenuGoogleFontsBusy] = useState(false);
 		const [allUrlsCssBusy, setAllUrlsCssBusy] = useState(false);
 		const [menuUrlsCssBusy, setMenuUrlsCssBusy] = useState(false);
 		const [savedJob, setSavedJob] = useState(loadSavedJob());
@@ -2941,7 +2945,7 @@
 				if (typeof afterResult === 'function') {
 					afterResult(result, completed);
 				}
-				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'object_cache_full_count', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'apcu_flush', 'varnish_flush_all'].indexOf(action) !== -1) {
+				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'object_cache_full_count', 'warm_frontpage_html', 'warm_frontpage_html_css', 'warm_homepage_google_fonts', 'warm_menu_google_fonts', 'opcache_flush', 'apcu_flush', 'varnish_flush_all'].indexOf(action) !== -1) {
 					try {
 						await refreshStats();
 					} catch (error) {}
@@ -3086,6 +3090,46 @@
 				runningLabel: 'Warming…',
 			}, 'warm_frontpage_html_css');
 			setHomepageHtmlCssBusy(false);
+		}
+
+		async function warmHomepageGoogleFonts() {
+			await syncQueuedSettingsBeforeAction();
+			if (!(settingsRef.current && settingsRef.current.googleFontsLocalOptimizationEnabled)) {
+				pushToast({ type: 'warning', text: 'Enable Local Google Fonts Optimization before warming Google Fonts.' });
+				return;
+			}
+			if (process.active || asyncActions.warm_homepage_google_fonts) {
+				return;
+			}
+
+			setHomepageGoogleFontsBusy(true);
+			await queueDashboardAction('warm_homepage_google_fonts', {}, {
+				queued: 'Homepage Google Fonts warm processing via dashboard…',
+				success: 'Homepage Google Fonts warm completed.',
+				failed: 'Homepage Google Fonts warm failed.',
+				runningLabel: 'Warming Google Fonts…',
+			}, 'warm_homepage_google_fonts');
+			setHomepageGoogleFontsBusy(false);
+		}
+
+		async function warmMenuGoogleFonts() {
+			await syncQueuedSettingsBeforeAction();
+			if (!(settingsRef.current && settingsRef.current.googleFontsLocalOptimizationEnabled)) {
+				pushToast({ type: 'warning', text: 'Enable Local Google Fonts Optimization before warming Google Fonts.' });
+				return;
+			}
+			if (process.active || asyncActions.warm_menu_google_fonts) {
+				return;
+			}
+
+			setMenuGoogleFontsBusy(true);
+			await queueDashboardAction('warm_menu_google_fonts', {}, {
+				queued: 'Menu Google Fonts warm processing via dashboard…',
+				success: 'Menu Google Fonts warm completed.',
+				failed: 'Menu Google Fonts warm failed.',
+				runningLabel: 'Warming menu Google Fonts…',
+			}, 'warm_menu_google_fonts');
+			setMenuGoogleFontsBusy(false);
 		}
 
 		async function startWarmingAllWithFrontpageCss(forceRestart = false) {
@@ -3776,6 +3820,7 @@ async function deleteAllPluginDataAndDeactivate() {
 		const activePerformanceProfile = getActivePerformanceProfile(settings);
 		const pageCacheReady = !!settings.pageCacheEnabled;
 		const cssBundleReady = pageCacheReady && !!settings.homepageCssBundleEnabled;
+		const googleFontsWarmReady = !!settings.googleFontsLocalOptimizationEnabled;
 		const cssWarmScope = normalizeCssBundleScopeValue(settings.cssBundleScope || 'homepage');
 		const menuCssWarmJobType = getCssWarmJobType('menu', cssWarmScope);
 		const fullCssWarmJobType = getCssWarmJobType('full', cssWarmScope);
@@ -3790,7 +3835,7 @@ async function deleteAllPluginDataAndDeactivate() {
 				stylesUnresolved: typeof stats.homepageCssStylesUnresolved !== 'undefined' ? stats.homepageCssStylesUnresolved : stats.frontpageCssStylesUnresolved,
 				lastWarm: stats.lastFrontpageCssWarm || null,
 			};
-		const warmBusy = busy || process.active || homepageHtmlBusy || homepageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy;
+		const warmBusy = busy || process.active || homepageHtmlBusy || homepageHtmlCssBusy || homepageGoogleFontsBusy || menuGoogleFontsBusy || menuUrlsCssBusy || allUrlsCssBusy;
 		const warmDisabledMessage = !pageCacheReady
 			? 'Please enable Page Caching first or select a profile before warming cache.'
 			: (!settings.homepageCssBundleEnabled ? 'CSS bundle warm buttons are disabled until CSS Bundling is enabled.' : '');
@@ -3865,10 +3910,28 @@ async function deleteAllPluginDataAndDeactivate() {
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
+									onClick: warmHomepageGoogleFonts,
+									disabled: !googleFontsWarmReady || warmBusy,
+								},
+								!googleFontsWarmReady ? 'Enable Google Fonts First' : (warmBusy && !homepageGoogleFontsBusy ? 'Engine Busy' : (homepageGoogleFontsBusy ? 'Warming Homepage Google Fonts…' : 'Warm Homepage Google Fonts'))
+							),
+							h(
+								'button',
+								{
+									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startMenuWarming(false),
 									disabled: !pageCacheReady || warmBusy,
 								},
 								!pageCacheReady ? 'Enable Page Cache First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm_menu').canResume ? 'Resume Warm Up Menu HTML Cache' : 'Warm Up Menu HTML Cache'))
+							),
+							h(
+								'button',
+								{
+									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
+									onClick: warmMenuGoogleFonts,
+									disabled: !googleFontsWarmReady || warmBusy,
+								},
+								!googleFontsWarmReady ? 'Enable Google Fonts First' : (warmBusy && !menuGoogleFontsBusy ? 'Engine Busy' : (menuGoogleFontsBusy ? 'Warming Menu Google Fonts…' : 'Warm Menu Google Fonts'))
 							),
 							h(
 								'button',
@@ -4274,7 +4337,7 @@ h(
 						}),
 h(ToggleRow, {
 							label: 'Local Google Fonts Optimization',
-							description: 'Opt-in feature. Download Google Fonts CSS and WOFF2 files into the UltraCache cache, rewrite the frontend to serve local copies, and keep font-display: swap on the localized CSS. This feature makes outbound requests to Google Fonts when building the local cache.',
+							description: 'Opt-in feature. Download Google Fonts CSS and WOFF2 files into the UltraCache cache, rewrite the frontend to serve local copies, and keep font-display: swap on the localized CSS. Usually Warm Homepage Google Fonts is enough because most themes load the same font set globally. Use Warm Menu Google Fonts to discover extra fonts used only on inner pages. Without pre-warm, UltraCache keeps original Google Fonts URLs on first visits and builds local copies later via WP-Cron/server cron or the warm buttons, without blocking frontend rendering.',
 							checked: settings.googleFontsLocalOptimizationEnabled,
 							onChange: (value) => updateSetting('googleFontsLocalOptimizationEnabled', value),
 							disabled: busy,

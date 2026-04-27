@@ -410,6 +410,20 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
+                '/warm-homepage-google-fonts' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'warm_homepage_google_fonts'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
+                '/warm-menu-google-fonts' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'warm_menu_google_fonts'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/inspect-url' => array(
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
@@ -889,6 +903,18 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             return null;
         }
 
+        private function guard_google_fonts_local_enabled()
+        {
+            if (!$this->is_dashboard_setting_enabled('googleFontsLocalOptimizationEnabled')) {
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'message' => 'Enable Local Google Fonts Optimization before warming Google Fonts.',
+                ), 400);
+            }
+
+            return null;
+        }
+
         public function get_urls(WP_REST_Request $request)
         {
             $engine = $this->get_engine();
@@ -1013,6 +1039,38 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : (!empty($result['skipped']) ? 200 : 500));
         }
 
+        public function warm_homepage_google_fonts()
+        {
+            $guard = $this->guard_google_fonts_local_enabled();
+            if ($guard instanceof WP_REST_Response) {
+                return $guard;
+            }
+
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'warm_homepage_google_fonts')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
+            }
+
+            $result = $engine->warm_homepage_google_fonts();
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : (!empty($result['skipped']) ? 200 : 500));
+        }
+
+        public function warm_menu_google_fonts()
+        {
+            $guard = $this->guard_google_fonts_local_enabled();
+            if ($guard instanceof WP_REST_Response) {
+                return $guard;
+            }
+
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'warm_menu_google_fonts')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
+            }
+
+            $result = $engine->warm_menu_google_fonts();
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : (!empty($result['skipped']) ? 200 : 500));
+        }
+
         public function get_media_ids(WP_REST_Request $request)
         {
             $media = $this->get_media();
@@ -1071,6 +1129,8 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'object_cache_full_count',
                 'warm_frontpage_html',
                 'warm_frontpage_html_css',
+                'warm_homepage_google_fonts',
+                'warm_menu_google_fonts',
                 'varnish_test',
                 'varnish_flush_all',
                 'opcache_flush',
@@ -1087,6 +1147,8 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'object_cache_full_count',
                 'warm_frontpage_html',
                 'warm_frontpage_html_css',
+                'warm_homepage_google_fonts',
+                'warm_menu_google_fonts',
                 'varnish_flush_all',
             );
         }
@@ -1360,6 +1422,10 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         return $this->unwrap_rest_payload($this->warm_frontpage_html());
                     case 'warm_frontpage_html_css':
                         return $this->unwrap_rest_payload($this->warm_frontpage_html_css());
+                    case 'warm_homepage_google_fonts':
+                        return $this->unwrap_rest_payload($this->warm_homepage_google_fonts());
+                    case 'warm_menu_google_fonts':
+                        return $this->unwrap_rest_payload($this->warm_menu_google_fonts());
                     case 'varnish_test':
                         return $this->unwrap_rest_payload($this->varnish_test());
                     case 'varnish_flush_all':

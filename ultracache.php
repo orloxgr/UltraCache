@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.27
+ * Version: 2.56.37
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.27');
+    define('UCWP_VERSION', '2.56.37');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -308,6 +308,34 @@ if (!function_exists('ucwp_safe_fsockopen')) {
 if (!function_exists('ucwp_safe_file_put_contents')) {
     function ucwp_safe_file_put_contents($path, $contents, $flags = 0, $context = '')
     {
+        $path = (string) $path;
+        $context = (string) $context;
+        if ('' === $path) {
+            ucwp_debug_log('file_put_contents failed', array('path' => $path, 'context' => $context, 'reason' => 'empty-path'));
+            return false;
+        }
+
+        $dir = dirname($path);
+        if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
+            if (function_exists('ucwp_safe_mkdir')) {
+                ucwp_safe_mkdir($dir, 0755, true, $context . ' parent mkdir');
+            } elseif (function_exists('wp_mkdir_p')) {
+                wp_mkdir_p($dir);
+            } else {
+                @mkdir($dir, 0755, true);
+            }
+        }
+
+        if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !is_writable($dir))) {
+            if (is_dir($dir)) {
+                @chmod($dir, 0755);
+            }
+            if (!is_dir($dir) || !is_writable($dir)) {
+                ucwp_debug_log('file_put_contents failed', array('path' => $path, 'context' => $context, 'reason' => 'parent-not-writable'));
+                return false;
+            }
+        }
+
         $filesystem = ucwp_get_wp_filesystem();
         if ($filesystem) {
             $existing = '';
@@ -321,9 +349,9 @@ if (!function_exists('ucwp_safe_file_put_contents')) {
             }
         }
 
-        $result = file_put_contents($path, $contents, $flags);
+        $result = @file_put_contents($path, $contents, $flags);
         if (false === $result) {
-            ucwp_debug_log('file_put_contents failed', array('path' => $path, 'context' => (string) $context));
+            ucwp_debug_log('file_put_contents failed', array('path' => $path, 'context' => $context));
         }
 
         return $result;
@@ -1182,6 +1210,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 UCWP_AVIF_DIR,
                 UCWP_WEBP_DIR,
                 UCWP_OBJECT_CACHE_DIR,
+                trailingslashit(UCWP_CACHE_DIR) . 'google-fonts/',
             );
 
             foreach ($dirs as $dir) {
@@ -2588,28 +2617,7 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private static function has_cron_warm_recurring_event_scheduled()
         {
-            if (!function_exists('_get_cron_array')) {
-                return false;
-            }
-
-            $cron = _get_cron_array();
-            if (!is_array($cron)) {
-                return false;
-            }
-
-            foreach ($cron as $timestamp => $hooks) {
-                if (empty($hooks['ucwp_cron_warm_tick']) || !is_array($hooks['ucwp_cron_warm_tick'])) {
-                    continue;
-                }
-
-                foreach ($hooks['ucwp_cron_warm_tick'] as $event) {
-                    if (!empty($event['schedule']) && 'ucwp_every_minute' === $event['schedule']) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
+            return false !== wp_next_scheduled('ucwp_cron_warm_tick');
         }
 
         private static function get_next_cron_warm_scheduled_at()
@@ -3380,6 +3388,10 @@ public static function delete_all_plugin_data_and_deactivate()
             }
             update_option(UCWP_SETTINGS_KEY, $current_settings);
             self::reset_settings_cache();
+            self::ensure_directories();
+            if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_cache_directories')) {
+                Ultra_Cache_Engine::ensure_cache_directories();
+            }
 
             $page_cache_sync = self::sync_page_cache_bootstrap(!empty($current_settings['pageCacheEnabled']));
             if (is_wp_error($page_cache_sync)) {

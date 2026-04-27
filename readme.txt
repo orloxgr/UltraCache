@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp, apcu
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.56.27
+Stable tag: 2.56.37
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -104,6 +104,22 @@ UltraCache now prefers WordPress `WP_HTML_Tag_Processor` for many tag/attribute 
 
 == Changelog ==
 
+= 2.56.37 =
+* Added Warm Homepage Google Fonts and Warm Menu Google Fonts dashboard jobs for immediate backend local font builds on sites with delayed server cron.
+* Google Fonts warm actions scan frontend HTML from backend loopbacks, build local CSS/WOFF2 files under one lock, clear built queue entries, and refresh page-cache URLs when Page Cache is enabled.
+* Frontend Google Fonts localization remains non-blocking; first visits keep original Google Fonts URLs until server cron or the warm buttons build local files.
+* Added dashboard help text explaining that homepage font warm-up is usually enough, while menu font warm-up can discover additional inner-page fonts.
+
+= 2.56.36 =
+* Emergency frontend/admin CSS safety: Google Fonts local optimization no longer rewrites wp-admin stylesheet URLs and no longer blocks page-cache storage while a background font build is pending.
+* Canonicalized protocol-relative Google Fonts URLs before hashing/queuing and added a schedule lock to prevent duplicate background font build events.
+* Coalesced Google Fonts background builds into a single queue/runner and made the runtime self-hosted font CSS map non-blocking on frontend requests.
+
+= 2.56.28 =
+* Added single-flight transient locks for Google Fonts CSS and font binary localization to prevent frontend PHP-FPM worker floods during cold cache generation.
+* Google Fonts remote requests now use shorter timeouts and fall back to the original Google URLs while another request is already building the local cache.
+* Replaced the cron warm-up schedule scan with wp_next_scheduled() to avoid walking the full WP-Cron array on dashboard/settings loads.
+
 = 2.56.27 =
 * Added hard single-flight locks for heavy dashboard actions and CSS/frontpage bundle generation.
 * Stale dashboard action jobs are now failed automatically instead of blocking future actions.
@@ -186,6 +202,9 @@ UltraCache now prefers WordPress `WP_HTML_Tag_Processor` for many tag/attribute 
 
 
 == Upgrade Notice ==
+
+= 2.56.37 =
+Adds backend Google Fonts warm buttons so sites with delayed server cron can build local font files immediately without blocking frontend requests.
 
 = 2.56.27 =
 Heavy dashboard actions and CSS/frontpage bundle generation are now single-flight locked to prevent PHP worker floods from stale or parallel dashboard jobs.
