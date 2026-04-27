@@ -1,5 +1,4 @@
 <?php
-/** Hotfix Bundle Version: 2.56.06 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -15,6 +14,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         /** @var string */
         private $last_bypass_reason = '';
+
+        /** @var array<string, resource> */
+        private $runtime_locks = array();
 
         public static function get_instance()
         {
@@ -1002,6 +1004,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
+            if ($this->page_cache_variant_cap_reached($file_path)) {
+                $this->record_cache_event('variant-cap', array('file' => $file_path));
+                return false;
+            }
+
             if (!$this->write_cache_variant_atomically($file_path, $html)) {
                 return false;
             }
@@ -1023,6 +1030,44 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             return true;
+        }
+
+        private function get_page_cache_variant_cap_per_bucket()
+        {
+            /**
+             * Safety cap for same path + same image bucket HTML variants.
+             * Normal operation should produce one hash per bucket for a plain URL.
+             * Extra variants are only expected for explicitly allowlisted query args.
+             */
+            $cap = (int) apply_filters('ucwp_page_cache_variant_cap_per_bucket', 8);
+            return max(3, min(50, $cap));
+        }
+
+        private function page_cache_variant_cap_reached($file_path)
+        {
+            $file_path = (string) $file_path;
+            if ('' === $file_path || file_exists($file_path)) {
+                return false;
+            }
+
+            $basename = basename($file_path);
+            if (!preg_match('/^index-(orig|webp|avif)-[a-f0-9]{32}\.html$/', $basename, $matches)) {
+                return false;
+            }
+
+            $dir = dirname($file_path);
+            if (!is_dir($dir) || !is_readable($dir)) {
+                return false;
+            }
+
+            $bucket = $matches[1];
+            $pattern = trailingslashit($dir) . 'index-' . $bucket . '-*.html';
+            $existing = glob($pattern);
+            if (!is_array($existing)) {
+                return false;
+            }
+
+            return count($existing) >= $this->get_page_cache_variant_cap_per_bucket();
         }
 
         private function write_cache_variant_atomically($path, $contents)
@@ -1678,34 +1723,32 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return $this->get_safe_stage_defer_exclude_fragments($settings);
         }
 
-        private function get_builtin_defer_js_exclude_fragments()
+        private function get_slider_hero_protected_fragments()
         {
-            return array(
-                'googlesitekit',
-                'google-site-kit',
-                'sitekit',
+            $fragments = array(
                 'revslider',
+                'sliderrevolution',
+                'slider-revolution',
+                'revolution',
                 'sr7',
+                'rs6',
+                'rs7',
                 'tptools',
                 'tp-tools',
-                'sliderrevolution',
-                'revolution',
-                'rs6',
                 '/plugins/revslider/',
                 '/plugins/slider-revolution/',
-                'elementor/assets/js/frontend',
-                'elementor-pro/assets/js/frontend',
-                'elementor-frontend',
-                'elementor-pro-frontend',
-                'frontend-modules',
-                'header-footer-elementor',
-                'hfe-',
-                'smartmenus',
+                '/wp-content/uploads/revslider/',
+                'wp-block-themepunch-revslider',
                 'swiper',
                 'swiper-bundle',
+                'swiper-container',
+                'swiper-wrapper',
                 'slick',
+                'slick-slider',
                 'splide',
+                'splide__track',
                 'owl.carousel',
+                'owl-carousel',
                 'owlcarousel',
                 'flickity',
                 'keen-slider',
@@ -1720,34 +1763,112 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'n2-ss',
                 'soliloquy',
                 'royalslider',
+                'elementor-widget-slides',
+                'elementor-widget-image-carousel',
+                'elementor-widget-media-carousel',
                 'slider',
                 'carousel',
                 'slideshow',
                 'hero',
-                'html_types/image',
-                'html_types/color',
-                'html_types/label',
-                'html_types/slide',
-                'product-ajax-search',
-                'search-popup',
-                'nav-mobile',
-                'megamenu',
-                'header-cart',
-                'cart-canvas',
-                'off-canvas',
-                'woocommerce-products-filter',
-                'woof_',
-                'dgwt-wcas',
-                'woosq',
-                'wpcbn',
-                'contact-form-7',
-                'author-arc',
-                'mailerlite',
-                'mc4wp',
-                'complianz',
-                'sourcebuster',
-                'order-attribution',
-                'eael-general',                'elementor-frontend.js',            );
+            );
+
+            $filtered = apply_filters('ucwp_slider_hero_protected_fragments', $fragments);
+            if (is_array($filtered)) {
+                $fragments = $filtered;
+            }
+
+            return array_values(array_unique(array_filter(array_map('strval', $fragments), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+        }
+
+        private function get_slider_hero_protected_script_handles()
+        {
+            $handles = array(
+                'revslider',
+                'sr7',
+                'tptools',
+                'tp-tools',
+                'rs6',
+                'rs7',
+                'slider-revolution',
+                'swiper-js',
+                'swiper-bundle-js',
+                'slick-js',
+                'splide-js',
+                'owl-carousel-js',
+                'flickity-js',
+                'smartslider-frontend',
+                'smartslider-simple-type-frontend',
+                'n2-ss-public',
+                'layerslider',
+                'masterslider-core',
+                'metaslider-flex-slider',
+                'metaslider-responsive-slides',
+            );
+
+            $filtered = apply_filters('ucwp_slider_hero_protected_script_handles', $handles);
+            if (is_array($filtered)) {
+                $handles = $filtered;
+            }
+
+            return array_values(array_unique(array_filter(array_map('strval', $handles), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+        }
+
+        private function get_slider_hero_markup_markers()
+        {
+            return $this->get_slider_hero_protected_fragments();
+        }
+
+        private function get_builtin_defer_js_exclude_fragments()
+        {
+            $fragments = array_merge(
+                array(
+                    'googlesitekit',
+                    'google-site-kit',
+                    'sitekit',
+                    'elementor/assets/js/frontend',
+                    'elementor-pro/assets/js/frontend',
+                    'elementor-frontend',
+                    'elementor-pro-frontend',
+                    'frontend-modules',
+                    'header-footer-elementor',
+                    'hfe-',
+                    'smartmenus',
+                    'html_types/image',
+                    'html_types/color',
+                    'html_types/label',
+                    'html_types/slide',
+                    'product-ajax-search',
+                    'search-popup',
+                    'nav-mobile',
+                    'megamenu',
+                    'header-cart',
+                    'cart-canvas',
+                    'off-canvas',
+                    'woocommerce-products-filter',
+                    'woof_',
+                    'dgwt-wcas',
+                    'woosq',
+                    'wpcbn',
+                    'contact-form-7',
+                    'author-arc',
+                    'mailerlite',
+                    'mc4wp',
+                    'complianz',
+                    'sourcebuster',
+                    'order-attribution',
+                    'eael-general',
+                    'elementor-frontend.js',
+                ),
+                $this->get_slider_hero_protected_fragments()
+            );
+
+            return array_values(array_unique(array_filter(array_map('strval', $fragments), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
         }
 
         private function get_force_blocking_script_handles(array $settings = array())
@@ -1791,32 +1912,21 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function get_safe_stage_excluded_handles(array $settings = array())
         {
-            return array(
-                'revslider',
-                'sr7',
-                'tptools',
-                'tp-tools',
-                'rs6',
-                'slider-revolution',
-                'elementor-frontend-js',
-                'elementor-pro-frontend-js',
-                'elementor-frontend-modules-js',
-                'pro-elements-handlers-js',
-                'swiper-js',
-                'swiper-bundle-js',
-                'slick-js',
-                'splide-js',
-                'owl-carousel-js',
-                'flickity-js',
-                'smartslider-frontend',
-                'smartslider-simple-type-frontend',
-                'n2-ss-public',
-                'layerslider',
-                'masterslider-core',
-                'metaslider-flex-slider',
-                'metaslider-responsive-slides',
-                'hfe-frontend-js-js',
-                'smartmenus-js',            );
+            $handles = array_merge(
+                array(
+                    'elementor-frontend-js',
+                    'elementor-pro-frontend-js',
+                    'elementor-frontend-modules-js',
+                    'pro-elements-handlers-js',
+                    'hfe-frontend-js-js',
+                    'smartmenus-js',
+                ),
+                $this->get_slider_hero_protected_script_handles()
+            );
+
+            return array_values(array_unique(array_filter(array_map('strval', $handles), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
         }
 
         private function get_defer_excluded_handles(array $settings = array())
@@ -1861,7 +1971,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function get_builtin_delay_non_critical_js_exclude_fragments()
         {
-            $fragments = array(
+            $fragments = array_merge(array(
                 'jquery',
                 'wp-hooks',
                 'wp-i18n',
@@ -1940,7 +2050,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'wpforms',
                 'fluentform',
                 'forminator',
-                'gravityforms',            );
+                'gravityforms',
+            ), $this->get_slider_hero_protected_fragments());
 
             $filtered = apply_filters('ucwp_delay_js_blocking_fragments', $fragments);
             if (is_array($filtered)) {
@@ -2688,6 +2799,68 @@ if (!class_exists('Ultra_Cache_Engine')) {
             self::write_analytics($analytics);
         }
 
+        private function get_frontend_rewrite_profile($html, array $settings = array())
+        {
+            $frontend_safe_mode = !empty($settings['frontend_safe_mode']);
+            $slider_safe_mode = !empty($settings['slider_safe_mode']) && $this->should_use_safe_frontend_optimization_mode($html);
+            $safe_mode = $frontend_safe_mode || $slider_safe_mode;
+
+            $reason = '';
+            if ($slider_safe_mode) {
+                $reason = 'slider-hero-detected';
+            } elseif ($frontend_safe_mode) {
+                $reason = 'frontend-safe-mode';
+            }
+
+            return array(
+                'frontend_safe_mode' => (bool) $frontend_safe_mode,
+                'slider_safe_mode' => (bool) $slider_safe_mode,
+                'safe_mode' => (bool) $safe_mode,
+                'reason' => $reason,
+            );
+        }
+
+        private function should_apply_lcp_boundary_defer(array $settings, $frontend_safe_mode, $slider_safe_mode)
+        {
+            if (empty($settings['lcp_boundary_defer']) || empty($settings['lcp_image_priority'])) {
+                return false;
+            }
+
+            // The UI disables this switch while Frontend Safe Mode or Slider/Hero Safe Mode is
+            // selected. Keep the same truth at runtime in case stale config reaches the buffer.
+            if (!empty($frontend_safe_mode) || !empty($slider_safe_mode)) {
+                return false;
+            }
+
+            return true;
+        }
+
+        private function apply_lcp_priority_pipeline($html, array $settings, $frontend_safe_mode, $slider_safe_mode)
+        {
+            if (empty($settings['lcp_image_priority'])) {
+                return $html;
+            }
+
+            if (!empty($slider_safe_mode)) {
+                $html = $this->apply_html_rewrite_safely($html, 'sr7-first-slide-lcp-priority', function ($html) {
+                    return $this->apply_sr7_first_slide_lcp_priority_markup($html);
+                });
+                return $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
+                    return $this->inject_safe_lcp_priority_preloads($html);
+                });
+            }
+
+            if (!empty($frontend_safe_mode)) {
+                return $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
+                    return $this->inject_safe_lcp_priority_preloads($html);
+                });
+            }
+
+            return $this->apply_html_rewrite_safely($html, 'lcp-image-markup', function ($html) {
+                return $this->optimize_lcp_image_markup($html);
+            });
+        }
+
         private function apply_frontend_performance_optimizations($html)
         {
             if (!is_string($html) || '' === $html) {
@@ -2704,8 +2877,10 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $html = $this->apply_html_rewrite_safely($html, 'normalize-script-loading-attrs', function ($html) use ($settings) {
                 return $this->normalize_protected_script_loading_attributes_in_html($html, $settings);
             });
-            $slider_safe_mode = !empty($settings['slider_safe_mode']) && $this->should_use_safe_frontend_optimization_mode($html);
-            $safe_mode = !empty($settings['frontend_safe_mode']) || $slider_safe_mode;
+            $rewrite_profile = $this->get_frontend_rewrite_profile($html, $settings);
+            $frontend_safe_mode = !empty($rewrite_profile['frontend_safe_mode']);
+            $slider_safe_mode = !empty($rewrite_profile['slider_safe_mode']);
+            $safe_mode = !empty($rewrite_profile['safe_mode']);
 
             if (!empty($settings['critical_request_chain_relief'])) {
                 if ($slider_safe_mode) {
@@ -2730,27 +2905,27 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 });
             }
 
-            // Frontend Safe Mode is user-controlled. When it is off, UltraCache does not silently
-            // re-enable it from automatic SR7/Elementor heuristics.
+            // Frontend Safe Mode is user-controlled. Slider/Hero Safe Mode is separate and only
+            // becomes active when protected hero markup is detected in the rendered HTML.
             if (!$safe_mode) {
                 $html = $this->apply_html_rewrite_safely($html, 'strip-authoring-assets', function ($html) {
                     return $this->strip_probable_frontend_authoring_assets($html);
                 });
             }
 
-            if (!empty($settings['homepage_css_bundle']) || !empty($settings['critical_css'])) {
+            if (!empty($settings['homepage_css_bundle'])) {
                 $bundle_mode = isset($settings['homepage_css_bundle_mode']) && 'aggressive' === strtolower((string) $settings['homepage_css_bundle_mode']) ? 'aggressive' : 'safe';
                 $bundle_scope = $this->get_css_bundle_scope($settings);
 
-                // Slider Safe Mode should not automatically disable all CSS bundling. On fragile
-                // slider/hero pages, keep Stage 1 fully conservative, but let Stage 2 build/serve
-                // bundles for non-slider local CSS while built-in slider stylesheet exclusions keep
-                // SR7/Revolution/Swiper/Slick CSS as normal stylesheet links.
+                // Slider Safe Mode protects fragile hero areas. Safe bundling stays non-destructive
+                // by skipping CSS bundle replacement on detected slider pages; aggressive bundling
+                // can still proceed for eligible non-slider local CSS because slider stylesheet
+                // fragments remain excluded below.
                 if ($slider_safe_mode && 'aggressive' !== $bundle_mode) {
                     $bundle_mode = '';
                 }
 
-                if ('' !== $bundle_mode && !empty($settings['page_css_bundle_on_entry'])) {
+                if ('' !== $bundle_mode && !empty($settings['page_css_bundle_on_entry']) && !$this->is_ultracache_internal_loopback_request()) {
                     if ('per-page' === $bundle_scope || ('homepage' === $bundle_scope && $this->is_frontpage_request_url()) || ('shared' === $bundle_scope && $this->is_frontpage_request_url())) {
                         $this->maybe_build_page_css_bundle_on_entry($html, $settings);
                     }
@@ -2826,26 +3001,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 });
             }
 
-            if (!empty($settings['lcp_image_priority'])) {
-                if ($safe_mode) {
-                    // Frontend Safe Mode avoids broad structural rewrites. When Slider Safe Mode is
-                    // actually active on this page, apply only the SR7 lifecycle-aware priority guard.
-                    if ($slider_safe_mode) {
-                        $html = $this->apply_html_rewrite_safely($html, 'sr7-first-slide-lcp-priority', function ($html) {
-                            return $this->apply_sr7_first_slide_lcp_priority_markup($html);
-                        });
-                    }
-                    $html = $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
-                        return $this->inject_safe_lcp_priority_preloads($html);
-                    });
-                } else {
-                    $html = $this->apply_html_rewrite_safely($html, 'lcp-image-markup', function ($html) {
-                        return $this->optimize_lcp_image_markup($html);
-                    });
-                }
-            }
+            $html = $this->apply_lcp_priority_pipeline($html, $settings, $frontend_safe_mode, $slider_safe_mode);
 
-            if (!$safe_mode && !empty($settings['lcp_boundary_defer']) && !empty($settings['lcp_image_priority'])) {
+            if ($this->should_apply_lcp_boundary_defer($settings, $frontend_safe_mode, $slider_safe_mode)) {
                 $html = $this->apply_html_rewrite_safely($html, 'lcp-boundary-defer', function ($html) use ($settings) {
                     return $this->apply_lcp_boundary_defer_to_html($html, $settings);
                 });
@@ -3690,31 +3848,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             $html_lc = strtolower($html);
-            foreach (array(
-                'revslider',
-                'slider revolution',
-                'wp-block-themepunch-revslider',
-                'sr7-',
-                '<sr7-',
-                'rs-module',
-                'rs-fullwidth-wrap',
-                '/wp-content/uploads/revslider/',
-                'revapi',
-                'tptools',
-                'smartslider',
-                'n2-ss',
-                'metaslider',
-                'layerslider',
-                'masterslider',
-                'swiper-container',
-                'swiper-wrapper',
-                'slick-slider',
-                'splide__track',
-                'owl-carousel',
-                'elementor-widget-slides',
-                'elementor-widget-image-carousel',
-                'elementor-widget-media-carousel'
-            ) as $marker) {
+            foreach ($this->get_slider_hero_markup_markers() as $marker) {
                 if (false !== strpos($html_lc, strtolower($marker))) {
                     return true;
                 }
@@ -4203,18 +4337,13 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $settings = $this->get_settings();
             $list = isset($settings['homepage_css_bundle_exclude_list']) && is_array($settings['homepage_css_bundle_exclude_list'])
                 ? $settings['homepage_css_bundle_exclude_list']
-                : (isset($settings['critical_css_exclude_list']) && is_array($settings['critical_css_exclude_list']) ? $settings['critical_css_exclude_list'] : array());
+                : array();
 
             $list = array_merge($this->get_builtin_homepage_css_bundle_exclude_fragments(), (array) $list);
 
             return array_values(array_unique(array_filter(array_map('strval', $list), static function ($item) {
                 return '' !== trim((string) $item);
             })));
-        }
-
-        private function get_critical_css_exclude_fragments()
-        {
-            return $this->get_homepage_css_bundle_exclude_fragments();
         }
 
         private function is_safe_local_public_stylesheet_url($url)
@@ -5319,6 +5448,46 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return $this->inject_sr7_lcp_priority_runtime_script($html);
         }
 
+        private function is_sr7_lcp_markup_candidate($tag_name, $src, $data_src, $dbsrc)
+        {
+            $tag_name = strtoupper((string) $tag_name);
+            if ('SR7-IMG' === $tag_name) {
+                return true;
+            }
+
+            if ('IMG' !== $tag_name) {
+                return false;
+            }
+
+            foreach (array($src, $data_src) as $value) {
+                $value = is_string($value) ? $value : '';
+                if ('' === $value) {
+                    continue;
+                }
+
+                if (false !== stripos($value, '/revslider/') || false !== stripos($value, '/cache/ultracache-avif/revslider/') || false !== stripos($value, '/cache/ultracache-webp/revslider/')) {
+                    return true;
+                }
+            }
+
+            return is_string($dbsrc) && '' !== trim($dbsrc);
+        }
+
+        private function set_lcp_marker_on_start_tag($tag, $is_sr7 = false)
+        {
+            $tag = (string) $tag;
+            if ('' === $tag) {
+                return $tag;
+            }
+
+            $attribute = $is_sr7 ? 'data-ucwp-sr7-lcp' : 'data-ucwp-lcp';
+            if (false !== stripos($tag, $attribute . '=')) {
+                return $tag;
+            }
+
+            return $this->set_or_add_html_tag_attribute($tag, $attribute, '1');
+        }
+
         private function apply_sr7_first_slide_lcp_priority_markup_with_processor($html)
         {
             if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html) {
@@ -5340,7 +5509,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                     $data_src = $processor->get_attribute('data-src');
                     $dbsrc = $processor->get_attribute('data-dbsrc');
                     $has_source = (is_string($src) && '' !== $src) || (is_string($data_src) && '' !== $data_src) || (is_string($dbsrc) && '' !== $dbsrc);
-                    if (!$has_source) {
+                    if (!$has_source || !$this->is_sr7_lcp_markup_candidate($tag_name, $src, $data_src, $dbsrc)) {
                         continue;
                     }
 
@@ -5384,6 +5553,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             $replacement = $this->set_or_add_html_tag_attribute($tag, 'fetchpriority', 'high');
+            $replacement = $this->set_lcp_marker_on_start_tag($replacement, (bool) $include_loading);
 
             if ($include_loading) {
                 $loading = strtolower((string) $this->extract_attribute_from_html_tag($replacement, 'loading'));
@@ -6485,11 +6655,13 @@ HTML;
             $pattern = '~<' . $tag_name . '\b[^>]*\b' . preg_quote($attribute, '~') . '=(["\'])' . preg_quote($raw_url, '~') . '\1[^>]*>~i';
             return (string) preg_replace_callback(
                 $pattern,
-                function ($matches) use ($tag, $tag_name) {
+                function ($matches) use ($tag, $tag_name, $candidate) {
                     $replacement = $matches[0];
                     if (false === stripos($replacement, 'fetchpriority=')) {
                         $replacement = preg_replace('~<' . preg_quote($tag_name, '~') . '\b~i', '<' . $tag_name . ' fetchpriority="high"', $replacement, 1);
                     }
+
+                    $replacement = $this->set_lcp_marker_on_start_tag($replacement, ('SR7-IMG' === $tag || !empty($candidate['is_sr7'])));
 
                     if ('IMG' === $tag || 'SR7-IMG' === $tag) {
                         if (preg_match('~\sloading=(["\'])lazy\1~i', $replacement)) {
@@ -6528,6 +6700,12 @@ HTML;
 
                     if ('high' !== (string) $processor->get_attribute('fetchpriority')) {
                         $processor->set_attribute('fetchpriority', 'high');
+                        $changed = true;
+                    }
+
+                    $marker_attribute = ('SR7-IMG' === $tag || !empty($candidate['is_sr7'])) ? 'data-ucwp-sr7-lcp' : 'data-ucwp-lcp';
+                    if (null === $processor->get_attribute($marker_attribute)) {
+                        $processor->set_attribute($marker_attribute, '1');
                         $changed = true;
                     }
 
@@ -7718,6 +7896,15 @@ HTML;
 
         private function build_normalized_query_string_for_cache($query, array $allowlist = array())
         {
+            /*
+             * Query-string HTML cache variants are intentionally allowlist-only.
+             * An enabled query-string switch with an empty allowlist must not cache
+             * every tracking/session/bot query as a separate homepage variant.
+             */
+            if (empty($allowlist)) {
+                return '';
+            }
+
             $filtered = $this->normalize_query_vars_for_cache($query, $allowlist);
             if (empty($filtered)) {
                 return '';
@@ -7768,7 +7955,7 @@ HTML;
 
         private function query_has_cacheable_allowlisted_variant($query, array $allowlist = array())
         {
-            if ('' === (string) $query) {
+            if ('' === (string) $query || empty($allowlist)) {
                 return false;
             }
 
@@ -7854,6 +8041,7 @@ HTML;
                 'excluded-path'             => 'Excluded by path rule',
                 'excluded-query-arg'        => 'Excluded by query-arg rule',
                 'query-strings-disabled'    => 'Query strings are not cached',
+                'query-allowlist-empty'     => 'Query-string caching requires a whitelist',
                 'query-arg-not-allowlisted' => 'Query arg is not in the cache allowlist',
                 'woocommerce-dynamic-path'  => 'WooCommerce dynamic path bypass',
                 'woocommerce-dynamic-query' => 'WooCommerce dynamic query bypass',
@@ -8104,7 +8292,12 @@ HTML;
                     return true;
                 }
 
-                if (!empty($query_allowlist) && !$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
+                if (empty($query_allowlist)) {
+                    $this->last_bypass_reason = 'query-allowlist-empty';
+                    return true;
+                }
+
+                if (!$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
                     $this->last_bypass_reason = 'query-arg-not-allowlisted';
                     return true;
                 }
@@ -8252,9 +8445,101 @@ HTML;
         }
 
 
+        private function is_html_loopback_response($response, $body = '')
+        {
+            $content_type = strtolower(trim((string) wp_remote_retrieve_header($response, 'content-type')));
+            if ('' !== $content_type) {
+                return false !== strpos($content_type, 'text/html') || false !== strpos($content_type, 'application/xhtml+xml');
+            }
+
+            $sample = ltrim((string) $body);
+            if ('' === $sample) {
+                return false;
+            }
+
+            $prefix = strtolower(substr($sample, 0, 512));
+            return 0 === strpos($prefix, '<!doctype html') || 0 === strpos($prefix, '<html') || false !== strpos($prefix, '<html');
+        }
+
         private function should_verify_loopback_ssl($url)
         {
             return !function_exists('ucwp_is_local_https_url') || !ucwp_is_local_https_url($url);
+        }
+
+        private function get_runtime_lock_file($name)
+        {
+            $safe = preg_replace('/[^a-z0-9_-]/', '-', strtolower((string) $name));
+            $safe = trim((string) $safe, '-');
+            if ('' === $safe) {
+                $safe = 'runtime';
+            }
+
+            $dir = trailingslashit(UCWP_CACHE_DIR) . 'locks/';
+            if (!is_dir($dir)) {
+                wp_mkdir_p($dir);
+            }
+
+            return $dir . $safe . '.lock';
+        }
+
+        private function acquire_runtime_lock($name, $ttl = 180)
+        {
+            $name = (string) $name;
+            if ('' === $name) {
+                return false;
+            }
+
+            $file = $this->get_runtime_lock_file($name);
+            $handle = @fopen($file, 'c+');
+            if (!$handle) {
+                return false;
+            }
+
+            if (!@flock($handle, LOCK_EX | LOCK_NB)) {
+                $mtime = @filemtime($file);
+                if ($mtime && (time() - (int) $mtime) > max(30, (int) $ttl)) {
+                    @touch($file);
+                }
+                @fclose($handle);
+                return false;
+            }
+
+            @ftruncate($handle, 0);
+            @fwrite($handle, (string) time());
+            @fflush($handle);
+            $this->runtime_locks[$name] = $handle;
+            return true;
+        }
+
+        private function release_runtime_lock($name)
+        {
+            $name = (string) $name;
+            if (empty($this->runtime_locks[$name])) {
+                return;
+            }
+
+            $handle = $this->runtime_locks[$name];
+            @flock($handle, LOCK_UN);
+            @fclose($handle);
+            unset($this->runtime_locks[$name]);
+        }
+
+        private function is_ultracache_internal_loopback_request()
+        {
+            if ('1' === sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_INTERNAL_REQUEST'))) {
+                return true;
+            }
+            if ('1' === sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_WARM'))) {
+                return true;
+            }
+            if ('1' === sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_CSS_BUNDLE'))) {
+                return true;
+            }
+            if ($this->is_frontpage_css_scan_mode()) {
+                return true;
+            }
+
+            return false;
         }
 
         public function warm_url($url, array $args = array())
@@ -8292,6 +8577,20 @@ HTML;
                 $buckets = array('orig', 'webp', 'avif');
             }
 
+            $css_bundle_requested = !empty($args['build_css_bundle']);
+            $css_bundle_result = array();
+            if ($css_bundle_requested) {
+                $settings = $this->get_settings();
+                $bundle_scope = $this->get_css_bundle_scope($settings);
+                $css_bundle_result = array('success' => false, 'skipped' => true, 'message' => 'CSS bundle skipped for this URL by the selected CSS Bundling Scope.');
+                if ('per-page' === $bundle_scope || $this->is_frontpage_request_url($url)) {
+                    // Build the CSS bundle/manifest before writing the HTML cache. The HTML warm below
+                    // then sees the fresh manifest and only needs one loopback pass instead of a
+                    // warm -> bundle -> warm sequence.
+                    $css_bundle_result = $this->build_frontpage_css_bundle($url, array('skip_final_warm' => true));
+                }
+            }
+
             $cached_files = array();
             $last_error = '';
 
@@ -8300,14 +8599,15 @@ HTML;
                     $url,
                     array(
                         'method'      => 'GET',
-                        'timeout'     => 20,
-                        'redirection' => 5,
+                        'timeout'     => 10,
+                        'redirection' => 3,
                         'sslverify'   => $this->should_verify_loopback_ssl($url),
                         'user-agent'  => 'Mozilla/5.0 (compatible; UltraCache-Warm/' . UCWP_VERSION . '; +https://wordpress.org)',
                         'headers'     => array_filter(
                             array(
-                                'Accept'             => $this->get_accept_header_for_bucket($bucket),
-                                'X-UltraCache-Warm'  => '1',
+                                'Accept'                          => $this->get_accept_header_for_bucket($bucket),
+                                'X-UltraCache-Warm'               => '1',
+                                'X-UltraCache-Internal-Request'   => '1',
                             )
                         ),
                     ),
@@ -8323,6 +8623,11 @@ HTML;
                 $html = wp_remote_retrieve_body($response);
                 if (200 !== $code || empty($html)) {
                     $last_error = 200 !== $code ? 'Remote page did not return HTTP 200.' : 'Remote page returned an empty body.';
+                    continue;
+                }
+
+                if (!$this->is_html_loopback_response($response, $html)) {
+                    $last_error = 'Remote page did not return an HTML Content-Type.';
                     continue;
                 }
 
@@ -8354,18 +8659,12 @@ HTML;
                 'files'   => $cached_files,
             );
 
-            if ($success && !empty($args['build_css_bundle'])) {
-                $settings = $this->get_settings();
-                $bundle_scope = $this->get_css_bundle_scope($settings);
-                $bundle_result = array('success' => false, 'skipped' => true, 'message' => 'CSS bundle skipped for this URL by the selected CSS Bundling Scope.');
-                if ('per-page' === $bundle_scope || $this->is_frontpage_request_url($url)) {
-                    $bundle_result = $this->build_frontpage_css_bundle($url);
-                }
-                $result['cssBundle'] = is_array($bundle_result) ? $bundle_result : array();
-                if (!empty($bundle_result['success'])) {
-                    $result['message'] .= ' CSS bundle built.';
-                } elseif (!empty($bundle_result['message'])) {
-                    $result['message'] .= ' CSS bundle skipped: ' . (string) $bundle_result['message'];
+            if ($css_bundle_requested) {
+                $result['cssBundle'] = is_array($css_bundle_result) ? $css_bundle_result : array();
+                if (!empty($css_bundle_result['success'])) {
+                    $result['message'] .= ' CSS bundle built before HTML warm.';
+                } elseif (!empty($css_bundle_result['message'])) {
+                    $result['message'] .= ' CSS bundle skipped: ' . (string) $css_bundle_result['message'];
                 }
             }
 
@@ -8452,6 +8751,78 @@ HTML;
             ucwp_safe_file_put_contents($this->get_frontpage_css_manifest_file(), wp_json_encode($manifest), LOCK_EX);
         }
 
+        private function get_frontpage_css_manifest_bundle_files(array $manifest)
+        {
+            $files = array();
+            foreach ((array) ($manifest['entries'] ?? array()) as $entry) {
+                if (is_array($entry) && !empty($entry['bundleFile'])) {
+                    $files[] = (string) $entry['bundleFile'];
+                }
+            }
+
+            if (!empty($manifest['entry']) && is_array($manifest['entry']) && !empty($manifest['entry']['bundleFile'])) {
+                $files[] = (string) $manifest['entry']['bundleFile'];
+            }
+
+            $dir = wp_normalize_path($this->get_frontpage_css_dir());
+            $active = array();
+            foreach ($files as $file) {
+                $file = wp_normalize_path((string) $file);
+                if ('' === $file || 0 !== strpos($file, $dir)) {
+                    continue;
+                }
+                $active[basename($file)] = true;
+            }
+
+            return $active;
+        }
+
+        private function cleanup_orphan_frontpage_css_bundles(array $manifest)
+        {
+            $dir = $this->get_frontpage_css_dir();
+            if (!is_dir($dir) || !is_readable($dir)) {
+                return 0;
+            }
+
+            $active = $this->get_frontpage_css_manifest_bundle_files($manifest);
+            $deleted = 0;
+            foreach ((array) glob(trailingslashit($dir) . '*.css') as $file) {
+                $file = (string) $file;
+                if ('' === $file || !is_file($file)) {
+                    continue;
+                }
+                if (isset($active[basename($file)])) {
+                    continue;
+                }
+                if (ucwp_safe_unlink($file)) {
+                    $deleted++;
+                }
+            }
+
+            if ($deleted > 0) {
+                $this->record_cache_event('page-css-bundle-cleanup', array('deleted' => $deleted));
+            }
+
+            return $deleted;
+        }
+
+        private function delete_all_frontpage_css_bundle_files()
+        {
+            $dir = $this->get_frontpage_css_dir();
+            if (!is_dir($dir) || !is_readable($dir)) {
+                return 0;
+            }
+
+            $deleted = 0;
+            foreach ((array) glob(trailingslashit($dir) . '*.css') as $file) {
+                $file = (string) $file;
+                if ('' !== $file && is_file($file) && ucwp_safe_unlink($file)) {
+                    $deleted++;
+                }
+            }
+            return $deleted;
+        }
+
         private function get_css_bundle_manifest_key($url)
         {
             $normalized = $this->normalize_url((string) $url);
@@ -8487,13 +8858,6 @@ HTML;
 
             if ('' !== (string) $url) {
                 $key = $this->get_css_bundle_manifest_key($url);
-                $entry = ('' !== $key && isset($manifest['entries'][$key]) && is_array($manifest['entries'][$key])) ? $manifest['entries'][$key] : array();
-                if (empty($entry) && $this->is_frontpage_request_url($url) && isset($manifest['entry']) && is_array($manifest['entry'])) {
-                    $entry = $manifest['entry'];
-                }
-                if (!empty($entry['bundleFile']) && file_exists((string) $entry['bundleFile'])) {
-                    ucwp_safe_unlink((string) $entry['bundleFile']);
-                }
                 if ('' !== $key && isset($manifest['entries'][$key])) {
                     unset($manifest['entries'][$key]);
                 }
@@ -8501,19 +8865,11 @@ HTML;
                     $manifest['entry'] = array();
                 }
                 $this->write_frontpage_css_manifest($manifest);
+                $this->cleanup_orphan_frontpage_css_bundles($manifest);
                 return;
             }
 
-            foreach ((array) ($manifest['entries'] ?? array()) as $entry) {
-                if (is_array($entry) && !empty($entry['bundleFile']) && file_exists((string) $entry['bundleFile'])) {
-                    ucwp_safe_unlink((string) $entry['bundleFile']);
-                }
-            }
-
-            $legacy_entry = isset($manifest['entry']) && is_array($manifest['entry']) ? $manifest['entry'] : array();
-            if (!empty($legacy_entry['bundleFile']) && file_exists((string) $legacy_entry['bundleFile'])) {
-                ucwp_safe_unlink((string) $legacy_entry['bundleFile']);
-            }
+            $this->delete_all_frontpage_css_bundle_files();
 
             $file = $this->get_frontpage_css_manifest_file();
             if (file_exists($file)) {
@@ -8541,8 +8897,10 @@ HTML;
             return $this->build_frontpage_css_bundle(home_url('/'));
         }
 
-        public function build_frontpage_css_bundle($url = '')
+        public function build_frontpage_css_bundle($url = '', array $args = array())
         {
+            $args = is_array($args) ? $args : array();
+            $skip_final_warm = !empty($args['skip_final_warm']);
             $frontpage_url = '' !== (string) $url ? esc_url_raw((string) $url) : home_url('/');
             $result = array(
                 'success' => false,
@@ -8563,73 +8921,83 @@ HTML;
                 return $result;
             }
 
-            $scan = $this->fetch_frontpage_css_source_html($frontpage_url);
-            if (empty($scan['success']) || empty($scan['html'])) {
-                $result['message'] = !empty($scan['message']) ? (string) $scan['message'] : 'Could not fetch page HTML.';
+            $lock_name = 'css-bundle-' . md5($this->normalize_url($frontpage_url));
+            if (!$this->acquire_runtime_lock($lock_name, 180)) {
+                $result['skipped'] = true;
+                $result['message'] = 'CSS bundle build skipped because another CSS/frontpage build is already running for this URL.';
                 $this->record_analytics_frontpage_css_warm($result);
                 return $result;
             }
 
-            $prepared = $this->build_frontpage_css_bundle_from_html((string) $scan['html'], $frontpage_url);
-            if (!empty($prepared['stats']) && is_array($prepared['stats'])) {
-                $result['stats'] = $prepared['stats'];
-            }
+            try {
+                $scan = $this->fetch_frontpage_css_source_html($frontpage_url);
+                if (empty($scan['success']) || empty($scan['html'])) {
+                    $result['message'] = !empty($scan['message']) ? (string) $scan['message'] : 'Could not fetch page HTML.';
+                    $this->record_analytics_frontpage_css_warm($result);
+                    return $result;
+                }
 
-            if (empty($prepared['success'])) {
-                $result['skipped'] = !empty($prepared['skipped']);
-                $result['message'] = !empty($prepared['message']) ? (string) $prepared['message'] : 'Could not build CSS bundle.';
+                $prepared = $this->build_frontpage_css_bundle_from_html((string) $scan['html'], $frontpage_url);
+                if (!empty($prepared['stats']) && is_array($prepared['stats'])) {
+                    $result['stats'] = $prepared['stats'];
+                }
+
+                if (empty($prepared['success'])) {
+                    $result['skipped'] = !empty($prepared['skipped']);
+                    $result['message'] = !empty($prepared['message']) ? (string) $prepared['message'] : 'Could not build CSS bundle.';
+                    $this->record_analytics_frontpage_css_warm($result);
+                    return $result;
+                }
+
+                $manifest = $this->read_frontpage_css_manifest();
+                $manifest['version'] = 2;
+                $manifest['updatedAt'] = current_time('timestamp');
+                $manifest['updatedAtMysql'] = current_time('mysql');
+                if (!isset($manifest['entries']) || !is_array($manifest['entries'])) {
+                    $manifest['entries'] = array();
+                }
+                $entry = array(
+                    'normalizedUrl' => $this->normalize_url($frontpage_url),
+                    'bundleFile' => (string) $prepared['bundleFile'],
+                    'bundleUrl' => (string) $prepared['bundleUrl'],
+                    'sourceUrls' => array_values(array_unique(array_map('strval', (array) ($prepared['sourceUrls'] ?? array())))),
+                    'sourceCount' => count((array) ($prepared['sourceUrls'] ?? array())),
+                    'bundleCount' => 1,
+                    'mode' => (string) ($prepared['mode'] ?? 'safe'),
+                    'bundleSignature' => (string) ($prepared['bundleSignature'] ?? ''),
+                    'bundleContentHash' => (string) ($prepared['bundleContentHash'] ?? ''),
+                    'time' => current_time('timestamp'),
+                    'time_mysql' => current_time('mysql'),
+                );
+                $key = $this->get_css_bundle_manifest_key($frontpage_url);
+                if ('' !== $key) {
+                    $manifest['entries'][$key] = $entry;
+                }
+                if ($this->is_frontpage_request_url($frontpage_url)) {
+                    $manifest['entry'] = $entry;
+                }
+                $this->write_frontpage_css_manifest($manifest);
+                $this->cleanup_orphan_frontpage_css_bundles($manifest);
+
+                $warm_result = $skip_final_warm ? array('success' => true, 'skipped' => true, 'message' => 'Final HTML warm skipped because the caller will warm the page after the CSS bundle is available.') : $this->warm_url($frontpage_url);
+                $result['success'] = true;
+                $result['bundleCount'] = 1;
+                $result['bundleFile'] = (string) $prepared['bundleFile'];
+                $result['bundleUrl'] = (string) $prepared['bundleUrl'];
+                $result['sourceUrls'] = array_values(array_unique(array_map('strval', (array) ($prepared['sourceUrls'] ?? array()))));
+                $result['warmResult'] = is_array($warm_result) ? $warm_result : array();
+                $result['message'] = 'Built 1 CSS bundle from ' . max(0, (int) ($result['stats']['bundled'] ?? 0)) . ' stylesheet(s).' . ($skip_final_warm ? ' Page cache warm deferred to caller.' : (!empty($warm_result['success']) ? ' Page cache warmed.' : ' Page cache warm returned: ' . (!empty($warm_result['message']) ? (string) $warm_result['message'] : 'unknown result')));
+                $this->record_cache_event('page-css-bundle-build', array(
+                    'url' => $frontpage_url,
+                    'bundleFile' => $result['bundleFile'],
+                    'sourceCount' => count($result['sourceUrls']),
+                ));
                 $this->record_analytics_frontpage_css_warm($result);
+
                 return $result;
+            } finally {
+                $this->release_runtime_lock($lock_name);
             }
-
-            $previous = $this->get_frontpage_css_manifest_entry($frontpage_url);
-            $manifest = $this->read_frontpage_css_manifest();
-            $manifest['version'] = 2;
-            $manifest['updatedAt'] = current_time('timestamp');
-            $manifest['updatedAtMysql'] = current_time('mysql');
-            if (!isset($manifest['entries']) || !is_array($manifest['entries'])) {
-                $manifest['entries'] = array();
-            }
-            $entry = array(
-                'normalizedUrl' => $this->normalize_url($frontpage_url),
-                'bundleFile' => (string) $prepared['bundleFile'],
-                'bundleUrl' => (string) $prepared['bundleUrl'],
-                'sourceUrls' => array_values(array_unique(array_map('strval', (array) ($prepared['sourceUrls'] ?? array())))),
-                'sourceCount' => count((array) ($prepared['sourceUrls'] ?? array())),
-                'bundleCount' => 1,
-                'mode' => (string) ($prepared['mode'] ?? 'safe'),
-                'time' => current_time('timestamp'),
-                'time_mysql' => current_time('mysql'),
-            );
-            $key = $this->get_css_bundle_manifest_key($frontpage_url);
-            if ('' !== $key) {
-                $manifest['entries'][$key] = $entry;
-            }
-            if ($this->is_frontpage_request_url($frontpage_url)) {
-                $manifest['entry'] = $entry;
-            }
-            $this->write_frontpage_css_manifest($manifest);
-
-            if (!empty($previous['bundleFile']) && (string) $previous['bundleFile'] !== (string) $prepared['bundleFile'] && file_exists((string) $previous['bundleFile'])) {
-                ucwp_safe_unlink((string) $previous['bundleFile']);
-            }
-
-            $warm_result = $this->warm_url($frontpage_url);
-            $result['success'] = true;
-            $result['bundleCount'] = 1;
-            $result['bundleFile'] = (string) $prepared['bundleFile'];
-            $result['bundleUrl'] = (string) $prepared['bundleUrl'];
-            $result['sourceUrls'] = array_values(array_unique(array_map('strval', (array) ($prepared['sourceUrls'] ?? array()))));
-            $result['warmResult'] = is_array($warm_result) ? $warm_result : array();
-            $result['message'] = 'Built 1 CSS bundle from ' . max(0, (int) ($result['stats']['bundled'] ?? 0)) . ' stylesheet(s).' . (!empty($warm_result['success']) ? ' Page cache warmed.' : ' Page cache warm returned: ' . (!empty($warm_result['message']) ? (string) $warm_result['message'] : 'unknown result'));
-            $this->record_cache_event('page-css-bundle-build', array(
-                'url' => $frontpage_url,
-                'bundleFile' => $result['bundleFile'],
-                'sourceCount' => count($result['sourceUrls']),
-            ));
-            $this->record_analytics_frontpage_css_warm($result);
-
-            return $result;
         }
 
         private function fetch_frontpage_css_source_html($url)
@@ -8637,7 +9005,7 @@ HTML;
             $scan_url = add_query_arg(
                 array(
                     'ucwp_frontpage_css_scan' => 1,
-                    'ucwp_css_v' => rawurlencode(UCWP_VERSION . '-' . UCWP_HOTFIX_BUNDLE_VERSION),
+                    'ucwp_css_v' => rawurlencode(UCWP_VERSION),
                 ),
                 $url
             );
@@ -8646,13 +9014,15 @@ HTML;
                 $scan_url,
                 array(
                     'method' => 'GET',
-                    'timeout' => 25,
-                    'redirection' => 5,
+                    'timeout' => 10,
+                    'redirection' => 3,
                     'sslverify' => $this->should_verify_loopback_ssl($scan_url),
                     'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-CSSBundle/' . UCWP_VERSION . '; +https://wordpress.org)',
                     'headers' => array(
                         'Cache-Control' => 'no-cache',
                         'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'X-UltraCache-CSS-Bundle' => '1',
+                        'X-UltraCache-Internal-Request' => '1',
                     ),
                 ),
                 'css_bundle_scan'
@@ -8666,6 +9036,9 @@ HTML;
             $html = (string) wp_remote_retrieve_body($response);
             if (200 !== $code || '' === $html) {
                 return array('success' => false, 'message' => 200 !== $code ? 'Remote page did not return HTTP 200.' : 'Remote page returned an empty body.', 'html' => '');
+            }
+            if (!$this->is_html_loopback_response($response, $html)) {
+                return array('success' => false, 'message' => 'Remote page did not return an HTML Content-Type.', 'html' => '');
             }
 
             return array('success' => true, 'message' => '', 'html' => $html);
@@ -8734,6 +9107,8 @@ HTML;
                 'bundleUrl' => (string) $bundle['url'],
                 'sourceUrls' => array_values(array_unique(array_map('strval', (array) ($bundle['sourceUrls'] ?? wp_list_pluck($assets, 'url'))))),
                 'mode' => $mode,
+                'bundleSignature' => (string) ($bundle['signature'] ?? ''),
+                'bundleContentHash' => (string) ($bundle['contentHash'] ?? ''),
                 'stats' => $stats,
             );
         }
@@ -8824,9 +9199,11 @@ HTML;
                 wp_mkdir_p($dir);
             }
 
-            $page_hash = md5($this->normalize_url($page_url));
             $signature_parts = array();
             $bundle_body = '';
+            $bundle_charset = '';
+            $bundle_imports = array();
+            $bundle_import_keys = array();
             $used_urls = array();
             $stats = array(
                 'bundled' => 0,
@@ -8853,10 +9230,26 @@ HTML;
                 }
 
                 $signature_parts[] = $url . '|' . (string) ucwp_safe_filemtime($path, 'frontpage_css_bundle_signature') . '|' . strlen($css);
+                $prepared_css = $this->prepare_css_asset_for_bundle($css, $url);
+                if ('' === $bundle_charset && !empty($prepared_css['charset'])) {
+                    $bundle_charset = (string) $prepared_css['charset'];
+                }
+                foreach ((array) ($prepared_css['imports'] ?? array()) as $import_rule) {
+                    $import_rule = trim((string) $import_rule);
+                    if ('' === $import_rule) {
+                        continue;
+                    }
+                    $import_key = strtolower(preg_replace('/\s+/', ' ', $import_rule));
+                    if (!isset($bundle_import_keys[$import_key])) {
+                        $bundle_import_keys[$import_key] = true;
+                        $bundle_imports[] = $import_rule;
+                    }
+                }
+
                 $bundle_body .= "
 /* UltraCache CSS Bundle Source: " . $url . " */
 ";
-                $bundle_body .= $this->rewrite_frontpage_css_urls_for_bundle($css, $url) . "
+                $bundle_body .= (string) ($prepared_css['body'] ?? '') . "
 ";
                 $used_urls[] = $url;
                 $stats['bundled']++;
@@ -8872,14 +9265,33 @@ HTML;
                 );
             }
 
-            $signature = md5($page_hash . '|' . implode('||', $signature_parts));
+            $bundle_prelude = '';
+            if ('' !== trim($bundle_charset)) {
+                $bundle_prelude .= trim($bundle_charset) . "
+";
+            }
+            if (!empty($bundle_imports)) {
+                $bundle_prelude .= implode("
+", $bundle_imports) . "
+
+";
+            }
+
             $mode = in_array((string) $mode, array('safe', 'aggressive'), true) ? (string) $mode : 'safe';
-            $filename = 'page-' . $mode . '-' . $page_hash . '-' . $signature . '.css';
+            $bundle_content = trim($bundle_prelude . trim($bundle_body)) . "
+";
+            $content_hash = md5($bundle_content);
+            $signature = md5($mode . '|' . implode('||', $signature_parts) . '|' . $content_hash);
+            $filename = 'bundle-' . $mode . '-' . $signature . '.css';
             $file = $dir . $filename;
-            ucwp_safe_file_put_contents($file, trim($bundle_body) . "
-", LOCK_EX);
+            if (!file_exists($file) || md5_file($file) !== $content_hash) {
+                ucwp_safe_file_put_contents($file, $bundle_content, LOCK_EX);
+            }
 
             $message = 'Prepared ' . $mode . ' CSS bundle.';
+            if (!empty($bundle_imports)) {
+                $message .= ' Hoisted ' . count($bundle_imports) . ' @import rule(s).';
+            }
             if ($stats['skipped'] > 0) {
                 $message .= ' Skipped ' . (int) $stats['skipped'] . ' empty stylesheet(s).';
             }
@@ -8894,8 +9306,84 @@ HTML;
                 'message' => $message,
                 'stats' => $stats,
                 'mode' => $mode,
+                'signature' => $signature,
+                'contentHash' => $content_hash,
                 'sourceUrls' => array_values(array_unique(array_map('strval', $used_urls))),
             );
+        }
+
+        private function prepare_css_asset_for_bundle($css, $source_url)
+        {
+            $css = (string) $css;
+            if ('' === $css) {
+                return array('body' => '', 'imports' => array(), 'charset' => '');
+            }
+
+            $css = preg_replace('/^\xEF\xBB\xBF/', '', $css);
+            $comments = array();
+            $masked_css = (string) preg_replace_callback('/\/\*[\s\S]*?\*\//', function ($matches) use (&$comments) {
+                $key = '___UCWP_CSS_COMMENT_' . count($comments) . '___';
+                $comments[$key] = (string) $matches[0];
+                return $key;
+            }, $css);
+
+            $charset = '';
+            $masked_css = (string) preg_replace_callback('/@charset\s+(["\'])([^"\']+)\1\s*;/i', function ($matches) use (&$charset) {
+                if ('' === $charset) {
+                    $charset = '@charset "' . addcslashes((string) $matches[2], "\\\"") . '";';
+                }
+                return "\n";
+            }, $masked_css);
+
+            $imports = array();
+            $masked_css = (string) preg_replace_callback('/@import\s+(?:url\(\s*"([^"]+)"\s*\)|url\(\s*\'([^\']+)\'\s*\)|url\(\s*([^)]+?)\s*\)|"([^"]+)"|\'([^\']+)\')([^;]*);/i', function ($matches) use (&$imports, $source_url) {
+                $import_url = '';
+                for ($i = 1; $i <= 5; $i++) {
+                    if (isset($matches[$i]) && '' !== trim((string) $matches[$i])) {
+                        $import_url = trim((string) $matches[$i]);
+                        break;
+                    }
+                }
+                $suffix = isset($matches[6]) ? trim((string) $matches[6]) : '';
+                $rewritten = $this->rewrite_css_import_rule_for_bundle($import_url, $suffix, (string) $matches[0], $source_url);
+                if ('' !== $rewritten) {
+                    $imports[] = $rewritten;
+                }
+                return "\n";
+            }, $masked_css);
+
+            if (!empty($comments)) {
+                $masked_css = strtr($masked_css, $comments);
+            }
+
+            return array(
+                'body' => $this->rewrite_frontpage_css_urls_for_bundle($masked_css, $source_url),
+                'imports' => $imports,
+                'charset' => $charset,
+            );
+        }
+
+        private function rewrite_css_import_rule_for_bundle($import_url, $suffix, $fallback_rule, $source_url)
+        {
+            $import_url = trim((string) $import_url);
+            $suffix = trim((string) $suffix);
+            if ('' === $import_url) {
+                return trim((string) $fallback_rule);
+            }
+
+            $lower = strtolower($import_url);
+            foreach (array('data:', 'blob:', 'about:', 'javascript:', '#') as $prefix) {
+                if (0 === strpos($lower, $prefix)) {
+                    return trim((string) $fallback_rule);
+                }
+            }
+
+            $absolute = $this->absolutize_public_resource_url($import_url, $source_url);
+            if ('' === $absolute) {
+                return trim((string) $fallback_rule);
+            }
+
+            return '@import url("' . esc_url_raw($absolute) . '")' . ('' !== $suffix ? ' ' . $suffix : '') . ';';
         }
 
         private function rewrite_frontpage_css_urls_for_bundle($css, $source_url)
@@ -8949,10 +9437,20 @@ HTML;
                 return false;
             }
 
-            $prepared = $this->build_frontpage_css_bundle_from_html((string) $html, $url, (string) ($settings['homepage_css_bundle_mode'] ?? 'safe'));
-            if (empty($prepared['success'])) {
+            $lock_name = 'css-entry-' . md5($this->normalize_url($url));
+            if (!$this->acquire_runtime_lock($lock_name, 120)) {
                 return false;
             }
+
+            try {
+                if (!empty($this->get_frontpage_css_manifest_entry($url))) {
+                    return false;
+                }
+
+                $prepared = $this->build_frontpage_css_bundle_from_html((string) $html, $url, (string) ($settings['homepage_css_bundle_mode'] ?? 'safe'));
+                if (empty($prepared['success'])) {
+                    return false;
+                }
 
             $manifest = $this->read_frontpage_css_manifest();
             if (!isset($manifest['entries']) || !is_array($manifest['entries'])) {
@@ -8967,6 +9465,8 @@ HTML;
                 'sourceCount' => count((array) ($prepared['sourceUrls'] ?? array())),
                 'bundleCount' => 1,
                 'mode' => (string) ($prepared['mode'] ?? 'safe'),
+                'bundleSignature' => (string) ($prepared['bundleSignature'] ?? ''),
+                'bundleContentHash' => (string) ($prepared['bundleContentHash'] ?? ''),
                 'time' => current_time('timestamp'),
                 'time_mysql' => current_time('mysql'),
             );
@@ -8981,10 +9481,14 @@ HTML;
                     $manifest['entry'] = $entry;
                 }
                 $this->write_frontpage_css_manifest($manifest);
+                $this->cleanup_orphan_frontpage_css_bundles($manifest);
                 return true;
             }
 
             return false;
+            } finally {
+                $this->release_runtime_lock($lock_name);
+            }
         }
 
         private function prepare_inline_css_bundle_for_style_tag($css)
@@ -9054,7 +9558,7 @@ HTML;
             }
 
             $replacement = '<link rel="stylesheet" id="ucwp-frontpage-css" href="' . esc_url($bundle_url) . '" data-ucwp-frontpage-css="1" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
-            if (!empty($settings['homepage_css_bundle_inline']) || !empty($settings['critical_css_inline'])) {
+            if (!empty($settings['homepage_css_bundle_inline'])) {
                 $bundle_css = ('' !== $bundle_file && is_readable($bundle_file)) ? ucwp_safe_file_get_contents($bundle_file) : '';
                 $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($bundle_css);
                 if ('' !== $bundle_css) {
@@ -9184,7 +9688,7 @@ HTML;
 
             $settings = $this->get_settings();
             $replacement = '<link rel="stylesheet" id="ucwp-page-css-bundle" href="' . esc_url($bundle_url) . '" data-ucwp-page-css-bundle="1" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
-            if (!empty($settings['homepage_css_bundle_inline']) || !empty($settings['critical_css_inline'])) {
+            if (!empty($settings['homepage_css_bundle_inline'])) {
                 $maybe_css = ucwp_safe_file_get_contents($bundle_file);
                 $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($maybe_css);
                 if ('' !== $bundle_css) {
@@ -9250,19 +9754,28 @@ HTML;
 
         public function purge_all()
         {
-            $this->recursive_delete(UCWP_CACHE_DIR);
-            self::ensure_cache_directories();
-            $this->delete_frontpage_css_bundle();
-            $this->invalidate_dashboard_cache_activity_snapshot();
-
-            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
-                Ultra_Cache_Object_Cache_Manager::flush_cache();
+            $lock_name = 'purge-all';
+            if (!$this->acquire_runtime_lock($lock_name, 180)) {
+                return false;
             }
 
-            $this->record_cache_event('purge-all');
-            $this->record_analytics_purge('all');
-            do_action('ucwp_after_purge_all', array('scope' => 'all'));
-            return true;
+            try {
+                $this->recursive_delete(UCWP_CACHE_DIR);
+                self::ensure_cache_directories();
+                $this->delete_frontpage_css_bundle();
+                $this->invalidate_dashboard_cache_activity_snapshot();
+
+                if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
+                    Ultra_Cache_Object_Cache_Manager::flush_cache();
+                }
+
+                $this->record_cache_event('purge-all');
+                $this->record_analytics_purge('all');
+                do_action('ucwp_after_purge_all', array('scope' => 'all'));
+                return true;
+            } finally {
+                $this->release_runtime_lock($lock_name);
+            }
         }
 
         public function purge_url($url)
@@ -9978,7 +10491,9 @@ HTML;
                 $reason = 'excluded-query-arg';
             } elseif ('' !== $query && empty($settings['cache_query_strings'])) {
                 $reason = 'query-strings-disabled';
-            } elseif ('' !== $query && !empty($query_allowlist) && !$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
+            } elseif ('' !== $query && empty($query_allowlist)) {
+                $reason = 'query-allowlist-empty';
+            } elseif ('' !== $query && !$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
                 $reason = 'query-arg-not-allowlisted';
             }
 
@@ -10735,7 +11250,12 @@ HTML;
                     return true;
                 }
 
-                if (!empty($query_allowlist) && !$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
+                if (empty($query_allowlist)) {
+                    $this->last_bypass_reason = 'query-allowlist-empty';
+                    return true;
+                }
+
+                if (!$this->query_has_cacheable_allowlisted_variant($query, $query_allowlist)) {
                     $this->last_bypass_reason = 'query-arg-not-allowlisted';
                     return true;
                 }
@@ -10827,6 +11347,3 @@ HTML;
     }
 }
 
-if (!class_exists('UltraCache_V246_Engine') && class_exists('Ultra_Cache_Engine')) {
-    class_alias('Ultra_Cache_Engine', 'UltraCache_V246_Engine');
-}

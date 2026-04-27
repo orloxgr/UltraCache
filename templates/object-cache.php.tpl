@@ -134,16 +134,31 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		public function get_backend_status() {
+			$fallback_active = ('redis' === (string) $this->selected_backend && 'redis' !== (string) $this->active_backend);
+			$fallback_backend = $fallback_active ? (string) $this->active_backend : ($this->apcu_available() ? 'apcu' : 'runtime');
+			$fallback_reason = '';
+			$fallback_message = '';
+			if ($fallback_active) {
+				$fallback_label = 'apcu' === $fallback_backend ? 'APCu' : ('runtime' === $fallback_backend ? 'runtime-only' : strtoupper($fallback_backend));
+				$fallback_reason = '' !== (string) $this->redis_error ? (string) $this->redis_error : 'Redis was selected but did not become active during drop-in bootstrap.';
+				$fallback_message = 'Redis selected, ' . $fallback_label . ' fallback active.' . ('' !== $fallback_reason ? ' Redis: ' . $fallback_reason : '');
+			}
+
 			return array(
 				'selected' => (string) $this->selected_backend,
 				'active'   => (string) $this->active_backend,
-				'fallback' => 'apcu',
+				'fallback' => (string) $fallback_backend,
+				'fallbackActive' => (bool) $fallback_active,
+				'fallbackReason' => $fallback_reason,
+				'fallbackMessage' => $fallback_message,
 				'apcu'     => array(
 					'enabled'   => (bool) $this->apcu_enabled,
 					'available' => (bool) $this->apcu_available(),
+					'fallback_active' => (bool) ($fallback_active && 'apcu' === $fallback_backend),
 				),
 				'redis'    => array(
 					'enabled'  => (bool) $this->redis_enabled,
+					'available' => class_exists('Redis'),
 					'host'     => (string) $this->redis_host,
 					'port'     => (int) $this->redis_port,
 					'database' => (int) $this->redis_database,
@@ -855,10 +870,17 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 			$value = $payload['value'] ?? null;
-			if ($this->payload_contains_complex_types($value) || !(is_scalar($value) || null === $value || is_array($value))) {
+			if ($this->payload_contains_complex_types($value)) {
 				return false;
 			}
-			$serialized = serialize($payload);
+			try {
+				$serialized = serialize($payload);
+			} catch (Throwable $e) {
+				return false;
+			}
+			if (!is_string($serialized) || '' === $serialized || strlen($serialized) > $this->redis_payload_max_bytes) {
+				return false;
+			}
 			$envelope = $this->build_signed_envelope($serialized);
 			if (!is_array($envelope)) {
 				return false;
@@ -885,7 +907,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (false === $payload_serialized || !$this->verify_signature($payload_serialized, (string) $envelope['sig'])) {
 				return false;
 			}
-			$payload = $this->deserialize_cache_payload($payload_serialized, false);
+			$payload = $this->deserialize_cache_payload($payload_serialized, true);
 			return (is_array($payload) && $this->is_valid_cache_payload($payload, $key, $group)) ? $payload : false;
 		}
 
@@ -946,24 +968,22 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function payload_contains_complex_types($value, $depth = 0) {
-			if ($depth > $this->redis_value_max_depth) {
+			// WordPress object cache values may legitimately be arrays or objects.
+			// Reject only payloads that cannot be safely serialized or that are extremely deep.
+			if ($depth > 32) {
 				return true;
 			}
 
-			if (is_object($value) || is_resource($value)) {
+			if (is_resource($value)) {
 				return true;
 			}
 
-			if (is_string($value)) {
-				return strlen($value) > $this->redis_value_max_string_bytes;
+			if (is_object($value)) {
+				return ($value instanceof Closure);
 			}
 
 			if (!is_array($value)) {
 				return false;
-			}
-
-			if (count($value) > $this->redis_value_max_items) {
-				return true;
 			}
 
 			foreach ($value as $item) {
@@ -999,12 +1019,7 @@ if (!class_exists('WP_Object_Cache')) {
 
 			$value = $payload['value'] ?? null;
 			if ($this->payload_contains_complex_types($value)) {
-				$this->redis_error = 'Redis payload rejected: complex value type.';
-				return false;
-			}
-
-			if (!(is_scalar($value) || null === $value || is_array($value))) {
-				$this->redis_error = 'Redis payload rejected: unsupported value type.';
+				$this->redis_error = 'Redis payload rejected: unsupported resource/closure or excessive nesting.';
 				return false;
 			}
 
@@ -1032,13 +1047,21 @@ if (!class_exists('WP_Object_Cache')) {
 				}
 
 				if ((int) $expire > 0) {
-					return (bool) $this->with_redis_error_handler(function () use ($redis_key, $expire, $data) {
+					$stored = (bool) $this->with_redis_error_handler(function () use ($redis_key, $expire, $data) {
 						return $this->redis->setEx($redis_key, (int) $expire, $data);
 					}, false);
+					if ($stored) {
+						$this->redis_error = '';
+					}
+					return $stored;
 				}
-				return (bool) $this->with_redis_error_handler(function () use ($redis_key, $data) {
+				$stored = (bool) $this->with_redis_error_handler(function () use ($redis_key, $data) {
 					return $this->redis->set($redis_key, $data);
 				}, false);
+				if ($stored) {
+					$this->redis_error = '';
+				}
+				return $stored;
 			} catch (Throwable $e) {
 				$this->redis_error = $e->getMessage();
 				return false;
@@ -1073,7 +1096,7 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 
-			$payload = $this->deserialize_cache_payload($payload_serialized, false);
+			$payload = $this->deserialize_cache_payload($payload_serialized, true);
 			if (!is_array($payload) || !$this->is_valid_cache_payload($payload, $key, $group)) {
 				return false;
 			}

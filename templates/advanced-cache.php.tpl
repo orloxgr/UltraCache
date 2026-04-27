@@ -260,11 +260,11 @@ $runtime_config = array(
     ),
     'cache_query_strings'            => false,
     'cache_query_allowlist'          => array(),
-    'woo_safe_mode'                  => true,
+    'woo_safe_mode'                  => false,
     'cache_stats_enabled'            => false,
-    'stale_while_revalidate_enabled' => true,
-    'cache_fresh_ttl_minutes'        => 1440,
-    'cache_max_stale_minutes'        => 10080,
+    'stale_while_revalidate_enabled' => false,
+    'cache_fresh_ttl_minutes'        => 15,
+    'cache_max_stale_minutes'        => 720,
     'revalidate_secret'              => '',
     'trusted_hosts'                  => array(),
     'object_cache_enabled'           => false,
@@ -393,25 +393,12 @@ if ('' === $runtime_secret_site_token) {
 }
 if (is_string($runtime_secret_base) && '' !== trim($runtime_secret_base) && '.' !== $runtime_secret_base && '/' !== $runtime_secret_base) {
     $runtime_secret_candidates[] = rtrim($runtime_secret_base, '/\\') . '/.' . $runtime_secret_site_token . '-ultracache-runtime-secrets.php';
-    $runtime_secret_candidates[] = rtrim($runtime_secret_base, '/\\') . '/.ultracache-runtime-secrets.php';
 }
-$runtime_secret_candidates[] = rtrim(WP_CONTENT_DIR, '/\\') . '/ultracache-runtime-secrets.php';
 $runtime_secret_candidates = array_values(array_unique($runtime_secret_candidates));
-$runtime_secret_legacy_public = rtrim(WP_CONTENT_DIR, '/\\') . '/ultracache-runtime-secrets.php';
-$ucwp_is_allowed_runtime_secret = static function ($path) use ($runtime_secret_base, $runtime_secret_legacy_public) {
+$ucwp_is_allowed_runtime_secret = static function ($path) use ($runtime_secret_base) {
     $path = is_string($path) ? trim($path) : '';
     if ('' === $path) {
         return false;
-    }
-
-    $resolved_path = ucwp_resolve_cache_path_for_compare($path, true);
-    if ('' === $resolved_path) {
-        return false;
-    }
-
-    $resolved_legacy = ucwp_resolve_cache_path_for_compare($runtime_secret_legacy_public, true);
-    if ('' !== $resolved_legacy && $resolved_path === $resolved_legacy) {
-        return true;
     }
 
     return is_string($runtime_secret_base)
@@ -985,7 +972,7 @@ $ucwp_sort_query_value = static function ($value) use (&$ucwp_sort_query_value) 
 };
 
 $ucwp_normalize_query_vars = static function ($query_vars, $allowlist) use ($ucwp_sort_query_value) {
-    if (!is_array($query_vars) || empty($query_vars)) {
+    if (!is_array($query_vars) || empty($query_vars) || empty($allowlist)) {
         return array();
     }
 
@@ -1170,11 +1157,11 @@ foreach (array_keys($query_vars) as $query_key) {
 $normalized_query_vars = array();
 if (!empty($query_vars)) {
     $query_allowlist = (array) ($runtime_config['cache_query_allowlist'] ?? array());
-    if (empty($runtime_config['cache_query_strings'])) {
+    if (empty($runtime_config['cache_query_strings']) || empty($query_allowlist)) {
         return;
     }
 
-    if (!empty($query_allowlist) && '' !== $ucwp_get_first_non_allowlisted_query_key($query_vars, $query_allowlist)) {
+    if ('' !== $ucwp_get_first_non_allowlisted_query_key($query_vars, $query_allowlist)) {
         return;
     }
 

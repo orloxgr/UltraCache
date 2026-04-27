@@ -2622,6 +2622,3 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 	}
 }
 
-if (!class_exists('UltraCache_V246_Media_Converter') && class_exists('Ultra_Cache_Media_Converter')) {
-	class_alias('Ultra_Cache_Media_Converter', 'UltraCache_V246_Media_Converter');
-}

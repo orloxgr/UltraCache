@@ -69,10 +69,6 @@
 		'homepageCssBundleMode',
 		'cssBundleScope',
 		'pageCssBundleOnEntryEnabled',
-		// Legacy import aliases.
-		'criticalCssEnabled',
-		'criticalCssInlineEnabled',
-		'criticalCssExcludeList',
 		'frontendSafeModeEnabled',
 		'sliderSafeModeEnabled',
 		'clsDimensionsEnabled',
@@ -136,7 +132,7 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: 'All Off', description: 'Disable page cache, object cache, media, CSS, JS, fonts, prefetch, warmup, and scheduled jobs. Best for first install or troubleshooting.', patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, delayThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, pageCssBundleOnEntryEnabled: false, criticalCssEnabled: false, criticalCssInlineEnabled: false,
+			deferJsEnabled: false, delayThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, pageCssBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
@@ -144,19 +140,19 @@
 		} },
 		safe: { label: 'Safe', description: 'Enables page caching, WooCommerce-safe bypasses, browser cache headers, save-time warmup, and stale protection. No JS/CSS/media rewrites.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: false, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, deferJsEnabled: false, delayThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false,
+			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, deferJsEnabled: false, delayThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false, cssBundleScope: 'homepage',
 		} },
 		balanced: { label: 'Balanced', description: 'Adds object cache, media optimization, Safe CLS/LCP image hints, conservative JS defer, safe CSS bundling, and font-display improvements.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
 			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
-			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'safe', cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: false, criticalCssEnabled: true, criticalCssInlineEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
+			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'safe', cssBundleScope: 'homepage', pageCssBundleOnEntryEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, cronWarmEnabled: false, cacheCleanupEnabled: false, cacheQueryStringsEnabled: false,
 		} },
-		aggressive: { label: 'Aggressive', description: 'Balanced plus delayed third-party JS, main-thread relief, aggressive CSS bundling, CSS bundles on warm, speculation prefetch, cron warmup, and scheduled cleanup.', patch: {
+		aggressive: { label: 'Aggressive', description: 'Balanced plus delayed third-party JS, main-thread relief, aggressive CSS bundling, manual CSS bundle warm actions, speculation prefetch, cron HTML warmup, and scheduled cleanup.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: true, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
-			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'aggressive', cssBundleScope: 'per-page', pageCssBundleOnEntryEnabled: true, criticalCssEnabled: true, criticalCssInlineEnabled: false, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
-			speculationRulesEnabled: true, cronWarmEnabled: true, cronWarmStartAfterCleanup: true, cronWarmStartAfterManualPurge: true, cacheCleanupEnabled: true, cacheQueryStringsEnabled: false,
+			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, lcpBoundaryDeferEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: true, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
+			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: true, homepageCssBundleMode: 'aggressive', cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: true, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
+			speculationRulesEnabled: true, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, cacheCleanupEnabled: true, cacheQueryStringsEnabled: false,
 		} },
 	};
 
@@ -385,14 +381,30 @@
 
 	function getObjectEntriesHint(stats) {
 		const parts = [];
+		const activeBackend = stats && (stats.objectCacheActiveBackend || stats.objectCacheBackend || stats.objectCacheStatsSource);
+		const selectedBackend = stats && stats.objectCacheSelectedBackend;
+		if (activeBackend) {
+			parts.push('Active: ' + String(activeBackend).toUpperCase());
+		}
+		if (selectedBackend && activeBackend && String(selectedBackend) !== String(activeBackend)) {
+			parts.push('Selected: ' + String(selectedBackend).toUpperCase());
+		}
+		if (stats && stats.objectCacheFallbackActive) {
+			parts.push('APCu fallback active');
+		}
 		if (stats && stats.objectCacheSizeHuman) {
 			parts.push(stats.objectCacheSizeHuman);
 		}
 		if (stats && stats.objectCacheStatsPartial) {
-			parts.push(stats.objectCacheStatsPartialReason || ('sampled, Redis scan capped at ' + formatNumber(stats.objectCacheStatsLimit || 5000) + ' keys'));
+			parts.push(stats.objectCacheStatsPartialReason || ('sampled, backend scan capped at ' + formatNumber(stats.objectCacheStatsLimit || 5000) + ' keys'));
+		}
+		if (stats && (typeof stats.objectCacheRedisEntries !== 'undefined' || typeof stats.objectCacheApcuEntries !== 'undefined' || typeof stats.objectCacheDiskEntries !== 'undefined')) {
+			parts.push('Redis ' + formatNumber(stats.objectCacheRedisEntries || 0));
+			parts.push('APCu ' + formatNumber(stats.objectCacheApcuEntries || 0));
+			parts.push('Disk ' + formatNumber(stats.objectCacheDiskEntries || 0));
 		}
 		if (!parts.length) {
-			parts.push('File object cache');
+			parts.push('Object cache backend entries');
 		}
 		return parts.join(' · ');
 	}
@@ -512,7 +524,6 @@
 			format: 'ultracache-settings-v1',
 			plugin: 'UltraCache',
 			version: ucwp.version || '',
-			hotfixBundle: ucwp.hotfixBundle || '',
 			exportedAt: new Date().toISOString(),
 			site: window.location.origin || '',
 			settings: pickTransferableSettings(source),
@@ -579,6 +590,7 @@
 			queue_action: { path: 'action-queue', method: 'POST' },
 			queue_status: { path: 'action-queue/{id}', method: 'GET' },
 			delete_all_data: { path: 'delete-all-data', method: 'POST' },
+			populate_query_allowlist: { path: 'query-string-allowlist/populate', method: 'POST' },
 		};
 
 		const route = routes[subAction];
@@ -768,8 +780,16 @@
 				if (isWarmJobType(type)) {
 					const result = await apiRequest('crawl_page', { url: item, buildCssBundle: shouldBuildCssBundleForWarmJob(type) });
 					const detail = result && result.message ? ' — ' + result.message : '';
+					const skipped = !!(result && (result.cached === false || result.skipped));
+					const failed = !!(result && result.success === false && !skipped);
 					await sleep(40);
-					return ((result && result.cached !== false) ? 'Cached: ' : 'Skipped: ') + item + detail;
+					return {
+						line: (failed ? 'Failed: ' : (skipped ? 'Skipped: ' : 'Cached: ')) + item + detail,
+						progressIncrement: 1,
+						successIncrement: failed || skipped ? 0 : 1,
+						skippedIncrement: skipped ? 1 : 0,
+						failedIncrement: failed ? 1 : 0,
+					};
 				}
 
 				const response = await apiRequest('optimize_id', { id: item });
@@ -781,6 +801,7 @@
 					line: (response && response.converted ? 'Processed attachment #' : 'Scanned attachment #') + item + ' · ' + workCompleted + ' unit' + (workCompleted === 1 ? '' : 's') + ' · AVIF ' + avifCount + ' · WebP ' + webpCount,
 					progressIncrement: workCompleted,
 					attachmentIncrement: 1,
+					successIncrement: 1,
 				};
 			} catch (error) {
 				lastError = error;
@@ -792,7 +813,11 @@
 			attempt += 1;
 		}
 
-		return (isWarmJobType(type) ? 'Failed: ' + item : 'Failed attachment #' + item) + ' — ' + (lastError && lastError.message ? lastError.message : 'Unknown error');
+		return {
+			line: (isWarmJobType(type) ? 'Failed: ' + item : 'Failed attachment #' + item) + ' — ' + (lastError && lastError.message ? lastError.message : 'Unknown error'),
+			progressIncrement: 1,
+			failedIncrement: 1,
+		};
 	}
 
 	async function fetchJobBatch(type, cursor, limit, scope) {
@@ -1080,8 +1105,9 @@
 		]);
 	}
 
-	function SaveableTextAreaField({ label, description, value, onSave, disabled, placeholder, saveLabel }) {
+	function SaveableTextAreaField({ label, description, value, onSave, disabled, placeholder, saveLabel, populateLabel, onPopulate, populateWarning }) {
 		const [draft, setDraft] = useState(value || '');
+		const [populateBusy, setPopulateBusy] = useState(false);
 
 		useEffect(() => {
 			setDraft(value || '');
@@ -1090,6 +1116,30 @@
 		const currentValue = String(value || '');
 		const draftValue = String(draft || '');
 		const hasChanges = draftValue !== currentValue;
+		const hasPopulate = typeof onPopulate === 'function';
+		const hasDraftContent = draftValue.trim().length > 0;
+
+		async function handlePopulateClick() {
+			if (!hasPopulate || populateBusy || disabled) {
+				return;
+			}
+
+			if (hasDraftContent && typeof window !== 'undefined' && typeof window.confirm === 'function') {
+				if (!window.confirm(populateWarning || 'Your current whitelist will be replaced.')) {
+					return;
+				}
+			}
+
+			setPopulateBusy(true);
+			try {
+				const populatedValue = await onPopulate(draftValue);
+				if (typeof populatedValue === 'string') {
+					setDraft(populatedValue);
+				}
+			} finally {
+				setPopulateBusy(false);
+			}
+		}
 
 		return h('div', { className: 'uc-field-wrap' }, [
 			h('label', { className: 'uc-field-label' }, label),
@@ -1101,7 +1151,12 @@
 				placeholder: placeholder || '',
 				onChange: (e) => setDraft(e.target.value),
 			}),
-			h('div', { className: 'mt-3 flex justify-end' }, [
+			hasPopulate && hasDraftContent ? h('div', { className: 'mt-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, populateWarning || 'Your current whitelist will be replaced.') : null,
+			h('div', { className: 'mt-3 flex items-center justify-between gap-3' }, [
+				hasPopulate ? h(Button, {
+					onClick: handlePopulateClick,
+					disabled: !!disabled || populateBusy,
+				}, populateBusy ? 'Populating…' : (populateLabel || 'Populate')) : h('span', { 'aria-hidden': 'true' }, ''),
 				h(Button, {
 					onClick: () => onSave(draftValue),
 					disabled: !!disabled || !hasChanges,
@@ -1110,6 +1165,7 @@
 			]),
 		]);
 	}
+
 
 	function NumberField({ label, description, value, onChange, disabled, min, step }) {
 		return h('div', { className: 'uc-field-wrap' }, [
@@ -1220,7 +1276,7 @@
 		]);
 	}
 
-	function ActivitySummaryCard({ stats, cssBundleDiagnostics }) {
+	function ActivitySummaryCard({ stats, cssBundleDiagnostics, open, onToggle }) {
 		const lastPurge = stats && stats.lastPurge ? stats.lastPurge : {};
 		const lastWarm = stats && stats.lastWarm ? stats.lastWarm : {};
 		const counterRows = [
@@ -1266,10 +1322,16 @@
 			])));
 		}
 
-		return h(Card, {
-			title: 'Activity Summary',
-			description: 'Recent operational events and warm/object-cache counters.',
-		}, [
+		return h('div', { className: 'uc-card' }, [
+			h('details', { className: 'uc-accordion uc-accordion--card', key: 'activity-summary', open: !!open }, [
+				h('summary', { className: 'uc-accordion__summary', onClick: function(event) { event.preventDefault(); if (onToggle) { onToggle(); } } }, [
+					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
+						h('div', { className: 'uc-accordion__title' }, 'Activity Summary'),
+						h('div', { className: 'uc-accordion__description' }, 'Recent operational events and warm/object-cache counters.'),
+					]),
+					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
+				]),
+				h('div', { className: 'uc-accordion__body' }, [
 			h('div', { className: 'uc-diagnostic-group', key: 'activity-counters' }, [
 				h('div', { className: 'uc-section-title' }, 'Activity counters'),
 				renderSummaryRows(counterRows),
@@ -1286,6 +1348,8 @@
 			h('div', { className: 'uc-diagnostic-group', key: 'activity-timeline' }, [
 				h('div', { className: 'uc-section-title' }, 'Recent activity'),
 				renderStackRows(timelineRows),
+			]),
+				]),
 			]),
 		]);
 	}
@@ -1326,7 +1390,7 @@
 	}
 
 
-		function DiagnosticsCard({ diagnostics, stats }) {
+		function DiagnosticsCard({ diagnostics, stats, open, onToggle }) {
 		const compressionStatus = diagnostics.compression || {};
 		const pathDiagnostics = diagnostics.paths || {};
 		const reverseProxy = diagnostics.reverseProxy || {};
@@ -1356,8 +1420,11 @@
 		const pageCacheStatus = diagnostics.pageCache || {};
 		const selectedObjectBackend = objectCacheStatus.selectedBackend || 'redis';
 		const activeObjectBackend = objectCacheStatus.activeBackend || selectedObjectBackend;
+		const fallbackObjectBackend = objectCacheStatus.fallbackBackend || 'apcu';
+		const objectFallbackActive = !!objectCacheStatus.fallbackActive || (selectedObjectBackend === 'redis' && activeObjectBackend === 'apcu');
 		const selectedObjectBackendText = selectedObjectBackend ? String(selectedObjectBackend).toUpperCase() : 'Unavailable';
 		const activeObjectBackendText = activeObjectBackend ? String(activeObjectBackend).toUpperCase() : 'Unavailable';
+		const fallbackObjectBackendText = fallbackObjectBackend ? String(fallbackObjectBackend).toUpperCase() : 'Unavailable';
 
 		function describeDropIn(diag) {
 			if (!diag || !diag.exists) {
@@ -1375,7 +1442,8 @@
 			['Page cache drop-in active', !!pageCacheStatus.active, pageCacheStatus.active ? 'Active' : (pageCacheStatus.enabled ? 'Configured · drop-in inactive' : 'Disabled')],
 			['Object cache switch', !!objectCacheStatus.enabled, objectCacheStatus.enabled ? 'Enabled' : 'Disabled'],
 			['Selected object cache backend', !!objectCacheStatus.enabled, objectCacheStatus.enabled ? selectedObjectBackendText : 'Disabled'],
-			['Active object cache backend', !!objectCacheStatus.active, objectCacheStatus.active ? activeObjectBackendText : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled')],
+			['Active object cache backend', !!objectCacheStatus.active && !objectFallbackActive, objectCacheStatus.active ? (activeObjectBackendText + (objectFallbackActive ? ' fallback' : '')) : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled')],
+			['Object cache fallback', !objectFallbackActive, objectFallbackActive ? (fallbackObjectBackendText + ' active') : (fallbackObjectBackendText + ' standby')],
 			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : ('Disabled' + (analyticsBackend.message ? ' · ' + analyticsBackend.message : ''))],
 			['Cron Warm Up', diagnostics.cronWarm && diagnostics.cronWarm.active, diagnostics.cronWarm && diagnostics.cronWarm.active ? ('Running · ' + formatNumber(diagnostics.cronWarm.processed || 0) + '/' + formatNumber(diagnostics.cronWarm.total || 0)) : diagnostics.cronWarm && diagnostics.cronWarm.enabled ? ((diagnostics.cronWarm.completed ? 'Completed' : 'Enabled') + ' · ' + formatNumber(diagnostics.cronWarm.pagesPerMinute || 0) + '/min') : 'Disabled'],
 			['Varnish', diagnostics.varnish && diagnostics.varnish.enabled, diagnostics.varnish && diagnostics.varnish.enabled ? ('Varnish mode: ' + (diagnostics.varnish.mode || 'http') + ' · ' + (((diagnostics.varnish.mode || 'http') === 'admin') ? 'BAN' : (diagnostics.varnish.method || 'BAN')) + ' · ' + ((diagnostics.varnish.servers || '').trim() || 'No endpoints')) : 'Disabled'],
@@ -1419,7 +1487,16 @@
 			])));
 		}
 
-		return h(Card, { title: 'Diagnostics', description: 'Live cache status' }, [
+		return h('div', { className: 'uc-card' }, [
+			h('details', { className: 'uc-accordion uc-accordion--card', key: 'diagnostics', open: !!open }, [
+				h('summary', { className: 'uc-accordion__summary', onClick: function(event) { event.preventDefault(); if (onToggle) { onToggle(); } } }, [
+					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
+						h('div', { className: 'uc-accordion__title' }, 'Diagnostics'),
+						h('div', { className: 'uc-accordion__description' }, 'Live cache status'),
+					]),
+					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
+				]),
+				h('div', { className: 'uc-accordion__body' }, [
 			h('div', { className: 'uc-diagnostic-group', key: 'status-group' }, [
 				h('div', { className: 'uc-section-title' }, 'Runtime status'),
 				renderRows(statusRows),
@@ -1432,12 +1509,21 @@
 				h('div', { className: 'uc-section-title' }, 'Runtime config in use'),
 				renderRows(runtimeConfigRows),
 			]) : null,
+				]),
+			]),
 		]);
 	}
 
 	function AdvancedDiagnosticsCard({ diagnostics, stats }) {
 		const last = diagnostics.lastEvent || {};
 		const objectCacheStatus = diagnostics.objectCache || {};
+		const selectedObjectBackend = objectCacheStatus.selectedBackend || 'redis';
+		const activeObjectBackend = objectCacheStatus.activeBackend || selectedObjectBackend;
+		const fallbackObjectBackend = objectCacheStatus.fallbackBackend || 'apcu';
+		const objectFallbackActive = !!objectCacheStatus.fallbackActive || (selectedObjectBackend === 'redis' && activeObjectBackend === 'apcu');
+		const selectedObjectBackendText = selectedObjectBackend ? String(selectedObjectBackend).toUpperCase() : 'Unavailable';
+		const activeObjectBackendText = activeObjectBackend ? String(activeObjectBackend).toUpperCase() : 'Unavailable';
+		const fallbackObjectBackendText = fallbackObjectBackend ? String(fallbackObjectBackend).toUpperCase() : 'Unavailable';
 		const compressionStatus = diagnostics.compression || {};
 		const wpCacheStatus = diagnostics.wpCache || {};
 		const pathDiagnostics = diagnostics.paths || {};
@@ -1470,8 +1556,9 @@
 			['Write skips', false, formatNumber(stats.pageCacheStoreSkips || 0)],
 			['Stale hits', false, formatNumber(stats.pageCacheStaleHits || 0)],
 			['Background refreshes', false, formatNumber(stats.pageCacheBackgroundRevalidations || 0)],
-			['Selected object cache backend', false, objectCacheStatus.selectedBackend ? String(objectCacheStatus.selectedBackend).toUpperCase() : 'Unavailable'],
-			['Active object cache backend', !!objectCacheStatus.active, objectCacheStatus.active ? String(objectCacheStatus.activeBackend || objectCacheStatus.selectedBackend || 'redis').toUpperCase() : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled')],
+			['Selected object cache backend', false, selectedObjectBackendText],
+			['Active object cache backend', !!objectCacheStatus.active && !objectFallbackActive, objectCacheStatus.active ? (activeObjectBackendText + (objectFallbackActive ? ' fallback' : '')) : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled')],
+			['Object cache fallback', !objectFallbackActive, objectFallbackActive ? (fallbackObjectBackendText + ' active') : (fallbackObjectBackendText + ' standby')],
 			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : 'Disabled'],
 			['CLS images scanned', false, formatNumber(stats.clsImagesScanned || 0)],
 			['CLS dimensions injected', false, formatNumber(stats.clsDimensionsInjected || 0)],
@@ -1634,6 +1721,10 @@
 		const attachmentText = process.attachmentsTotal > 0
 			? ('Attachments ' + process.attachmentsProcessed + ' / ' + process.attachmentsTotal)
 			: '';
+		const successCount = Math.max(0, Number(process.successCount || 0));
+		const skippedCount = Math.max(0, Number(process.skippedCount || 0));
+		const failedCount = Math.max(0, Number(process.failedCount || 0));
+		const hasWarmCounters = successCount > 0 || skippedCount > 0 || failedCount > 0;
 
 		return h('div', { className: 'bg-emerald-500/5  p-6 rounded' }, [
 			h('div', { className: 'flex justify-between items-center mb-3 gap-3', key: 'head' }, [
@@ -1674,6 +1765,13 @@
 					style: { width: percent + '%' },
 				}),
 			]),
+			hasWarmCounters
+				? h('div', { className: 'flex flex-wrap gap-2 mt-3 text-[11px]', key: 'warm-counters' }, [
+					h('span', { className: 'text-emerald-400 font-bold', key: 'cached' }, 'Cached: ' + successCount),
+					h('span', { className: 'text-zinc-400 font-bold', key: 'skipped' }, 'Skipped: ' + skippedCount),
+					h('span', { className: failedCount > 0 ? 'text-amber-400 font-bold' : 'text-zinc-500 font-bold', key: 'failed' }, 'Failed: ' + failedCount),
+				])
+				: null,
 			process.logs && process.logs.length
 				? h(
 						'div',
@@ -1695,24 +1793,35 @@
 		const varnish = diagnostics.varnish || {};
 		const last = varnish.last || {};
 		const supportMessage = varnish.message || '';
+		const endpointDiagnostics = varnish.endpointDiagnostics || {};
+		const endpointWarningMessages = Array.isArray(endpointDiagnostics.messages) ? endpointDiagnostics.messages : (varnish.unsafeEndpointMessage ? [varnish.unsafeEndpointMessage] : []);
+		const hasUnsafeEndpoints = !!varnish.hasUnsafeEndpoints || !!endpointDiagnostics.unsafe;
+		const legacyConflicts = diagnostics.legacyCacheConflicts || {};
 		const detailLines = Array.isArray(last.details) ? last.details.map((item) => {
 			return (item.server || 'server') + ': ' + (item.success ? 'OK' : 'FAIL') + (item.detail ? ' · ' + item.detail : '');
 		}).join('\n') : '';
 		const mode = form.varnishCliMode || 'http';
 		const isAdminMode = mode === 'admin';
+		const formServers = String(form.varnishCliServers || '');
+		const formHasUnsafeEndpoint = !isAdminMode && /:(80|443|8443)(\s|$)/.test(formServers);
+		const actionsBlocked = hasUnsafeEndpoints || formHasUnsafeEndpoint;
 
 		return h(Card, {
 			title: 'Varnish',
-			description: isAdminMode ? 'Send admin BAN commands to one or more Varnish admin endpoints using the shared secret.' : 'Send BAN or PURGE HTTP requests to one or more Varnish/frontend HTTP endpoints when UltraCache purges.',
+			description: isAdminMode ? 'Send admin BAN commands to one or more Varnish admin endpoints using the shared secret.' : 'Send BAN or PURGE HTTP requests to a local Varnish listener. Use 127.0.0.1:82; do not use the public WordPress domain on :80 or :443.',
 		}, [
 			h(ToggleRow, {
 				label: isAdminMode ? 'Enable Varnish admin purge' : 'Enable Varnish HTTP purge',
-				description: varnish.available ? (isAdminMode ? 'Propagate UltraCache purge-all and URL purge events through the Varnish admin interface.' : 'Propagate UltraCache purge-all and URL purge events to your Varnish frontend endpoints.') : (supportMessage || 'Unavailable on this server.'),
+				description: varnish.available ? (isAdminMode ? 'Saves immediately. Propagate UltraCache purge-all and URL purge events through the Varnish admin interface.' : 'Saves immediately. Propagate UltraCache purge-all and URL purge events to your Varnish frontend endpoints.') : (supportMessage || 'Unavailable on this server.'),
 				checked: !!form.varnishCliEnabled,
 				onChange: (value) => onFieldChange('varnishCliEnabled', value),
 				disabled: busy || !varnish.available,
 			}),
 			isAdminMode ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, 'Security warning: Varnish admin mode uses a plain TCP socket. Use localhost/private endpoints only, such as 127.0.0.1:6082, and never expose the Varnish admin port publicly.') : null,
+			
+			!isAdminMode && endpointWarningMessages.length ? h('div', { className: 'space-y-2 mt-4' }, endpointWarningMessages.map((message, index) => h('div', { className: 'text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2', key: 'varnish-endpoint-warning-' + index }, message))) : null,
+			formHasUnsafeEndpoint ? h('div', { className: 'mt-4 text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2' }, 'This unsaved HTTP endpoint is unsafe or unsupported. HTTP mode only allows local Varnish listener ports 82 or 6081. Do not use the public WordPress frontend on :80 or :443.') : null,
+			legacyConflicts.detected ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, (legacyConflicts.message || 'Old W3 Total Cache / Varnish helper leftovers detected.') + ((legacyConflicts.options || []).length ? ' Options: ' + legacyConflicts.options.join(', ') + '.' : '') + ((legacyConflicts.plugins || []).length ? ' Plugins: ' + legacyConflicts.plugins.join(', ') + '.' : '')) : null,
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(SelectField, {
 					label: 'Mode',
@@ -1728,7 +1837,7 @@
 				}),
 				h(TextField, {
 					label: isAdminMode ? 'Admin endpoints' : 'HTTP endpoints',
-					description: isAdminMode ? 'Space-separated Varnish admin endpoints in host:port format. Example: 127.0.0.1:6082' : 'Space-separated Varnish/frontend HTTP endpoints. Use host:port for HTTP, or a full URL for custom HTTPS/path targets. Example: 127.0.0.1:82 https://example.com:8443/',
+					description: isAdminMode ? 'Space-separated Varnish admin endpoints in host:port format. Example: 127.0.0.1:6082' : 'Space-separated local Varnish HTTP listener endpoints in host:port format. Safe example: 127.0.0.1:82. Public frontend endpoints such as domain.com:443 are blocked.',
 					value: form.varnishCliServers || '',
 					onChange: (value) => onFieldChange('varnishCliServers', value),
 					disabled: busy,
@@ -1746,7 +1855,7 @@
 				}),
 				h(SelectField, {
 					label: 'Command type',
-					description: isAdminMode ? 'Admin mode uses the Varnish admin interface. BAN is the effective action even if you change this selector.' : 'BAN is safer across most builds. PURGE automatically falls back to BAN on status 101.',
+					description: isAdminMode ? 'Admin mode uses the Varnish admin interface. BAN is the effective action even if you change this selector.' : 'BAN is safer across most builds. PURGE sends PURGE only; choose BAN if your Varnish setup does not explicitly support PURGE.',
 					value: form.varnishCliMethod || 'BAN',
 					onChange: (value) => onFieldChange('varnishCliMethod', value),
 					disabled: busy,
@@ -1769,7 +1878,7 @@
 			]),
 			h(ToggleRow, {
 				label: 'Debug log',
-				description: 'Write Varnish request details to wp-content/cache/ultracache/logs/varnish-cli.log',
+				description: 'Saves immediately. Write Varnish request details to wp-content/cache/ultracache/logs/varnish-cli.log',
 				checked: !!form.varnishCliDebug,
 				onChange: (value) => onFieldChange('varnishCliDebug', value),
 				disabled: busy,
@@ -1777,8 +1886,8 @@
 			}),
 			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
 				h(Button, { onClick: onSave, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Save Varnish Settings'),
-				h(Button, { onClick: onTest, disabled: busy || !form.varnishCliEnabled || !varnish.available, variant: 'light' }, busy ? 'Working…' : 'Run Varnish Test'),
-				h(Button, { onClick: onFlushAll, disabled: busy || !form.varnishCliEnabled || !varnish.available, variant: 'light' }, busy ? 'Working…' : 'Flush Varnish All'),
+				h(Button, { onClick: onTest, disabled: busy || !form.varnishCliEnabled || !varnish.available || actionsBlocked, variant: 'light' }, busy ? 'Working…' : 'Run Varnish Test'),
+				h(Button, { onClick: onFlushAll, disabled: busy || !form.varnishCliEnabled || !varnish.available || actionsBlocked, variant: 'light' }, busy ? 'Working…' : 'Flush Varnish All'),
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
 				h('div', { className: 'uc-section-title' }, 'Status'),
@@ -1904,20 +2013,37 @@
 	function RedisCard({ form, diagnostics, busy, objectCacheEnabled, onObjectCacheEnabledChange, onFieldChange, onSave, onTest, onFlush }) {
 		const objectCache = diagnostics.objectCache || {};
 		const redis = objectCache.redis || {};
+		const legacyConflicts = diagnostics.legacyCacheConflicts || {};
 		const backend = form.objectCacheBackend || 'redis';
+		const selectedBackend = objectCache.selectedBackend || backend;
+		const activeBackend = objectCache.activeBackend || selectedBackend;
+		const fallbackActive = !!objectCache.fallbackActive || (selectedBackend === 'redis' && activeBackend !== 'redis');
+		const fallbackBackend = objectCache.fallbackBackend || (fallbackActive ? activeBackend : 'apcu');
 		const apcu = objectCache.apcu || {};
+		const backendLabel = (value) => value === 'redis' ? 'Redis' : (value === 'apcu' ? 'APCu' : (value === 'disk' ? 'Disk' : (value === 'runtime' ? 'Runtime-only' : String(value || 'Unavailable'))));
+		const redisDropinError = redis.dropinError || (objectCache.backendStatus && objectCache.backendStatus.redis && objectCache.backendStatus.redis.error) || '';
+		const fallbackMessage = objectCache.fallbackMessage || (fallbackActive ? ('Redis selected, ' + backendLabel(fallbackBackend) + ' fallback active.' + (redisDropinError ? ' Redis: ' + redisDropinError : '')) : '');
 		const redisSupportText = redis.available ? 'PHP Redis extension detected on this server.' : (redis.message || 'PHP Redis extension not detected. APCu will be used when available; otherwise object cache is runtime-only.');
+		const dropinInstallable = typeof objectCache.dropinInstallable === 'undefined' ? !!objectCache.available : !!objectCache.dropinInstallable;
+		const selectedBackendSupported = typeof objectCache.selectedBackendSupported === 'undefined'
+			? (selectedBackend === 'redis' ? !!redis.available : (selectedBackend === 'apcu' ? !!apcu.available : true))
+			: !!objectCache.selectedBackendSupported;
+		const fallbackStatusText = selectedBackend === 'redis'
+			? (fallbackActive ? (backendLabel(fallbackBackend) + ' active') : 'Standby')
+			: 'Not needed';
 		const transportText = [form.redisUseTls ? 'TLS' : 'TCP', form.redisPersistent ? 'Persistent connections ON' : 'Persistent connections OFF'].join(' · ');
 		const statusText = objectCache.active
-			? ('Active backend: ' + (objectCache.activeBackend || backend))
-			: (objectCache.enabled ? ('Configured backend: ' + backend) : 'Object cache is disabled.');
+			? ('Active backend: ' + backendLabel(activeBackend) + (fallbackActive ? ' fallback' : ''))
+			: (objectCache.enabled ? ('Configured backend: ' + backendLabel(selectedBackend)) : 'Object cache is disabled.');
 		const connectionText = redis.connected
 			? 'Connected'
-			: (redis.message || 'Not tested yet');
-
+			: (redisDropinError || redis.message || 'Not tested yet');
+		const payloadProbe = redis.payloadProbe || {};
+		const payloadProbeKnown = typeof payloadProbe.success !== 'undefined';
+		const payloadProbeText = payloadProbeKnown ? (payloadProbe.success ? 'String / array / object OK' : (payloadProbe.message || 'Payload probe failed')) : 'Not tested yet';
 		return h(Card, {
 			title: 'Object Cache',
-			description: 'Enable the WordPress object-cache.php drop-in. Redis is preferred; APCu is the safe local fallback. Disk is advanced-only and never used automatically.',
+			description: 'Enable the WordPress object-cache.php drop-in. The selected backend and the active runtime backend are shown separately so Redis/APCu/runtime fallbacks are visible.',
 		}, [
 			h(ToggleField, {
 				label: 'Enable Object Cache',
@@ -1927,10 +2053,11 @@
 				disabled: busy,
 				key: 'object-cache-enabled',
 			}),
+			legacyConflicts.detected ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, (legacyConflicts.message || 'Old W3 Total Cache / Varnish helper leftovers detected.') + ((legacyConflicts.options || []).length ? ' Options: ' + legacyConflicts.options.join(', ') + '.' : '') + ((legacyConflicts.plugins || []).length ? ' Plugins: ' + legacyConflicts.plugins.join(', ') + '.' : '')) : null,
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4 mt-4' }, [
 				h(ToggleField, {
 					label: 'Use Redis',
-					description: 'Recommended production backend. If Redis cannot connect, UltraCache falls back to APCu when available, then runtime-only.',
+					description: 'Recommended production backend. This switch saves immediately. If Redis cannot connect, UltraCache falls back to APCu when available, then runtime-only.',
 					checked: backend === 'redis',
 					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'redis') : null,
 					disabled: busy,
@@ -1938,7 +2065,7 @@
 				}),
 				h(ToggleField, {
 					label: 'Use APCu',
-					description: 'Local memory backend for single-server sites. Faster and safer than disk, but cleared on PHP-FPM restart.',
+					description: 'Local memory backend for single-server sites. This switch saves immediately. APCu is cleared on PHP-FPM restart.',
 					checked: backend === 'apcu',
 					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'apcu') : null,
 					disabled: busy,
@@ -1946,7 +2073,7 @@
 				}),
 				h(ToggleField, {
 					label: 'Use Disk',
-					description: 'Advanced/debug only. Not recommended for production because it can create many small files.',
+					description: 'Advanced/debug only. This switch saves immediately. Not recommended for production because it can create many small files.',
 					checked: backend === 'disk',
 					onChange: (value) => value ? onFieldChange('objectCacheBackend', 'disk') : null,
 					disabled: busy,
@@ -1954,6 +2081,7 @@
 				}),
 			]),
 			backend === 'disk' ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, 'Disk object cache is advanced/debug only and is not recommended for production. It can create many small files and may be slower than leaving persistent object cache disabled.') : null,
+				fallbackActive ? h('div', { className: 'mt-4 text-xs text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded-xl px-3 py-2' }, fallbackMessage) : null,
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(TextField, {
 					label: 'Redis host',
@@ -2025,7 +2153,7 @@
 				}),
 				h(ToggleField, {
 					label: 'Persistent connection',
-					description: 'Advanced. Reuse the Redis connection across PHP worker requests when supported.',
+					description: 'Advanced. Saves immediately. Reuse the Redis connection across PHP worker requests when supported.',
 					checked: !!form.redisPersistent,
 					onChange: (value) => onFieldChange('redisPersistent', value),
 					disabled: busy,
@@ -2033,7 +2161,7 @@
 				}),
 				h(ToggleField, {
 					label: 'Use TLS',
-					description: 'Enable for managed Redis providers that require TLS/SSL transport.',
+					description: 'Saves immediately. Enable for managed Redis providers that require TLS/SSL transport.',
 					checked: !!form.redisUseTls,
 					onChange: (value) => onFieldChange('redisUseTls', value),
 					disabled: busy,
@@ -2048,18 +2176,26 @@
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
 				h('div', { className: 'uc-section-title' }, 'Status'),
 				h('div', { className: 'space-y-3' }, [
-					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Selected backend'),
-						h(StatusPill, {
-								ok: backend === 'redis' ? !!redis.available : (backend === 'apcu' ? !!apcu.available : true),
-								text: backend === 'redis' ? 'Redis' : (backend === 'apcu' ? 'APCu' : 'Disk'),
-								tone: backend === 'disk' ? 'warning' : ((backend === 'redis' ? !!redis.available : !!apcu.available) ? 'success' : 'warning')
+						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
+							h('div', { className: 'text-sm text-white' }, 'Drop-in installable'),
+							h(StatusPill, { ok: dropinInstallable, text: dropinInstallable ? 'Yes' : 'No', tone: dropinInstallable ? 'success' : 'warning' }),
+						]),
+						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
+							h('div', { className: 'text-sm text-white' }, 'Selected backend'),
+							h(StatusPill, {
+								ok: selectedBackendSupported,
+								text: backendLabel(selectedBackend),
+								tone: selectedBackend === 'disk' ? 'warning' : (selectedBackendSupported ? 'success' : 'warning')
 							}),
-					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Fallback backend'),
-						h(StatusPill, { ok: true, text: objectCache.fallbackBackend || 'apcu', tone: 'neutral' }),
-					]),
+						]),
+						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
+							h('div', { className: 'text-sm text-white' }, 'Active backend'),
+							h(StatusPill, { ok: !!objectCache.active, text: objectCache.active ? backendLabel(activeBackend) : (objectCache.enabled ? 'Drop-in inactive' : 'Disabled'), tone: fallbackActive ? 'warning' : (objectCache.active ? 'success' : 'neutral') }),
+						]),
+						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
+							h('div', { className: 'text-sm text-white' }, 'Fallback status'),
+							h(StatusPill, { ok: !fallbackActive, text: fallbackStatusText, tone: fallbackActive ? 'warning' : 'neutral' }),
+						]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Redis support'),
 						h(StatusPill, { ok: !!redis.available, text: redis.available ? 'Available' : 'Unavailable', tone: redis.available ? 'success' : 'warning' }),
@@ -2068,10 +2204,18 @@
 						h('div', { className: 'text-sm text-white' }, 'APCu support'),
 						h(StatusPill, { ok: !!apcu.available, text: apcu.available ? 'Available' : 'Unavailable', tone: apcu.available ? 'success' : 'warning' }),
 					]),
-					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Redis connection'),
-						h(StatusPill, { ok: !!redis.connected, text: connectionText, tone: redis.connected ? 'success' : (backend === 'redis' ? 'warning' : 'neutral') }),
-					]),
+						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
+							h('div', { className: 'text-sm text-white' }, 'Redis connection'),
+							h(StatusPill, { ok: !!redis.connected, text: connectionText, tone: redis.connected ? 'success' : (selectedBackend === 'redis' ? 'warning' : 'neutral') }),
+						]),
+						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
+							h('div', { className: 'text-sm text-white' }, 'Object payload probe'),
+							h(StatusPill, { ok: !!payloadProbe.success, text: payloadProbeText, tone: payloadProbeKnown ? (payloadProbe.success ? 'success' : 'warning') : 'neutral' }),
+						]),
+						redisDropinError ? h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
+							h('div', { className: 'text-sm text-white' }, 'Redis drop-in error'),
+							h('div', { className: 'text-xs text-amber-300 text-right break-all max-w-xl' }, redisDropinError),
+						]) : null,
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
 						h('div', { className: 'text-sm text-white' }, 'Runtime status'),
 						h(StatusPill, { ok: !!objectCache.active, text: statusText, tone: objectCache.active ? 'success' : 'neutral' }),
@@ -2096,6 +2240,7 @@
 		const [toasts, setToasts] = useState([]);
 		const [isMobile, setIsMobile] = useState(isMobileViewport());
 		const [supportModalOpen, setSupportModalOpen] = useState(false);
+		const [infoAccordionsOpen, setInfoAccordionsOpen] = useState(false);
 		const [advancedForm, setAdvancedForm] = useState({
 			cacheExceptionPaths: initialSettings.cacheExceptionPaths || '',
 			cacheExceptionQueryArgs: initialSettings.cacheExceptionQueryArgs || '',
@@ -2462,6 +2607,10 @@
 
 		function updateVarnishField(key, value) {
 			setVarnishForm((current) => Object.assign({}, current, { [key]: value }));
+
+			if (key === 'varnishCliEnabled' || key === 'varnishCliDebug') {
+				queueSettingsPatch({ [key]: !!value });
+			}
 		}
 
 		function updateRedisField(key, value) {
@@ -2469,6 +2618,9 @@
 
 			if (key === 'objectCacheBackend') {
 				queueSettingsPatch({ objectCacheBackend: value });
+			}
+			if (key === 'redisPersistent' || key === 'redisUseTls') {
+				queueSettingsPatch({ [key]: !!value });
 			}
 		}
 
@@ -2745,12 +2897,33 @@
 			throw new Error('Dashboard processing action timed out.');
 		}
 
+		async function waitForSettingsSaveToSettle(maxWaitMs = 6000) {
+			const startedAt = Date.now();
+			while (settingsSaveInFlightRef.current && (Date.now() - startedAt) < maxWaitMs) {
+				await sleep(50);
+			}
+			return !settingsSaveInFlightRef.current;
+		}
+
+		async function syncQueuedSettingsBeforeAction() {
+			if (settingsSaveTimerRef.current || hasPendingSettingsPatch()) {
+				await flushQueuedSettings();
+			}
+			await waitForSettingsSaveToSettle();
+			if (hasPendingSettingsPatch()) {
+				await flushQueuedSettings();
+				await waitForSettingsSaveToSettle();
+			}
+		}
+
 		async function queueDashboardAction(action, params, labels, key, afterResult) {
 			const actionKey = key || action;
 			if (queuedActionKeysRef.current[actionKey]) {
 				pushToast({ type: 'info', text: (labels && labels.alreadyQueued) || 'This dashboard action is already processing.' });
 				return null;
 			}
+
+			await syncQueuedSettingsBeforeAction();
 
 			setAsyncActionState(actionKey, true, (labels && labels.runningLabel) || 'Processing via dashboard…');
 			pushToast({ id: 'ucwp-action-' + actionKey, type: 'info', text: (labels && labels.queued) || 'Processing via dashboard…', duration: 2200 });
@@ -2794,7 +2967,10 @@
 			}
 
 			if (settingsSaveInFlightRef.current) {
-				return;
+				await waitForSettingsSaveToSettle();
+				if (settingsSaveInFlightRef.current) {
+					return;
+				}
 			}
 
 			const patch = Object.assign({}, pendingSettingsPatchRef.current || {});
@@ -2869,6 +3045,7 @@
 		}
 
 		async function warmFrontpageHtml() {
+			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
 				return;
@@ -2888,6 +3065,7 @@
 		}
 
 		async function warmFrontpageHtmlCss() {
+			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
 				return;
@@ -2911,6 +3089,7 @@
 		}
 
 		async function startWarmingAllWithFrontpageCss(forceRestart = false) {
+			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
 				return;
@@ -2961,6 +3140,7 @@
 		}
 
 		async function startMenuWarming(forceRestart = false) {
+			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
 				return;
@@ -2992,6 +3172,7 @@
 		}
 
 		async function startMenuWarmingWithFrontpageCss(forceRestart = false) {
+			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
 				return;
@@ -3046,9 +3227,40 @@
 			queueSettingsPatch({ [key]: value });
 		}
 
+		async function populateQueryStringAllowlist() {
+			try {
+				const response = await apiRequest('populate_query_allowlist', {});
+				const items = Array.isArray(response && response.items) ? response.items : [];
+				if (!items.length) {
+					pushToast({ type: 'warning', text: 'No query-string keys were detected.' });
+					return null;
+				}
+				pushToast({ type: 'success', text: 'Populated query-string whitelist with ' + items.length + ' keys.' });
+				return items.join('\n');
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Query-string populate failed.' });
+				return null;
+			}
+		}
+
 		function updateMediaOptimizationSetting(value) {
+
 			queueSettingsPatch({
 				mediaOptimizationEnabled: value,
+			});
+		}
+
+		function updateFrontendSafeModeSetting(value) {
+			queueSettingsPatch({
+				frontendSafeModeEnabled: value,
+				lcpBoundaryDeferEnabled: value ? false : !!settings.lcpBoundaryDeferEnabled,
+			});
+		}
+
+		function updateSliderSafeModeSetting(value) {
+			queueSettingsPatch({
+				sliderSafeModeEnabled: value,
+				lcpBoundaryDeferEnabled: value ? false : !!settings.lcpBoundaryDeferEnabled,
 			});
 		}
 
@@ -3193,6 +3405,9 @@
 				cancelRequested: false,
 				startTime: forceRestart ? Date.now() : (job.startTime || Date.now()),
 				batchSize: Math.max(1, Number(job.batchSize || DEFAULT_QUEUE_BATCH_SIZE)),
+				successCount: forceRestart ? 0 : Math.max(0, Number(job.successCount || 0)),
+				skippedCount: forceRestart ? 0 : Math.max(0, Number(job.skippedCount || 0)),
+				failedCount: forceRestart ? 0 : Math.max(0, Number(job.failedCount || 0)),
 			});
 			let completed = false;
 			cancelRequestedRef.current = false;
@@ -3259,9 +3474,15 @@
 						const line = itemResult && typeof itemResult === 'object' ? itemResult.line : itemResult;
 						const progressIncrement = itemResult && typeof itemResult === 'object' ? Math.max(0, Number(itemResult.progressIncrement || 0)) : 1;
 						const attachmentIncrement = itemResult && typeof itemResult === 'object' ? Math.max(0, Number(itemResult.attachmentIncrement || 0)) : 0;
+						const successIncrement = itemResult && typeof itemResult === 'object' ? Math.max(0, Number(itemResult.successIncrement || 0)) : 1;
+						const skippedIncrement = itemResult && typeof itemResult === 'object' ? Math.max(0, Number(itemResult.skippedIncrement || 0)) : 0;
+						const failedIncrement = itemResult && typeof itemResult === 'object' ? Math.max(0, Number(itemResult.failedIncrement || 0)) : 0;
 						state = Object.assign({}, state, {
 							processed: Number(state.processed || 0) + progressIncrement,
 							attachmentsProcessed: Number(state.attachmentsProcessed || 0) + attachmentIncrement,
+							successCount: Number(state.successCount || 0) + successIncrement,
+							skippedCount: Number(state.skippedCount || 0) + skippedIncrement,
+							failedCount: Number(state.failedCount || 0) + failedIncrement,
 							logs: state.logs.concat([line]).slice(-50),
 							pendingItems: batchItems.slice(i + 1),
 							nextCursor: batchNextCursor,
@@ -3292,14 +3513,29 @@
 				}
 
 				if (completed) {
+					const failedCount = Math.max(0, Number(state.failedCount || 0));
+					const skippedCount = Math.max(0, Number(state.skippedCount || 0));
+					const successCount = Math.max(0, Number(state.successCount || 0));
 					let finalNotice = { type: 'success', text: isWarmJobType(state.type) ? 'Cache warming complete.' : 'Media optimization complete.' };
-					if (isWarmCssJobType(state.type)) {
-						const warmedScopeLabel = getWarmScopeForType(state.type) === 'menu' ? 'Menu URLs' : 'Full site HTML';
-						finalNotice = {
-							type: 'success',
-							text: warmedScopeLabel + ' warmed and CSS bundle action completed.',
-						};
+					if (isWarmJobType(state.type)) {
+						const subject = isWarmCssJobType(state.type) ? (getWarmScopeForType(state.type) === 'menu' ? 'Menu HTML + CSS bundle warm' : 'Full site HTML + CSS bundle warm') : 'Cache warming';
+						if (failedCount > 0) {
+							finalNotice = {
+								type: 'warning',
+								text: subject + ' completed with ' + failedCount + ' failed URL' + (failedCount === 1 ? '' : 's') + ', ' + successCount + ' cached, ' + skippedCount + ' skipped.',
+							};
+						} else if (skippedCount > 0) {
+							finalNotice = {
+								type: 'success',
+								text: subject + ' complete: ' + successCount + ' cached, ' + skippedCount + ' skipped.',
+							};
+						} else {
+							finalNotice = { type: 'success', text: subject + ' complete: ' + successCount + ' cached.' };
+						}
+					} else if (failedCount > 0) {
+						finalNotice = { type: 'warning', text: 'Media optimization completed with ' + failedCount + ' failed item' + (failedCount === 1 ? '' : 's') + '.' };
 					}
+					state = Object.assign({}, state, { logs: state.logs.concat([finalNotice.text]).slice(-50) });
 					await refreshStats();
 					pushToast(finalNotice);
 					setProcess((prev) => Object.assign({}, prev, { active: false, cancellable: false, cancelRequested: false }));
@@ -3317,6 +3553,7 @@
 		}
 
 		async function startWarming(forceRestart = false) {
+			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
 				return;
@@ -3739,7 +3976,7 @@ async function deleteAllPluginDataAndDeactivate() {
 					}),
 					h(ToggleRow, {
 						label: 'LCP Image Priority',
-						description: 'Prioritize likely hero/LCP images. When Fix sliders / hero sections is enabled, SR7/Revolution Slider first-slide image layers are discovered from SR7 JSON and verified optimized image candidates, so hashed revslider assets do not need to be hardcoded.',
+						description: 'Prioritize likely hero/LCP images. In normal mode UltraCache can mark the detected candidate and inject a preload; when Fix sliders / hero sections is active, it uses SR7/Revolution Slider first-slide discovery plus a lifecycle-safe runtime guard.',
 						checked: settings.lcpImagePriorityEnabled,
 						onChange: (value) => updateSetting('lcpImagePriorityEnabled', value),
 						disabled: busy || !mediaOptimizationEnabled || !!settings.frontendSafeModeEnabled,
@@ -3941,10 +4178,10 @@ h(ToggleRow, {
 								}),
 h(ToggleRow, {
 									label: 'LCP Boundary Defer',
-									description: 'Use the detected LCP image or verified SR7 first-slide image as a conservative visual boundary and delay eligible local enhancement scripts printed after that boundary. Core, WooCommerce, Elementor, sliders, dependencies, and manual exclusions stay protected. Off by default and not enabled by any profile.',
+									description: 'Use the detected LCP image as a conservative visual boundary and delay eligible local enhancement scripts printed after that boundary. Disabled when Frontend Safe Mode or Fix sliders / hero sections is enabled, because those modes intentionally avoid this rewrite path.',
 									checked: !!settings.lcpBoundaryDeferEnabled,
 									onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
-									disabled: busy || !settings.lcpImagePriorityEnabled || !!settings.frontendSafeModeEnabled,
+									disabled: busy || !settings.lcpImagePriorityEnabled || !!settings.frontendSafeModeEnabled || !!settings.sliderSafeModeEnabled,
 									key: 'lcp-boundary-defer',
 								})
 					]
@@ -3965,12 +4202,21 @@ h(
 							disabled: busy,
 							key: 'homepage-css-bundle',
 						}),
-						h(ToggleRow, { label: 'CSS Bundling Scope: Homepage only', description: 'Use CSS bundles only on the homepage. Safest option when the goal is homepage PageSpeed testing and maximum browser cache reuse on inner pages.', checked: (settings.cssBundleScope || 'homepage') === 'homepage', onChange: (value) => value && updateSetting('cssBundleScope', 'homepage'), disabled: busy || !settings.homepageCssBundleEnabled, key: 'css-bundle-scope-homepage' }),
-						h(ToggleRow, { label: 'CSS Bundling Scope: Shared site bundle', description: 'Use the homepage-generated bundle as a shared bundle across pages. Matching common CSS is bundled once and reused; page-specific CSS remains as normal links.', checked: settings.cssBundleScope === 'shared', onChange: (value) => value && updateSetting('cssBundleScope', 'shared'), disabled: busy || !settings.homepageCssBundleEnabled, key: 'css-bundle-scope-shared' }),
-						h(ToggleRow, { label: 'CSS Bundling Scope: Per-page bundles', description: 'Create page-specific bundles. Best for isolated landing pages, but it can reduce browser cache reuse across multi-page browsing sessions.', checked: settings.cssBundleScope === 'per-page', onChange: (value) => value && updateSetting('cssBundleScope', 'per-page'), disabled: busy || !settings.homepageCssBundleEnabled, key: 'css-bundle-scope-per-page' }),
+						h('div', { className: 'uc-css-bundle-scope-field', key: 'css-bundle-scope-wrap' }, h(SelectField, {
+							label: 'CSS Bundling Scope',
+							description: 'Choose exactly one scope for generated CSS bundles. Homepage only is safest, shared reuses the homepage bundle where possible, and per-page creates separate bundles for cacheable pages.',
+							value: settings.cssBundleScope || 'homepage',
+							onChange: (value) => updateSetting('cssBundleScope', value),
+							disabled: busy || !settings.homepageCssBundleEnabled,
+							options: [
+								{ value: 'homepage', label: 'Homepage only' },
+								{ value: 'shared', label: 'Shared site bundle' },
+								{ value: 'per-page', label: 'Per-page bundles' },
+							],
+						})),
 h(ToggleRow, {
 							label: 'CSS Safe Bundling',
-							description: 'Conservative site-wide CSS bundling. Injects the generated bundle without removing original stylesheet links, making it the safest default for fragile themes, sliders, and mixed plugin stacks.',
+							description: 'Conservative CSS bundling. Injects the generated bundle without removing original stylesheet links. If Fix sliders / hero sections detects fragile slider markup, safe bundle replacement may be skipped on that page to protect the hero area.',
 							checked: 'aggressive' !== settings.homepageCssBundleMode,
 							onChange: (value) => updateSetting('homepageCssBundleMode', value ? 'safe' : 'aggressive'),
 							disabled: busy || !settings.homepageCssBundleEnabled,
@@ -4081,17 +4327,17 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 									h('div', { className: 'uc-accordion__body space-y-4' }, [
 										h(ToggleRow, {
 											label: 'Frontend Safe Mode',
-											description: 'Force the internal safe frontend mode. When enabled, UltraCache skips structural HTML mutations such as LCP image priority, CLS image dimensions, authoring-asset stripping, and safe HTML minification.',
+											description: 'Force the broad safe frontend mode. When enabled, UltraCache skips structural frontend rewrites such as authoring-asset stripping, async CSS rewrites, self-hosted font runtime rewrites, LCP Boundary Defer, and safe HTML minification.',
 											checked: settings.frontendSafeModeEnabled,
-											onChange: (value) => updateSetting('frontendSafeModeEnabled', value),
+											onChange: (value) => updateFrontendSafeModeSetting(value),
 											disabled: busy,
 											key: 'frontend-safe-mode',
 										}),
 										h(ToggleRow, {
 											label: 'Fix sliders / hero sections',
-											description: 'When Revolution Slider, SR7, Swiper, Slick, or similar hero slider markup is detected, protect slider/runtime assets. Stage 2 CSS bundling can still bundle non-slider local CSS, while slider CSS and risky frontend transforms stay protected.',
-											checked: settings.sliderSafeModeEnabled !== false,
-											onChange: (value) => updateSetting('sliderSafeModeEnabled', value),
+											description: 'When Revolution Slider, SR7, Swiper, Slick, or similar hero/slider markup is detected, UltraCache protects slider/runtime assets, skips risky structural rewrites, disables LCP Boundary Defer, and keeps SR7 first-slide LCP priority on the lifecycle-safe path when LCP Image Priority is enabled.',
+											checked: !!settings.sliderSafeModeEnabled,
+											onChange: (value) => updateSliderSafeModeSetting(value),
 											disabled: busy,
 											key: 'slider-safe-mode',
 										}),
@@ -4134,12 +4380,15 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											}),
 											h(SaveableTextAreaField, {
 												label: 'Query-string args whitelist',
-												description: 'Optional. One query key per line. Leave empty to cache all non-excluded query-string variants. When filled, UltraCache caches a query-string URL only when every query arg is listed here.',
+												description: 'Optional. One query key per line. Leave empty to cache all non-excluded query-string variants. When filled, UltraCache caches a query-string URL only when every query arg is listed here. Click Populate to scan your website/WooCommerce setup for likely query strings.',
 												value: settings.cacheQueryStringAllowlist || '',
 												onSave: (value) => updateSetting('cacheQueryStringAllowlist', value),
 												disabled: busy,
-												placeholder: 'color\nsize\nfilter',
+												placeholder: 'swoof\npa_translations\nproduct_author\nproduct_cat\nproduct_tag\nproduct_genre\npa_series\ngroup_by_series\npa_format',
 												saveLabel: 'Save Query-string Whitelist',
+												populateLabel: 'Populate',
+												populateWarning: 'Your current whitelist will be replaced.',
+												onPopulate: populateQueryStringAllowlist,
 												key: 'query-string-args-whitelist',
 											}),
 											h(SaveableTextAreaField, {
@@ -4268,7 +4517,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 						}),
 						h(ToggleRow, {
 							label: 'Cron Warm Up',
-							description: 'Enable the minute-by-minute background warm queue. Homepage is warmed first and the queue can also be started manually or after a flush.',
+							description: 'Enable the minute-by-minute background HTML warm queue. Homepage is warmed first; CSS bundle warm actions remain manual and are not run by this cron queue.',
 							checked: settings.cronWarmEnabled,
 							onChange: (value) => updateSetting('cronWarmEnabled', value),
 							disabled: busy,
@@ -4311,7 +4560,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 						}),
 						h(NumberField, {
 							label: 'Cron warm pages per minute',
-							description: 'How many URLs to warm per minute in the cron warm-up queue. Homepage is always warmed first. Lower values are safer on slower servers. Set 0 to pause queue processing.',
+							description: 'How many HTML URLs to warm per minute in the cron warm-up queue. Homepage is always warmed first. CSS bundles are not rebuilt by cron. Lower values are safer on slower servers. Set 0 to pause queue processing.',
 							value: advancedForm.cronWarmPagesPerMinute,
 							onChange: (value) => updateAdvancedField('cronWarmPagesPerMinute', value),
 							disabled: busy,
@@ -4358,11 +4607,11 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 			h(APCuCard, { stats, settings, busy: busy || !!asyncActions.apcu_flush, onFlush: flushApcu, onToggleScheduledCleanup: (value) => updateSetting('apcuFlushOnScheduledCleanup', value), key: 'apcu-card' }),
 			]),
 
-			settings.cacheStatsEnabled ? h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
-				h(DiagnosticsCard, { diagnostics, stats, key: 'diagnostics' }),
-				h(ActivitySummaryCard, { stats, cssBundleDiagnostics, key: 'activity-summary' }),
-			]) : null,
-			settings.cacheStatsEnabled ? h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }) : null,
+				h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
+					h(DiagnosticsCard, { diagnostics, stats, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, key: 'diagnostics' }),
+					h(ActivitySummaryCard, { stats, cssBundleDiagnostics, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, key: 'activity-summary' }),
+				]),
+				settings.cacheStatsEnabled ? h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }) : null,
 
 			h(
 				Card,

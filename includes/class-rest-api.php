@@ -1,5 +1,4 @@
 <?php
-/** Hotfix Bundle Version: 2.56.06 */
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -31,34 +30,11 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             foreach ($definitions as $route => $handlers) {
                 register_rest_route($canonical_namespace, $route, $handlers);
             }
-
-            foreach ($this->get_legacy_namespaces() as $namespace) {
-                foreach ($definitions as $route => $handlers) {
-                    register_rest_route($namespace, $route, $handlers);
-                }
-            }
         }
 
         private function get_canonical_namespace()
         {
             return 'ultracache/v1';
-        }
-
-        private function get_legacy_namespaces()
-        {
-            $namespaces = array('ucwp/v1', 'ultra-cache-wp/v1');
-            $namespaces = apply_filters('ucwp_rest_legacy_namespaces', $namespaces);
-            $clean = array();
-
-            foreach ((array) $namespaces as $namespace) {
-                $namespace = trim((string) $namespace, " /");
-                if ('' === $namespace || $namespace === $this->get_canonical_namespace()) {
-                    continue;
-                }
-                $clean[$namespace] = $namespace;
-            }
-
-            return array_values($clean);
         }
 
         public function sanitize_object_cache_backend_param($value)
@@ -178,9 +154,6 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'homepageCssBundleMode'                => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_homepage_css_bundle_mode_param'), 'validate_callback' => array($this, 'validate_homepage_css_bundle_mode_param')),
                 'cssBundleScope'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_css_bundle_scope_param'), 'validate_callback' => array($this, 'validate_css_bundle_scope_param')),
                 'pageCssBundleOnEntryEnabled'          => array('type' => 'boolean', 'required' => false),
-                'criticalCssEnabled'                   => array('type' => 'boolean', 'required' => false),
-                'criticalCssInlineEnabled'             => array('type' => 'boolean', 'required' => false),
-                'criticalCssExcludeList'               => array('type' => 'string', 'required' => false),
                 'frontendSafeModeEnabled'            => array('type' => 'boolean', 'required' => false),
                 'sliderSafeModeEnabled'              => array('type' => 'boolean', 'required' => false),
                 'clsDimensionsEnabled'                 => array('type' => 'boolean', 'required' => false),
@@ -452,6 +425,13 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                         ),
                     ),
                 ),
+                '/query-string-allowlist/populate' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'populate_query_string_allowlist'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/media-ids' => array(
                     array(
                         'methods'             => WP_REST_Server::READABLE,
@@ -533,130 +513,111 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             );
         }
 
-        public function dispatch_legacy_route(WP_REST_Request $request)
+        private function add_query_string_candidate(&$items, &$sources, $key, $source)
         {
-            $path = '/' . ltrim((string) $request->get_param('ucwp_legacy_path'), '/');
-            $definitions = $this->get_route_definitions();
-            if (empty($definitions[$path])) {
-                return new WP_Error(
-                    'rest_no_route',
-                    __('No route was found matching the URL and request method.', 'ultracache'),
-                    array('status' => 404)
-                );
+            $key = sanitize_key((string) $key);
+            if ('' === $key) {
+                return;
             }
-
-            $handler = $this->get_matching_legacy_handler($definitions[$path], $request->get_method());
-            if (empty($handler)) {
-                return new WP_Error(
-                    'rest_no_route',
-                    __('No route was found matching the URL and request method.', 'ultracache'),
-                    array('status' => 404)
-                );
+            if (!isset($items[$key])) {
+                $items[$key] = true;
+                $sources[$key] = $source;
             }
-
-            $permission = $handler['permission_callback'] ?? null;
-            if (is_callable($permission)) {
-                $permission_result = call_user_func($permission, $request);
-                if (is_wp_error($permission_result)) {
-                    return $permission_result;
-                }
-                if (false === $permission_result || null === $permission_result) {
-                    return new WP_Error(
-                        'rest_forbidden',
-                        __('Sorry, you are not allowed to do that.', 'ultracache'),
-                        array('status' => function_exists('rest_authorization_required_code') ? rest_authorization_required_code() : 403)
-                    );
-                }
-            }
-
-            $prepared = $this->prepare_legacy_request($request, $handler['args'] ?? array());
-            if (is_wp_error($prepared)) {
-                return $prepared;
-            }
-
-            $callback = $handler['callback'] ?? null;
-            if (!is_callable($callback)) {
-                return new WP_Error(
-                    'rest_invalid_handler',
-                    __('The REST route handler is invalid.', 'ultracache'),
-                    array('status' => 500)
-                );
-            }
-
-            return call_user_func($callback, $request);
         }
 
-        private function get_matching_legacy_handler($handlers, $method)
+        private function get_query_string_allowlist_candidates()
         {
-            $method = strtoupper((string) $method);
-            if ('HEAD' === $method) {
-                $method = 'GET';
+            $items = array();
+            $sources = array();
+
+            $common = array(
+                'swoof'           => 'Common WooCommerce filter key',
+                'pa_translations' => 'Common WooCommerce attribute/filter key',
+                'product_author'  => 'Common product taxonomy/filter key',
+                'product_cat'     => 'WooCommerce product category key',
+                'product_tag'     => 'WooCommerce product tag key',
+                'product_genre'   => 'Common product taxonomy/filter key',
+                'pa_series'       => 'Common WooCommerce attribute/filter key',
+                'group_by_series' => 'Common product grouping key',
+                'pa_format'       => 'Common WooCommerce attribute/filter key',
+            );
+
+            foreach ($common as $key => $source) {
+                $this->add_query_string_candidate($items, $sources, $key, $source);
             }
-            foreach ((array) $handlers as $handler) {
-                $supported_methods = array_filter(array_map('trim', explode(',', strtoupper((string) ($handler['methods'] ?? '')))));
-                if (in_array($method, $supported_methods, true)) {
-                    return $handler;
+
+            if (taxonomy_exists('product_cat')) {
+                $this->add_query_string_candidate($items, $sources, 'product_cat', 'WooCommerce product category taxonomy');
+            }
+            if (taxonomy_exists('product_tag')) {
+                $this->add_query_string_candidate($items, $sources, 'product_tag', 'WooCommerce product tag taxonomy');
+            }
+
+            $product_taxonomies = get_object_taxonomies('product', 'objects');
+            if (is_array($product_taxonomies)) {
+                foreach ($product_taxonomies as $taxonomy => $taxonomy_object) {
+                    if (!is_object($taxonomy_object)) {
+                        continue;
+                    }
+
+                    $is_publicish = !empty($taxonomy_object->public) || !empty($taxonomy_object->publicly_queryable) || !empty($taxonomy_object->show_ui);
+                    if (!$is_publicish) {
+                        continue;
+                    }
+
+                    $this->add_query_string_candidate($items, $sources, $taxonomy, 'Product taxonomy');
+
+                    if (isset($taxonomy_object->query_var) && is_string($taxonomy_object->query_var) && '' !== $taxonomy_object->query_var && $taxonomy_object->query_var !== $taxonomy) {
+                        $this->add_query_string_candidate($items, $sources, $taxonomy_object->query_var, 'Product taxonomy query var');
+                    }
                 }
             }
 
-            return array();
+            if (function_exists('wc_get_attribute_taxonomies')) {
+                $attributes = wc_get_attribute_taxonomies();
+                if (is_array($attributes)) {
+                    foreach ($attributes as $attribute) {
+                        $attribute_name = '';
+                        if (is_object($attribute) && isset($attribute->attribute_name)) {
+                            $attribute_name = (string) $attribute->attribute_name;
+                        } elseif (is_array($attribute) && isset($attribute['attribute_name'])) {
+                            $attribute_name = (string) $attribute['attribute_name'];
+                        }
+
+                        $attribute_name = sanitize_title($attribute_name);
+                        if ('' === $attribute_name) {
+                            continue;
+                        }
+
+                        $taxonomy = function_exists('wc_attribute_taxonomy_name') ? wc_attribute_taxonomy_name($attribute_name) : ('pa_' . $attribute_name);
+                        $this->add_query_string_candidate($items, $sources, $taxonomy, 'WooCommerce product attribute taxonomy');
+                        $this->add_query_string_candidate($items, $sources, 'filter_' . $attribute_name, 'WooCommerce layered nav filter key');
+                        $this->add_query_string_candidate($items, $sources, 'query_type_' . $attribute_name, 'WooCommerce layered nav query type key');
+                    }
+                }
+            }
+
+            return array(
+                'items'   => array_keys($items),
+                'sources' => $sources,
+            );
         }
 
-        private function prepare_legacy_request(WP_REST_Request $request, array $args)
+        public function populate_query_string_allowlist($request = null)
         {
-            foreach ($args as $name => $schema) {
-                $required = !empty($schema['required']);
-                $has_value = $request->has_param($name);
-                if (!$has_value) {
-                    if ($required) {
-                        return new WP_Error(
-                            'rest_missing_callback_param',
-                            sprintf(
-                                /* translators: %s: REST parameter name. */
-                                __('Missing parameter(s): %s', 'ultracache'),
-                                $name
-                            ),
-                            array('status' => 400)
-                        );
-                    }
-                    continue;
-                }
+            unset($request);
 
-                $value = $request->get_param($name);
+            $candidates = $this->get_query_string_allowlist_candidates();
+            $items = isset($candidates['items']) && is_array($candidates['items']) ? $candidates['items'] : array();
+            $sources = isset($candidates['sources']) && is_array($candidates['sources']) ? $candidates['sources'] : array();
 
-                if (!empty($schema['sanitize_callback']) && is_callable($schema['sanitize_callback'])) {
-                    $value = call_user_func($schema['sanitize_callback'], $value, $request, $name);
-                } elseif (function_exists('rest_sanitize_value_from_schema') && !empty($schema['type'])) {
-                    $value = rest_sanitize_value_from_schema($value, $schema, $name);
-                }
-
-                if (!empty($schema['validate_callback']) && is_callable($schema['validate_callback'])) {
-                    $valid = call_user_func($schema['validate_callback'], $value, $request, $name);
-                    if (is_wp_error($valid)) {
-                        return $valid;
-                    }
-                    if (false === $valid) {
-                        return new WP_Error(
-                            'rest_invalid_param',
-                            sprintf(
-                                /* translators: %s: REST parameter name. */
-                                __('Invalid parameter: %s', 'ultracache'),
-                                $name
-                            ),
-                            array('status' => 400)
-                        );
-                    }
-                } elseif (function_exists('rest_validate_value_from_schema') && !empty($schema['type'])) {
-                    $valid = rest_validate_value_from_schema($value, $schema, $name);
-                    if (is_wp_error($valid)) {
-                        return $valid;
-                    }
-                }
-
-                $request->set_param($name, $value);
-            }
-
-            return true;
+            return new WP_REST_Response(array(
+                'items'               => $items,
+                'sources'             => $sources,
+                'count'               => count($items),
+                'woocommerceDetected' => class_exists('WooCommerce') || function_exists('wc_get_attribute_taxonomies'),
+                'message'             => count($items) ? sprintf('Detected %d likely query-string keys.', count($items)) : 'No query-string keys were detected.',
+            ), 200);
         }
 
         public function check_permission($request = null)
@@ -1118,25 +1079,143 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             );
         }
 
-        private function load_action_jobs()
+        private function get_heavy_action_queue_actions()
         {
-            $jobs = get_option($this->get_action_queue_option_key(), array());
-            return is_array($jobs) ? $jobs : array();
+            return array(
+                'purge_all',
+                'object_cache_flush',
+                'object_cache_full_count',
+                'warm_frontpage_html',
+                'warm_frontpage_html_css',
+                'varnish_flush_all',
+            );
         }
 
-        private function save_action_jobs(array $jobs)
+        private function is_heavy_action_queue_action($action)
+        {
+            return in_array((string) $action, $this->get_heavy_action_queue_actions(), true);
+        }
+
+        private function get_action_queue_stale_seconds()
+        {
+            return 180;
+        }
+
+        private function get_action_queue_lock_option_key()
+        {
+            return defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_queue_heavy_lock' : 'ucwp_settings_action_queue_heavy_lock';
+        }
+
+        private function normalize_action_jobs(array $jobs)
         {
             $now = time();
+            $stale_after = $this->get_action_queue_stale_seconds();
             foreach ($jobs as $id => $job) {
+                if (!is_array($job)) {
+                    unset($jobs[$id]);
+                    continue;
+                }
+
+                $status = (string) ($job['status'] ?? 'queued');
                 $created = isset($job['createdAt']) ? (int) $job['createdAt'] : $now;
+                $started = isset($job['startedAt']) ? (int) $job['startedAt'] : 0;
+                $updated = isset($job['updatedAt']) ? (int) $job['updatedAt'] : 0;
                 $finished = isset($job['finishedAt']) ? (int) $job['finishedAt'] : 0;
-                $terminal = in_array((string) ($job['status'] ?? ''), array('done', 'failed'), true);
+                $age_base = max($started, $updated, $created);
+
+                if (in_array($status, array('queued', 'running'), true) && $age_base > 0 && ($now - $age_base) > $stale_after) {
+                    $job['status'] = 'failed';
+                    $job['message'] = 'Dashboard processing action was marked stale and stopped from blocking new work.';
+                    $job['finishedAt'] = $now;
+                    $job['updatedAt'] = $now;
+                    $jobs[$id] = $job;
+                    $status = 'failed';
+                    $finished = $now;
+                }
+
+                $terminal = in_array($status, array('done', 'failed'), true);
                 if (($terminal && $finished > 0 && ($now - $finished) > HOUR_IN_SECONDS) || (!$terminal && ($now - $created) > 6 * HOUR_IN_SECONDS)) {
                     unset($jobs[$id]);
                 }
             }
 
-            update_option($this->get_action_queue_option_key(), $jobs, false);
+            if (count($jobs) > 20) {
+                uasort($jobs, static function ($a, $b) {
+                    $a_time = is_array($a) ? (int) ($a['updatedAt'] ?? $a['createdAt'] ?? 0) : 0;
+                    $b_time = is_array($b) ? (int) ($b['updatedAt'] ?? $b['createdAt'] ?? 0) : 0;
+                    return $b_time <=> $a_time;
+                });
+                $jobs = array_slice($jobs, 0, 20, true);
+            }
+
+            return $jobs;
+        }
+
+        private function load_action_jobs()
+        {
+            $jobs = get_option($this->get_action_queue_option_key(), array());
+            $jobs = is_array($jobs) ? $jobs : array();
+            $normalized = $this->normalize_action_jobs($jobs);
+            if ($normalized !== $jobs) {
+                update_option($this->get_action_queue_option_key(), $normalized, false);
+            }
+            return $normalized;
+        }
+
+        private function save_action_jobs(array $jobs)
+        {
+            update_option($this->get_action_queue_option_key(), $this->normalize_action_jobs($jobs), false);
+        }
+
+        private function find_active_heavy_action_job(array $jobs, $exclude_id = '')
+        {
+            foreach ($jobs as $id => $job) {
+                if ((string) $id === (string) $exclude_id || !is_array($job)) {
+                    continue;
+                }
+                $status = (string) ($job['status'] ?? '');
+                $action = (string) ($job['action'] ?? '');
+                if ($this->is_heavy_action_queue_action($action) && in_array($status, array('queued', 'running'), true)) {
+                    return $job;
+                }
+            }
+
+            return array();
+        }
+
+        private function acquire_action_queue_heavy_lock($action, $job_id)
+        {
+            $action = sanitize_key((string) $action);
+            $job_id = sanitize_text_field((string) $job_id);
+            $now = time();
+            $key = $this->get_action_queue_lock_option_key();
+            $payload = array(
+                'action' => $action,
+                'jobId'  => $job_id,
+                'time'   => $now,
+            );
+
+            if (add_option($key, $payload, '', false)) {
+                return true;
+            }
+
+            $existing = get_option($key, array());
+            $existing_time = is_array($existing) ? (int) ($existing['time'] ?? 0) : 0;
+            if ($existing_time > 0 && ($now - $existing_time) > $this->get_action_queue_stale_seconds()) {
+                delete_option($key);
+                return add_option($key, $payload, '', false);
+            }
+
+            return false;
+        }
+
+        private function release_action_queue_heavy_lock($job_id)
+        {
+            $key = $this->get_action_queue_lock_option_key();
+            $existing = get_option($key, array());
+            if (is_array($existing) && (string) ($existing['jobId'] ?? '') === (string) $job_id) {
+                delete_option($key);
+            }
         }
 
         private function normalize_action_params($params)
@@ -1180,6 +1259,19 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             );
 
             $jobs = $this->load_action_jobs();
+            if ($this->is_heavy_action_queue_action($action)) {
+                $active = $this->find_active_heavy_action_job($jobs);
+                if (!empty($active)) {
+                    $job['status'] = 'failed';
+                    $job['message'] = 'Another heavy dashboard action is already running: ' . (string) ($active['action'] ?? 'unknown') . '.';
+                    $job['finishedAt'] = $now;
+                    $job['updatedAt'] = $now;
+                    $jobs[$id] = $job;
+                    $this->save_action_jobs($jobs);
+
+                    return new WP_REST_Response(array('success' => true, 'job' => $job), 202);
+                }
+            }
             $jobs[$id] = $job;
             $this->save_action_jobs($jobs);
 
@@ -1197,6 +1289,29 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             $job = $jobs[$id];
             $status = (string) ($job['status'] ?? 'queued');
             if ('queued' === $status) {
+                $action = (string) ($job['action'] ?? '');
+                if ($this->is_heavy_action_queue_action($action)) {
+                    $active = $this->find_active_heavy_action_job($jobs, $id);
+                    if (!empty($active)) {
+                        $job['status'] = 'failed';
+                        $job['message'] = 'Another heavy dashboard action is already running: ' . (string) ($active['action'] ?? 'unknown') . '.';
+                        $job['finishedAt'] = time();
+                        $job['updatedAt'] = time();
+                        $jobs[$id] = $job;
+                        $this->save_action_jobs($jobs);
+                        return new WP_REST_Response(array('success' => true, 'job' => $job), 200);
+                    }
+                    if (!$this->acquire_action_queue_heavy_lock($action, $id)) {
+                        $job['status'] = 'failed';
+                        $job['message'] = 'Another heavy dashboard action lock is active. Try again shortly.';
+                        $job['finishedAt'] = time();
+                        $job['updatedAt'] = time();
+                        $jobs[$id] = $job;
+                        $this->save_action_jobs($jobs);
+                        return new WP_REST_Response(array('success' => true, 'job' => $job), 200);
+                    }
+                }
+
                 $job['status'] = 'running';
                 $job['message'] = 'Processing via dashboard.';
                 $job['startedAt'] = time();
@@ -1204,7 +1319,13 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 $jobs[$id] = $job;
                 $this->save_action_jobs($jobs);
 
-                $result = $this->run_action_queue_job((string) ($job['action'] ?? ''), is_array($job['params'] ?? null) ? $job['params'] : array());
+                try {
+                    $result = $this->run_action_queue_job($action, is_array($job['params'] ?? null) ? $job['params'] : array());
+                } finally {
+                    if ($this->is_heavy_action_queue_action($action)) {
+                        $this->release_action_queue_heavy_lock($id);
+                    }
+                }
                 $ok = !empty($result['success']) || !empty($result['skipped']);
                 $job['status'] = $ok ? 'done' : 'failed';
                 $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
@@ -1361,10 +1482,3 @@ if (!class_exists('Ultra_Cache_REST_API') && class_exists('Ultra_Cache_Rest_API'
     class_alias('Ultra_Cache_Rest_API', 'Ultra_Cache_REST_API');
 }
 
-if (!class_exists('UltraCache_V246_Rest_API') && class_exists('Ultra_Cache_Rest_API')) {
-    class_alias('Ultra_Cache_Rest_API', 'UltraCache_V246_Rest_API');
-}
-
-if (!class_exists('UltraCache_V246_REST_API') && class_exists('Ultra_Cache_Rest_API')) {
-    class_alias('Ultra_Cache_Rest_API', 'UltraCache_V246_REST_API');
-}

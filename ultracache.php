@@ -3,13 +3,12 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.07
+ * Version: 2.56.27
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
  * Domain Path: /languages
- * Hotfix Bundle Version: 2.56.07
  */
 
 if (!defined('ABSPATH')) {
@@ -17,10 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.07');
-}
-if (!defined('UCWP_HOTFIX_BUNDLE_VERSION')) {
-    define('UCWP_HOTFIX_BUNDLE_VERSION', '2.56.07');
+    define('UCWP_VERSION', '2.56.27');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -624,13 +620,6 @@ if (!function_exists('ucwp_safe_stream_set_blocking')) {
     }
 }
 
-if (!function_exists('ucwp_safe_fwrite')) {
-    function ucwp_safe_fwrite($stream, $data, $context = '')
-    {
-        ucwp_debug_log('fwrite unavailable in repository build', array('context' => (string) $context, 'bytes' => strlen((string) $data)));
-        return false;
-    }
-}
 
 if (!function_exists('ucwp_safe_remote_request')) {
     function ucwp_safe_remote_request($url, array $args = array(), $context = '')
@@ -1248,9 +1237,6 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'homepageCssBundleMode'      => 'safe',
                 'cssBundleScope'            => 'homepage',
                 'pageCssBundleOnEntryEnabled' => false,
-                'criticalCssEnabled'         => false,
-                'criticalCssInlineEnabled'   => false,
-                'criticalCssExcludeList'     => '',
                 'frontendSafeModeEnabled'    => false,
                 'sliderSafeModeEnabled'       => false,
                 'clsDimensionsEnabled'       => false,
@@ -1619,43 +1605,194 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private static function get_default_varnish_http_endpoint()
         {
-            $home = wp_parse_url(home_url('/'));
-            if (!is_array($home) || empty($home['host'])) {
-                return '127.0.0.1:80';
-            }
-
-            $scheme = !empty($home['scheme']) ? strtolower((string) $home['scheme']) : 'http';
-            $port   = !empty($home['port']) ? (int) $home['port'] : ('https' === $scheme ? 443 : 80);
-
-            return (string) $home['host'] . ':' . $port;
+            return '127.0.0.1:82';
         }
 
-        private static function remap_legacy_varnish_server($server)
+        private static function get_default_varnish_admin_endpoint()
         {
-            $server = trim((string) $server);
-            if ('' === $server) {
-                return '';
+            return '127.0.0.1:6082';
+        }
+
+        private static function get_varnish_http_allowed_ports()
+        {
+            $ports = apply_filters('ucwp_varnish_http_endpoint_ports', array(82, 6081));
+            if (!is_array($ports)) {
+                $ports = array(82, 6081);
             }
 
-            $normalized = strtolower($server);
-            $legacy_defaults = array(
-                '127.0.0.1:6081',
-                '127.0.0.1:6082',
-                'localhost:6081',
-                'localhost:6082',
-                '[::1]:6081',
-                '[::1]:6082',
+            $ports = array_values(array_unique(array_filter(array_map('intval', $ports))));
+            return !empty($ports) ? $ports : array(82, 6081);
+        }
+
+        private static function normalize_varnish_compare_host($host)
+        {
+            $host = strtolower(trim((string) $host));
+            $host = trim($host, "[] \t\n\r\0\x0B.");
+            if (0 === strpos($host, 'www.')) {
+                $host = substr($host, 4);
+            }
+            return $host;
+        }
+
+        private static function get_varnish_site_host_candidates()
+        {
+            $hosts = array();
+            $home_host = wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ($home_host) {
+                $hosts[] = self::normalize_varnish_compare_host($home_host);
+            }
+
+            foreach (array('HTTP_HOST', 'SERVER_NAME', 'SERVER_ADDR', 'LOCAL_ADDR') as $key) {
+                if (!empty($_SERVER[$key]) && is_scalar($_SERVER[$key])) {
+                    $hosts[] = self::normalize_varnish_compare_host((string) wp_unslash($_SERVER[$key]));
+                }
+            }
+
+            $expanded = array();
+            foreach ($hosts as $host) {
+                if ('' === $host) {
+                    continue;
+                }
+                $expanded[] = $host;
+                $expanded[] = 'www.' . $host;
+            }
+
+            return array_values(array_unique(array_filter($expanded)));
+        }
+
+        private static function get_varnish_http_endpoint_block_message($host, $port)
+        {
+            $host = self::normalize_varnish_compare_host($host);
+            $port = (int) $port;
+
+            if ('' === $host || $port <= 0) {
+                return self::maybe_translate('Invalid Varnish HTTP endpoint. Use host:port, for example 127.0.0.1:82.');
+            }
+
+            $allowed_ports = self::get_varnish_http_allowed_ports();
+            if (!in_array($port, $allowed_ports, true)) {
+                return self::maybe_translate_sprintf('Blocked unsafe Varnish HTTP endpoint %1$s:%2$d. HTTP mode may only target a Varnish listener on port %3$s. Do not use the public WordPress frontend on ports 80/443; use 127.0.0.1:82 for HTTP mode or Admin mode 127.0.0.1:6082.', $host, $port, implode('/', $allowed_ports));
+            }
+
+            if (in_array($host, self::get_varnish_site_host_candidates(), true) && in_array($port, array(80, 443, 8443), true)) {
+                return self::maybe_translate_sprintf('Blocked unsafe Varnish endpoint %1$s:%2$d because it points to the public WordPress frontend. Use 127.0.0.1:82 for HTTP mode or Admin mode 127.0.0.1:6082.', $host, $port);
+            }
+
+            return '';
+        }
+
+        private static function validate_varnish_http_endpoint($terminal)
+        {
+            $terminal = trim((string) $terminal);
+            if ('' === $terminal) {
+                return array('valid' => false, 'message' => self::maybe_translate('Empty Varnish HTTP endpoint. Use 127.0.0.1:82.'));
+            }
+
+            list($host, $port) = self::parse_varnish_terminal($terminal);
+            $message = self::get_varnish_http_endpoint_block_message($host, $port);
+            if ('' !== $message) {
+                return array('valid' => false, 'message' => $message, 'host' => $host, 'port' => $port);
+            }
+
+            if (!ucwp_is_allowed_socket_target($host, $port)) {
+                return array('valid' => false, 'message' => self::maybe_translate_sprintf('Varnish HTTP endpoint %1$s:%2$d is not allowed by the socket target allowlist.', $host, $port), 'host' => $host, 'port' => $port);
+            }
+
+            return array('valid' => true, 'message' => '', 'host' => $host, 'port' => $port);
+        }
+
+        private static function get_varnish_endpoint_diagnostics($servers, $mode = 'http')
+        {
+            $mode = self::sanitize_varnish_mode($mode);
+            $servers = self::sanitize_varnish_servers_string($servers, $mode);
+            $items = array_values(array_filter(array_map('trim', preg_split('/\s+/', (string) $servers))));
+            $messages = array();
+            $unsafe = false;
+
+            if ('http' === $mode) {
+                foreach ($items as $server) {
+                    $check = self::validate_varnish_http_endpoint($server);
+                    if (empty($check['valid'])) {
+                        $unsafe = true;
+                        $messages[] = (string) ($check['message'] ?? 'Invalid or unsafe Varnish HTTP endpoint.');
+                    }
+                }
+            }
+
+            $messages = array_values(array_unique(array_filter($messages)));
+
+            return array(
+                'unsafe'       => $unsafe,
+                'messages'     => $messages,
+                'allowedPorts' => self::get_varnish_http_allowed_ports(),
+            );
+        }
+
+        private static function validate_varnish_settings(array $settings)
+        {
+            if (empty($settings['varnishCliEnabled'])) {
+                return true;
+            }
+
+            $mode = self::sanitize_varnish_mode($settings['varnishCliMode'] ?? 'http');
+            if ('http' !== $mode) {
+                return true;
+            }
+
+            $diagnostics = self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'] ?? '', $mode);
+            if (!empty($diagnostics['unsafe'])) {
+                $message = !empty($diagnostics['messages'][0]) ? (string) $diagnostics['messages'][0] : self::maybe_translate('Unsafe Varnish HTTP endpoint blocked.');
+                return new WP_Error('ucwp_unsafe_varnish_http_endpoint', $message);
+            }
+
+            return true;
+        }
+
+        private static function get_legacy_cache_conflict_status()
+        {
+            $option_names = array(
+                'purge_varnish_action',
+                'purge_varnish_expire',
+                'varnish_bantype',
+                'varnish_control_key',
+                'varnish_control_terminal',
+                'varnish_socket_timeout',
+                'varnish_version',
+                'vhp_varnish_debug',
+                'w3x_varnish_cli_secret',
+                'w3x_varnish_cli_timeout_ms',
+                'w3x_varnish_http_servers',
+                'w3tc_state',
             );
 
-            if (in_array($normalized, $legacy_defaults, true)) {
-                return self::get_default_varnish_http_endpoint();
+            $found_options = array();
+            foreach ($option_names as $option_name) {
+                if (false !== get_option($option_name, false)) {
+                    $found_options[] = $option_name;
+                }
             }
 
-            return $server;
+            $found_plugins = array();
+            if (defined('WP_PLUGIN_DIR')) {
+                foreach (array('w3-total-cache', 'w3tc-varnish-cli-helper') as $plugin_dir) {
+                    if (file_exists(trailingslashit(WP_PLUGIN_DIR) . $plugin_dir)) {
+                        $found_plugins[] = $plugin_dir;
+                    }
+                }
+            }
+
+            return array(
+                'detected' => !empty($found_options) || !empty($found_plugins),
+                'options'  => $found_options,
+                'plugins'  => $found_plugins,
+                'message'  => (!empty($found_options) || !empty($found_plugins)) ? self::maybe_translate('Old W3 Total Cache / Varnish helper leftovers detected. Remove them before enabling Varnish or Object Cache to avoid purge loops or Redis auth conflicts.') : '',
+            );
         }
 
         private static function sanitize_varnish_servers_string($value, $mode = 'http')
         {
+            $mode = self::sanitize_varnish_mode($mode);
+
             if (is_array($value)) {
                 $value = implode("
 ", array_map('strval', $value));
@@ -1688,18 +1825,11 @@ if (!class_exists('Ultra_Cache_WP')) {
                     continue;
                 }
 
-                if ('admin' !== self::sanitize_varnish_mode($mode)) {
-                    $server = self::remap_legacy_varnish_server($server);
-                    if ('' === $server) {
-                        continue;
-                    }
-                }
-
                 $normalized[] = $server;
             }
 
             if (empty($normalized)) {
-                $normalized[] = self::get_default_varnish_http_endpoint();
+                $normalized[] = ('admin' === $mode) ? self::get_default_varnish_admin_endpoint() : self::get_default_varnish_http_endpoint();
             }
 
             return implode("
@@ -1759,15 +1889,6 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['scheduledWarmLimit'] = $raw_settings['scheduledWarmLimit'];
             }
 
-            if (array_key_exists('criticalCssEnabled', $raw_settings) && !array_key_exists('homepageCssBundleEnabled', $raw_settings)) {
-                $settings['homepageCssBundleEnabled'] = $raw_settings['criticalCssEnabled'];
-            }
-            if (array_key_exists('criticalCssInlineEnabled', $raw_settings) && !array_key_exists('homepageCssBundleInlineEnabled', $raw_settings)) {
-                $settings['homepageCssBundleInlineEnabled'] = $raw_settings['criticalCssInlineEnabled'];
-            }
-            if (array_key_exists('criticalCssExcludeList', $raw_settings) && !array_key_exists('homepageCssBundleExcludeList', $raw_settings)) {
-                $settings['homepageCssBundleExcludeList'] = $raw_settings['criticalCssExcludeList'];
-            }
 
             $boolean_keys = array(
                 'pageCacheEnabled',
@@ -1784,8 +1905,6 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'homepageCssBundleEnabled',
                 'homepageCssBundleInlineEnabled',
                 'pageCssBundleOnEntryEnabled',
-                'criticalCssEnabled',
-                'criticalCssInlineEnabled',
                 'frontendSafeModeEnabled',
                 'sliderSafeModeEnabled',
                 'clsDimensionsEnabled',
@@ -1844,7 +1963,6 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['homepageCssBundleExcludeList'] = self::normalize_textarea_setting($settings['homepageCssBundleExcludeList']);
             $settings['homepageCssBundleMode'] = self::sanitize_homepage_css_bundle_mode($settings['homepageCssBundleMode']);
             $settings['cssBundleScope'] = self::sanitize_css_bundle_scope($settings['cssBundleScope'] ?? 'homepage');
-            $settings['criticalCssExcludeList']    = self::normalize_textarea_setting($settings['criticalCssExcludeList']);
             $settings['asyncCssExcludeList']       = self::normalize_textarea_setting($settings['asyncCssExcludeList']);
             $settings['aggressiveAsyncCssExcludeList'] = self::normalize_textarea_setting($settings['aggressiveAsyncCssExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = self::normalize_textarea_setting($settings['delayNonCriticalJsExcludeList']);
@@ -1853,10 +1971,6 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['criticalResourcePreloadList'] = self::normalize_textarea_setting($settings['criticalResourcePreloadList']);
             $settings['criticalFetchPreloadList'] = self::normalize_textarea_setting($settings['criticalFetchPreloadList']);
             $settings['criticalRequestChainDelayList'] = self::normalize_textarea_setting($settings['criticalRequestChainDelayList']);
-            $settings['criticalCssEnabled'] = !empty($settings['homepageCssBundleEnabled']);
-            $settings['criticalCssInlineEnabled'] = !empty($settings['homepageCssBundleInlineEnabled']);
-            $settings['criticalCssExcludeList'] = $settings['homepageCssBundleExcludeList'];
-
             $settings['mediaOutputMode']           = self::sanitize_media_output_mode($settings['mediaOutputMode']);
             $settings['objectCacheBackend']        = self::sanitize_object_cache_backend($settings['objectCacheBackend']);
             $settings['redisHost']                 = self::sanitize_redis_host($settings['redisHost']);
@@ -1872,6 +1986,13 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['varnishCliServers']         = self::sanitize_varnish_servers_string($settings['varnishCliServers'], $settings['varnishCliMode']);
             $settings['varnishCliKey']             = trim((string) $settings['varnishCliKey']);
             $settings['varnishCliMethod']          = ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN';
+
+            // LCP Boundary Defer is intentionally unavailable while either broad Frontend Safe Mode
+            // or Slider/Hero Safe Mode is selected. The runtime path also enforces this guard,
+            // but normalizing the saved setting keeps UI, REST, WP-CLI, and cached runtime config honest.
+            if (!empty($settings['frontendSafeModeEnabled']) || !empty($settings['sliderSafeModeEnabled'])) {
+                $settings['lcpBoundaryDeferEnabled'] = false;
+            }
 
             $compression_support = self::get_compression_support_status();
             if (empty($compression_support['brotli'])) {
@@ -1936,7 +2057,17 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             $saved = get_option(UCWP_SETTINGS_KEY, array());
-            self::$dashboard_settings_cache = self::sanitize_dashboard_settings(is_array($saved) ? $saved : array());
+            $raw_saved = is_array($saved) ? $saved : array();
+            $sanitized = self::sanitize_dashboard_settings($raw_saved);
+
+            // This private build does not need a backward-compatibility layer. Keep the
+            // stored option canonical so invalid combinations from previous local builds
+            // do not remain visible in direct option reads, CLI checks, or diagnostics.
+            if (!is_array($saved) || wp_json_encode($raw_saved) !== wp_json_encode($sanitized)) {
+                update_option(UCWP_SETTINGS_KEY, $sanitized, false);
+            }
+
+            self::$dashboard_settings_cache = $sanitized;
 
             return self::$dashboard_settings_cache;
         }
@@ -2066,7 +2197,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_stats_enabled'          => !empty($ui['cacheStatsEnabled']),
                 'preload_on_save'              => !empty($ui['preRenderOnSave']),
                 'defer_js'                     => $defer_js_enabled,
-                'defer_stage_safe'             => $defer_js_enabled,
+                'defer_stage_safe'             => $defer_stage_safe,
                 'defer_stage_balanced'         => $defer_stage_balanced,
                 'defer_stage_aggressive'       => $defer_stage_aggressive,
                 'defer_js_force_list'          => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsForceList'])),
@@ -2079,10 +2210,6 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'homepage_css_bundle_mode'    => self::sanitize_homepage_css_bundle_mode($ui['homepageCssBundleMode']),
                 'css_bundle_scope'            => self::sanitize_css_bundle_scope($ui['cssBundleScope'] ?? 'homepage'),
                 'page_css_bundle_on_entry'    => !empty($ui['pageCssBundleOnEntryEnabled']),
-                // Legacy runtime aliases retained for older helper names.
-                'critical_css'                 => !empty($ui['homepageCssBundleEnabled']),
-                'critical_css_inline'          => !empty($ui['homepageCssBundleInlineEnabled']),
-                'critical_css_exclude_list'    => self::parse_textarea_setting(self::normalize_textarea_setting($ui['homepageCssBundleExcludeList'])),
                 'frontend_safe_mode'          => !empty($ui['frontendSafeModeEnabled']),
                 'slider_safe_mode'            => !empty($ui['sliderSafeModeEnabled']),
                 'cls_dimensions'               => !empty($ui['clsDimensionsEnabled']),
@@ -2146,21 +2273,6 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function get_runtime_config_path()
         {
             return trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.json';
-        }
-
-        private static function get_legacy_runtime_secret_path()
-        {
-            return trailingslashit(WP_CONTENT_DIR) . 'ultracache-runtime-secrets.php';
-        }
-
-        private static function get_previous_runtime_secret_path()
-        {
-            $base = dirname(untrailingslashit(ABSPATH));
-            if (!is_string($base) || '' === trim($base) || '.' === $base || '/' === $base) {
-                $base = dirname(untrailingslashit(WP_CONTENT_DIR));
-            }
-
-            return rtrim($base, '/\\') . '/.ultracache-runtime-secrets.php';
         }
 
         private static function get_runtime_secret_site_token()
@@ -2227,16 +2339,6 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $candidates[] = $path;
             } else {
                 $candidates[] = self::get_runtime_secret_path();
-            }
-
-            $previous = self::get_previous_runtime_secret_path();
-            if (!in_array($previous, $candidates, true)) {
-                $candidates[] = $previous;
-            }
-
-            $legacy = self::get_legacy_runtime_secret_path();
-            if (!in_array($legacy, $candidates, true)) {
-                $candidates[] = $legacy;
             }
 
             foreach ($candidates as $candidate) {
@@ -2403,24 +2505,6 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             $secret_written = self::write_file_atomically($secret_target, $secret_contents, 'sync_runtime_config secret');
             $config_written = self::write_file_atomically($config_target, $config_contents, 'sync_runtime_config');
-
-            if ($secret_written) {
-                $cleanup_candidates = array(
-                    self::get_previous_runtime_secret_path(),
-                    self::get_legacy_runtime_secret_path(),
-                );
-
-                foreach ($cleanup_candidates as $cleanup_secret) {
-                    if (!is_string($cleanup_secret) || '' === trim($cleanup_secret) || $cleanup_secret === $secret_target || !file_exists($cleanup_secret)) {
-                        continue;
-                    }
-
-                    $cleanup_contents = ucwp_safe_file_get_contents($cleanup_secret, 'sync_runtime_config secret cleanup read');
-                    if (is_string($cleanup_contents) && false !== strpos($cleanup_contents, 'revalidate_secret')) {
-                        ucwp_safe_unlink($cleanup_secret, 'sync_runtime_config secret cleanup');
-                    }
-                }
-            }
 
             return $secret_written && $config_written;
         }
@@ -3290,6 +3374,10 @@ public static function delete_all_plugin_data_and_deactivate()
         public static function persist_dashboard_settings(array $settings)
         {
             $current_settings = self::sanitize_dashboard_settings(self::merge_protected_dashboard_settings($settings, self::get_dashboard_settings()));
+            $varnish_validation = self::validate_varnish_settings($current_settings);
+            if (is_wp_error($varnish_validation)) {
+                return $varnish_validation;
+            }
             update_option(UCWP_SETTINGS_KEY, $current_settings);
             self::reset_settings_cache();
 
@@ -3492,13 +3580,6 @@ public static function delete_all_plugin_data_and_deactivate()
         {
             $pattern = '/\n?\/\/ Added by UltraCache\R.*?\/\/ End UltraCache\R?/s';
             return (string) preg_replace($pattern, '', (string) $contents);
-        }
-
-        private static function normalize_legacy_managed_wp_cache_define($contents)
-        {
-            $pattern = '/^([ \t]*)define\s*\(\s*[\'\"]WP_CACHE[\'\"]\s*,\s*(true|false)\s*\)\s*;\s*\/\/\s*Managed by UltraCache\s*$/mi';
-
-            return (string) preg_replace($pattern, '$1define(\'WP_CACHE\', $2);', (string) $contents);
         }
 
         private static function get_wp_cache_insertion_offset($contents)
@@ -3869,7 +3950,6 @@ public static function delete_all_plugin_data_and_deactivate()
             $enabled           = (bool) $enabled;
             $original_contents = (string) $raw_contents;
             $contents          = self::strip_managed_wp_cache_block($original_contents);
-            $contents          = self::normalize_legacy_managed_wp_cache_define($contents);
 
             if ($enabled) {
                 $wp_cache_define = self::get_wp_cache_define_summary($contents);
@@ -3915,9 +3995,8 @@ public static function delete_all_plugin_data_and_deactivate()
         public function render_dashboard()
         {
             $version_label = self::maybe_translate_sprintf(
-                'UltraCache %1$s · Bundle %2$s',
-                (string) UCWP_VERSION,
-                (string) UCWP_HOTFIX_BUNDLE_VERSION
+                'UltraCache %s',
+                (string) UCWP_VERSION
             );
 
             echo '<div id="uc-dashboard"></div>';
@@ -3933,8 +4012,8 @@ public static function delete_all_plugin_data_and_deactivate()
                 return;
             }
 
-            wp_enqueue_style('ucwp-admin-css', UCWP_URL . 'includes/admin-dashboard.css', array(), UCWP_VERSION . '-' . UCWP_HOTFIX_BUNDLE_VERSION);
-            wp_enqueue_script('ucwp-admin-js', UCWP_URL . 'includes/admin-dashboard.js', array('wp-element'), UCWP_VERSION . '-' . UCWP_HOTFIX_BUNDLE_VERSION, true);
+            wp_enqueue_style('ucwp-admin-css', UCWP_URL . 'includes/admin-dashboard.css', array(), UCWP_VERSION);
+            wp_enqueue_script('ucwp-admin-js', UCWP_URL . 'includes/admin-dashboard.js', array('wp-element'), UCWP_VERSION, true);
             wp_script_add_data('ucwp-admin-js', 'type', 'module');
 
             wp_localize_script(
@@ -3951,7 +4030,6 @@ public static function delete_all_plugin_data_and_deactivate()
                     'avifSupport'  => self::get_media_support_status(),
                     'diagnostics'  => self::get_dashboard_diagnostics(),
                     'crawlScopeSummary' => self::get_crawl_scope_summary(),
-                    'hotfixBundle' => UCWP_HOTFIX_BUNDLE_VERSION,
                 )
             );
         }
@@ -4646,9 +4724,9 @@ public static function delete_all_plugin_data_and_deactivate()
             $admin_available = function_exists('fsockopen');
             $available = $http_available || $admin_available;
             if ($http_available && $admin_available) {
-                $message = 'Varnish integration supports both HTTP frontend purge endpoints and admin-secret mode.';
+                $message = 'Varnish integration supports both HTTP host:port purge endpoints and admin-secret mode.';
             } elseif ($http_available) {
-                $message = 'Varnish integration supports HTTP frontend purge endpoints on this server.';
+                $message = 'Varnish integration supports HTTP host:port purge endpoints on this server.';
             } elseif ($admin_available) {
                 $message = 'Varnish integration supports admin-secret mode on this server.';
             } else {
@@ -4676,6 +4754,7 @@ public static function delete_all_plugin_data_and_deactivate()
                 'debug'        => !empty($settings['varnishCliDebug']),
                 'support'      => self::get_varnish_support_status(),
                 'last'         => self::get_varnish_last_result(),
+                'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
             );
         }
 
@@ -4686,41 +4765,21 @@ public static function delete_all_plugin_data_and_deactivate()
                 return array();
             }
 
-            if (preg_match('#^https?://#i', $terminal)) {
-                $parts = wp_parse_url($terminal);
-                if (empty($parts['host'])) {
-                    return array();
-                }
-
-                $scheme = !empty($parts['scheme']) ? strtolower((string) $parts['scheme']) : 'http';
-                $host   = (string) $parts['host'];
-                $port   = !empty($parts['port']) ? (int) $parts['port'] : ('https' === $scheme ? 443 : 80);
-                $path   = !empty($parts['path']) ? (string) $parts['path'] : '/';
-
-                if (!ucwp_is_allowed_socket_target($host, $port)) {
-                    return array();
-                }
-
-                return array(
-                    'scheme' => $scheme,
-                    'host'   => $host,
-                    'port'   => $port,
-                    'path'   => $path,
-                    'base'   => $scheme . '://' . $host . ':' . $port . $path,
-                );
+            $check = self::validate_varnish_http_endpoint($terminal);
+            if (empty($check['valid'])) {
+                return array();
             }
 
-            list($host, $port) = self::parse_varnish_terminal($terminal);
-            if ('' === $host || $port <= 0 || !ucwp_is_allowed_socket_target($host, $port)) {
+            $host = (string) ($check['host'] ?? '');
+            $port = (int) ($check['port'] ?? 0);
+            if ('' === $host || $port <= 0) {
                 return array();
             }
 
             return array(
-                'scheme' => in_array($port, array(443, 8443), true) ? 'https' : 'http',
+                'scheme' => 'http',
                 'host'   => $host,
                 'port'   => $port,
-                'path'   => '/',
-                'base'   => ((in_array($port, array(443, 8443), true) ? 'https' : 'http') . '://' . $host . ':' . $port . '/'),
             );
         }
 
@@ -4985,6 +5044,11 @@ public static function delete_all_plugin_data_and_deactivate()
                 return $response;
             }
 
+            $endpoint_check = self::validate_varnish_http_endpoint($terminal);
+            if (empty($endpoint_check['valid'])) {
+                return array('ok' => false, 'detail' => (string) ($endpoint_check['message'] ?? 'Invalid or blocked Varnish HTTP endpoint.'));
+            }
+
             $endpoint = self::normalize_varnish_endpoint($terminal);
             if (empty($endpoint)) {
                 return array('ok' => false, 'detail' => 'Invalid or blocked Varnish HTTP endpoint.');
@@ -5120,6 +5184,13 @@ public static function delete_all_plugin_data_and_deactivate()
                     if (empty($res['ok'])) {
                         $all_ok = false;
                     }
+                    continue;
+                }
+
+                $endpoint_check = self::validate_varnish_http_endpoint($terminal);
+                if (empty($endpoint_check['valid'])) {
+                    $details[] = array('server' => $terminal, 'success' => false, 'detail' => (string) ($endpoint_check['message'] ?? 'Invalid or blocked Varnish HTTP endpoint.'));
+                    $all_ok = false;
                     continue;
                 }
 
@@ -5342,6 +5413,29 @@ public static function delete_all_plugin_data_and_deactivate()
             $runtime_config_path  = self::get_runtime_config_path();
             $analytics_path       = trailingslashit(UCWP_CACHE_DIR) . 'analytics.json';
             $browser_cache_path   = self::get_browser_cache_htaccess_path();
+            $object_cache_support  = self::get_object_cache_support_status();
+            $object_backend_status = array();
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_backend_status')) {
+                $object_backend_status = Ultra_Cache_Object_Cache_Manager::get_backend_status();
+            }
+            if (!is_array($object_backend_status)) {
+                $object_backend_status = array();
+            }
+            $selected_object_backend = isset($object_backend_status['selected']) ? self::sanitize_object_cache_backend($object_backend_status['selected']) : self::sanitize_object_cache_backend($settings['objectCacheBackend']);
+            $active_object_backend = isset($object_backend_status['active']) ? strtolower(trim((string) $object_backend_status['active'])) : $selected_object_backend;
+            if (!in_array($active_object_backend, array('redis', 'apcu', 'disk', 'runtime'), true)) {
+                $active_object_backend = $selected_object_backend;
+            }
+            $fallback_object_backend = isset($object_backend_status['fallback']) ? strtolower(trim((string) $object_backend_status['fallback'])) : (!empty($object_cache_support['apcu']['available']) ? 'apcu' : 'runtime');
+            if (!in_array($fallback_object_backend, array('apcu', 'runtime'), true)) {
+                $fallback_object_backend = !empty($object_cache_support['apcu']['available']) ? 'apcu' : 'runtime';
+            }
+            $selected_object_backend_supported = true;
+            if ('redis' === $selected_object_backend) {
+                $selected_object_backend_supported = !empty(self::get_redis_support_status()['available']);
+            } elseif ('apcu' === $selected_object_backend) {
+                $selected_object_backend_supported = !empty($object_cache_support['apcu']['available']);
+            }
 
             return array(
                 'pageCache' => array(
@@ -5349,7 +5443,7 @@ public static function delete_all_plugin_data_and_deactivate()
                     'active'  => (bool) (defined('WP_CACHE') && WP_CACHE && file_exists($advanced_cache_path)),
                 ),
                 'objectCache' => array_merge(
-                    self::get_object_cache_support_status(),
+                    $object_cache_support,
                     array(
                         'enabled'         => !empty($settings['objectCacheEnabled']),
                         'active'          => (bool) (
@@ -5360,12 +5454,16 @@ public static function delete_all_plugin_data_and_deactivate()
                                 && wp_using_ext_object_cache()
                                 && file_exists($object_cache_path))
                         ),
-                        'selectedBackend' => self::sanitize_object_cache_backend($settings['objectCacheBackend']),
-                        'fallbackBackend' => 'apcu',
-                        'activeBackend'   => (
-                            class_exists('Ultra_Cache_Object_Cache_Manager')
-                            && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_active_backend')
-                        ) ? Ultra_Cache_Object_Cache_Manager::get_active_backend() : self::sanitize_object_cache_backend($settings['objectCacheBackend']),
+                        'selectedBackend' => $selected_object_backend,
+                        'fallbackBackend' => $fallback_object_backend,
+                        'fallbackActive'  => !empty($object_backend_status['fallbackActive']),
+                        'fallbackReason'  => (string) ($object_backend_status['fallbackReason'] ?? ''),
+                        'fallbackMessage' => (string) ($object_backend_status['fallbackMessage'] ?? ''),
+                        'activeBackend'   => $active_object_backend,
+                        'selectedBackendSupported' => (bool) $selected_object_backend_supported,
+                        'activeBackendPersistent' => 'redis' === $active_object_backend,
+                        'activeBackendRuntimeOnly' => 'runtime' === $active_object_backend,
+                        'backendStatus'   => $object_backend_status,
                         'redis'           => array_merge(
                             self::get_redis_support_status(),
                             array(
@@ -5378,8 +5476,17 @@ public static function delete_all_plugin_data_and_deactivate()
                                 'connectTimeoutMs' => self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], 200, 50, 5000),
                                 'readTimeoutMs'    => self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], 200, 50, 5000),
                             ),
+                            isset($object_backend_status['redis']) && is_array($object_backend_status['redis'])
+                                ? array(
+                                    'dropinEnabled' => !empty($object_backend_status['redis']['enabled']),
+                                    'dropinError' => (string) ($object_backend_status['redis']['error'] ?? ''),
+                                )
+                                : array(),
                             (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_redis_connection'))
                                 ? Ultra_Cache_Object_Cache_Manager::test_redis_connection()
+                                : array(),
+                            (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_runtime_object_cache_payloads'))
+                                ? array('payloadProbe' => Ultra_Cache_Object_Cache_Manager::test_runtime_object_cache_payloads())
                                 : array(),
                             (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_last_flush_report'))
                                 ? array('lastFlush' => Ultra_Cache_Object_Cache_Manager::get_last_flush_report())
@@ -5419,10 +5526,14 @@ public static function delete_all_plugin_data_and_deactivate()
                         'method'  => ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN',
                         'timeout' => max(1, min(30, absint($settings['varnishCliTimeoutSeconds']))),
                         'last'    => self::get_varnish_last_result(),
+                        'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'hasUnsafeEndpoints' => !empty(self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['unsafe']),
+                        'unsafeEndpointMessage' => !empty(self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['messages'][0]) ? (string) self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['messages'][0] : '',
                     )
                 ),
                 'reverseProxy' => self::get_reverse_proxy_status(),
                 'loopbackSsl' => ucwp_get_loopback_ssl_status(),
+                'legacyCacheConflicts' => self::get_legacy_cache_conflict_status(),
                 'analytics' => self::get_analytics_hit_backend_diagnostic($settings),
                 'environment' => self::get_advanced_environment_diagnostic(),
                 'mediaRuntime' => self::get_media_runtime_diagnostic(),
@@ -5516,8 +5627,6 @@ public static function delete_all_plugin_data_and_deactivate()
             $diag['inSync'] = false;
             $diag['loaded'] = array();
             $diag['secretPath'] = self::get_runtime_secret_path();
-            $diag['previousSecretPath'] = self::get_previous_runtime_secret_path();
-            $diag['legacySecretPath'] = self::get_legacy_runtime_secret_path();
             $diag['secretStorage'] = 'file_outside_webroot_per_site';
             $diag['secretPresent'] = false;
 
@@ -5735,12 +5844,12 @@ public static function delete_all_plugin_data_and_deactivate()
 
         private static function get_object_cache_support_status()
         {
-            $available = true;
+            $dropin_installable = true;
             $message   = '';
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
                 if (method_exists('Ultra_Cache_Object_Cache_Manager', 'supports_dropin')) {
-                    $available = (bool) Ultra_Cache_Object_Cache_Manager::supports_dropin();
+                    $dropin_installable = (bool) Ultra_Cache_Object_Cache_Manager::supports_dropin();
                 }
 
                 if (method_exists('Ultra_Cache_Object_Cache_Manager', 'get_unavailable_reason')) {
@@ -5748,11 +5857,16 @@ public static function delete_all_plugin_data_and_deactivate()
                 }
             }
 
-            $apcu_available = function_exists('apcu_fetch') && function_exists('apcu_store') && (!function_exists('apcu_enabled') || apcu_enabled());
+            $apcu_available  = function_exists('apcu_fetch') && function_exists('apcu_store') && (!function_exists('apcu_enabled') || apcu_enabled());
+            $redis_available = (bool) (class_exists('Redis') || extension_loaded('redis'));
 
             return array(
-                'available' => $available,
-                'message'   => $message,
+                // Kept for compatibility with the dashboard JS. This means the drop-in can be installed, not that Redis is connected.
+                'available'                  => $dropin_installable,
+                'dropinInstallable'          => $dropin_installable,
+                'persistentBackendAvailable' => $redis_available,
+                'localBackendAvailable'      => $apcu_available,
+                'message'                    => $message,
                 'apcu'      => array(
                     'available' => $apcu_available,
                     'message'   => $apcu_available ? '' : self::maybe_translate('APCu extension is not loaded or not enabled.'),

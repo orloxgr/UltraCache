@@ -59,16 +59,64 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		public static function get_active_backend() {
-			global $wp_object_cache;
+			$status = self::get_backend_status();
+			$backend = isset($status['active']) ? (string) $status['active'] : '';
+			return '' !== $backend ? $backend : self::get_selected_backend();
+		}
 
-			if (is_object($wp_object_cache) && method_exists($wp_object_cache, 'get_backend')) {
-				$backend = (string) $wp_object_cache->get_backend();
-				if ('' !== $backend) {
-					return $backend;
+		public static function get_backend_status() {
+			$selected = self::get_selected_backend();
+			$active = $selected;
+			$status = array(
+				'selected' => $selected,
+				'active' => $active,
+				'fallback' => 'apcu',
+				'fallbackActive' => false,
+				'fallbackReason' => '',
+				'fallbackMessage' => '',
+				'apcu' => array(
+					'enabled' => false,
+					'available' => function_exists('apcu_fetch') && function_exists('apcu_store') && (!function_exists('apcu_enabled') || apcu_enabled()),
+				),
+				'redis' => array(
+					'enabled' => false,
+					'available' => self::redis_supported(),
+					'host' => '',
+					'port' => 0,
+					'database' => 0,
+					'use_tls' => false,
+					'persistent' => false,
+					'error' => '',
+				),
+			);
+
+			global $wp_object_cache;
+			if (is_object($wp_object_cache)) {
+				if (method_exists($wp_object_cache, 'get_backend_status')) {
+					$runtime_status = $wp_object_cache->get_backend_status();
+					if (is_array($runtime_status)) {
+						$status = array_replace_recursive($status, $runtime_status);
+					}
+				} elseif (method_exists($wp_object_cache, 'get_backend')) {
+					$runtime_backend = (string) $wp_object_cache->get_backend();
+					if ('' !== $runtime_backend) {
+						$status['active'] = $runtime_backend;
+					}
 				}
 			}
 
-			return self::get_selected_backend();
+			$status['selected'] = in_array((string) ($status['selected'] ?? ''), array('redis', 'apcu', 'disk'), true) ? (string) $status['selected'] : $selected;
+			$status['active'] = in_array((string) ($status['active'] ?? ''), array('redis', 'apcu', 'disk', 'runtime'), true) ? (string) $status['active'] : $selected;
+			$status['fallbackActive'] = ('redis' === $status['selected'] && 'redis' !== $status['active']);
+			$status['fallback'] = $status['fallbackActive'] ? (string) $status['active'] : (!empty($status['apcu']['available']) ? 'apcu' : 'runtime');
+			if ($status['fallbackActive']) {
+				$redis_error = isset($status['redis']['error']) ? trim((string) $status['redis']['error']) : '';
+				$fallback_label = 'apcu' === (string) $status['fallback'] ? 'APCu' : ('runtime' === (string) $status['fallback'] ? 'runtime-only' : strtoupper((string) $status['fallback']));
+				$status['fallbackReason'] = '' !== $redis_error ? $redis_error : 'Redis was selected but did not become active during drop-in bootstrap.';
+				$status['fallbackMessage'] = 'Redis selected, ' . $fallback_label . ' fallback active.' . ('' !== $status['fallbackReason'] ? ' Redis: ' . $status['fallbackReason'] : '');
+			}
+
+			return $status;
 		}
 
 		public static function is_dropin_active() {
@@ -415,6 +463,71 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			return $result;
 		}
 
+
+		public static function test_runtime_object_cache_payloads() {
+			$result = array(
+				'success' => false,
+				'backendStatus' => self::get_backend_status(),
+				'probes' => array(),
+				'message' => '',
+			);
+
+			if (!function_exists('wp_cache_set') || !function_exists('wp_cache_get')) {
+				$result['message'] = 'WordPress object cache functions are unavailable.';
+				return $result;
+			}
+
+			$object = new stdClass();
+			$object->alpha = 1;
+			$object->nested = new stdClass();
+			$object->nested->beta = 'two';
+
+			$payloads = array(
+				'string' => 'ucwp:' . md5((string) microtime(true)),
+				'array' => array('alpha' => 1, 'nested' => array('beta' => 'two')),
+				'object' => $object,
+			);
+
+			$group = 'ucwp_diagnostics';
+			$all_ok = true;
+
+			foreach ($payloads as $type => $value) {
+				$key = 'payload_probe_' . $type . '_' . md5(uniqid('ucwp', true));
+				wp_cache_delete($key, $group);
+				$set = wp_cache_set($key, $value, $group, 30);
+
+				global $wp_object_cache;
+				if (is_object($wp_object_cache) && method_exists($wp_object_cache, 'flush_runtime')) {
+					$wp_object_cache->flush_runtime();
+				}
+
+				$found = null;
+				$read = wp_cache_get($key, $group, false, $found);
+				$matches = false;
+				try {
+					$matches = (serialize($read) === serialize($value));
+				} catch (Throwable $e) {
+					$matches = false;
+				}
+				wp_cache_delete($key, $group);
+
+				$ok = (bool) $set && (bool) $found && (bool) $matches;
+				$all_ok = $all_ok && $ok;
+				$result['probes'][$type] = array(
+					'set' => (bool) $set,
+					'found' => (bool) $found,
+					'matches' => (bool) $matches,
+					'success' => (bool) $ok,
+					'readType' => is_object($read) ? get_class($read) : gettype($read),
+				);
+			}
+
+			$result['success'] = (bool) $all_ok;
+			$result['backendStatus'] = self::get_backend_status();
+			$result['message'] = $all_ok ? 'Object cache payload probe passed for string, array, and object values.' : 'Object cache payload probe failed for one or more value types.';
+			return $result;
+		}
+
 		private static function get_metrics_file() {
 			return trailingslashit(UCWP_OBJECT_CACHE_DIR) . 'object-cache-metrics.json';
 		}
@@ -535,49 +648,94 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		public static function get_stats($full_count = false) {
-			$backend = self::get_selected_backend();
-			$entry_count = 0;
-			$bytes = 0;
-			$used_redis = false;
+			$backend_status = self::get_backend_status();
+			$selected_backend = isset($backend_status['selected']) ? (string) $backend_status['selected'] : self::get_selected_backend();
+			$active_backend = isset($backend_status['active']) ? (string) $backend_status['active'] : $selected_backend;
+			$fallback_active = !empty($backend_status['fallbackActive']);
+
+			$disk_entries = 0;
+			$disk_bytes = 0;
+			$redis_entries = 0;
+			$redis_bytes = 0;
+			$apcu_entries = 0;
+			$apcu_bytes = 0;
 			$partial = false;
 			$partial_reason = '';
 			$stats_limit = 0;
 
 			$files = self::collect_cache_files(UCWP_OBJECT_CACHE_DIR, 'cache');
-			$entry_count = count($files);
+			$disk_entries = count($files);
 			foreach ($files as $file) {
 				$size = ucwp_safe_filesize($file, 'object_cache_manager_stats');
 				if (false !== $size) {
-					$bytes += (int) $size;
+					$disk_bytes += (int) $size;
 				}
 			}
 
-			if ('redis' === $backend && self::redis_supported()) {
+			if (('redis' === $selected_backend || 'redis' === $active_backend) && self::redis_supported()) {
 				$redis = self::connect_redis();
 				if ($redis instanceof Redis) {
-					$used_redis = true;
 					$redis_stats = self::collect_redis_namespace_stats($redis, self::get_redis_prefix(), (bool) $full_count);
-					$entry_count += (int) ($redis_stats['entries'] ?? 0);
-					$bytes += (int) ($redis_stats['bytes'] ?? 0);
-					$partial = !empty($redis_stats['partial']);
-					$partial_reason = (string) ($redis_stats['partialReason'] ?? '');
-					$stats_limit = (int) ($redis_stats['limit'] ?? 0);
+					$redis_entries = (int) ($redis_stats['entries'] ?? 0);
+					$redis_bytes = (int) ($redis_stats['bytes'] ?? 0);
+					if ('redis' === $active_backend) {
+						$partial = !empty($redis_stats['partial']);
+						$partial_reason = (string) ($redis_stats['partialReason'] ?? '');
+						$stats_limit = (int) ($redis_stats['limit'] ?? 0);
+					}
+				} elseif (isset($backend_status['redis']) && is_array($backend_status['redis']) && empty($backend_status['redis']['error'])) {
+					$backend_status['redis']['error'] = '' !== self::$redis_last_error ? self::$redis_last_error : 'Redis stats scan could not connect.';
 				}
 			}
 
-			if (!$used_redis && 'redis' === $backend) {
-				$backend = 'disk';
+			$apcu_stats = self::collect_apcu_namespace_stats(self::get_apcu_prefix(), (bool) $full_count);
+			$apcu_entries = (int) ($apcu_stats['entries'] ?? 0);
+			$apcu_bytes = (int) ($apcu_stats['bytes'] ?? 0);
+			if ('apcu' === $active_backend) {
+				$partial = !empty($apcu_stats['partial']);
+				$partial_reason = (string) ($apcu_stats['partialReason'] ?? '');
+				$stats_limit = (int) ($apcu_stats['limit'] ?? 0);
+			}
+
+			$entry_count = 0;
+			$bytes = 0;
+			if ('redis' === $active_backend) {
+				$entry_count = $redis_entries;
+				$bytes = $redis_bytes;
+			} elseif ('apcu' === $active_backend) {
+				$entry_count = $apcu_entries;
+				$bytes = $apcu_bytes;
+			} elseif ('disk' === $active_backend) {
+				$entry_count = $disk_entries;
+				$bytes = $disk_bytes;
 			}
 
 			$metrics = self::read_metrics_snapshot();
 			$hits = (int) ($metrics['hits'] ?? 0);
 			$misses = (int) ($metrics['misses'] ?? 0);
 			$ratio = ($hits + $misses) > 0 ? round(($hits / ($hits + $misses)) * 100, 1) : 0.0;
+
 			return array(
-				'objectCacheBackend'      => $backend,
+				'objectCacheBackend'      => $active_backend,
+				'objectCacheSelectedBackend' => $selected_backend,
+				'objectCacheActiveBackend' => $active_backend,
+				'objectCacheFallbackBackend' => 'apcu',
+				'objectCacheFallbackActive' => (bool) $fallback_active,
+				'objectCacheFallbackReason' => (string) ($backend_status['fallbackReason'] ?? ''),
+				'objectCacheBackendStatus' => $backend_status,
+				'objectCacheStatsSource' => $active_backend,
 				'objectCacheEntries'      => $entry_count,
 				'objectCacheSizeBytes'    => $bytes,
 				'objectCacheSizeHuman'    => function_exists('size_format') ? size_format($bytes, 2) : (string) $bytes,
+				'objectCacheRedisEntries' => $redis_entries,
+				'objectCacheRedisSizeBytes' => $redis_bytes,
+				'objectCacheRedisSizeHuman' => function_exists('size_format') ? size_format($redis_bytes, 2) : (string) $redis_bytes,
+				'objectCacheApcuEntries' => $apcu_entries,
+				'objectCacheApcuSizeBytes' => $apcu_bytes,
+				'objectCacheApcuSizeHuman' => function_exists('size_format') ? size_format($apcu_bytes, 2) : (string) $apcu_bytes,
+				'objectCacheDiskEntries' => $disk_entries,
+				'objectCacheDiskSizeBytes' => $disk_bytes,
+				'objectCacheDiskSizeHuman' => function_exists('size_format') ? size_format($disk_bytes, 2) : (string) $disk_bytes,
 				'objectCacheHits'         => $hits,
 				'objectCacheMisses'       => $misses,
 				'objectCacheHitRatio'     => $ratio,
@@ -586,6 +744,73 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'objectCacheStatsMode'    => $full_count ? 'full' : 'sampled',
 				'objectCacheStatsPartialReason' => $partial_reason,
 			);
+		}
+
+		private static function collect_apcu_namespace_stats($prefix, $full_count = false) {
+			$default_max_keys = (int) apply_filters('ucwp_apcu_object_cache_stats_max_keys', 5000);
+			$default_max_keys = max(250, min(50000, $default_max_keys));
+			$max_keys = $full_count ? 0 : $default_max_keys;
+			$deadline_seconds = $full_count
+				? (float) apply_filters('ucwp_apcu_object_cache_stats_full_scan_timeout', 15)
+				: 1.0;
+			$deadline_seconds = $full_count ? max(3, min(60, $deadline_seconds)) : max(0.25, min(3, $deadline_seconds));
+
+			$stats = array(
+				'entries' => 0,
+				'bytes' => 0,
+				'partial' => false,
+				'partialReason' => '',
+				'limit' => $max_keys,
+			);
+
+			if (!function_exists('apcu_cache_info') || !is_string($prefix) || '' === $prefix) {
+				return $stats;
+			}
+			if (function_exists('apcu_enabled') && !apcu_enabled()) {
+				return $stats;
+			}
+
+			$deadline = microtime(true) + $deadline_seconds;
+			try {
+				$info = @apcu_cache_info(false);
+				if (!is_array($info) || empty($info['cache_list']) || !is_array($info['cache_list'])) {
+					return $stats;
+				}
+				foreach ($info['cache_list'] as $entry) {
+					if (!is_array($entry)) {
+						continue;
+					}
+					$key = '';
+					foreach (array('info', 'key') as $key_field) {
+						if (isset($entry[$key_field]) && is_scalar($entry[$key_field])) {
+							$key = (string) $entry[$key_field];
+							break;
+						}
+					}
+					if ('' === $key || 0 !== strpos($key, $prefix)) {
+						continue;
+					}
+					$stats['entries']++;
+					if (isset($entry['mem_size']) && (is_int($entry['mem_size']) || ctype_digit((string) $entry['mem_size']))) {
+						$stats['bytes'] += (int) $entry['mem_size'];
+					}
+					if (!$full_count && $max_keys > 0 && $stats['entries'] >= $max_keys) {
+						$stats['partial'] = true;
+						$stats['partialReason'] = 'sampled, APCu scan capped at ' . number_format_i18n($max_keys) . ' keys';
+						break;
+					}
+					if (microtime(true) >= $deadline) {
+						$stats['partial'] = true;
+						$stats['partialReason'] = $full_count ? 'full APCu count timed out before scan completed' : 'sampled, APCu scan timed out';
+						break;
+					}
+				}
+			} catch (Throwable $e) {
+				$stats['partial'] = true;
+				$stats['partialReason'] = 'APCu scan failed before completion';
+			}
+
+			return $stats;
 		}
 
 		private static function collect_redis_namespace_stats($redis, $prefix, $full_count = false) {
@@ -900,6 +1125,19 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			return self::$plugin_settings_cache;
 		}
 
+		private static function get_apcu_prefix($settings = null) {
+			$settings = is_array($settings) ? $settings : self::get_plugin_settings();
+			$seed = implode('|', array(
+				defined('DB_NAME') ? DB_NAME : '',
+				defined('DB_USER') ? DB_USER : '',
+				defined('ABSPATH') ? ABSPATH : '',
+				defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : '',
+				(string) self::get_redis_prefix($settings),
+			));
+			$hash = function_exists('hash') ? hash('sha256', 'ucwp-apcu|' . $seed) : md5('ucwp-apcu|' . $seed);
+			return 'ucwp_apcu:' . substr((string) $hash, 0, 16) . ':';
+		}
+
 		private static function get_redis_prefix($settings = null) {
 			if (is_array($settings) && !empty($settings['redis_prefix'])) {
 				$prefix = preg_replace('/[^A-Za-z0-9:_\-]/', '', (string) $settings['redis_prefix']);
@@ -1036,6 +1274,3 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 	}
 }
 
-if (!class_exists('UltraCache_V246_Object_Cache_Manager') && class_exists('Ultra_Cache_Object_Cache_Manager')) {
-	class_alias('Ultra_Cache_Object_Cache_Manager', 'UltraCache_V246_Object_Cache_Manager');
-}

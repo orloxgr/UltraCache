@@ -6,17 +6,17 @@ UltraCache is a production-oriented WordPress performance plugin focused on page
 
 | Feature / backend | Status | Recommended use | Notes |
 | --- | --- | --- | --- |
-| **Varnish Support** | Optional integration | Use when the site is behind Varnish and you want UltraCache to test, purge, or ban cached pages. | HTTP mode targets frontend BAN/PURGE endpoints. Admin mode should use localhost/private endpoints only, for example `127.0.0.1:6082`. Do not expose the Varnish admin port publicly. |
+| **Varnish Support** | Optional integration | Use when the site is behind Varnish and you want UltraCache to test, purge, or ban cached pages. | HTTP mode targets a local Varnish listener, for example `127.0.0.1:82`, and blocks public frontend endpoints such as `domain.com:443`. Admin mode should use localhost/private endpoints only, for example `127.0.0.1:6082`. Do not expose the Varnish admin port publicly. |
 | **Redis Object Cache** | Recommended production backend | Best persistent object-cache backend when the PHP Redis extension and a stable Redis service are available. | UltraCache stores Redis secrets in protected runtime sidecar config rather than exposing them in generated drop-ins. |
 | **APCu Object Cache** | Safe local fallback | Good for single-server sites when Redis is unavailable. | APCu is local to the PHP runtime and is cleared on PHP-FPM restart. If APCu writes fail or memory is full, UltraCache falls back safely to runtime-only behavior. |
 | **Disk Object Cache** | Advanced/debug only | Use only when explicitly testing object-cache behavior. | Not recommended for production because it can create many small files and increase filesystem I/O. It is not used automatically as a fallback. |
 
 ## Current build
 
-- Version: `2.56.07`
-- Build type: CSS-scope-aware warm-up buttons and behavior
-- Runtime focus: dashboard warm-up orchestration only; no extra frontend JS
-- Default behavior: HTML-only warm actions remain separate; CSS warm actions follow the selected CSS Bundling Scope.
+- Version: `2.56.27`
+- Build type: page-cache variant stabilization and dashboard visibility fix
+- Runtime focus: preventing unbounded HTML cache variants from non-allowlisted query strings and keeping diagnostics visible with cache stats disabled
+- Default behavior: query-string HTML cache variants are allowlist-only; public Varnish frontend endpoints remain blocked.
 
 ## Recommended setup
 
@@ -200,18 +200,85 @@ Check:
 
 ## Changelog highlights
 
+### 2.56.27
+
+- Added hard single-flight locks for heavy dashboard actions and CSS/frontpage bundle generation.
+- Stale dashboard action jobs are now failed automatically instead of blocking future actions.
+- Internal loopback requests now carry UltraCache headers so on-entry CSS generation does not recursively amplify PHP workers.
+- Pruned dashboard action queue storage to avoid stale running jobs and oversized options.
+
+### 2.56.26
+
+- Linked the Diagnostics and Activity Summary accordions so opening or closing either card toggles both together.
+- Added the missing `.text-right` utility rule so status pills and right-aligned diagnostic text render correctly.
+
+### 2.56.25
+
+- Added the Query-string args whitelist Populate action for WooCommerce/taxonomy query keys.
+
+### 2.56.24
+
+- Stabilized page-cache variant creation: query-string HTML cache variants now require an explicit allowlist.
+- Added a safety cap for same-path/same-bucket HTML variants to prevent runaway homepage cache files.
+- Fixed Diagnostics and Activity Summary visibility so they remain visible when Cache Stats is disabled.
+
+### 2.56.23
+
+- Changed performance profile patches so no profile enables background/scheduled warm-up.
+- Aggressive profile now keeps `cronWarmEnabled`, `cronWarmStartAfterCleanup`, and `cronWarmStartAfterManualPurge` disabled.
+- Manual warm-up buttons remain unchanged.
+
+### 2.56.21
+
+- Blocked unsafe Varnish HTTP endpoints that point to the public WordPress frontend, especially `domain.com:80`, `domain.com:443`, and unsupported HTTP-mode ports.
+- Changed the Varnish HTTP default endpoint to `127.0.0.1:82`; Admin mode remains `127.0.0.1:6082`.
+- Added runtime guards so Varnish Test, Flush All, and URL purge refuse unsafe HTTP endpoints even if old options or imports contain them.
+- Added diagnostics for old W3 Total Cache / Varnish helper leftovers before enabling Varnish or Object Cache.
+
+### 2.56.19
+
+- Consolidated version reporting to a single `UCWP_VERSION` source and removed the private hotfix bundle duplicate.
+- Removed legacy REST namespace registration so only `ultracache/v1` is exposed.
+- Removed old runtime secret path fallback loading and kept only the per-site secret file outside the webroot.
+- Removed the old WP_CACHE marker normalization path; the current managed block is the only supported marker.
+
+### 2.56.18
+
+- Simplified Varnish HTTP endpoint handling to the current host:port-only model.
+- Removed the legacy Varnish endpoint remap that silently changed old Varnish listener ports to the detected frontend endpoint.
+- Added an admin-mode fallback endpoint of `127.0.0.1:6082` when admin mode is selected and the endpoints field is empty.
+
+### 2.56.17
+
+- Clarified the Varnish HTTP UI: endpoints are documented as host:port only, and PURGE no longer claims an automatic BAN fallback.
+- Aligned the advanced-cache fallback defaults with the dashboard defaults for Woo safe mode and stale-while-revalidate.
+- Fixed the runtime `defer_stage_safe` mapping so the computed safe-stage flag is written to config.
+
+### 2.56.15
+
+- Fixed a dashboard crash in Advanced Diagnostics caused by an undefined `objectFallbackActive` variable.
+- Canonicalized saved dashboard settings on load so invalid previous combinations like Slider Safe Mode + LCP Boundary Defer are written back as valid settings.
+- Restricted `data-ucwp-sr7-lcp` to SR7/RevSlider image candidates instead of allowing normal site images, such as the logo, to receive SR7-specific markers.
+- Added generic `data-ucwp-lcp` markers for non-slider LCP image candidates.
+
+### 2.56.09
+
+- Hoisted CSS `@import` rules to the top of generated page CSS bundles so browser import ordering remains valid.
+- Preserved a single CSS `@charset` rule at the very top of the generated bundle when source stylesheets include one.
+- Rewrote relative `@import` URLs and normal `url(...)` references against each source stylesheet URL before bundling.
+- Added an HTML `Content-Type` guard before `warm_url()` writes static HTML cache files or scans HTML for CSS bundling.
+- Reduced per-page CSS warmups from `warm -> bundle -> warm` to `bundle -> warm`, avoiding the extra final loopback pass.
+
 ### 2.56.07
 
 - Updated the Warm Cache button labels so they explicitly show Homepage, Shared, or Separate CSS Bundle behavior according to the selected CSS Bundling Scope.
 - Homepage/shared scope CSS warm actions now build the homepage/shared CSS bundle once, then warm the selected URL set as HTML.
 - Per-page scope CSS warm actions build separate CSS bundles for each warmed menu/full-site URL.
 
-
 ### 2.56.06
 
 - Scoped the WordPress admin `#wpcontent` padding-left override to the UltraCache dashboard only.
 - Removed the default WordPress left gutter from the UltraCache full-background admin UI while leaving all other wp-admin pages untouched.
-
 
 ### 2.56.05
 

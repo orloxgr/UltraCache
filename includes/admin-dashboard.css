@@ -1355,3 +1355,11 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	opacity: 0.5;
 	cursor: not-allowed;
 }
+
+.uc-css-bundle-scope-field {
+	margin-top: 10px;
+}
+
+#uc-dashboard .text-right {
+	text-align: right;
+}

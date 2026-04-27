@@ -279,8 +279,6 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'homepageCssBundleEnabled',
                 'homepageCssBundleInlineEnabled',
                 'pageCssBundleOnEntryEnabled',
-                'criticalCssEnabled',
-                'criticalCssInlineEnabled',
                 'frontendSafeModeEnabled',
                 'sliderSafeModeEnabled',
                 'clsDimensionsEnabled',
@@ -329,7 +327,6 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'deferJsForceList',
                 'deferJsExcludeList',
                 'homepageCssBundleExcludeList',
-                'criticalCssExcludeList',
                 'asyncCssExcludeList',
                 'aggressiveAsyncCssExcludeList',
                 'delayNonCriticalJsExcludeList',
@@ -1049,6 +1046,13 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'objectCacheEntries' => 0,
                 'objectCacheSizeBytes' => 0,
                 'objectCacheSizeHuman' => '',
+                'objectCacheSelectedBackend' => '',
+                'objectCacheActiveBackend' => '',
+                'objectCacheFallbackActive' => false,
+                'objectCacheStatsSource' => '',
+                'objectCacheRedisEntries' => 0,
+                'objectCacheApcuEntries' => 0,
+                'objectCacheDiskEntries' => 0,
                 'objectCacheHits' => 0,
                 'objectCacheMisses' => 0,
                 'objectCacheHitRatio' => 0.0,
@@ -1095,6 +1099,13 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                     $payload['objectCacheEntries'] = (int) ($object_stats['objectCacheEntries'] ?? 0);
                     $payload['objectCacheSizeBytes'] = (int) ($object_stats['objectCacheSizeBytes'] ?? 0);
                     $payload['objectCacheSizeHuman'] = (string) ($object_stats['objectCacheSizeHuman'] ?? '');
+                    $payload['objectCacheSelectedBackend'] = (string) ($object_stats['objectCacheSelectedBackend'] ?? '');
+                    $payload['objectCacheActiveBackend'] = (string) ($object_stats['objectCacheActiveBackend'] ?? ($object_stats['objectCacheBackend'] ?? ''));
+                    $payload['objectCacheFallbackActive'] = !empty($object_stats['objectCacheFallbackActive']);
+                    $payload['objectCacheStatsSource'] = (string) ($object_stats['objectCacheStatsSource'] ?? '');
+                    $payload['objectCacheRedisEntries'] = (int) ($object_stats['objectCacheRedisEntries'] ?? 0);
+                    $payload['objectCacheApcuEntries'] = (int) ($object_stats['objectCacheApcuEntries'] ?? 0);
+                    $payload['objectCacheDiskEntries'] = (int) ($object_stats['objectCacheDiskEntries'] ?? 0);
                     $payload['objectCacheHits'] = (int) ($object_stats['objectCacheHits'] ?? 0);
                     $payload['objectCacheMisses'] = (int) ($object_stats['objectCacheMisses'] ?? 0);
                     $payload['objectCacheHitRatio'] = (float) ($object_stats['objectCacheHitRatio'] ?? 0);
@@ -1243,6 +1254,232 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
 
             WP_CLI::error('Invalid action. Use start, stop, tick, or status.');
         }
+        private function self_test_add_check(array &$checks, $name, $passed, $message = '', $severity = 'error', array $meta = array())
+        {
+            $status = $passed ? 'pass' : ('warning' === $severity ? 'warning' : 'fail');
+            $checks[] = array(
+                'name'     => (string) $name,
+                'status'   => $status,
+                'message'  => (string) $message,
+                'severity' => $passed ? 'info' : (string) $severity,
+                'meta'     => $meta,
+            );
+        }
+
+        private function get_file_owner_summary($path)
+        {
+            $summary = array(
+                'exists' => file_exists($path),
+                'path' => (string) $path,
+                'owner' => '',
+                'group' => '',
+                'mode' => '',
+            );
+
+            if (!$summary['exists']) {
+                return $summary;
+            }
+
+            $perms = @fileperms($path);
+            $summary['mode'] = false === $perms ? '' : substr(sprintf('%o', $perms), -4);
+
+            $owner_id = @fileowner($path);
+            if (false !== $owner_id && function_exists('posix_getpwuid')) {
+                $owner = @posix_getpwuid($owner_id);
+                $summary['owner'] = is_array($owner) && !empty($owner['name']) ? (string) $owner['name'] : (string) $owner_id;
+            } elseif (false !== $owner_id) {
+                $summary['owner'] = (string) $owner_id;
+            }
+
+            $group_id = @filegroup($path);
+            if (false !== $group_id && function_exists('posix_getgrgid')) {
+                $group = @posix_getgrgid($group_id);
+                $summary['group'] = is_array($group) && !empty($group['name']) ? (string) $group['name'] : (string) $group_id;
+            } elseif (false !== $group_id) {
+                $summary['group'] = (string) $group_id;
+            }
+
+            return $summary;
+        }
+
+        /**
+         * Run a compact UltraCache self-test.
+         *
+         * ## OPTIONS
+         *
+         * [--format=<format>]
+         * : Output format: table or json. Default: table.
+         */
+        public function self_test($args, $assoc_args)
+        {
+            $format = !empty($assoc_args['format']) ? (string) $assoc_args['format'] : 'table';
+            if (!in_array(strtolower($format), array('table', 'json'), true)) {
+                WP_CLI::error('Invalid format. Use table or json.');
+            }
+
+            $checks = array();
+            $settings = $this->get_dashboard_settings();
+            $diagnostics = $this->get_dashboard_diagnostics();
+            $stats = $this->get_dashboard_stats();
+
+            $this->self_test_add_check(
+                $checks,
+                'Version constant',
+                defined('UCWP_VERSION') && '' !== (string) UCWP_VERSION,
+                defined('UCWP_VERSION') ? ('version=' . UCWP_VERSION) : 'Version constant unavailable.'
+            );
+
+            $stored = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
+            $stored = is_array($stored) ? $stored : array();
+            $deprecated_keys = array_values(array_intersect(array_keys($stored), array_merge($this->get_deprecated_setting_keys(), array('criticalCssEnabled', 'criticalCssInlineEnabled', 'criticalCssExcludeList'))));
+            $this->self_test_add_check(
+                $checks,
+                'Stored settings canonical',
+                empty($deprecated_keys),
+                empty($deprecated_keys) ? 'No deprecated setting keys remain in stored settings.' : ('Deprecated keys: ' . implode(', ', $deprecated_keys)),
+                'warning'
+            );
+
+            $invalid_lcp_combo = (!empty($settings['frontendSafeModeEnabled']) || !empty($settings['sliderSafeModeEnabled'])) && !empty($settings['lcpBoundaryDeferEnabled']);
+            $this->self_test_add_check(
+                $checks,
+                'LCP Boundary Defer guard',
+                !$invalid_lcp_combo,
+                $invalid_lcp_combo ? 'LCP Boundary Defer is enabled while a safe mode is active.' : 'LCP Boundary Defer setting is compatible with current safe-mode settings.'
+            );
+
+            $cache_dir = defined('UCWP_CACHE_DIR') ? UCWP_CACHE_DIR : WP_CONTENT_DIR . '/cache/ultracache';
+            $this->self_test_add_check(
+                $checks,
+                'Cache directory writable',
+                is_dir($cache_dir) ? wp_is_writable($cache_dir) : wp_is_writable(dirname($cache_dir)),
+                'cacheDir=' . $cache_dir,
+                'error',
+                $this->get_file_owner_summary($cache_dir)
+            );
+
+            $advanced_cache = WP_CONTENT_DIR . '/advanced-cache.php';
+            $page_cache_expected = !empty($settings['pageCacheEnabled']);
+            $advanced_exists = file_exists($advanced_cache);
+            $advanced_dropin_ok = $page_cache_expected ? $advanced_exists : !$advanced_exists;
+            $this->self_test_add_check(
+                $checks,
+                'Page cache drop-in',
+                $advanced_dropin_ok,
+                $page_cache_expected ? ($advanced_exists ? 'advanced-cache.php is installed.' : 'Page Cache is enabled but advanced-cache.php is missing.') : ($advanced_exists ? 'advanced-cache.php exists while Page Cache setting is off.' : 'Page Cache disabled; no drop-in required.'),
+                $page_cache_expected ? 'error' : 'warning',
+                $this->get_file_owner_summary($advanced_cache)
+            );
+
+            $object_cache = WP_CONTENT_DIR . '/object-cache.php';
+            $object_expected = !empty($settings['objectCacheEnabled']);
+            $object_exists = file_exists($object_cache);
+            $object_status = !empty($diagnostics['objectCache']) && is_array($diagnostics['objectCache']) ? $diagnostics['objectCache'] : array();
+            $object_dropin_ok = $object_expected ? $object_exists : !$object_exists;
+            $this->self_test_add_check(
+                $checks,
+                'Object cache drop-in',
+                $object_dropin_ok,
+                $object_expected ? ($object_exists ? 'object-cache.php is installed.' : 'Object Cache is enabled but object-cache.php is missing.') : ($object_exists ? 'object-cache.php exists while Object Cache setting is off.' : 'Object Cache disabled; no drop-in required.'),
+                $object_expected ? 'error' : 'warning',
+                $this->get_file_owner_summary($object_cache)
+            );
+
+            $selected_backend = (string) ($object_status['selectedBackend'] ?? ($stats['objectCacheSelectedBackend'] ?? ''));
+            $active_backend = (string) ($object_status['activeBackend'] ?? ($stats['objectCacheActiveBackend'] ?? ''));
+            $this->self_test_add_check(
+                $checks,
+                'Object cache backend truth',
+                empty($object_expected) || ('' !== $selected_backend && '' !== $active_backend),
+                empty($object_expected) ? 'Object Cache disabled.' : ('selected=' . $selected_backend . ', active=' . $active_backend . (!empty($object_status['fallbackActive']) ? ', fallback active' : '')),
+                'error',
+                array(
+                    'selectedBackend' => $selected_backend,
+                    'activeBackend' => $active_backend,
+                    'fallbackBackend' => (string) ($object_status['fallbackBackend'] ?? ''),
+                    'fallbackActive' => !empty($object_status['fallbackActive']),
+                )
+            );
+
+            $payload_probe = array();
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_runtime_object_cache_payloads')) {
+                $payload_probe = Ultra_Cache_Object_Cache_Manager::test_runtime_object_cache_payloads();
+            }
+            $this->self_test_add_check(
+                $checks,
+                'Object payload probe',
+                empty($object_expected) || !empty($payload_probe['success']),
+                empty($object_expected) ? 'Object Cache disabled.' : (string) ($payload_probe['message'] ?? 'Payload probe unavailable.'),
+                'error',
+                is_array($payload_probe) ? $payload_probe : array()
+            );
+
+            $manifest_path = trailingslashit($cache_dir) . 'css-bundles/manifest.json';
+            $css_bundle_expected = !empty($settings['homepageCssBundleEnabled']);
+            $manifest_ok = !$css_bundle_expected || (file_exists($manifest_path) && is_readable($manifest_path) && is_array(json_decode((string) file_get_contents($manifest_path), true)));
+            $this->self_test_add_check(
+                $checks,
+                'CSS bundle manifest',
+                $manifest_ok,
+                $css_bundle_expected ? ($manifest_ok ? 'CSS bundle manifest is readable.' : 'CSS bundling is enabled but manifest is missing or invalid.') : 'CSS bundling disabled; manifest not required.',
+                'warning',
+                array('manifestPath' => $manifest_path)
+            );
+
+            $cron_status = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_cron_warm_status') ? Ultra_Cache_WP::get_cron_warm_status() : array();
+            $this->self_test_add_check(
+                $checks,
+                'Cron warm status payload',
+                is_array($cron_status) && array_key_exists('enabled', $cron_status),
+                is_array($cron_status) ? ('enabled=' . (!empty($cron_status['enabled']) ? 'yes' : 'no') . ', active=' . (!empty($cron_status['active']) ? 'yes' : 'no')) : 'Cron warm status unavailable.',
+                'warning',
+                is_array($cron_status) ? $cron_status : array()
+            );
+
+            $failures = 0;
+            $warnings = 0;
+            foreach ($checks as $check) {
+                if ('fail' === $check['status']) {
+                    $failures++;
+                } elseif ('warning' === $check['status']) {
+                    $warnings++;
+                }
+            }
+
+            $payload = array(
+                'summary' => array(
+                    'success' => 0 === $failures,
+                    'failures' => $failures,
+                    'warnings' => $warnings,
+                    'version' => defined('UCWP_VERSION') ? UCWP_VERSION : '',
+                ),
+                'checks' => $checks,
+            );
+
+            if ('json' === strtolower($format)) {
+                WP_CLI::line(wp_json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+                if ($failures > 0) {
+                    WP_CLI::halt(1);
+                }
+                return;
+            }
+
+            $rows = array();
+            foreach ($checks as $check) {
+                $rows[] = array(
+                    'status' => strtoupper((string) $check['status']),
+                    'check' => (string) $check['name'],
+                    'message' => (string) $check['message'],
+                );
+            }
+            \WP_CLI\Utils\format_items('table', $rows, array('status', 'check', 'message'));
+
+            if ($failures > 0) {
+                WP_CLI::error(sprintf('UltraCache self-test failed: %d failure(s), %d warning(s).', $failures, $warnings));
+            }
+
+            WP_CLI::success(sprintf('UltraCache self-test passed with %d warning(s).', $warnings));
+        }
 
 
         /**
@@ -1305,10 +1542,3 @@ if (!class_exists('Ultra_Cache_WP_CLI')) {
     }
 }
 
-if (!class_exists('UltraCache_V246_WP_CLI_Command') && class_exists('UCWP_CLI_Command')) {
-    class_alias('UCWP_CLI_Command', 'UltraCache_V246_WP_CLI_Command');
-}
-
-if (!class_exists('UltraCache_V246_WP_CLI') && class_exists('Ultra_Cache_WP_CLI')) {
-    class_alias('Ultra_Cache_WP_CLI', 'UltraCache_V246_WP_CLI');
-}
