@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.37
+ * Version: 2.56.43
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.37');
+    define('UCWP_VERSION', '2.56.43');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1290,6 +1290,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'assetCleanupExcludeList'     => "elementor\nbricks\noxygen\nwpbakery\nvc_\nrevslider\nsr7\najaxsearch\nfibosearch\n.dgwt-wcas\naws-container\ncart\ncheckout\naccount",
                 'googleFontsSwapEnabled'     => false,
                 'googleFontsLocalOptimizationEnabled' => false,
+                'googleFontsAdditionalScanUrls' => '',
                 'selfHostedFontCssOptimizationEnabled' => false,
                 'selfHostedFontRuntimeRewriteEnabled' => false,
                 'speculationRulesEnabled'    => false,
@@ -1996,6 +1997,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['aggressiveAsyncCssExcludeList'] = self::normalize_textarea_setting($settings['aggressiveAsyncCssExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = self::normalize_textarea_setting($settings['delayNonCriticalJsExcludeList']);
             $settings['assetCleanupExcludeList'] = self::normalize_textarea_setting($settings['assetCleanupExcludeList']);
+            $settings['googleFontsAdditionalScanUrls'] = self::normalize_textarea_setting($settings['googleFontsAdditionalScanUrls']);
             $settings['lcpImagePriorityOverride'] = self::normalize_textarea_setting($settings['lcpImagePriorityOverride']);
             $settings['criticalResourcePreloadList'] = self::normalize_textarea_setting($settings['criticalResourcePreloadList']);
             $settings['criticalFetchPreloadList'] = self::normalize_textarea_setting($settings['criticalFetchPreloadList']);
@@ -2264,6 +2266,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'asset_cleanup_exclude_list'   => self::parse_textarea_setting(self::normalize_textarea_setting($ui['assetCleanupExcludeList'])),
                 'google_fonts_swap'            => !empty($ui['googleFontsSwapEnabled']),
                 'google_fonts_local_optimization' => !empty($ui['googleFontsLocalOptimizationEnabled']),
+                'google_fonts_additional_scan_urls' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['googleFontsAdditionalScanUrls'] ?? '')),
                 'self_hosted_font_css_optimization' => !empty($ui['selfHostedFontCssOptimizationEnabled']),
                 'self_hosted_font_runtime_rewrite' => !empty($ui['selfHostedFontRuntimeRewriteEnabled']),
                 'speculation_rules_enabled'    => !empty($ui['speculationRulesEnabled']),
@@ -3381,7 +3384,8 @@ public static function delete_all_plugin_data_and_deactivate()
 
         public static function persist_dashboard_settings(array $settings)
         {
-            $current_settings = self::sanitize_dashboard_settings(self::merge_protected_dashboard_settings($settings, self::get_dashboard_settings()));
+            $previous_settings = self::get_dashboard_settings();
+            $current_settings = self::sanitize_dashboard_settings(self::merge_protected_dashboard_settings($settings, $previous_settings));
             $varnish_validation = self::validate_varnish_settings($current_settings);
             if (is_wp_error($varnish_validation)) {
                 return $varnish_validation;
@@ -3425,15 +3429,30 @@ public static function delete_all_plugin_data_and_deactivate()
                 Ultra_Cache_Object_Cache_Manager::sync_dropin();
             }
 
-            return array(
+            $google_fonts_job = null;
+            $google_fonts_enabled_now = !empty($current_settings['googleFontsLocalOptimizationEnabled']);
+            $google_fonts_was_enabled = !empty($previous_settings['googleFontsLocalOptimizationEnabled']);
+            $google_fonts_urls_changed = (string) ($current_settings['googleFontsAdditionalScanUrls'] ?? '') !== (string) ($previous_settings['googleFontsAdditionalScanUrls'] ?? '');
+            if ($google_fonts_enabled_now && (!$google_fonts_was_enabled || $google_fonts_urls_changed)) {
+                $google_fonts_job = array(
+                    'success' => true,
+                    'queued'  => false,
+                    'message' => 'Google Fonts settings saved. Use the Rebuild Google Fonts Cache button or wp ultracache google_fonts_rebuild --clear to rebuild the local font cache.',
+                );
+            }
+
+            $payload = array(
                 'success'     => true,
                 'settings'    => self::get_dashboard_settings_for_client(),
                 'stats'       => self::get_engine_stats(),
                 'diagnostics' => self::get_dashboard_diagnostics(),
             );
+            if (is_array($google_fonts_job)) {
+                $payload['googleFonts'] = $google_fonts_job;
+            }
+
+            return $payload;
         }
-
-
         private static function get_browser_cache_htaccess_path()
         {
             return trailingslashit(ABSPATH) . '.htaccess';
@@ -5414,6 +5433,38 @@ public static function delete_all_plugin_data_and_deactivate()
         }
 
 
+        private static function get_google_fonts_cache_diagnostics()
+        {
+            $fallback = array(
+                'enabled' => false,
+                'built' => false,
+                'cssFiles' => 0,
+                'fontFiles' => 0,
+                'totalFiles' => 0,
+                'bytes' => 0,
+                'lastBuilt' => 0,
+                'message' => 'Google Fonts cache status unavailable.',
+            );
+
+            if (!class_exists('Ultra_Cache_Engine')) {
+                return $fallback;
+            }
+
+            try {
+                $engine = new Ultra_Cache_Engine();
+                if (method_exists($engine, 'get_google_fonts_cache_summary')) {
+                    $summary = $engine->get_google_fonts_cache_summary();
+                    return is_array($summary) ? array_merge($fallback, $summary) : $fallback;
+                }
+            } catch (Throwable $e) {
+                $fallback['message'] = $e->getMessage();
+            } catch (Exception $e) {
+                $fallback['message'] = $e->getMessage();
+            }
+
+            return $fallback;
+        }
+
         public static function get_dashboard_diagnostics()
         {
             $settings             = self::get_dashboard_settings();
@@ -5524,6 +5575,7 @@ public static function delete_all_plugin_data_and_deactivate()
                     'serverDefault' => self::get_frontend_compression_probe_status(),
                 ),
                 'wpCache' => self::get_wp_cache_define_status(),
+                'googleFonts' => self::get_google_fonts_cache_diagnostics(),
                 'browserCache' => array(
                     'enabled' => !empty($settings['browserCacheRulesEnabled']),
                     'path'    => $browser_cache_path,

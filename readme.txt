@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp, apcu
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.56.37
+Stable tag: 2.56.43
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -103,17 +103,49 @@ UltraCache now prefers WordPress `WP_HTML_Tag_Processor` for many tag/attribute 
 8. Review Diagnostics for page cache, object cache backend, analytics backend, OPcache/APCu cards, CSS Bundle Summary, and generated drop-in versions.
 
 == Changelog ==
+- 2.56.43: Adds Google Fonts cache status diagnostics, removes remote Google Fonts DNS/preconnect hints after successful local rewrite, and keeps rebuilds dashboard/WP-CLI controlled only.
+- 2.56.40: Hardens the 2.56.39 Google Fonts admin-scan workflow by making legacy live-build queues/events cleanup-only, keeping frontend missing-font handling read-only, and preserving the page-cache stampede lock behavior.
+- 2.56.39: Adds page-cache stampede protection for cold concurrent requests, keeps Google Fonts rebuilding manual/admin-controlled without frontend live builds, and avoids leaving server-cron-only Google Fonts rebuild events after settings save.
+- 2.56.38: Moves Local Google Fonts Optimization to a controlled admin/save/manual-rebuild scan pipeline, stops frontend Google Fonts build/queue behavior, adds Additional URLs for scanning, and preserves the Google Fonts cache during Flush All Cache.
+- 2.56.36: Keeps the 2.56.35 canonical Google Fonts fix, but frontend/loopback requests now only reuse existing local font CSS and queue missing fonts for WP-CLI/server cron without synchronous downloads.
+- 2.56.34: Coalesced Google Fonts background builds into a single queue/runner and made the runtime self-hosted font CSS map non-blocking on frontend requests.
 
-= 2.56.37 =
-* Added Warm Homepage Google Fonts and Warm Menu Google Fonts dashboard jobs for immediate backend local font builds on sites with delayed server cron.
-* Google Fonts warm actions scan frontend HTML from backend loopbacks, build local CSS/WOFF2 files under one lock, clear built queue entries, and refresh page-cache URLs when Page Cache is enabled.
-* Frontend Google Fonts localization remains non-blocking; first visits keep original Google Fonts URLs until server cron or the warm buttons build local files.
-* Added dashboard help text explaining that homepage font warm-up is usually enough, while menu font warm-up can discover additional inner-page fonts.
+= 2.56.43 =
+
+* Added Google Fonts cache status diagnostics for stylesheet/font counts and built/not-built messaging.
+* Removed remote Google Fonts dns-prefetch/preconnect hints from cached HTML once the stylesheet is successfully rewritten to the local UltraCache Google Fonts cache.
+* Kept Google Fonts cache generation explicit-only through the dashboard rebuild button or wp ultracache google_fonts_rebuild --clear.
+* Flush All Cache continues to preserve the local Google Fonts cache.
+
+= 2.56.40 =
+* Frontend Google Fonts rewriting is read-only when local files are missing: it keeps the original Google Fonts URL and never creates legacy live-build queue data.
+* Kept the validated 2.56.39 page-cache stampede lock behavior and the controlled dashboard/WP-CLI rebuild workflow.
+
+= 2.56.39 =
+* Added cold page-cache generation stampede protection so concurrent first hits wait for the first generated HTML cache instead of all rendering/storing independently.
+* Settings save no longer depends on WP-Cron for Google Fonts cache rebuild; dashboard button/WP-CLI remain the controlled build paths.
+
+= 2.56.38 =
+* Local Google Fonts Optimization no longer discovers, queues, downloads, or builds Google Fonts assets from live frontend requests. Frontend HTML only rewrites Google Fonts links when the local CSS file already exists; otherwise it keeps the original Google Fonts URL intact.
+* Enabling Local Google Fonts Optimization queues a homepage scan through the admin/server-cron path, not through the frontend request path.
+* Added Advanced Settings & Exclusions -> Additional URLs for Google Fonts scanning with Save Google Fonts URLs and Rebuild Google Fonts Cache controls.
+* Rebuild Google Fonts Cache scans the homepage plus configured local URLs, clears/rebuilds only the Google Fonts cache, and downloads the discovered CSS/WOFF assets under wp-content/cache/ultracache/google-fonts/.
+* Flush All Cache now preserves wp-content/cache/ultracache/google-fonts/ so local font files are not thrown away during normal page-cache purges.
 
 = 2.56.36 =
-* Emergency frontend/admin CSS safety: Google Fonts local optimization no longer rewrites wp-admin stylesheet URLs and no longer blocks page-cache storage while a background font build is pending.
-* Canonicalized protocol-relative Google Fonts URLs before hashing/queuing and added a schedule lock to prevent duplicate background font build events.
-* Coalesced Google Fonts background builds into a single queue/runner and made the runtime self-hosted font CSS map non-blocking on frontend requests.
+
+* Kept the 2.56.35 canonical Google Fonts URL/hash behavior.
+* Frontend and internal loopback requests now only reuse already-built local Google Fonts CSS; missing font CSS is queued for the real cron/WP-CLI runner instead of being downloaded during the page request.
+* Added a short schedule lock so cold concurrency does not create duplicate Google Fonts build events.
+* Left original Google Fonts URLs as fallback until the local files exist, so CSS integrity is preserved.
+
+* Fixed the protocol-relative Google Fonts root cause where //fonts.googleapis.com/... and https://fonts.googleapis.com/... were treated as different hashes.
+* Prevented google-fonts-pending from blocking page-cache storage; local font generation now stays best-effort and the frontend keeps the valid Google Fonts fallback.
+* Kept the 2.56.34 baseline behavior and did not carry over the later experimental frontend CSS branches.
+
+= 2.56.34 =
+* Coalesced Google Fonts background builds into a single queue/runner.
+* Made the runtime self-hosted font CSS map non-blocking on frontend requests.
 
 = 2.56.28 =
 * Added single-flight transient locks for Google Fonts CSS and font binary localization to prevent frontend PHP-FPM worker floods during cold cache generation.
@@ -203,8 +235,14 @@ UltraCache now prefers WordPress `WP_HTML_Tag_Processor` for many tag/attribute 
 
 == Upgrade Notice ==
 
-= 2.56.37 =
-Adds backend Google Fonts warm buttons so sites with delayed server cron can build local font files immediately without blocking frontend requests.
+= 2.56.36 =
+
+* Kept the 2.56.35 canonical Google Fonts URL/hash behavior.
+* Frontend and internal loopback requests now only reuse already-built local Google Fonts CSS; missing font CSS is queued for the real cron/WP-CLI runner instead of being downloaded during the page request.
+* Added a short schedule lock so cold concurrency does not create duplicate Google Fonts build events.
+* Left original Google Fonts URLs as fallback until the local files exist, so CSS integrity is preserved.
+
+Fixes protocol-relative Google Fonts hash mismatches and stops pending local font builds from blocking page-cache storage.
 
 = 2.56.27 =
 Heavy dashboard actions and CSS/frontpage bundle generation are now single-flight locked to prevent PHP worker floods from stale or parallel dashboard jobs.

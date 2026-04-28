@@ -337,6 +337,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'objectCacheBackend',
                 'cssBundleScope',
                 'cacheQueryStringAllowlist',
+                'googleFontsAdditionalScanUrls',
                 'redisHost',
                 'redisPassword',
                 'redisPrefix',
@@ -1499,6 +1500,36 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
             WP_CLI::success((string) ($result['message'] ?? 'Object cache flushed.'));
         }
 
+
+        /**
+         * Rebuild the local Google Fonts cache from the homepage and configured extra scan URLs.
+         *
+         * ## OPTIONS
+         *
+         * [--clear]
+         * : Clear existing local Google Fonts CSS/WOFF files before rebuilding.
+         */
+        public function google_fonts_rebuild($args, $assoc_args)
+        {
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'rebuild_google_fonts_cache_from_scan_urls')) {
+                WP_CLI::error('Google Fonts rebuild helper is not available.');
+            }
+
+            $result = $engine->rebuild_google_fonts_cache_from_scan_urls(array(), !empty($assoc_args['clear']), 'wp-cli');
+            if (empty($result['success'])) {
+                WP_CLI::error(!empty($result['message']) ? (string) $result['message'] : 'Google Fonts rebuild failed.');
+            }
+
+            WP_CLI::log(sprintf(
+                'Scanned URLs: %d, Google Fonts URLs: %d, built: %d, failed: %d.',
+                (int) ($result['scannedUrls'] ?? 0),
+                (int) ($result['fontUrls'] ?? 0),
+                (int) ($result['built'] ?? 0),
+                (int) ($result['failed'] ?? 0)
+            ));
+            WP_CLI::success(!empty($result['message']) ? (string) $result['message'] : 'Google Fonts cache rebuilt.');
+        }
 
         /**
          * Run the scheduled cleanup job immediately.
