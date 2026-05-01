@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.121
+ * Version: 2.56.122
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.121');
+    define('UCWP_VERSION', '2.56.122');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -4154,6 +4154,21 @@ if (!class_exists('Ultra_Cache_WP')) {
                 update_option(UCWP_CRON_WARM_STATE_KEY, $state);
             }
             return $state;
+        }
+
+        public static function reset_cron_warmup_queue_after_cache_flush($reason = 'cache_flush')
+        {
+            $state = self::get_default_cron_warm_state();
+            $state['active'] = false;
+            $state['stopped'] = true;
+            $state['completed'] = false;
+            $state['stopReason'] = sanitize_key((string) $reason);
+            $state['finishedAt'] = time();
+            $state['updatedAt'] = time();
+            $state['lastMessage'] = self::maybe_translate('Cron warm up queue reset after cache flush.');
+            self::save_cron_warm_state($state);
+            self::unschedule_cron_warm_events();
+            return self::get_cron_warm_status();
         }
 
         private static function schedule_next_cron_warm_tick($delay_seconds = 5)

@@ -1196,14 +1196,22 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
-            $this->maybe_serve_cache_file_path($file_path, 'HIT', $reason);
-            return true;
+            return $this->maybe_serve_cache_file_path($file_path, 'HIT', $reason);
         }
 
         private function maybe_serve_cache_file_path($file_path, $status = 'HIT', $reason = '')
         {
             $file_path = (string) $file_path;
             if ('' === $file_path || !is_readable($file_path)) {
+                return false;
+            }
+
+            $html = ucwp_safe_file_get_contents($file_path);
+            if (!is_string($html) || '' === $html) {
+                return false;
+            }
+
+            if (!$this->validate_cached_html_css_bundle_refs($html, $file_path)) {
                 return false;
             }
 
@@ -1223,8 +1231,78 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             $this->record_analytics_hit();
-            readfile($file_path);
+            echo $html;
             return true;
+        }
+
+        private function validate_cached_html_css_bundle_refs($html, $cache_file = '')
+        {
+            $html = (string) $html;
+            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+                return true;
+            }
+
+            $missing = $this->get_missing_css_bundle_refs_from_html($html);
+            if (empty($missing)) {
+                return true;
+            }
+
+            $cache_file = (string) $cache_file;
+            if ('' !== $cache_file) {
+                ucwp_safe_unlink($cache_file);
+                ucwp_safe_unlink($cache_file . '.gz');
+                ucwp_safe_unlink($cache_file . '.br');
+            }
+
+            $this->record_cache_event('stale-css-bundle-html-invalidated', array(
+                'file' => $cache_file,
+                'missing' => array_slice(array_values($missing), 0, 20),
+                'missing_count' => count($missing),
+            ));
+
+            if (!headers_sent()) {
+                header('X-Ultra-Cache-Stale-CSS-Bundle: invalidated');
+            }
+
+            return false;
+        }
+
+        private function get_missing_css_bundle_refs_from_html($html)
+        {
+            $html = (string) $html;
+            $missing = array();
+            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+                return $missing;
+            }
+
+            preg_match_all('#(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s\"\'<>?#)]+\.css#i', $html, $absolute_matches);
+            preg_match_all('#/wp-content/cache/ultracache/css-bundles/[^\s\"\'<>?#)]+\.css#i', $html, $path_matches);
+
+            $refs = array_merge(
+                isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
+                isset($path_matches[0]) && is_array($path_matches[0]) ? $path_matches[0] : array()
+            );
+
+            $refs = array_values(array_unique(array_map('strval', $refs)));
+            $bundle_dir = wp_normalize_path($this->get_frontpage_css_dir());
+            foreach ($refs as $ref) {
+                $path = (string) wp_parse_url($ref, PHP_URL_PATH);
+                if ('' === $path) {
+                    $path = $ref;
+                }
+                $basename = basename(rawurldecode($path));
+                if ('' === $basename || false === preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                    continue;
+                }
+
+                $file = wp_normalize_path($bundle_dir . $basename);
+                clearstatcache(true, $file);
+                if (!is_readable($file) || filesize($file) <= 0) {
+                    $missing[$basename] = $basename;
+                }
+            }
+
+            return array_values($missing);
         }
 
         public function cache_output_callback($html)
@@ -1308,6 +1386,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
             if ($this->page_cache_variant_cap_reached($file_path)) {
                 $this->record_cache_event('variant-cap', array('file' => $file_path));
+                return false;
+            }
+
+            if (!$this->validate_cached_html_css_bundle_refs($html, '')) {
+                $this->record_cache_event('skip-store-missing-css-bundle-ref', array('file' => $file_path));
                 return false;
             }
 
@@ -3539,7 +3622,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
         private function should_native_defer_all_local_script($src, array $settings = array())
         {
             /*
-             * 2.56.121 regression guard: 2.56.120 bypassed the ordered
+             * 2.56.122 regression guard: 2.56.120 bypassed the ordered
              * delayed-loader for every same-host script when Defer all JS was
              * enabled. That broke grouped inline-before / inline-after config
              * scripts for Complianz, Site Kit, WooCommerce and similar assets.
@@ -14379,7 +14462,13 @@ HTML;
             if (!is_dir($dir)) {
                 wp_mkdir_p($dir);
             }
-            ucwp_safe_file_put_contents($this->get_frontpage_css_manifest_file(), wp_json_encode($manifest), LOCK_EX);
+
+            $json = wp_json_encode($manifest);
+            if (!is_string($json)) {
+                return false;
+            }
+
+            return $this->write_cache_variant_atomically($this->get_frontpage_css_manifest_file(), $json);
         }
 
         private function get_frontpage_css_manifest_bundle_files(array $manifest)
@@ -14414,6 +14503,59 @@ HTML;
             return $active;
         }
 
+        private function get_css_bundle_cleanup_grace_seconds()
+        {
+            $seconds = (int) apply_filters('ucwp_css_bundle_cleanup_grace_seconds', 172800);
+            return max(3600, min(604800, $seconds));
+        }
+
+        private function get_css_bundle_cleanup_max_deletes_per_run()
+        {
+            $max = (int) apply_filters('ucwp_css_bundle_cleanup_max_deletes_per_run', 60);
+            return max(5, min(500, $max));
+        }
+
+        private function is_css_bundle_file_recently_protected($file)
+        {
+            $file = (string) $file;
+            if ('' === $file || !is_file($file)) {
+                return false;
+            }
+
+            $mtime = (int) filemtime($file);
+            if ($mtime <= 0) {
+                return true;
+            }
+
+            return (time() - $mtime) < $this->get_css_bundle_cleanup_grace_seconds();
+        }
+
+        private function get_css_bundle_pair_basename($basename)
+        {
+            $basename = (string) $basename;
+            if ('' === $basename) {
+                return '';
+            }
+
+            return (string) preg_replace('/-delayed-fonts\.css$/i', '.css', $basename);
+        }
+
+        private function normalize_css_bundle_entry_for_manifest(array $entry)
+        {
+            if (empty($entry['bundleFile']) || !is_readable((string) $entry['bundleFile']) || filesize((string) $entry['bundleFile']) <= 0) {
+                return array();
+            }
+
+            if (!empty($entry['delayedFontUrl']) || !empty($entry['delayedFontFile']) || !empty($entry['delayedFontFaceBlocks'])) {
+                $delayed_file = isset($entry['delayedFontFile']) ? (string) $entry['delayedFontFile'] : '';
+                if ('' === $delayed_file || !is_readable($delayed_file) || filesize($delayed_file) <= 0) {
+                    return array();
+                }
+            }
+
+            return $entry;
+        }
+
         private function cleanup_orphan_frontpage_css_bundles(array $manifest)
         {
             $dir = $this->get_frontpage_css_dir();
@@ -14423,27 +14565,49 @@ HTML;
 
             $active = $this->get_frontpage_css_manifest_bundle_files($manifest);
             $deleted = 0;
-            foreach ((array) glob(trailingslashit($dir) . '*.css') as $file) {
+            $max_deletes = $this->get_css_bundle_cleanup_max_deletes_per_run();
+            $files = (array) glob(trailingslashit($dir) . '*.css');
+
+            foreach ($files as $file) {
                 $file = (string) $file;
                 if ('' === $file || !is_file($file)) {
                     continue;
                 }
-                if (isset($active[basename($file)])) {
+
+                $basename = basename($file);
+                $pair_basename = $this->get_css_bundle_pair_basename($basename);
+                if (isset($active[$basename]) || ('' !== $pair_basename && isset($active[$pair_basename]))) {
                     continue;
                 }
+
+                // Proxy-stale-safe lifecycle: Varnish/browser/CDN can still serve older cached HTML
+                // after the manifest changed. Keep recent bundle files around long enough for stale
+                // HTML refs to keep working instead of returning 404 and breaking CSS.
+                if ($this->is_css_bundle_file_recently_protected($file)) {
+                    continue;
+                }
+
                 if (ucwp_safe_unlink($file)) {
                     $deleted++;
+                }
+
+                if ($deleted >= $max_deletes) {
+                    break;
                 }
             }
 
             if ($deleted > 0) {
-                $this->record_cache_event('page-css-bundle-cleanup', array('deleted' => $deleted));
+                $this->record_cache_event('page-css-bundle-cleanup', array(
+                    'deleted' => $deleted,
+                    'max' => $max_deletes,
+                    'grace_seconds' => $this->get_css_bundle_cleanup_grace_seconds(),
+                ));
             }
 
             return $deleted;
         }
 
-        private function delete_all_frontpage_css_bundle_files()
+        private function delete_all_frontpage_css_bundle_files($force = false)
         {
             $dir = $this->get_frontpage_css_dir();
             if (!is_dir($dir) || !is_readable($dir)) {
@@ -14451,10 +14615,20 @@ HTML;
             }
 
             $deleted = 0;
+            $max_deletes = $force ? PHP_INT_MAX : $this->get_css_bundle_cleanup_max_deletes_per_run();
             foreach ((array) glob(trailingslashit($dir) . '*.css') as $file) {
                 $file = (string) $file;
-                if ('' !== $file && is_file($file) && ucwp_safe_unlink($file)) {
+                if ('' === $file || !is_file($file)) {
+                    continue;
+                }
+                if (!$force && $this->is_css_bundle_file_recently_protected($file)) {
+                    continue;
+                }
+                if (ucwp_safe_unlink($file)) {
                     $deleted++;
+                }
+                if ($deleted >= $max_deletes) {
+                    break;
                 }
             }
             return $deleted;
@@ -14479,7 +14653,8 @@ HTML;
                 $entry = $manifest['entry'];
             }
 
-            if (empty($entry['bundleFile']) || !file_exists((string) $entry['bundleFile']) || !is_readable((string) $entry['bundleFile'])) {
+            $entry = $this->normalize_css_bundle_entry_for_manifest($entry);
+            if (empty($entry)) {
                 return array();
             }
             if (empty($entry['bundleUrl']) || empty($entry['sourceUrls']) || !is_array($entry['sourceUrls'])) {
@@ -14506,7 +14681,9 @@ HTML;
                 return;
             }
 
-            $this->delete_all_frontpage_css_bundle_files();
+            // Do not remove recent CSS bundles immediately on purge/flush: reverse proxies can
+            // still serve stale HTML that references those files. Cleanup will remove aged files.
+            $this->delete_all_frontpage_css_bundle_files(false);
 
             $file = $this->get_frontpage_css_manifest_file();
             if (file_exists($file)) {
@@ -15305,7 +15482,7 @@ HTML;
             $filename = 'bundle-' . $mode . '-' . $signature . '.css';
             $file = $dir . $filename;
             if (!file_exists($file) || md5_file($file) !== $content_hash) {
-                ucwp_safe_file_put_contents($file, $bundle_content, LOCK_EX);
+                $this->write_cache_variant_atomically($file, $bundle_content);
             }
 
             $delayed_font_file = '';
@@ -15317,7 +15494,7 @@ HTML;
                 $delayed_font_filename = 'bundle-' . $mode . '-' . $signature . '-delayed-fonts.css';
                 $delayed_font_file = $dir . $delayed_font_filename;
                 if (!file_exists($delayed_font_file) || md5_file($delayed_font_file) !== $delayed_font_hash) {
-                    ucwp_safe_file_put_contents($delayed_font_file, $delayed_font_content, LOCK_EX);
+                    $this->write_cache_variant_atomically($delayed_font_file, $delayed_font_content);
                 }
                 $delayed_font_bytes = is_readable($delayed_font_file) ? (int) filesize($delayed_font_file) : strlen($delayed_font_content);
                 $delayed_font_url = home_url('/wp-content/cache/ultracache/css-bundles/' . rawurlencode($delayed_font_filename));
@@ -16071,7 +16248,7 @@ HTML;
             }
 
             foreach ($items as $item) {
-                if ('.' === $item || '..' === $item || 'google-fonts' === $item) {
+                if ('.' === $item || '..' === $item || 'google-fonts' === $item || 'css-bundles' === $item) {
                     continue;
                 }
 
@@ -16096,6 +16273,9 @@ HTML;
                 self::ensure_cache_directories();
                 if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'sync_runtime_config')) {
                     Ultra_Cache_WP::sync_runtime_config();
+                }
+                if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'reset_cron_warmup_queue_after_cache_flush')) {
+                    Ultra_Cache_WP::reset_cron_warmup_queue_after_cache_flush('purge_all');
                 }
                 $this->delete_frontpage_css_bundle();
                 $this->invalidate_dashboard_cache_activity_snapshot();

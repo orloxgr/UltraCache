@@ -13,7 +13,7 @@ UltraCache is a production-oriented WordPress performance plugin focused on page
 
 ## Current build
 
-- Version: `2.56.121`
+- Version: `2.56.122`
 - Build type: Full CSS Bundle mode and CSS delivery controls
 - Runtime focus: CSS Bundle Mode now supports Safe, Aggressive, and Full CSS Bundle while preserving the lightweight SR7 LCP preload helper and strong safe-third-party delay behavior.
 - Default behavior: Flush All Cache preserves the Google Fonts cache; Google Fonts are rebuilt only from the dashboard button or WP-CLI.
@@ -200,7 +200,7 @@ Check:
 
 ## Changelog
 
-### 2.56.121
+### 2.56.122
 - Regression fix: restores the dependency-aware ordered delayed-loader path for same-host scripts instead of forcing native `defer` for every local asset.
 - Prevents grouped inline-before / inline-after configs from running out of order for integrations such as Complianz, Google Site Kit, WooCommerce and similar scripts.
 - Keeps **JS Delay / Defer Exclusions** and hard dependency blockers as the final priority.

@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp, apcu
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.56.121
+Stable tag: 2.56.122
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -104,7 +104,7 @@ UltraCache now prefers WordPress `WP_HTML_Tag_Processor` for many tag/attribute 
 
 == Changelog ==
 
-= 2.56.121 =
+= 2.56.122 =
 * Regression fix: restores the dependency-aware ordered delayed-loader path for same-host scripts instead of forcing native defer for every local asset.
 * Prevents grouped inline-before / inline-after configs from running out of order for integrations such as Complianz, Google Site Kit, WooCommerce and similar scripts.
 * Keeps JS Delay / Defer Exclusions and hard dependency blockers as the final priority.
