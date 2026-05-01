@@ -113,6 +113,7 @@ if (!class_exists('WP_Object_Cache')) {
 			'misses' => 0,
 		);
 		private $selected_backend = __UCWP_SELECTED_BACKEND__;
+		private $fallback_backend_policy = __UCWP_FALLBACK_BACKEND__;
 		private $metrics_enabled = __UCWP_CACHE_STATS_ENABLED__;
 		private $active_backend = 'runtime';
 		private $redis = null;
@@ -154,7 +155,8 @@ if (!class_exists('WP_Object_Cache')) {
 
 		public function get_backend_status() {
 			$fallback_active = ('redis' === (string) $this->selected_backend && 'redis' !== (string) $this->active_backend);
-			$fallback_backend = $fallback_active ? (string) $this->active_backend : ($this->apcu_available() ? 'apcu' : 'runtime');
+			$configured_fallback = $this->sanitize_fallback_backend($this->fallback_backend_policy);
+			$fallback_backend = $fallback_active ? (string) $this->active_backend : ('none' === $configured_fallback ? 'runtime' : $configured_fallback);
 			$fallback_reason = '';
 			$fallback_message = '';
 			if ($fallback_active) {
@@ -166,6 +168,7 @@ if (!class_exists('WP_Object_Cache')) {
 			return array(
 				'selected' => (string) $this->selected_backend,
 				'active'   => (string) $this->active_backend,
+				'configuredFallback' => $configured_fallback,
 				'fallback' => (string) $fallback_backend,
 				'fallbackActive' => (bool) $fallback_active,
 				'fallbackReason' => $fallback_reason,
@@ -191,16 +194,22 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function load_redis_secret_config() {
 			$config = is_string($this->redis_secret_config) ? trim($this->redis_secret_config) : '';
-			if ('' === $config || !is_string($this->cache_dir)) {
+			if ('' === $config) {
 				return;
 			}
 
-			$base = rtrim((string) $this->cache_dir, '/\\');
-			if (!$this->is_path_within_base($config, $base, true)) {
-				return;
+			$allowed = false;
+			$cache_base = is_string($this->cache_dir) ? rtrim((string) $this->cache_dir, '/\\') : '';
+			if ('' !== $cache_base && $this->is_path_within_base($config, $cache_base, true)) {
+				$allowed = true;
 			}
 
-			if (!is_readable($config)) {
+			$runtime_base = defined('ABSPATH') ? dirname(rtrim((string) ABSPATH, '/\\')) : '';
+			if (!$allowed && is_string($runtime_base) && '' !== trim($runtime_base) && '.' !== $runtime_base && '/' !== $runtime_base && $this->is_path_within_base($config, $runtime_base, true)) {
+				$allowed = true;
+			}
+
+			if (!$allowed || !is_readable($config)) {
 				return;
 			}
 
@@ -214,8 +223,17 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 		}
 
+		private function sanitize_fallback_backend($value) {
+			$value = strtolower(trim((string) $value));
+			if ('none' === $value || 'runtime' === $value || '' === $value) {
+				return 'none';
+			}
+			return in_array($value, array('apcu', 'disk'), true) ? $value : 'apcu';
+		}
+
 		private function bootstrap_backend() {
 			$this->active_backend = 'runtime';
+			$this->fallback_backend_policy = $this->sanitize_fallback_backend($this->fallback_backend_policy);
 			$this->apcu_prefix = $this->build_apcu_prefix();
 
 			if ('redis' === $this->selected_backend) {
@@ -224,11 +242,14 @@ if (!class_exists('WP_Object_Cache')) {
 					return;
 				}
 
-				// Redis is preferred, but APCu is the safe local fallback. Do not
-				// silently fall back to Disk because it can create thousands of files.
-				if ($this->bootstrap_apcu_backend()) {
+				if ('apcu' === $this->fallback_backend_policy && $this->bootstrap_apcu_backend()) {
 					return;
 				}
+				if ('disk' === $this->fallback_backend_policy) {
+					$this->active_backend = 'disk';
+					return;
+				}
+				// None/runtime fallback keeps only request-local runtime cache.
 				return;
 			}
 

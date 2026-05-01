@@ -58,6 +58,19 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			return in_array($backend, array('redis', 'apcu', 'disk'), true) ? $backend : 'redis';
 		}
 
+		private static function sanitize_fallback_backend($value) {
+			$value = strtolower(trim((string) $value));
+			if ('none' === $value || 'runtime' === $value || '' === $value) {
+				return 'none';
+			}
+			return in_array($value, array('apcu', 'disk'), true) ? $value : 'apcu';
+		}
+
+		public static function get_selected_fallback_backend() {
+			$settings = self::get_plugin_settings();
+			return self::sanitize_fallback_backend($settings['object_cache_fallback_backend'] ?? 'apcu');
+		}
+
 		public static function get_active_backend() {
 			$status = self::get_backend_status();
 			$backend = isset($status['active']) ? (string) $status['active'] : '';
@@ -67,10 +80,12 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		public static function get_backend_status() {
 			$selected = self::get_selected_backend();
 			$active = $selected;
+			$selected_fallback = self::get_selected_fallback_backend();
 			$status = array(
 				'selected' => $selected,
 				'active' => $active,
-				'fallback' => 'apcu',
+				'configuredFallback' => $selected_fallback,
+				'fallback' => ('none' === $selected_fallback ? 'runtime' : $selected_fallback),
 				'fallbackActive' => false,
 				'fallbackReason' => '',
 				'fallbackMessage' => '',
@@ -108,7 +123,9 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			$status['selected'] = in_array((string) ($status['selected'] ?? ''), array('redis', 'apcu', 'disk'), true) ? (string) $status['selected'] : $selected;
 			$status['active'] = in_array((string) ($status['active'] ?? ''), array('redis', 'apcu', 'disk', 'runtime'), true) ? (string) $status['active'] : $selected;
 			$status['fallbackActive'] = ('redis' === $status['selected'] && 'redis' !== $status['active']);
-			$status['fallback'] = $status['fallbackActive'] ? (string) $status['active'] : (!empty($status['apcu']['available']) ? 'apcu' : 'runtime');
+			$configured_fallback = self::sanitize_fallback_backend($status['configuredFallback'] ?? $selected_fallback);
+			$status['configuredFallback'] = $configured_fallback;
+			$status['fallback'] = $status['fallbackActive'] ? (string) $status['active'] : ('none' === $configured_fallback ? 'runtime' : $configured_fallback);
 			if ($status['fallbackActive']) {
 				$redis_error = isset($status['redis']['error']) ? trim((string) $status['redis']['error']) : '';
 				$fallback_label = 'apcu' === (string) $status['fallback'] ? 'APCu' : ('runtime' === (string) $status['fallback'] ? 'runtime-only' : strtoupper((string) $status['fallback']));
@@ -194,8 +211,92 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			return $status;
 		}
 
+		private static function get_runtime_secret_site_token() {
+			$site_root = defined('ABSPATH') ? wp_normalize_path(untrailingslashit(ABSPATH)) : '';
+			$token = '' !== $site_root ? wp_basename($site_root) : 'site';
+			$token = is_string($token) ? strtolower($token) : '';
+			$token = preg_replace('/[^a-z0-9._-]+/', '-', $token);
+			$token = trim((string) $token, '.-_');
+			return '' !== $token ? $token : 'site';
+		}
+
+		private static function get_runtime_secret_path() {
+			$base = defined('ABSPATH') ? dirname(untrailingslashit(ABSPATH)) : '';
+			if (!is_string($base) || '' === trim($base) || '.' === $base || '/' === $base) {
+				$base = defined('WP_CONTENT_DIR') ? dirname(untrailingslashit(WP_CONTENT_DIR)) : '';
+			}
+
+			return rtrim((string) $base, '/\\') . '/.' . self::get_runtime_secret_site_token() . '-ultracache-runtime-secrets.php';
+		}
+
 		private static function get_redis_secret_config_path() {
+			return self::get_runtime_secret_path();
+		}
+
+		private static function get_legacy_redis_secret_config_path() {
 			return trailingslashit(UCWP_OBJECT_CACHE_DIR) . '.redis-auth.php';
+		}
+
+		private static function normalize_runtime_secret_array(array $loaded) {
+			$varnish_admin_secret = '';
+			if (isset($loaded['varnish_admin_secret'])) {
+				$varnish_admin_secret = (string) $loaded['varnish_admin_secret'];
+			} elseif (isset($loaded['varnish_cli_key'])) {
+				$varnish_admin_secret = (string) $loaded['varnish_cli_key'];
+			}
+
+			return array(
+				'revalidate_secret' => isset($loaded['revalidate_secret']) ? (string) $loaded['revalidate_secret'] : '',
+				'redis_password' => isset($loaded['redis_password']) ? (string) $loaded['redis_password'] : '',
+				'varnish_admin_secret' => $varnish_admin_secret,
+			);
+		}
+
+		private static function load_runtime_secret_file($path = null) {
+			$candidates = array();
+			if (is_string($path) && '' !== trim($path)) {
+				$candidates[] = $path;
+			} else {
+				$candidates[] = self::get_runtime_secret_path();
+			}
+
+			foreach ($candidates as $candidate) {
+				if (!is_string($candidate) || '' === trim($candidate) || !file_exists($candidate) || !is_readable($candidate)) {
+					continue;
+				}
+				$loaded = require $candidate;
+				if (is_array($loaded)) {
+					return self::normalize_runtime_secret_array($loaded);
+				}
+			}
+
+			return array();
+		}
+
+		private static function render_runtime_secret_php(array $runtime) {
+			$runtime = self::normalize_runtime_secret_array($runtime);
+			$secret = isset($runtime['revalidate_secret']) ? (string) $runtime['revalidate_secret'] : '';
+			$redis_password = isset($runtime['redis_password']) ? (string) $runtime['redis_password'] : '';
+			$varnish_admin_secret = isset($runtime['varnish_admin_secret']) ? (string) $runtime['varnish_admin_secret'] : '';
+			return "<?php\n/** UltraCache managed runtime secrets. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn array(\n    'revalidate_secret' => " . ucwp_php_string_literal($secret) . ",\n    'redis_password' => " . ucwp_php_string_literal($redis_password) . ",\n    'varnish_admin_secret' => " . ucwp_php_string_literal($varnish_admin_secret) . ",\n);\n";
+		}
+
+		private static function write_runtime_secret_array(array $runtime) {
+			$path = self::get_runtime_secret_path();
+			$payload = self::render_runtime_secret_php($runtime);
+			$result = ucwp_safe_file_put_contents($path, $payload, LOCK_EX, 'object_cache_runtime_secret_write');
+			if (false === $result) {
+				return false;
+			}
+			self::apply_restrictive_file_permissions($path, 0600);
+			return true;
+		}
+
+		private static function remove_legacy_redis_secret_config() {
+			$legacy = self::get_legacy_redis_secret_config_path();
+			if (file_exists($legacy)) {
+				ucwp_safe_unlink($legacy, 'object_cache_legacy_secret_config_remove');
+			}
 		}
 
 		private static function apply_restrictive_file_permissions($path, $mode = 0600) {
@@ -215,52 +316,22 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				}
 			}
 
-
-			return false;
+			@chmod($path, $mode);
+			clearstatcache(true, $path);
+			$perms = (is_file($path) && is_readable($path)) ? fileperms($path) : false;
+			return false !== $perms && (($perms & 0777) === $mode);
 		}
 
 		private static function maybe_sync_redis_secret_config(array $settings) {
-			$config = self::get_redis_secret_config_path();
-			$backend = self::get_selected_backend();
-			$enabled = !empty($settings['object_cache_enabled']);
 			$password = isset($settings['redis_password']) ? (string) $settings['redis_password'] : '';
+			$runtime = self::load_runtime_secret_file();
+			$runtime['redis_password'] = trim((string) $password);
 
-			if (!$enabled || 'redis' !== $backend || '' === $password) {
-				if (file_exists($config)) {
-					ucwp_safe_unlink($config, 'object_cache_secret_config_remove');
-				}
-				return true;
-			}
-
-			$payload = "<?php
-";
-			$payload .= "/**
- * UltraCache generated Redis auth config for object-cache.php.
- * Safe to overwrite.
- */
-";
-			$payload .= "defined('ABSPATH') || exit;
-
-";
-			$payload .= "return array(
-";
-			$payload .= "	'redis_password' => " . ucwp_php_string_literal($password) . ",
-";
-			$payload .= ");
-";
-
-			$existing = file_exists($config) ? ucwp_safe_file_get_contents($config, 'object_cache_secret_config_read', true) : false;
-			if (is_string($existing) && $existing === $payload) {
-				self::apply_restrictive_file_permissions($config, 0600);
-				return true;
-			}
-
-			$result = ucwp_safe_file_put_contents($config, $payload, LOCK_EX, 'object_cache_secret_config_write');
-			if (false === $result) {
+			if (!self::write_runtime_secret_array($runtime)) {
 				return false;
 			}
 
-			self::apply_restrictive_file_permissions($config, 0600);
+			self::remove_legacy_redis_secret_config();
 			return true;
 		}
 
@@ -282,6 +353,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'__UCWP_DROPIN_BUILD__' => UCWP_VERSION,
 				'__UCWP_OBJECT_CACHE_DIR__' => ucwp_php_string_literal(UCWP_OBJECT_CACHE_DIR),
 				'__UCWP_SELECTED_BACKEND__' => ucwp_php_string_literal(self::get_selected_backend()),
+				'__UCWP_FALLBACK_BACKEND__' => ucwp_php_string_literal(self::get_selected_fallback_backend()),
 				'__UCWP_CACHE_STATS_ENABLED__' => !empty($settings['cache_stats_enabled']) ? 'true' : 'false',
 				'__UCWP_REDIS_SECRET_CONFIG__' => ucwp_php_string_literal(self::get_redis_secret_config_path()),
 				'__UCWP_REDIS_HOST__'       => ucwp_php_string_literal((string) ($settings['redis_host'] ?? '127.0.0.1')),
@@ -323,10 +395,10 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			if (self::is_our_dropin($dropin)) {
 				ucwp_safe_unlink($dropin, 'object_cache_dropin_remove');
 			}
-			$config = self::get_redis_secret_config_path();
-			if (file_exists($config)) {
-				ucwp_safe_unlink($config, 'object_cache_secret_config_remove');
-			}
+            $legacy_config = self::get_legacy_redis_secret_config_path();
+            if (file_exists($legacy_config)) {
+                ucwp_safe_unlink($legacy_config, 'object_cache_legacy_secret_config_remove');
+            }
 		}
 
 		public static function flush_cache($force_hard = false, $reset_plugin_state = true) {
@@ -701,6 +773,11 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			$selected_backend = isset($backend_status['selected']) ? (string) $backend_status['selected'] : self::get_selected_backend();
 			$active_backend = isset($backend_status['active']) ? (string) $backend_status['active'] : $selected_backend;
 			$fallback_active = !empty($backend_status['fallbackActive']);
+			$fallback_backend = isset($backend_status['fallback']) ? strtolower(trim((string) $backend_status['fallback'])) : '';
+			if (!in_array($fallback_backend, array('redis', 'apcu', 'disk', 'runtime'), true)) {
+				$fallback_backend = $fallback_active ? $active_backend : (!empty($backend_status['apcu']['available']) ? 'apcu' : 'runtime');
+			}
+			$fallback_message = isset($backend_status['fallbackMessage']) ? (string) $backend_status['fallbackMessage'] : '';
 
 			$disk_entries = 0;
 			$disk_bytes = 0;
@@ -768,11 +845,13 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'objectCacheBackend'      => $active_backend,
 				'objectCacheSelectedBackend' => $selected_backend,
 				'objectCacheActiveBackend' => $active_backend,
-				'objectCacheFallbackBackend' => 'apcu',
+				'objectCacheFallbackBackend' => $fallback_backend,
 				'objectCacheFallbackActive' => (bool) $fallback_active,
 				'objectCacheFallbackReason' => (string) ($backend_status['fallbackReason'] ?? ''),
+				'objectCacheFallbackMessage' => $fallback_message,
 				'objectCacheBackendStatus' => $backend_status,
 				'objectCacheStatsSource' => $active_backend,
+				'objectCacheStatsBackendLabel' => strtoupper((string) $active_backend),
 				'objectCacheEntries'      => $entry_count,
 				'objectCacheSizeBytes'    => $bytes,
 				'objectCacheSizeHuman'    => function_exists('size_format') ? size_format($bytes, 2) : (string) $bytes,
@@ -1093,7 +1172,6 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 
 			$preserve = array(
 				'index.php',
-				basename((string) self::get_redis_secret_config_path()),
 				'object-cache-metrics.json',
 			);
 
@@ -1156,13 +1234,16 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				return self::$plugin_settings_cache;
 			}
 
+            $runtime_secret = self::load_runtime_secret_file();
+            $runtime_redis_password = isset($runtime_secret['redis_password']) ? (string) $runtime_secret['redis_password'] : '';
 			self::$plugin_settings_cache = array(
 				'object_cache_enabled' => !empty($saved['objectCacheEnabled']),
 				'object_cache_backend' => !empty($saved['objectCacheBackend']) ? (string) $saved['objectCacheBackend'] : 'redis',
+				'object_cache_fallback_backend' => isset($saved['objectCacheFallbackBackend']) ? self::sanitize_fallback_backend($saved['objectCacheFallbackBackend']) : 'apcu',
 				'cache_stats_enabled'  => !empty($saved['cacheStatsEnabled']),
 				'redis_host'           => !empty($saved['redisHost']) ? (string) $saved['redisHost'] : '127.0.0.1',
 				'redis_port'           => isset($saved['redisPort']) ? absint($saved['redisPort']) : 6379,
-				'redis_password'       => isset($saved['redisPassword']) ? (string) $saved['redisPassword'] : '',
+				'redis_password'       => '' !== trim((string) $runtime_redis_password) ? (string) $runtime_redis_password : (isset($saved['redisPassword']) ? (string) $saved['redisPassword'] : ''),
 				'redis_database'       => isset($saved['redisDatabase']) ? absint($saved['redisDatabase']) : 0,
 				'redis_prefix'         => isset($saved['redisPrefix']) ? trim((string) $saved['redisPrefix']) : '',
 				'redis_use_tls'        => !empty($saved['redisUseTls']),

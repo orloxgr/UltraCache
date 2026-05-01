@@ -1401,3 +1401,28 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 		flex: 1 1 100%;
 	}
 }
+
+/* UltraCache 2.56.140 UI polish: keep warm cache actions vertical and space media counters. */
+.uc-warm-cache-actions {
+	display: flex !important;
+	flex-direction: column !important;
+	gap: 12px !important;
+}
+
+.uc-warm-cache-actions > .uc-btn,
+.uc-warm-cache-actions > button {
+	width: 100% !important;
+	flex: 0 0 auto !important;
+}
+
+.uc-media-operation-counters {
+	display: flex !important;
+	flex-wrap: wrap !important;
+	gap: 4px 14px !important;
+	align-items: center !important;
+}
+
+.uc-media-operation-counters > span {
+	display: inline-flex !important;
+	white-space: nowrap !important;
+}

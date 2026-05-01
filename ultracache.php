@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.122
+ * Version: 2.56.140
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.122');
+    define('UCWP_VERSION', '2.56.140');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -61,15 +61,62 @@ if (!defined('UCWP_OBJECT_CACHE_DIR')) {
     define('UCWP_OBJECT_CACHE_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/');
 }
 
+if (!function_exists('ucwp_redact_sensitive_debug_value')) {
+    function ucwp_redact_sensitive_debug_value($key, $value, $depth = 0)
+    {
+        $sensitive_key = preg_match('/(?:password|secret|token|key|authorization|cookie|nonce|auth|credential)/i', (string) $key);
+        if ($sensitive_key) {
+            return '[redacted]';
+        }
+
+        if ($depth > 4) {
+            return is_scalar($value) || null === $value ? $value : '[truncated]';
+        }
+
+        if (is_array($value)) {
+            $redacted = array();
+            foreach ($value as $child_key => $child_value) {
+                $redacted[$child_key] = ucwp_redact_sensitive_debug_value($child_key, $child_value, $depth + 1);
+            }
+            return $redacted;
+        }
+
+        if (is_string($value)) {
+            if (preg_match('/(?:password|secret|token|nonce|auth|credential)=([^&\s]+)/i', $value)) {
+                return preg_replace('/((?:password|secret|token|nonce|auth|credential)=)([^&\s]+)/i', '$1[redacted]', $value);
+            }
+            if (preg_match('/(?:bearer\s+|basic\s+)[a-z0-9._~+\/=:-]+/i', $value)) {
+                return '[redacted]';
+            }
+        }
+
+        return $value;
+    }
+}
+
+if (!function_exists('ucwp_redact_sensitive_debug_context')) {
+    function ucwp_redact_sensitive_debug_context(array $context)
+    {
+        $redacted = array();
+        foreach ($context as $key => $value) {
+            $redacted[$key] = ucwp_redact_sensitive_debug_value($key, $value, 0);
+        }
+        return $redacted;
+    }
+}
+
 if (!function_exists('ucwp_debug_log')) {
     function ucwp_debug_log($message, array $context = array())
     {
         /**
-         * Fires when UltraCache emits a debug event.
+         * Fires when UltraCache emits a debug event. Sensitive values are redacted before hooks receive the context.
          *
          * @param string $message Debug message.
          * @param array  $context Context data.
          */
+        if (function_exists('ucwp_redact_sensitive_debug_context')) {
+            $context = ucwp_redact_sensitive_debug_context($context);
+        }
         do_action('ucwp_debug_log', (string) $message, $context);
     }
 }
@@ -433,12 +480,27 @@ if (!function_exists('ucwp_request_profile_compact_stages')) {
             'template_redirect_start' => true,
             'maybe_start_buffering_start' => true,
             'maybe_start_buffering_reentry_return' => true,
+            'maybe_start_buffering_after_reentry_check' => true,
+            'maybe_start_buffering_before_should_bypass' => true,
             'maybe_start_buffering_after_should_bypass' => true,
             'bypass_selected' => true,
             'should_bypass_return' => true,
             'early_hit_check_start' => true,
+            'early_hit_check_end' => true,
+            'early_hit_no_file_return' => true,
             'early_hit_served' => true,
+            'page_generation_lock_before' => true,
+            'page_generation_lock_before_current_url' => true,
+            'page_generation_lock_after_current_url' => true,
+            'page_generation_lock_before_cache_path' => true,
+            'page_generation_lock_after_cache_path' => true,
+            'page_generation_lock_acquire_start' => true,
+            'page_generation_lock_acquired' => true,
             'page_generation_lock_checked' => true,
+            'record_analytics_miss_start' => true,
+            'record_analytics_miss_end' => true,
+            'send_debug_headers_start' => true,
+            'send_debug_headers_end' => true,
             'buffer_start' => true,
             'template_redirect_global_end' => true,
             'wp_head_start' => true,
@@ -1039,11 +1101,108 @@ if (!function_exists('ucwp_safe_file_put_contents')) {
     }
 }
 
+if (!function_exists('ucwp_normalize_filesystem_path_for_guard')) {
+    function ucwp_normalize_filesystem_path_for_guard($path)
+    {
+        $path = is_string($path) ? trim($path) : '';
+        if ('' === $path) {
+            return '';
+        }
+
+        $real = realpath($path);
+        if (false !== $real) {
+            return str_replace('\\', '/', $real);
+        }
+
+        $dir = dirname($path);
+        $base = basename($path);
+        $dir_real = realpath($dir);
+        if (false !== $dir_real) {
+            return rtrim(str_replace('\\', '/', $dir_real), '/') . '/' . $base;
+        }
+
+        return str_replace('\\', '/', $path);
+    }
+}
+
+if (!function_exists('ucwp_path_has_dir_prefix')) {
+    function ucwp_path_has_dir_prefix($path, $dir)
+    {
+        $path = ucwp_normalize_filesystem_path_for_guard($path);
+        $dir = ucwp_normalize_filesystem_path_for_guard($dir);
+        if ('' === $path || '' === $dir) {
+            return false;
+        }
+
+        $dir = rtrim($dir, '/') . '/';
+        return 0 === strpos($path, $dir) || rtrim($path, '/') === rtrim($dir, '/');
+    }
+}
+
+if (!function_exists('ucwp_is_allowed_destructive_path')) {
+    function ucwp_is_allowed_destructive_path($path, $context = '')
+    {
+        $normalized = ucwp_normalize_filesystem_path_for_guard($path);
+        if ('' === $normalized) {
+            return false;
+        }
+
+        $allowed_dirs = array();
+        foreach (array('UCWP_CACHE_DIR', 'UCWP_AVIF_DIR', 'UCWP_WEBP_DIR', 'UCWP_OBJECT_CACHE_DIR') as $constant) {
+            if (defined($constant)) {
+                $allowed_dirs[] = constant($constant);
+            }
+        }
+
+        foreach ($allowed_dirs as $dir) {
+            if (ucwp_path_has_dir_prefix($normalized, $dir)) {
+                return true;
+            }
+        }
+
+        $allowed_files = array();
+        if (defined('WP_CONTENT_DIR')) {
+            $allowed_files[] = trailingslashit(WP_CONTENT_DIR) . 'advanced-cache.php';
+            $allowed_files[] = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+            $allowed_files[] = trailingslashit(WP_CONTENT_DIR) . 'ultracache-runtime-secrets.php';
+            $allowed_files[] = trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-runtime-secrets.php';
+        }
+
+        foreach ($allowed_files as $file) {
+            if ($normalized === ucwp_normalize_filesystem_path_for_guard($file)) {
+                return true;
+            }
+        }
+
+        $base = basename($normalized);
+        $dir = dirname($normalized);
+
+        if (preg_match('/^wp-config-backup-\\d{8}-\\d{6}-[A-Za-z0-9]+\\.php$/', $base) && file_exists($dir . '/wp-config.php')) {
+            return true;
+        }
+
+        if (preg_match('/^wp-config\\.php\\.tmp-[A-Za-z0-9_.]+$/', $base) && file_exists($dir . '/wp-config.php')) {
+            return true;
+        }
+
+        if (false !== strpos((string) $context, 'runtime') && preg_match('/^(?:\\.[A-Za-z0-9_-]+-)?ultracache-runtime-secrets\\.php$/', $base)) {
+            return true;
+        }
+
+        return false;
+    }
+}
+
 if (!function_exists('ucwp_safe_unlink')) {
     function ucwp_safe_unlink($path, $context = '')
     {
         if (!file_exists($path)) {
             return true;
+        }
+
+        if (!ucwp_is_allowed_destructive_path($path, $context)) {
+            ucwp_debug_log('unlink blocked: path outside allowed roots', array('path' => $path, 'context' => (string) $context));
+            return false;
         }
 
         $filesystem = ucwp_get_wp_filesystem();
@@ -1198,6 +1357,11 @@ if (!function_exists('ucwp_safe_rmdir')) {
         $dir = is_string($dir) ? $dir : '';
         if ('' === $dir || !file_exists($dir)) {
             return true;
+        }
+
+        if (!ucwp_is_allowed_destructive_path($dir, $context)) {
+            ucwp_debug_log('rmdir blocked: path outside allowed roots', array('dir' => $dir, 'context' => (string) $context));
+            return false;
         }
 
         $filesystem = ucwp_get_wp_filesystem();
@@ -1574,6 +1738,8 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         /** @var array|null */
         private static $settings_cache = null;
+        /** @var bool Temporarily suppress automatic cron warm starts while scheduled cleanup purges cache. */
+        private static $suppress_after_purge_warm = false;
 
         public static function instance()
         {
@@ -2180,6 +2346,10 @@ if (!class_exists('Ultra_Cache_WP')) {
             self::sync_page_cache_bootstrap();
             self::sync_runtime_config();
             self::sync_scheduled_events();
+            $media = self::get_media_instance();
+            if ($media && method_exists($media, 'ensure_media_queue_table')) {
+                $media->ensure_media_queue_table();
+            }
             $browser_cache_sync = self::sync_browser_cache_rules();
             if (false === $browser_cache_sync) {
                 set_transient(
@@ -2259,6 +2429,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'pageCacheEnabled'           => false,
                 'objectCacheEnabled'         => false,
                 'objectCacheBackend'         => 'redis',
+                'objectCacheFallbackBackend' => 'apcu',
                 'redisHost'                  => '127.0.0.1',
                 'redisPort'                  => 6379,
                 'redisPassword'              => '',
@@ -2383,6 +2554,25 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'apply_coupon',
                 'remove_coupon',
                 'order_again',
+                '_wpnonce',
+                '_ajax_nonce',
+                'nonce',
+                'security',
+                'token',
+                'auth',
+                'auth_token',
+                'access_token',
+                'key',
+                'order_key',
+                'password',
+                'pass',
+                'pwd',
+                'redirect_to',
+                'customer-logout',
+                'logout',
+                'pay_for_order',
+                'cancel_order',
+                'download_file',
             );
         }
 
@@ -2802,6 +2992,15 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             $value = strtolower(trim((string) $value));
             return in_array($value, array('redis', 'apcu', 'disk'), true) ? $value : 'redis';
+        }
+
+        private static function sanitize_object_cache_fallback_backend($value)
+        {
+            $value = strtolower(trim((string) $value));
+            if ('none' === $value || 'runtime' === $value || '' === $value) {
+                return 'none';
+            }
+            return in_array($value, array('apcu', 'disk'), true) ? $value : 'apcu';
         }
 
         private static function sanitize_homepage_css_bundle_mode($value)
@@ -3266,6 +3465,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['criticalRequestChainDelayList'] = self::normalize_textarea_setting($settings['criticalRequestChainDelayList']);
             $settings['mediaOutputMode']           = self::sanitize_media_output_mode($settings['mediaOutputMode']);
             $settings['objectCacheBackend']        = self::sanitize_object_cache_backend($settings['objectCacheBackend']);
+            $settings['objectCacheFallbackBackend'] = self::sanitize_object_cache_fallback_backend($settings['objectCacheFallbackBackend'] ?? 'apcu');
             $settings['redisHost']                 = self::sanitize_redis_host($settings['redisHost']);
             $settings['redisPort']                 = self::sanitize_bounded_integer_setting($settings['redisPort'], $defaults['redisPort'], 1, 65535);
             $settings['redisPassword']             = trim((string) $settings['redisPassword']);
@@ -3374,6 +3574,16 @@ if (!class_exists('Ultra_Cache_WP')) {
             $raw_saved = is_array($saved) ? $saved : array();
             ucwp_request_profile_checkpoint('dashboard_settings_before_sanitize');
             $sanitized = self::sanitize_dashboard_settings($raw_saved);
+            self::migrate_stored_redis_secret_to_runtime_file($raw_saved, $sanitized);
+            self::migrate_stored_varnish_secret_to_runtime_file($raw_saved, $sanitized);
+            $runtime_redis_password = self::get_runtime_redis_password();
+            if ('' !== $runtime_redis_password) {
+                $sanitized['redisPassword'] = $runtime_redis_password;
+            }
+            $runtime_varnish_secret = self::get_runtime_varnish_admin_secret();
+            if ('' !== $runtime_varnish_secret) {
+                $sanitized['varnishCliKey'] = $runtime_varnish_secret;
+            }
             ucwp_request_profile_checkpoint('dashboard_settings_after_sanitize', array(
                 'sanitized_count' => is_array($sanitized) ? count($sanitized) : 0,
             ));
@@ -3381,10 +3591,15 @@ if (!class_exists('Ultra_Cache_WP')) {
             // This private build does not need a backward-compatibility layer. Keep the
             // stored option canonical so invalid combinations from previous local builds
             // do not remain visible in direct option reads, CLI checks, or diagnostics.
+            // Redis and Varnish admin secrets are intentionally not persisted in wp_options;
+            // hydrated server-side settings read them from the off-docroot runtime secrets file.
+            $canonical_for_storage = $sanitized;
+            $canonical_for_storage['redisPassword'] = '';
+            $canonical_for_storage['varnishCliKey'] = '';
             ucwp_request_profile_checkpoint('dashboard_settings_before_canonical_compare');
-            if (!is_array($saved) || wp_json_encode($raw_saved) !== wp_json_encode($sanitized)) {
+            if (!is_array($saved) || wp_json_encode($raw_saved) !== wp_json_encode($canonical_for_storage)) {
                 ucwp_request_profile_checkpoint('dashboard_settings_before_update_option');
-                update_option(UCWP_SETTINGS_KEY, $sanitized, false);
+                update_option(UCWP_SETTINGS_KEY, $canonical_for_storage, false);
                 ucwp_request_profile_checkpoint('dashboard_settings_after_update_option');
             }
             ucwp_request_profile_checkpoint('dashboard_settings_after_canonical_compare');
@@ -3516,7 +3731,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'enabled'                      => !empty($ui['pageCacheEnabled']),
                 'object_cache_enabled'         => !empty($ui['objectCacheEnabled']),
                 'object_cache_backend'         => self::sanitize_object_cache_backend($ui['objectCacheBackend']),
-                'object_cache_fallback_backend'=> 'apcu',
+                'object_cache_fallback_backend'=> self::sanitize_object_cache_fallback_backend($ui['objectCacheFallbackBackend'] ?? 'apcu'),
                 'redis_host'                   => self::sanitize_redis_host($ui['redisHost']),
                 'redis_port'                   => self::sanitize_bounded_integer_setting($ui['redisPort'], 6379, 1, 65535),
                 'redis_password'               => trim((string) $ui['redisPassword']),
@@ -3653,6 +3868,83 @@ if (!class_exists('Ultra_Cache_WP')) {
             return rtrim($base, '/\\') . '/.' . self::get_runtime_secret_site_token() . '-ultracache-runtime-secrets.php';
         }
 
+        private static function normalize_runtime_secret_array(array $loaded)
+        {
+            $varnish_admin_secret = '';
+            if (isset($loaded['varnish_admin_secret'])) {
+                $varnish_admin_secret = (string) $loaded['varnish_admin_secret'];
+            } elseif (isset($loaded['varnish_cli_key'])) {
+                $varnish_admin_secret = (string) $loaded['varnish_cli_key'];
+            }
+
+            return array(
+                'revalidate_secret' => isset($loaded['revalidate_secret']) ? (string) $loaded['revalidate_secret'] : '',
+                'redis_password' => isset($loaded['redis_password']) ? (string) $loaded['redis_password'] : '',
+                'varnish_admin_secret' => $varnish_admin_secret,
+            );
+        }
+
+        private static function get_runtime_redis_password()
+        {
+            $runtime = self::load_runtime_secret_file();
+            return isset($runtime['redis_password']) ? trim((string) $runtime['redis_password']) : '';
+        }
+
+        private static function set_runtime_redis_password($password)
+        {
+            $runtime = self::load_runtime_secret_file();
+            $runtime['redis_password'] = trim((string) $password);
+            return self::write_runtime_secret_array($runtime);
+        }
+
+        private static function get_runtime_varnish_admin_secret()
+        {
+            $runtime = self::load_runtime_secret_file();
+            return isset($runtime['varnish_admin_secret']) ? trim((string) $runtime['varnish_admin_secret']) : '';
+        }
+
+        private static function write_runtime_secret_array(array $runtime)
+        {
+            $normalized = self::normalize_runtime_secret_array($runtime);
+            return self::write_file_atomically(self::get_runtime_secret_path(), self::render_runtime_secret_php($normalized), 'runtime_secret write');
+        }
+
+        private static function set_runtime_varnish_admin_secret($secret)
+        {
+            $runtime = self::load_runtime_secret_file();
+            $runtime['varnish_admin_secret'] = trim((string) $secret);
+            return self::write_runtime_secret_array($runtime);
+        }
+
+        private static function migrate_stored_redis_secret_to_runtime_file(array $raw_saved, array $sanitized)
+        {
+            $stored_secret = isset($raw_saved['redisPassword']) ? trim((string) $raw_saved['redisPassword']) : '';
+            if ('' === $stored_secret) {
+                return false;
+            }
+
+            $runtime_secret = self::get_runtime_redis_password();
+            if ('' !== $runtime_secret) {
+                return false;
+            }
+
+            return self::set_runtime_redis_password($stored_secret);
+        }
+
+        private static function migrate_stored_varnish_secret_to_runtime_file(array $raw_saved, array $sanitized)
+        {
+            $stored_secret = isset($raw_saved['varnishCliKey']) ? trim((string) $raw_saved['varnishCliKey']) : '';
+            if ('' === $stored_secret) {
+                return false;
+            }
+
+            $runtime_secret = self::get_runtime_varnish_admin_secret();
+            if ('' !== $runtime_secret) {
+                return false;
+            }
+
+            return self::set_runtime_varnish_admin_secret($stored_secret);
+        }
         private static function ensure_runtime_config_protection_files()
         {
             $runtime_dir = dirname(self::get_runtime_config_path());
@@ -3680,9 +3972,11 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private static function render_runtime_secret_php(array $runtime)
         {
+            $runtime = self::normalize_runtime_secret_array($runtime);
             $secret = isset($runtime['revalidate_secret']) ? (string) $runtime['revalidate_secret'] : '';
             $redis_password = isset($runtime['redis_password']) ? (string) $runtime['redis_password'] : '';
-            return "<?php\n/** UltraCache managed runtime secrets. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn array(\n    'revalidate_secret' => " . ucwp_php_string_literal($secret) . ",\n    'redis_password' => " . ucwp_php_string_literal($redis_password) . ",\n);\n";
+            $varnish_admin_secret = isset($runtime['varnish_admin_secret']) ? (string) $runtime['varnish_admin_secret'] : '';
+            return "<?php\n/** UltraCache managed runtime secrets. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn array(\n    'revalidate_secret' => " . ucwp_php_string_literal($secret) . ",\n    'redis_password' => " . ucwp_php_string_literal($redis_password) . ",\n    'varnish_admin_secret' => " . ucwp_php_string_literal($varnish_admin_secret) . ",\n);\n";
         }
 
         private static function load_runtime_secret_file($path = null)
@@ -3704,10 +3998,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     continue;
                 }
 
-                return array(
-                    'revalidate_secret' => isset($loaded['revalidate_secret']) ? (string) $loaded['revalidate_secret'] : '',
-                    'redis_password' => isset($loaded['redis_password']) ? (string) $loaded['redis_password'] : '',
-                );
+                return self::normalize_runtime_secret_array($loaded);
             }
 
             return array();
@@ -3726,6 +4017,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_stats_enabled'             => !empty($settings['cache_stats_enabled']),
                 'object_cache_enabled'            => !empty($settings['object_cache_enabled']),
                 'object_cache_backend'            => self::sanitize_object_cache_backend($settings['object_cache_backend'] ?? 'redis'),
+                'object_cache_fallback_backend'   => self::sanitize_object_cache_fallback_backend($settings['object_cache_fallback_backend'] ?? 'apcu'),
                 'redis_host'                      => (string) ($settings['redis_host'] ?? '127.0.0.1'),
                 'redis_port'                      => max(1, absint($settings['redis_port'] ?? 6379)),
                 'redis_password'                  => (string) ($settings['redis_password'] ?? ''),
@@ -3739,6 +4031,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_fresh_ttl_minutes'         => max(1, absint($settings['cache_fresh_ttl_minutes'])),
                 'cache_max_stale_minutes'         => max(absint($settings['cache_fresh_ttl_minutes']), absint($settings['cache_max_stale_minutes'])),
                 'revalidate_secret'               => wp_hash('ucwp-revalidate-v1'),
+                'varnish_admin_secret'            => (string) ($settings['varnish_cli_key'] ?? ''),
                 'trusted_hosts'                   => ucwp_get_trusted_hosts(),
             ));
         }
@@ -3767,7 +4060,7 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function render_runtime_config_json(array $runtime)
         {
             $public_runtime = self::normalize_runtime_config($runtime);
-            unset($public_runtime['revalidate_secret'], $public_runtime['redis_password']);
+            unset($public_runtime['revalidate_secret'], $public_runtime['redis_password'], $public_runtime['varnish_admin_secret']);
 
             $encoded = wp_json_encode($public_runtime, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
             if (!is_string($encoded) || '' === $encoded) {
@@ -3858,6 +4151,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_stats_enabled'            => !empty($runtime['cache_stats_enabled']),
                 'object_cache_enabled'           => !empty($runtime['object_cache_enabled']),
                 'object_cache_backend'           => self::sanitize_object_cache_backend($runtime['object_cache_backend'] ?? 'redis'),
+                'object_cache_fallback_backend'  => self::sanitize_object_cache_fallback_backend($runtime['object_cache_fallback_backend'] ?? 'apcu'),
                 'redis_host'                     => trim((string) ($runtime['redis_host'] ?? '127.0.0.1')) ?: '127.0.0.1',
                 'redis_port'                     => max(1, min(65535, absint($runtime['redis_port'] ?? 6379))),
                 'redis_password'                 => (string) ($runtime['redis_password'] ?? ''),
@@ -3871,6 +4165,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_fresh_ttl_minutes'        => $fresh_minutes,
                 'cache_max_stale_minutes'        => $max_stale_minutes,
                 'revalidate_secret'              => (string) ($runtime['revalidate_secret'] ?? ''),
+                'varnish_admin_secret'           => (string) ($runtime['varnish_admin_secret'] ?? ''),
                 'trusted_hosts'                  => array_values(array_filter(array_map('ucwp_normalize_host', (array) ($runtime['trusted_hosts'] ?? ucwp_get_trusted_hosts())))),
             );
 
@@ -4068,6 +4363,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $object_cache_removed = 0;
             $apcu_flushed = false;
             $apcu_flush_message = '';
+            $css_storage_before = self::get_cache_storage_diagnostics($settings);
 
             if ($engine && method_exists($engine, 'purge_all')) {
                 self::$suppress_after_purge_warm = true;
@@ -4094,13 +4390,26 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $warmed = (int) ($start_result['warmedThisRun'] ?? 0);
             }
 
+            $css_storage_after = self::get_cache_storage_diagnostics($settings);
+            $css_before = isset($css_storage_before['cssBundles']) && is_array($css_storage_before['cssBundles']) ? $css_storage_before['cssBundles'] : array();
+            $css_after = isset($css_storage_after['cssBundles']) && is_array($css_storage_after['cssBundles']) ? $css_storage_after['cssBundles'] : array();
+            $css_files_before = max(0, (int) ($css_before['files'] ?? ($css_before['totalFiles'] ?? 0)));
+            $css_files_after = max(0, (int) ($css_after['files'] ?? ($css_after['totalFiles'] ?? 0)));
+
             return array(
-                'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed),
+                'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed || $css_files_before !== $css_files_after),
                 'warmed'  => $warmed,
                 'queueStarted' => $queue_started,
                 'objectCacheRemoved' => $object_cache_removed,
                 'apcuFlushed' => $apcu_flushed,
                 'apcuFlushMessage' => $apcu_flush_message,
+                'cssBundleFilesBefore' => $css_files_before,
+                'cssBundleFilesAfter' => $css_files_after,
+                'cssBundleFilesDeleted' => max(0, $css_files_before - $css_files_after),
+                'cssBundleOldOrphanLikeBefore' => max(0, (int) ($css_before['oldOrphanLikeFiles'] ?? 0)),
+                'cssBundleRecentOrphanLikeBefore' => max(0, (int) ($css_before['recentOrphanLikeFiles'] ?? 0)),
+                'cssBundleCleanupLimit' => max(0, (int) ($css_after['cleanupDeleteLimit'] ?? self::get_storage_cleanup_max_deletes_per_run())),
+                'cssBundleGraceSeconds' => max(0, (int) ($css_after['graceSeconds'] ?? self::get_storage_cleanup_grace_seconds())),
             );
         }
 
@@ -4230,43 +4539,67 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return array('success' => false, 'message' => self::maybe_translate('Cron warm up is not available.'));
             }
 
-            $pages_per_minute = max(0, (int) $settings['cron_warm_pages_per_minute']);
-            $total_limit = max(0, (int) $settings['scheduled_warm_limit']);
-            $state = self::save_cron_warm_state(array(
-                'active'         => true,
-                'reason'         => sanitize_key((string) $reason),
-                'cursor'         => '',
-                'processed'      => 0,
-                'total'          => 0,
-                'successCount'   => 0,
-                'errorCount'     => 0,
-                'startedAt'      => time(),
-                'updatedAt'      => time(),
-                'lastRunAt'      => 0,
-                'finishedAt'     => 0,
-                'pagesPerMinute' => $pages_per_minute,
-                'totalLimit'     => $total_limit,
-                'currentBatch'   => array(),
-                'batchIndex'     => 0,
-                'batchHasMore'   => false,
-                'nextCursorPending' => '',
-                'lastError'      => '',
-                'lastMessage'    => self::maybe_translate('Cron warm up queued.'),
-                'lastUrl'        => '',
-                'completed'      => false,
-                'stopped'        => false,
-                'stopReason'     => '',
-                'invokedBy'      => '',
-            ));
+            $existing_state = self::get_cron_warm_state();
+            $existing_updated_at = !empty($existing_state['updatedAt']) ? (int) $existing_state['updatedAt'] : 0;
+            $existing_is_fresh = !empty($existing_state['active']) && empty($existing_state['completed']) && empty($existing_state['stopped']) && $existing_updated_at > (time() - 15 * MINUTE_IN_SECONDS);
+            if ($existing_is_fresh) {
+                return array(
+                    'success' => true,
+                    'message' => self::maybe_translate('Cron warm up is already queued or running.'),
+                    'state' => self::get_cron_warm_status(),
+                );
+            }
 
-            self::unschedule_cron_warm_events();
-            self::ensure_cron_warm_events_scheduled(1);
+            $lock_token = 'start-' . gmdate('YmdHis') . '-' . wp_generate_password(12, false, false);
+            if (!self::acquire_cron_warm_lock($lock_token, 60)) {
+                return array(
+                    'success' => false,
+                    'message' => self::maybe_translate('Cron warm up start skipped because another warm-up operation is active.'),
+                    'state' => self::get_cron_warm_status(),
+                );
+            }
 
-            return array(
-                'success' => true,
-                'message' => self::maybe_translate('Cron warm up queued.'),
-                'state'   => self::get_cron_warm_status(),
-            );
+            try {
+                $pages_per_minute = max(0, (int) $settings['cron_warm_pages_per_minute']);
+                $total_limit = max(0, (int) $settings['scheduled_warm_limit']);
+                $state = self::save_cron_warm_state(array(
+                    'active'         => true,
+                    'reason'         => sanitize_key((string) $reason),
+                    'cursor'         => '',
+                    'processed'      => 0,
+                    'total'          => 0,
+                    'successCount'   => 0,
+                    'errorCount'     => 0,
+                    'startedAt'      => time(),
+                    'updatedAt'      => time(),
+                    'lastRunAt'      => 0,
+                    'finishedAt'     => 0,
+                    'pagesPerMinute' => $pages_per_minute,
+                    'totalLimit'     => $total_limit,
+                    'currentBatch'   => array(),
+                    'batchIndex'     => 0,
+                    'batchHasMore'   => false,
+                    'nextCursorPending' => '',
+                    'lastError'      => '',
+                    'lastMessage'    => self::maybe_translate('Cron warm up queued.'),
+                    'lastUrl'        => '',
+                    'completed'      => false,
+                    'stopped'        => false,
+                    'stopReason'     => '',
+                    'invokedBy'      => '',
+                ));
+
+                self::unschedule_cron_warm_events();
+                self::ensure_cron_warm_events_scheduled(1);
+
+                return array(
+                    'success' => true,
+                    'message' => self::maybe_translate('Cron warm up queued.'),
+                    'state'   => self::get_cron_warm_status(),
+                );
+            } finally {
+                self::release_cron_warm_lock($lock_token);
+            }
         }
 
         public static function stop_cron_warmup_queue($reason = 'manual')
@@ -4615,6 +4948,7 @@ private static function delete_plugin_options_and_transients()
         UCWP_SETTINGS_KEY . '_action_jobs',
         'ucwp_media_conversion_queue',
         'ucwp_media_diagnostics_v1',
+        'ucwp_media_queue_db_version',
         'ucwp_object_cache_last_flush_report',
     );
 
@@ -4627,6 +4961,7 @@ private static function delete_plugin_options_and_transients()
     delete_transient('ucwp_loopback_ssl_status_v1');
     delete_transient('ucwp_frontend_compression_probe_v1');
     delete_transient('ucwp_media_conversion_queue_lock');
+    delete_transient('ucwp_media_queue_process_lock_v1');
     delete_transient('ucwp_media_work_summary_v1');
 
     if ($wpdb instanceof wpdb) {
@@ -4646,6 +4981,8 @@ private static function delete_plugin_options_and_transients()
                 )
             );
         }
+
+        $wpdb->query("DROP TABLE IF EXISTS {$wpdb->prefix}ucwp_media_queue");
 
         if (is_multisite()) {
             $wpdb->query(
@@ -4761,6 +5098,12 @@ public static function delete_all_plugin_data_and_deactivate()
             if (is_wp_error($varnish_validation)) {
                 return $varnish_validation;
             }
+            $redis_password_for_runtime = trim((string) ($current_settings['redisPassword'] ?? ''));
+            $varnish_admin_secret_for_runtime = trim((string) ($current_settings['varnishCliKey'] ?? ''));
+            self::set_runtime_redis_password($redis_password_for_runtime);
+            self::set_runtime_varnish_admin_secret($varnish_admin_secret_for_runtime);
+            $current_settings['redisPassword'] = '';
+            $current_settings['varnishCliKey'] = '';
             update_option(UCWP_SETTINGS_KEY, $current_settings);
             self::reset_settings_cache();
             self::ensure_directories();
@@ -6155,19 +6498,31 @@ public static function delete_all_plugin_data_and_deactivate()
         public static function get_varnish_cli_settings()
         {
             $settings = self::get_dashboard_settings();
+            $mode = self::sanitize_varnish_mode($settings['varnishCliMode']);
+            $servers_raw = self::sanitize_varnish_servers_string($settings['varnishCliServers'], $mode);
+            $servers = array_values(array_filter(array_map('trim', preg_split('/\s+/', $servers_raw))));
+            $method = ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN';
+            $effective_method = ('admin' === $mode) ? 'admin BAN' : $method;
+            $key = trim((string) $settings['varnishCliKey']);
 
             return array(
                 'enabled'      => !empty($settings['varnishCliEnabled']),
-                'mode'         => self::sanitize_varnish_mode($settings['varnishCliMode']),
-                'servers_raw'  => self::sanitize_varnish_servers_string($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
-                'servers'      => array_values(array_filter(array_map('trim', preg_split('/\s+/', self::sanitize_varnish_servers_string($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])))))),
-                'key'          => trim((string) $settings['varnishCliKey']),
+                'mode'         => $mode,
+                'configuredMode' => $mode,
+                'servers_raw'  => $servers_raw,
+                'servers'      => $servers,
+                'endpointCount' => count($servers),
+                'key'          => $key,
+                'secretConfigured' => ('' !== $key),
                 'timeout'      => max(1, min(30, absint($settings['varnishCliTimeoutSeconds']))),
-                'method'       => ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN',
+                'method'       => $method,
+                'effectiveMethod' => $effective_method,
+                'adminModeUsed' => ('admin' === $mode),
+                'httpEndpointModeUsed' => ('http' === $mode),
                 'debug'        => !empty($settings['varnishCliDebug']),
                 'support'      => self::get_varnish_support_status(),
                 'last'         => self::get_varnish_last_result(),
-                'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($servers_raw, $mode),
             );
         }
 
@@ -6536,7 +6891,13 @@ public static function delete_all_plugin_data_and_deactivate()
                 'success' => $all_ok,
                 'message' => $message,
                 'time'    => time(),
+                'mode'    => (string) ($settings['mode'] ?? 'http'),
                 'method'  => $settings['method'],
+                'effectiveMethod' => $action_label,
+                'endpointCount' => count($details),
+                'adminModeUsed' => ('admin' === ($settings['mode'] ?? 'http')),
+                'httpEndpointModeUsed' => ('http' === ($settings['mode'] ?? 'http')),
+                'secretConfigured' => !empty($settings['key']),
                 'label'   => $label,
                 'details' => $details,
             );
@@ -6623,11 +6984,18 @@ public static function delete_all_plugin_data_and_deactivate()
                 }
             }
 
+            $effective_method = ('admin' === ($settings['mode'] ?? 'http')) ? 'admin BAN' : $settings['method'];
             $result = array(
                 'success' => $all_ok,
-                'message' => $all_ok ? 'Varnish ' . (('admin' === ($settings['mode'] ?? 'http')) ? 'admin BAN' : $settings['method']) . ' succeeded on ' . count($details) . ' endpoint(s).' : 'Varnish ' . (('admin' === ($settings['mode'] ?? 'http')) ? 'admin BAN' : $settings['method']) . ' failed on one or more endpoints.',
+                'message' => $all_ok ? 'Varnish ' . $effective_method . ' succeeded on ' . count($details) . ' endpoint(s).' : 'Varnish ' . $effective_method . ' failed on one or more endpoints.',
                 'time'    => time(),
+                'mode'    => (string) ($settings['mode'] ?? 'http'),
                 'method'  => $settings['method'],
+                'effectiveMethod' => $effective_method,
+                'endpointCount' => count($details),
+                'adminModeUsed' => ('admin' === ($settings['mode'] ?? 'http')),
+                'httpEndpointModeUsed' => ('http' === ($settings['mode'] ?? 'http')),
+                'secretConfigured' => !empty($settings['key']),
                 'label'   => $path,
                 'details' => $details,
             );
@@ -6847,6 +7215,934 @@ public static function delete_all_plugin_data_and_deactivate()
             return $fallback;
         }
 
+        private static function get_font_pipeline_diagnostics($settings = array())
+        {
+            $settings = is_array($settings) ? $settings : array();
+            $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
+            $font_css_dir = trailingslashit($cache_dir) . 'font-css/';
+            $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
+            $google_fonts_dir = trailingslashit($cache_dir) . 'google-fonts/';
+            $manifest_file = $css_bundle_dir . 'manifest.json';
+
+            $count_files = static function ($pattern) {
+                $files = glob($pattern);
+                if (!is_array($files)) {
+                    return array('count' => 0, 'bytes' => 0, 'latestModified' => 0);
+                }
+                $count = 0;
+                $bytes = 0;
+                $latest = 0;
+                foreach ($files as $file) {
+                    if (!is_string($file) || !is_file($file)) {
+                        continue;
+                    }
+                    $count++;
+                    $size = ucwp_safe_filesize($file, 'font_pipeline_diagnostic');
+                    if (false !== $size) {
+                        $bytes += max(0, (int) $size);
+                    }
+                    $mtime = ucwp_safe_filemtime($file, 'font_pipeline_diagnostic');
+                    if (false !== $mtime) {
+                        $latest = max($latest, (int) $mtime);
+                    }
+                }
+                return array('count' => $count, 'bytes' => $bytes, 'latestModified' => $latest);
+            };
+
+            $font_css = $count_files($font_css_dir . '*.css');
+            $font_css_delayed = $count_files($font_css_dir . 'delayed-*.css');
+            $bundle_css = $count_files($css_bundle_dir . 'bundle-*.css');
+            $bundle_delayed = $count_files($css_bundle_dir . 'bundle-*-delayed-fonts.css');
+            $google_font_css = $count_files($google_fonts_dir . '*.css');
+            $google_font_files = $count_files($google_fonts_dir . '*.{woff2,woff,ttf,otf}');
+            if (0 === (int) $google_font_files['count']) {
+                $google_font_files = $count_files($google_fonts_dir . '*');
+            }
+
+            $manifest_entries = 0;
+            $manifest_entries_with_delayed = 0;
+            $manifest_delayed_blocks = 0;
+            $manifest_delayed_families = array();
+            $manifest_missing_bundle_files = 0;
+            $manifest_missing_delayed_files = 0;
+            $manifest_exists = file_exists($manifest_file);
+            $manifest_readable = $manifest_exists && is_readable($manifest_file);
+
+            if ($manifest_readable) {
+                $raw = ucwp_safe_file_get_contents($manifest_file, 'font pipeline manifest diagnostics');
+                $manifest = is_string($raw) && '' !== $raw ? json_decode($raw, true) : array();
+                if (is_array($manifest)) {
+                    $entries = array();
+                    if (!empty($manifest['entry']) && is_array($manifest['entry'])) {
+                        $entries[] = $manifest['entry'];
+                    }
+                    if (!empty($manifest['entries']) && is_array($manifest['entries'])) {
+                        foreach ($manifest['entries'] as $entry) {
+                            if (is_array($entry)) {
+                                $entries[] = $entry;
+                            }
+                        }
+                    }
+                    $seen = array();
+                    foreach ($entries as $entry) {
+                        $key = (string) ($entry['key'] ?? ($entry['url'] ?? ($entry['bundleFile'] ?? md5(wp_json_encode($entry)))));
+                        if (isset($seen[$key])) {
+                            continue;
+                        }
+                        $seen[$key] = true;
+                        $manifest_entries++;
+                        $bundle_file = isset($entry['bundleFile']) ? (string) $entry['bundleFile'] : '';
+                        if ('' !== $bundle_file && !is_file($bundle_file)) {
+                            $manifest_missing_bundle_files++;
+                        }
+                        $delayed_blocks = max(0, (int) ($entry['delayedFontFaceBlocks'] ?? 0));
+                        $delayed_file = isset($entry['delayedFontFile']) ? (string) $entry['delayedFontFile'] : '';
+                        $delayed_url = isset($entry['delayedFontUrl']) ? (string) $entry['delayedFontUrl'] : '';
+                        if ($delayed_blocks > 0 || '' !== $delayed_file || '' !== $delayed_url) {
+                            $manifest_entries_with_delayed++;
+                            $manifest_delayed_blocks += $delayed_blocks;
+                            if ('' !== $delayed_file && !is_file($delayed_file)) {
+                                $manifest_missing_delayed_files++;
+                            }
+                            foreach ((array) ($entry['delayedFontFamilies'] ?? array()) as $family) {
+                                $family = trim((string) $family);
+                                if ('' !== $family) {
+                                    $manifest_delayed_families[strtolower($family)] = $family;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return array(
+                'enabled' => !empty($settings['selfHostedFontCssOptimizationEnabled']) || !empty($settings['googleFontsLocalOptimizationEnabled']) || !empty($settings['delayIconFontsEnabled']),
+                'settings' => array(
+                    'googleFontsSwapEnabled' => !empty($settings['googleFontsSwapEnabled']),
+                    'googleFontsLocalOptimizationEnabled' => !empty($settings['googleFontsLocalOptimizationEnabled']),
+                    'selfHostedFontCssOptimizationEnabled' => !empty($settings['selfHostedFontCssOptimizationEnabled']),
+                    'selfHostedFontRuntimeRewriteEnabled' => !empty($settings['selfHostedFontRuntimeRewriteEnabled']),
+                    'delayIconFontsEnabled' => !empty($settings['delayIconFontsEnabled']),
+                    'delayIconFontsAutoDetectEnabled' => !empty($settings['delayIconFontsAutoDetectEnabled']),
+                    'cssBundlingEnabled' => !empty($settings['homepageCssBundleEnabled']),
+                    'cssBundleScope' => (string) ($settings['cssBundleScope'] ?? ($settings['css_bundle_scope'] ?? 'homepage')),
+                ),
+                'fontCss' => array(
+                    'dirExists' => is_dir($font_css_dir),
+                    'files' => (int) $font_css['count'],
+                    'bytes' => (int) $font_css['bytes'],
+                    'delayedFiles' => (int) $font_css_delayed['count'],
+                    'delayedBytes' => (int) $font_css_delayed['bytes'],
+                    'latestModified' => (int) max($font_css['latestModified'], $font_css_delayed['latestModified']),
+                ),
+                'cssBundles' => array(
+                    'dirExists' => is_dir($css_bundle_dir),
+                    'files' => (int) $bundle_css['count'],
+                    'bytes' => (int) $bundle_css['bytes'],
+                    'delayedFontFiles' => (int) $bundle_delayed['count'],
+                    'delayedFontBytes' => (int) $bundle_delayed['bytes'],
+                    'manifestExists' => (bool) $manifest_exists,
+                    'manifestReadable' => (bool) $manifest_readable,
+                    'manifestEntries' => (int) $manifest_entries,
+                    'entriesWithDelayedFonts' => (int) $manifest_entries_with_delayed,
+                    'delayedFontFaceBlocks' => (int) $manifest_delayed_blocks,
+                    'delayedFontFamilies' => array_values(array_slice($manifest_delayed_families, 0, 12, true)),
+                    'missingBundleFiles' => (int) $manifest_missing_bundle_files,
+                    'missingDelayedFontFiles' => (int) $manifest_missing_delayed_files,
+                ),
+                'googleFontsLocal' => array(
+                    'dirExists' => is_dir($google_fonts_dir),
+                    'cssFiles' => (int) $google_font_css['count'],
+                    'cssBytes' => (int) $google_font_css['bytes'],
+                    'fontFilesOrAssets' => (int) $google_font_files['count'],
+                    'fontBytesOrAssetBytes' => (int) $google_font_files['bytes'],
+                ),
+                'message' => 'Font diagnostics are read-only. They report generated local font CSS, delayed icon-font CSS, and CSS bundle delayed-font metadata.',
+            );
+        }
+
+
+        private static function count_textarea_lines_for_diagnostics($value)
+        {
+            return count(self::parse_textarea_setting(self::normalize_textarea_setting($value)));
+        }
+
+        private static function get_settings_transparency_diagnostics($settings = array())
+        {
+            $settings = is_array($settings) ? $settings : array();
+            $defaults = self::get_dashboard_defaults();
+
+            $visible_lists = array(
+                array('key' => 'cacheExceptionPaths', 'label' => 'Exclude Paths From Caching', 'area' => 'Cache bypass', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'cacheExceptionQueryArgs', 'label' => 'Excluded query-string args from Caching', 'area' => 'Cache bypass', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'cacheQueryStringAllowlist', 'label' => 'Query-string args whitelist', 'area' => 'Cache query strings', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'deferJsForceList', 'label' => 'Defer those scripts', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'deferJsExcludeList', 'label' => 'JS Delay / Defer Exclusions', 'area' => 'JavaScript', 'kind' => 'Shared final override', 'shared' => true),
+                array('key' => 'delaySafeThirdPartyJsPatterns', 'label' => 'Safe third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
+                array('key' => 'delayFunctionalThirdPartyJsPatterns', 'label' => 'Functional third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
+                array('key' => 'delayThirdPartyJsExcludeList', 'label' => 'Third-Party Delay Exclusions', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'criticalRequestChainDelayList', 'label' => 'Delay Non-Critical Request Chains', 'area' => 'JavaScript/CSS', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'criticalResourcePreloadList', 'label' => 'Manual Priority Preloads', 'area' => 'Critical chain', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'criticalFetchPreloadList', 'label' => 'Additional Fetch URL Preloads', 'area' => 'Critical chain', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'homepageCssBundleExcludeList', 'label' => 'CSS Bundle Exclusions', 'area' => 'CSS bundles', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'asyncCssExcludeList', 'label' => 'Async CSS Exclude List', 'area' => 'CSS async', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'aggressiveAsyncCssExcludeList', 'label' => 'Aggressive Async CSS Exclude List', 'area' => 'CSS async', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'assetCleanupExcludeList', 'label' => 'Asset Cleanup Exclusions', 'area' => 'Asset cleanup', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'delayIconFontsList', 'label' => 'Delay These Fonts / Patterns', 'area' => 'Fonts', 'kind' => 'Pattern list', 'shared' => false),
+                array('key' => 'delayIconFontsExcludeList', 'label' => 'Never Delay These Fonts / Patterns', 'area' => 'Fonts', 'kind' => 'Pattern list', 'shared' => false),
+                array('key' => 'lcpImagePriorityOverride', 'label' => 'Single LCP Image URL', 'area' => 'LCP', 'kind' => 'Single value', 'shared' => false),
+                array('key' => 'manualLcpHeroSelector', 'label' => 'Manual LCP Hero / Slider selector', 'area' => 'LCP', 'kind' => 'Single value', 'shared' => false),
+                array('key' => 'googleFontsAdditionalScanUrls', 'label' => 'Additional Google Fonts Scan URLs', 'area' => 'Fonts', 'kind' => 'Textarea', 'shared' => false),
+            );
+
+            $list_rows = array();
+            $with_defaults = 0;
+            $with_current = 0;
+            foreach ($visible_lists as $entry) {
+                $key = (string) $entry['key'];
+                $default_value = array_key_exists($key, $defaults) ? $defaults[$key] : '';
+                $current_value = array_key_exists($key, $settings) ? $settings[$key] : '';
+                $default_count = self::count_textarea_lines_for_diagnostics($default_value);
+                $current_count = self::count_textarea_lines_for_diagnostics($current_value);
+                if ($default_count > 0) {
+                    $with_defaults++;
+                }
+                if ($current_count > 0) {
+                    $with_current++;
+                }
+                $list_rows[] = array(
+                    'key' => $key,
+                    'label' => (string) $entry['label'],
+                    'area' => (string) $entry['area'],
+                    'kind' => (string) $entry['kind'],
+                    'shared' => !empty($entry['shared']),
+                    'visible' => true,
+                    'editable' => true,
+                    'resetRestoresDefault' => array_key_exists($key, $defaults),
+                    'populateDefaultAvailable' => $default_count > 0,
+                    'defaultCount' => (int) $default_count,
+                    'currentCount' => (int) $current_count,
+                );
+            }
+
+            $engine_only_safeguards = array(
+                array('label' => 'Absolute JS dependency floor', 'area' => 'JavaScript', 'editable' => false, 'reason' => 'Core WordPress/jQuery globals stay protected to avoid site-wide runtime failures.', 'examples' => array('jquery', 'jquery-migrate', 'wp-i18n', 'wp-hooks', 'wp-util', 'api-fetch', 'underscore')),
+                array('label' => 'Admin/internal paths never cached', 'area' => 'Cache bypass', 'editable' => false, 'reason' => 'WordPress admin/login/API flows must remain uncached even if the visible path list is edited.', 'examples' => array('/wp-admin/', '/wp-login.php', '/wp-json/')),
+                array('label' => 'Logged-in and personalized requests bypass', 'area' => 'Cache poisoning protection', 'editable' => false, 'reason' => 'User cookies, cart/checkout/account flows, and unsafe methods must not be page-cached.', 'examples' => array('logged-in cookies', 'POST', 'cart', 'checkout', 'account')),
+                array('label' => 'CSS bundle stale-ref protection', 'area' => 'CSS bundles', 'editable' => false, 'reason' => 'Main bundle files and delayed-font companion files are retained/validated to protect stale proxy HTML.', 'examples' => array('48h bundle grace period', 'delayed-font pair lifecycle', 'missing bundle invalidation')),
+                array('label' => 'Varnish endpoint safety validation', 'area' => 'Reverse proxy', 'editable' => false, 'reason' => 'Unsafe or non-local purge endpoints are blocked to reduce SSRF and accidental external requests.', 'examples' => array('loopback/local/private hosts only', 'HTTP/admin mode validation')),
+            );
+
+            $legacy_lists = array(
+                array('key' => 'delayNonCriticalJsExcludeList', 'label' => 'Legacy Delay Non-Critical JS Exclusions', 'mappedTo' => 'deferJsExcludeList', 'active' => false, 'message' => 'Legacy values are merged into the visible JS Delay / Defer Exclusions field and then cleared.'),
+            );
+
+            return array(
+                'enabled' => true,
+                'visibleLists' => $list_rows,
+                'engineOnlySafeguards' => $engine_only_safeguards,
+                'legacyLists' => $legacy_lists,
+                'summary' => array(
+                    'visibleEditableLists' => count($list_rows),
+                    'listsWithDefaults' => (int) $with_defaults,
+                    'listsWithCurrentValues' => (int) $with_current,
+                    'engineOnlySafeguards' => count($engine_only_safeguards),
+                    'legacyLists' => count($legacy_lists),
+                    'resetUsesDashboardDefaults' => true,
+                ),
+                'message' => 'Settings transparency diagnostics are read-only. User-editable safeguards are listed separately from engine-only safety floors.',
+            );
+        }
+
+        private static function get_storage_cleanup_grace_seconds()
+        {
+            $seconds = (int) apply_filters('ucwp_css_bundle_cleanup_grace_seconds', 172800);
+            return max(3600, min(604800, $seconds));
+        }
+
+        private static function get_storage_cleanup_max_deletes_per_run()
+        {
+            $max = (int) apply_filters('ucwp_css_bundle_cleanup_max_deletes_per_run', 60);
+            return max(5, min(500, $max));
+        }
+
+        private static function scan_storage_path_for_diagnostics($path, array $args = array())
+        {
+            $path = is_string($path) ? wp_normalize_path($path) : '';
+            $defaults = array(
+                'recursive' => true,
+                'maxFiles' => 5000,
+                'includeExtensions' => array(),
+                'excludePathContains' => array(),
+            );
+            $args = array_merge($defaults, $args);
+            $max_files = max(100, min(50000, (int) $args['maxFiles']));
+            $include_extensions = array();
+            foreach ((array) $args['includeExtensions'] as $ext) {
+                $ext = strtolower(ltrim((string) $ext, '.'));
+                if ('' !== $ext) {
+                    $include_extensions[$ext] = true;
+                }
+            }
+            $exclude_contains = array();
+            foreach ((array) $args['excludePathContains'] as $needle) {
+                $needle = wp_normalize_path((string) $needle);
+                if ('' !== $needle) {
+                    $exclude_contains[] = $needle;
+                }
+            }
+
+            $summary = array(
+                'path' => $path,
+                'exists' => '' !== $path && is_dir($path),
+                'readable' => '' !== $path && is_readable($path),
+                'files' => 0,
+                'dirs' => 0,
+                'bytes' => 0,
+                'latestModified' => 0,
+                'truncated' => false,
+                'maxFiles' => $max_files,
+                'error' => '',
+            );
+
+            if (empty($summary['exists']) || empty($summary['readable'])) {
+                return $summary;
+            }
+
+            try {
+                if (!empty($args['recursive'])) {
+                    $iterator = new RecursiveIteratorIterator(
+                        new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+                        RecursiveIteratorIterator::SELF_FIRST
+                    );
+                } else {
+                    $iterator = new DirectoryIterator($path);
+                }
+
+                foreach ($iterator as $file_info) {
+                    if (!$file_info instanceof SplFileInfo) {
+                        continue;
+                    }
+                    $pathname = wp_normalize_path((string) $file_info->getPathname());
+                    if ('' === $pathname) {
+                        continue;
+                    }
+
+                    $excluded = false;
+                    foreach ($exclude_contains as $needle) {
+                        if ('' !== $needle && false !== strpos($pathname, $needle)) {
+                            $excluded = true;
+                            break;
+                        }
+                    }
+                    if ($excluded) {
+                        continue;
+                    }
+
+                    if ($file_info->isDir()) {
+                        $summary['dirs']++;
+                        continue;
+                    }
+
+                    if (!$file_info->isFile()) {
+                        continue;
+                    }
+
+                    if (!empty($include_extensions)) {
+                        $ext = strtolower(pathinfo($pathname, PATHINFO_EXTENSION));
+                        if (!isset($include_extensions[$ext])) {
+                            continue;
+                        }
+                    }
+
+                    $summary['files']++;
+                    $summary['bytes'] += max(0, (int) $file_info->getSize());
+                    $mtime = (int) $file_info->getMTime();
+                    if ($mtime > $summary['latestModified']) {
+                        $summary['latestModified'] = $mtime;
+                    }
+
+                    if ($summary['files'] >= $max_files) {
+                        $summary['truncated'] = true;
+                        break;
+                    }
+                }
+            } catch (Exception $e) {
+                $summary['error'] = (string) $e->getMessage();
+            }
+
+            return $summary;
+        }
+
+        private static function analyze_css_bundle_storage_for_diagnostics($css_bundle_dir, array $manifest_active_files = array())
+        {
+            $css_bundle_dir = trailingslashit(wp_normalize_path((string) $css_bundle_dir));
+            $grace_seconds = self::get_storage_cleanup_grace_seconds();
+            $delete_limit = self::get_storage_cleanup_max_deletes_per_run();
+            $now = time();
+            $active = array();
+            foreach ($manifest_active_files as $file) {
+                $file = wp_normalize_path((string) $file);
+                if ('' !== $file) {
+                    $active[basename($file)] = true;
+                }
+            }
+
+            $summary = array(
+                'dirExists' => is_dir($css_bundle_dir),
+                'graceSeconds' => $grace_seconds,
+                'cleanupDeleteLimit' => $delete_limit,
+                'files' => 0,
+                'bytes' => 0,
+                'allDirectoryFiles' => 0,
+                'recognizedBundleFiles' => 0,
+                'totalFiles' => 0,
+                'totalBytes' => 0,
+                'mainBundleFiles' => 0,
+                'mainBundleBytes' => 0,
+                'delayedFontFiles' => 0,
+                'delayedFontBytes' => 0,
+                'leftoverFiles' => 0,
+                'safeFiles' => 0,
+                'aggressiveFiles' => 0,
+                'fullFiles' => 0,
+                'recentFiles' => 0,
+                'oldFiles' => 0,
+                'activeManifestFiles' => count($active),
+                'orphanLikeFiles' => 0,
+                'oldOrphanLikeFiles' => 0,
+                'recentOrphanLikeFiles' => 0,
+                'largestFiles' => array(),
+                'warningLevel' => 'ok',
+                'message' => '',
+            );
+
+            if (!is_dir($css_bundle_dir) || !is_readable($css_bundle_dir)) {
+                $summary['warningLevel'] = 'notice';
+                $summary['message'] = self::maybe_translate('CSS bundle directory does not exist or is not readable yet.');
+                return $summary;
+            }
+
+            foreach ((array) glob($css_bundle_dir . '*.css') as $file) {
+                if (is_string($file) && is_file($file)) {
+                    $summary['allDirectoryFiles']++;
+                }
+            }
+
+            $largest = array();
+            foreach ((array) glob($css_bundle_dir . 'bundle-*.css') as $file) {
+                $file = (string) $file;
+                if ('' === $file || !is_file($file)) {
+                    continue;
+                }
+
+                $summary['totalFiles']++;
+                $summary['recognizedBundleFiles']++;
+                $summary['files']++;
+                $basename = basename($file);
+                $size = ucwp_safe_filesize($file, 'css_bundle_storage_diagnostic');
+                $size = false !== $size ? max(0, (int) $size) : 0;
+                $summary['totalBytes'] += $size;
+                $summary['bytes'] += $size;
+                $is_delayed = (bool) preg_match('/-delayed-fonts\.css$/i', $basename);
+                if ($is_delayed) {
+                    $summary['delayedFontFiles']++;
+                    $summary['delayedFontBytes'] += $size;
+                } else {
+                    $summary['mainBundleFiles']++;
+                    $summary['mainBundleBytes'] += $size;
+                }
+                if (0 === strpos($basename, 'bundle-leftover-')) {
+                    $summary['leftoverFiles']++;
+                } elseif (0 === strpos($basename, 'bundle-safe-')) {
+                    $summary['safeFiles']++;
+                } elseif (0 === strpos($basename, 'bundle-aggressive-')) {
+                    $summary['aggressiveFiles']++;
+                } elseif (0 === strpos($basename, 'bundle-full-')) {
+                    $summary['fullFiles']++;
+                }
+
+                $mtime = (int) ucwp_safe_filemtime($file, 'css_bundle_storage_diagnostic');
+                $recent = ($mtime <= 0) || (($now - $mtime) < $grace_seconds);
+                if ($recent) {
+                    $summary['recentFiles']++;
+                } else {
+                    $summary['oldFiles']++;
+                }
+
+                $pair = (string) preg_replace('/-delayed-fonts\.css$/i', '.css', $basename);
+                $is_active = isset($active[$basename]) || ('' !== $pair && isset($active[$pair]));
+                if (!$is_active) {
+                    $summary['orphanLikeFiles']++;
+                    if ($recent) {
+                        $summary['recentOrphanLikeFiles']++;
+                    } else {
+                        $summary['oldOrphanLikeFiles']++;
+                    }
+                }
+
+                $largest[] = array(
+                    'name' => $basename,
+                    'bytes' => $size,
+                    'modified' => $mtime,
+                );
+            }
+
+            usort($largest, static function ($a, $b) {
+                return (int) ($b['bytes'] ?? 0) <=> (int) ($a['bytes'] ?? 0);
+            });
+            $summary['largestFiles'] = array_slice($largest, 0, 5);
+
+            if ($summary['totalFiles'] >= 500 || $summary['oldOrphanLikeFiles'] >= 120) {
+                $summary['warningLevel'] = 'warning';
+                $summary['message'] = self::maybe_translate('CSS bundle storage is high. Scheduled cleanup removes old orphan-like bundle files gradually, limited per run for safety.');
+            } elseif ($summary['totalFiles'] >= 150 || $summary['recentOrphanLikeFiles'] >= 50) {
+                $summary['warningLevel'] = 'notice';
+                $summary['message'] = self::maybe_translate('Many CSS bundle files are present, likely due to recent warm/test activity inside the cleanup grace window.');
+            } else {
+                $summary['warningLevel'] = 'ok';
+                $summary['message'] = self::maybe_translate('CSS bundle storage is within the expected range.');
+            }
+
+            return $summary;
+        }
+
+        private static function get_cache_storage_diagnostics($settings = array(), $css_summary = null)
+        {
+            $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
+            $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
+            $object_dir = defined('UCWP_OBJECT_CACHE_DIR') ? trailingslashit(UCWP_OBJECT_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/';
+            $avif_dir = defined('UCWP_AVIF_DIR') ? trailingslashit(UCWP_AVIF_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-avif/';
+            $webp_dir = defined('UCWP_WEBP_DIR') ? trailingslashit(UCWP_WEBP_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-webp/';
+
+            $css_summary = is_array($css_summary) ? $css_summary : self::get_css_bundle_summary_diagnostics(is_array($settings) ? $settings : array());
+            $manifest = isset($css_summary['manifest']) && is_array($css_summary['manifest']) ? $css_summary['manifest'] : array();
+            $active_files = array();
+            foreach ((array) ($manifest['bundleFiles'] ?? array()) as $file) {
+                $active_files[] = (string) $file;
+            }
+            foreach ((array) ($manifest['delayedFontFiles'] ?? array()) as $file) {
+                $active_files[] = (string) $file;
+            }
+
+            $css_storage = self::analyze_css_bundle_storage_for_diagnostics($css_bundle_dir, $active_files);
+            $page_cache = self::scan_storage_path_for_diagnostics($cache_dir, array(
+                'recursive' => true,
+                'maxFiles' => 8000,
+                'includeExtensions' => array('html', 'gz', 'br'),
+                'excludePathContains' => array('/css-bundles/', '/google-fonts/', '/font-css/'),
+            ));
+            $cache_root = self::scan_storage_path_for_diagnostics($cache_dir, array('recursive' => true, 'maxFiles' => 8000));
+            $object_cache = self::scan_storage_path_for_diagnostics($object_dir, array('recursive' => true, 'maxFiles' => 8000));
+            $avif = self::scan_storage_path_for_diagnostics($avif_dir, array('recursive' => true, 'maxFiles' => 8000));
+            $webp = self::scan_storage_path_for_diagnostics($webp_dir, array('recursive' => true, 'maxFiles' => 8000));
+
+            $css_files = isset($css_summary['files']) && is_array($css_summary['files']) ? $css_summary['files'] : array();
+            $css_recognized_files = max(0, (int) ($css_storage['recognizedBundleFiles'] ?? ($css_storage['totalFiles'] ?? 0)));
+            $css_bytes = max(0, (int) ($css_storage['totalBytes'] ?? ($css_storage['bytes'] ?? 0)));
+            $total_files = (int) $cache_root['files'] + (int) $object_cache['files'] + (int) $avif['files'] + (int) $webp['files'];
+            $total_bytes = (int) $cache_root['bytes'] + (int) $object_cache['bytes'] + (int) $avif['bytes'] + (int) $webp['bytes'];
+
+            $warnings = array();
+            if (!empty($cache_root['truncated']) || !empty($object_cache['truncated']) || !empty($avif['truncated']) || !empty($webp['truncated'])) {
+                $warnings[] = self::maybe_translate('Storage scan was capped to avoid expensive filesystem reads. Counts are minimum values.');
+            }
+            if ($total_files >= 10000) {
+                $warnings[] = self::maybe_translate('UltraCache file count is high. This may matter on inode-limited hosting.');
+            }
+            if ($total_bytes >= 536870912) {
+                $warnings[] = self::maybe_translate('UltraCache storage is above 512 MB. Review generated cache/media files and cleanup cadence.');
+            }
+            if (isset($css_storage['warningLevel']) && 'ok' !== $css_storage['warningLevel'] && !empty($css_storage['message'])) {
+                $warnings[] = (string) $css_storage['message'];
+            }
+
+            $warning_level = 'ok';
+            if ($total_files >= 20000 || $total_bytes >= 1073741824 || (isset($css_storage['warningLevel']) && 'warning' === $css_storage['warningLevel'])) {
+                $warning_level = 'warning';
+            } elseif (!empty($warnings)) {
+                $warning_level = 'notice';
+            }
+
+            return array(
+                'enabled' => true,
+                'warningLevel' => $warning_level,
+                'warnings' => array_values(array_unique($warnings)),
+                'scanLimit' => 8000,
+                'total' => array(
+                    'files' => $total_files,
+                    'bytes' => $total_bytes,
+                    'truncated' => !empty($cache_root['truncated']) || !empty($object_cache['truncated']) || !empty($avif['truncated']) || !empty($webp['truncated']),
+                ),
+                'pageCache' => array(
+                    'files' => (int) $page_cache['files'],
+                    'bytes' => (int) $page_cache['bytes'],
+                    'truncated' => !empty($page_cache['truncated']),
+                ),
+                'cssBundles' => array_merge(
+                    $css_storage,
+                    array(
+                        'files' => $css_recognized_files,
+                        'bytes' => $css_bytes,
+                        'recognizedBundleFiles' => $css_recognized_files,
+                        'legacySummaryFiles' => max(0, (int) ($css_files['bundleFiles'] ?? 0)) + max(0, (int) ($css_files['delayedFontFiles'] ?? 0)),
+                        'legacySummaryNote' => self::maybe_translate('Legacy summary counts delayed-font CSS separately; storage diagnostics uses recognized bundle files.'),
+                    )
+                ),
+                'objectCacheDisk' => array(
+                    'files' => (int) $object_cache['files'],
+                    'bytes' => (int) $object_cache['bytes'],
+                    'truncated' => !empty($object_cache['truncated']),
+                    'exists' => !empty($object_cache['exists']),
+                ),
+                'mediaCache' => array(
+                    'files' => (int) $avif['files'] + (int) $webp['files'],
+                    'bytes' => (int) $avif['bytes'] + (int) $webp['bytes'],
+                    'avifFiles' => (int) $avif['files'],
+                    'avifBytes' => (int) $avif['bytes'],
+                    'avifTruncated' => !empty($avif['truncated']),
+                    'webpFiles' => (int) $webp['files'],
+                    'webpBytes' => (int) $webp['bytes'],
+                    'webpTruncated' => !empty($webp['truncated']),
+                    'truncated' => !empty($avif['truncated']) || !empty($webp['truncated']),
+                ),
+            );
+        }
+
+        private static function get_css_bundle_summary_diagnostics($settings = array())
+        {
+            $settings = is_array($settings) ? $settings : array();
+            $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
+            $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
+            $manifest_file = $css_bundle_dir . 'manifest.json';
+            $last = get_option('ucwp_last_css_bundle_summary', array());
+            if (!is_array($last)) {
+                $last = array();
+            }
+
+            $count_files = static function ($pattern) {
+                $files = glob($pattern);
+                if (!is_array($files)) {
+                    return array('count' => 0, 'bytes' => 0, 'latestModified' => 0);
+                }
+                $count = 0;
+                $bytes = 0;
+                $latest = 0;
+                foreach ($files as $file) {
+                    if (!is_string($file) || !is_file($file)) {
+                        continue;
+                    }
+                    $count++;
+                    $size = ucwp_safe_filesize($file, 'css_bundle_summary_diagnostic');
+                    if (false !== $size) {
+                        $bytes += max(0, (int) $size);
+                    }
+                    $mtime = ucwp_safe_filemtime($file, 'css_bundle_summary_diagnostic');
+                    if (false !== $mtime) {
+                        $latest = max($latest, (int) $mtime);
+                    }
+                }
+                return array('count' => $count, 'bytes' => $bytes, 'latestModified' => $latest);
+            };
+
+            $bundle_files = $count_files($css_bundle_dir . 'bundle-*.css');
+            $delayed_files = $count_files($css_bundle_dir . 'bundle-*-delayed-fonts.css');
+            $manifest_exists = file_exists($manifest_file);
+            $manifest_readable = $manifest_exists && is_readable($manifest_file);
+
+            $manifest_entries = 0;
+            $entries_with_delayed = 0;
+            $missing_bundle_files = 0;
+            $missing_delayed_files = 0;
+            $manifest_bundle_urls = array();
+            $manifest_delayed_urls = array();
+            $manifest_bundle_files = array();
+            $manifest_delayed_files = array();
+            $manifest_source_count = 0;
+            $manifest_source_samples = array();
+            $manifest_bundle_bytes = 0;
+            $manifest_delayed_bytes = 0;
+            $manifest_delayed_blocks = 0;
+
+            if ($manifest_readable) {
+                $raw = ucwp_safe_file_get_contents($manifest_file, 'css bundle summary manifest diagnostics');
+                $manifest = is_string($raw) && '' !== $raw ? json_decode($raw, true) : array();
+                if (is_array($manifest)) {
+                    $entries = array();
+                    if (!empty($manifest['entry']) && is_array($manifest['entry'])) {
+                        $entries[] = $manifest['entry'];
+                    }
+                    if (!empty($manifest['entries']) && is_array($manifest['entries'])) {
+                        foreach ($manifest['entries'] as $entry) {
+                            if (is_array($entry)) {
+                                $entries[] = $entry;
+                            }
+                        }
+                    }
+                    $seen = array();
+                    foreach ($entries as $entry) {
+                        $key = (string) ($entry['key'] ?? ($entry['url'] ?? ($entry['bundleFile'] ?? md5(wp_json_encode($entry)))));
+                        if (isset($seen[$key])) {
+                            continue;
+                        }
+                        $seen[$key] = true;
+                        $manifest_entries++;
+
+                        $bundle_file = isset($entry['bundleFile']) ? (string) $entry['bundleFile'] : '';
+                        $bundle_url = isset($entry['bundleUrl']) ? (string) $entry['bundleUrl'] : '';
+                        if ('' !== $bundle_url) {
+                            $manifest_bundle_urls[] = $bundle_url;
+                        }
+                        if ('' !== $bundle_file) {
+                            $manifest_bundle_files[] = $bundle_file;
+                            if (!is_file($bundle_file)) {
+                                $missing_bundle_files++;
+                            } else {
+                                $size = ucwp_safe_filesize($bundle_file, 'css_bundle_summary_manifest_bundle');
+                                if (false !== $size) {
+                                    $manifest_bundle_bytes += max(0, (int) $size);
+                                }
+                            }
+                        }
+
+                        $delayed_file = isset($entry['delayedFontFile']) ? (string) $entry['delayedFontFile'] : '';
+                        $delayed_url = isset($entry['delayedFontUrl']) ? (string) $entry['delayedFontUrl'] : '';
+                        $delayed_blocks = max(0, (int) ($entry['delayedFontFaceBlocks'] ?? 0));
+                        if ('' !== $delayed_url) {
+                            $manifest_delayed_urls[] = $delayed_url;
+                        }
+                        if ($delayed_blocks > 0 || '' !== $delayed_file || '' !== $delayed_url) {
+                            $entries_with_delayed++;
+                            $manifest_delayed_blocks += $delayed_blocks;
+                            if ('' !== $delayed_file) {
+                                $manifest_delayed_files[] = $delayed_file;
+                                if (!is_file($delayed_file)) {
+                                    $missing_delayed_files++;
+                                } else {
+                                    $size = ucwp_safe_filesize($delayed_file, 'css_bundle_summary_manifest_delayed');
+                                    if (false !== $size) {
+                                        $manifest_delayed_bytes += max(0, (int) $size);
+                                    }
+                                }
+                            }
+                        }
+
+                        $source_urls = isset($entry['sourceUrls']) && is_array($entry['sourceUrls']) ? $entry['sourceUrls'] : array();
+                        $manifest_source_count += count($source_urls);
+                        foreach ($source_urls as $source_url) {
+                            $source_url = trim((string) $source_url);
+                            if ('' !== $source_url && count($manifest_source_samples) < 12) {
+                                $manifest_source_samples[] = $source_url;
+                            }
+                        }
+                    }
+                }
+            }
+
+            $last_verification = isset($last['warmVerification']) && is_array($last['warmVerification']) ? $last['warmVerification'] : array();
+            $last_warm = array(
+                'success' => !empty($last['success']),
+                'message' => isset($last['message']) ? (string) $last['message'] : '',
+                'bundleCount' => max(0, (int) ($last['bundleCount'] ?? 0)),
+                'stylesBundled' => max(0, (int) ($last['stylesBundled'] ?? 0)),
+                'stylesScanned' => max(0, (int) ($last['stylesScanned'] ?? 0)),
+                'stylesSkipped' => max(0, (int) ($last['stylesSkipped'] ?? 0)),
+                'stylesUnresolved' => max(0, (int) ($last['stylesUnresolved'] ?? 0)),
+                'bundleUrl' => isset($last['bundleUrl']) ? (string) $last['bundleUrl'] : '',
+                'delayedFontUrl' => isset($last['delayedFontUrl']) ? (string) $last['delayedFontUrl'] : '',
+                'bundleBytes' => max(0, (int) ($last['bundleBytes'] ?? 0)),
+                'delayedFontBytes' => max(0, (int) ($last['delayedFontBytes'] ?? 0)),
+                'cssBundleRefs' => max(0, (int) ($last_verification['cssBundleRefs'] ?? 0)),
+                'stylesheetLinks' => max(0, (int) ($last_verification['stylesheetLinks'] ?? 0)),
+                'time' => max(0, (int) ($last['time'] ?? 0)),
+                'time_mysql' => isset($last['time_mysql']) ? (string) $last['time_mysql'] : '',
+            );
+
+            return array(
+                'enabled' => !empty($settings['homepageCssBundleEnabled']),
+                'scope' => (string) ($settings['cssBundleScope'] ?? ($settings['css_bundle_scope'] ?? 'homepage')),
+                'mode' => (string) ($settings['homepageCssBundleMode'] ?? 'safe'),
+                'cacheStatsEnabled' => !empty($settings['cacheStatsEnabled']),
+                'summarySource' => 'independent-option-and-manifest',
+                'lastWarm' => $last_warm,
+                'bundlesBuilt' => (int) ($last_warm['bundleCount'] ?: 0),
+                'stylesBundled' => (int) $last_warm['stylesBundled'],
+                'stylesScanned' => (int) $last_warm['stylesScanned'],
+                'stylesSkipped' => (int) $last_warm['stylesSkipped'],
+                'stylesUnresolved' => (int) $last_warm['stylesUnresolved'],
+                'files' => array(
+                    'dirExists' => is_dir($css_bundle_dir),
+                    'bundleFiles' => (int) $bundle_files['count'],
+                    'bundleBytes' => (int) $bundle_files['bytes'],
+                    'delayedFontFiles' => (int) $delayed_files['count'],
+                    'delayedFontBytes' => (int) $delayed_files['bytes'],
+                    'latestModified' => (int) max($bundle_files['latestModified'], $delayed_files['latestModified']),
+                ),
+                'manifest' => array(
+                    'exists' => (bool) $manifest_exists,
+                    'readable' => (bool) $manifest_readable,
+                    'entries' => (int) $manifest_entries,
+                    'entriesWithDelayedFonts' => (int) $entries_with_delayed,
+                    'sourceUrls' => (int) $manifest_source_count,
+                    'sourceSamples' => array_values(array_unique($manifest_source_samples)),
+                    'bundleUrls' => array_values(array_slice(array_unique($manifest_bundle_urls), 0, 8)),
+                    'delayedFontUrls' => array_values(array_slice(array_unique($manifest_delayed_urls), 0, 8)),
+                    'bundleFiles' => array_values(array_slice(array_unique($manifest_bundle_files), 0, 20)),
+                    'delayedFontFiles' => array_values(array_slice(array_unique($manifest_delayed_files), 0, 20)),
+                    'bundleBytes' => (int) $manifest_bundle_bytes,
+                    'delayedFontBytes' => (int) $manifest_delayed_bytes,
+                    'delayedFontFaceBlocks' => (int) $manifest_delayed_blocks,
+                    'missingBundleFiles' => (int) $missing_bundle_files,
+                    'missingDelayedFontFiles' => (int) $missing_delayed_files,
+                ),
+                'integrityOk' => (0 === (int) $missing_bundle_files && 0 === (int) $missing_delayed_files),
+                'message' => 'CSS Bundle Summary is independent from Cache Stats. It reads the last bundle warm snapshot and current manifest/file integrity.',
+            );
+        }
+
+        private static function redact_path_for_diagnostics($path)
+        {
+            $path = is_string($path) ? wp_normalize_path($path) : '';
+            if ('' === $path) {
+                return '';
+            }
+
+            $basename = wp_basename($path);
+            $content_dir = defined('WP_CONTENT_DIR') ? wp_normalize_path(WP_CONTENT_DIR) : '';
+            $plugin_dir = defined('UCWP_PATH') ? wp_normalize_path(UCWP_PATH) : '';
+            $abspath = defined('ABSPATH') ? wp_normalize_path(ABSPATH) : '';
+
+            if ('' !== $content_dir && 0 === strpos($path, $content_dir)) {
+                $relative = ltrim(substr($path, strlen($content_dir)), '/');
+                return 'WP_CONTENT_DIR/' . $relative;
+            }
+
+            if ('' !== $plugin_dir && 0 === strpos($path, $plugin_dir)) {
+                $relative = ltrim(substr($path, strlen($plugin_dir)), '/');
+                return 'UCWP_PATH/' . $relative;
+            }
+
+            if ('' !== $abspath && 0 === strpos($path, $abspath)) {
+                $relative = ltrim(substr($path, strlen($abspath)), '/');
+                return 'ABSPATH/' . $relative;
+            }
+
+            return '[outside-webroot]/' . $basename;
+        }
+
+        private static function get_security_hard_query_args()
+        {
+            return array(
+                '_wpnonce', '_ajax_nonce', 'nonce', 'security', 'token', 'auth', 'auth_token', 'access_token',
+                'key', 'order_key', 'password', 'pass', 'pwd', 'redirect_to', 'customer-logout', 'logout',
+                'pay_for_order', 'cancel_order', 'download_file'
+            );
+        }
+
+        private static function get_security_cache_correctness_diagnostics(array $settings)
+        {
+            $runtime_config_path = self::get_runtime_config_path();
+            $runtime_secret_path = self::get_runtime_secret_path();
+            $object_secret_path = $runtime_secret_path;
+            $legacy_object_secret_path = trailingslashit(UCWP_OBJECT_CACHE_DIR) . '.redis-auth.php';
+            $runtime_secret_values = self::load_runtime_secret_file();
+            $settings_option_raw = get_option(UCWP_SETTINGS_KEY, array());
+            $redis_secret_in_settings = is_array($settings_option_raw) && isset($settings_option_raw['redisPassword']) && '' !== trim((string) $settings_option_raw['redisPassword']);
+            $varnish_secret_in_settings = is_array($settings_option_raw) && isset($settings_option_raw['varnishCliKey']) && '' !== trim((string) $settings_option_raw['varnishCliKey']);
+            $dangerous_query_args = self::get_security_hard_query_args();
+            $configured_query_args = self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($settings['cacheExceptionQueryArgs'] ?? array())));
+            $configured_lookup = array_fill_keys(array_map('sanitize_key', $configured_query_args), true);
+            $missing_visible = array();
+            foreach ($dangerous_query_args as $arg) {
+                $key = sanitize_key($arg);
+                if ('' !== $key && empty($configured_lookup[$key])) {
+                    $missing_visible[] = $key;
+                }
+            }
+
+            $secret_paths = array(
+                'runtimeSecret' => $runtime_secret_path,
+                'objectCacheRedisSecret' => $object_secret_path,
+                'legacyObjectCacheRedisSecret' => $legacy_object_secret_path,
+            );
+            $secret_files = array();
+            foreach ($secret_paths as $key => $path) {
+                if (!is_string($path) || '' === trim($path)) {
+                    continue;
+                }
+                $secret_files[$key] = array(
+                    'exists' => file_exists($path),
+                    'readable' => is_readable($path),
+                    'insideDocumentRoot' => (0 === strpos(wp_normalize_path($path), wp_normalize_path(ABSPATH))),
+                    'displayPath' => self::redact_path_for_diagnostics($path),
+                    'basename' => wp_basename($path),
+                );
+            }
+
+            $runtime_config_protection = array(
+                'runtimeConfigExists' => file_exists($runtime_config_path),
+                'runtimeConfigReadable' => is_readable($runtime_config_path),
+                'htaccessProtectionFile' => file_exists(trailingslashit(dirname($runtime_config_path)) . '.htaccess'),
+                'webConfigProtectionFile' => file_exists(trailingslashit(dirname($runtime_config_path)) . 'web.config'),
+            );
+
+            return array(
+                'enabled' => true,
+                'summary' => array(
+                    'loggedInBypass' => true,
+                    'woocommerceSafeModeEnabled' => !empty($settings['woocommerceSafeModeEnabled']),
+                    'queryStringsEnabled' => !empty($settings['cacheQueryStringsEnabled']),
+                    'queryAllowlistCount' => count(self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($settings['cacheQueryStringAllowlist'] ?? array())))),
+                    'configuredExcludedQueryArgs' => count($configured_query_args),
+                    'hardSensitiveQueryArgs' => count($dangerous_query_args),
+                    'hardSensitiveQueryArgsMissingFromVisibleList' => count($missing_visible),
+                    'secretsRedactedFromClientSettings' => true,
+                    'debugContextRedactionEnabled' => function_exists('ucwp_redact_sensitive_debug_context'),
+                    'redisSecretConfigured' => !empty($runtime_secret_values['redis_password']),
+                    'redisSecretLocation' => 'runtime-secrets-file',
+                    'redisSecretInSettingsOption' => $redis_secret_in_settings,
+                    'legacyObjectCacheRedisSecretExists' => file_exists($legacy_object_secret_path),
+                    'varnishSecretConfigured' => !empty($runtime_secret_values['varnish_admin_secret']),
+                    'varnishSecretLocation' => 'runtime-secrets-file',
+                    'varnishSecretInSettingsOption' => $varnish_secret_in_settings,
+                    'runtimeSecretsFileOutsideDocroot' => !(0 === strpos(wp_normalize_path($runtime_secret_path), wp_normalize_path(ABSPATH))),
+                ),
+                'hardSensitiveQueryArgs' => $dangerous_query_args,
+                'hardSensitiveQueryArgsMissingFromVisibleList' => array_values($missing_visible),
+                'cookieBypassPrefixes' => array('wordpress_logged_in_', 'wordpress_sec_', 'comment_author_', 'wp-postpass_', 'woocommerce_items_in_cart', 'woocommerce_cart_hash', 'wp_woocommerce_session_'),
+                'engineOnlySafeguards' => array(
+                    array('label' => 'Logged-in users bypass page cache', 'status' => 'enforced'),
+                    array('label' => 'Sensitive query args always bypass cache', 'status' => 'enforced'),
+                    array('label' => 'WooCommerce cart/checkout/account bypass rules', 'status' => !empty($settings['woocommerceSafeModeEnabled']) ? 'enabled' : 'available'),
+                    array('label' => 'Runtime and Redis secrets redacted from REST/dashboard settings', 'status' => 'enforced'),
+                    array('label' => 'Debug context secret redaction', 'status' => function_exists('ucwp_redact_sensitive_debug_context') ? 'enabled' : 'missing'),
+                ),
+                'runtimeConfigProtection' => $runtime_config_protection,
+                'secretFiles' => $secret_files,
+                'redisSecret' => array(
+                    'configured' => !empty($runtime_secret_values['redis_password']),
+                    'location' => 'runtime-secrets-file',
+                    'insideDocumentRoot' => (0 === strpos(wp_normalize_path($runtime_secret_path), wp_normalize_path(ABSPATH))),
+                    'inSettingsOption' => $redis_secret_in_settings,
+                    'legacyFileExists' => file_exists($legacy_object_secret_path),
+                    'legacyDisplayPath' => self::redact_path_for_diagnostics($legacy_object_secret_path),
+                    'displayPath' => self::redact_path_for_diagnostics($runtime_secret_path),
+                ),
+                'varnishSecret' => array(
+                    'configured' => !empty($runtime_secret_values['varnish_admin_secret']),
+                    'location' => 'runtime-secrets-file',
+                    'insideDocumentRoot' => (0 === strpos(wp_normalize_path($runtime_secret_path), wp_normalize_path(ABSPATH))),
+                    'inSettingsOption' => $varnish_secret_in_settings,
+                    'displayPath' => self::redact_path_for_diagnostics($runtime_secret_path),
+                ),
+                'rest' => array(
+                    'adminCapability' => 'manage_options',
+                    'routesUsePermissionCallback' => true,
+                    'dangerousActionsRequireAdmin' => true,
+                ),
+                'message' => 'Security diagnostics are read-only. Sensitive query args are enforced as an engine safety floor even if not present in the visible exclusion list.',
+            );
+        }
         public static function get_dashboard_diagnostics()
         {
             $settings             = self::get_dashboard_settings();
@@ -6871,9 +8167,10 @@ public static function delete_all_plugin_data_and_deactivate()
             if (!in_array($active_object_backend, array('redis', 'apcu', 'disk', 'runtime'), true)) {
                 $active_object_backend = $selected_object_backend;
             }
-            $fallback_object_backend = isset($object_backend_status['fallback']) ? strtolower(trim((string) $object_backend_status['fallback'])) : (!empty($object_cache_support['apcu']['available']) ? 'apcu' : 'runtime');
-            if (!in_array($fallback_object_backend, array('apcu', 'runtime'), true)) {
-                $fallback_object_backend = !empty($object_cache_support['apcu']['available']) ? 'apcu' : 'runtime';
+            $configured_object_fallback = self::sanitize_object_cache_fallback_backend($settings['objectCacheFallbackBackend'] ?? 'apcu');
+            $fallback_object_backend = isset($object_backend_status['fallback']) ? strtolower(trim((string) $object_backend_status['fallback'])) : ('none' === $configured_object_fallback ? 'runtime' : $configured_object_fallback);
+            if (!in_array($fallback_object_backend, array('apcu', 'disk', 'runtime'), true)) {
+                $fallback_object_backend = 'none' === $configured_object_fallback ? 'runtime' : $configured_object_fallback;
             }
             $selected_object_backend_supported = true;
             if ('redis' === $selected_object_backend) {
@@ -6881,6 +8178,9 @@ public static function delete_all_plugin_data_and_deactivate()
             } elseif ('apcu' === $selected_object_backend) {
                 $selected_object_backend_supported = !empty($object_cache_support['apcu']['available']);
             }
+
+            $css_bundle_summary_diagnostics = self::get_css_bundle_summary_diagnostics($settings);
+            $cache_storage_diagnostics = self::get_cache_storage_diagnostics($settings, $css_bundle_summary_diagnostics);
 
             return array(
                 'pageCache' => array(
@@ -6901,6 +8201,7 @@ public static function delete_all_plugin_data_and_deactivate()
                         ),
                         'selectedBackend' => $selected_object_backend,
                         'fallbackBackend' => $fallback_object_backend,
+                        'configuredFallbackBackend' => $configured_object_fallback,
                         'fallbackActive'  => !empty($object_backend_status['fallbackActive']),
                         'fallbackReason'  => (string) ($object_backend_status['fallbackReason'] ?? ''),
                         'fallbackMessage' => (string) ($object_backend_status['fallbackMessage'] ?? ''),
@@ -6958,6 +8259,11 @@ public static function delete_all_plugin_data_and_deactivate()
                 ),
                 'wpCache' => self::get_wp_cache_define_status(),
                 'googleFonts' => self::get_google_fonts_cache_diagnostics(),
+                'fontPipeline' => self::get_font_pipeline_diagnostics($settings),
+                'settingsTransparency' => self::get_settings_transparency_diagnostics($settings),
+                'cssBundleSummary' => $css_bundle_summary_diagnostics,
+                'cacheStorage' => $cache_storage_diagnostics,
+                'securityCorrectness' => self::get_security_cache_correctness_diagnostics($settings),
                 'browserCache' => array(
                     'enabled' => !empty($settings['browserCacheRulesEnabled']),
                     'path'    => $browser_cache_path,
@@ -6968,8 +8274,14 @@ public static function delete_all_plugin_data_and_deactivate()
                     array(
                         'enabled' => !empty($settings['varnishCliEnabled']),
                         'mode'    => self::sanitize_varnish_mode($settings['varnishCliMode']),
+                        'configuredMode' => self::sanitize_varnish_mode($settings['varnishCliMode']),
                         'servers' => self::sanitize_varnish_servers_string($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'endpointCount' => count(array_values(array_filter(array_map('trim', preg_split('/\s+/', self::sanitize_varnish_servers_string($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))))))),
                         'method'  => ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN',
+                        'effectiveMethod' => ('admin' === self::sanitize_varnish_mode($settings['varnishCliMode'])) ? 'admin BAN' : (('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN'),
+                        'adminModeUsed' => ('admin' === self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'httpEndpointModeUsed' => ('http' === self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'secretConfigured' => !empty($settings['varnishCliKey']),
                         'timeout' => max(1, min(30, absint($settings['varnishCliTimeoutSeconds']))),
                         'last'    => self::get_varnish_last_result(),
                         'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
@@ -7515,6 +8827,11 @@ public static function delete_all_plugin_data_and_deactivate()
 
         {
             $support = self::get_media_support_status();
+            $queue_status = array('enabled' => false);
+            $media = self::get_media_instance();
+            if ($media && method_exists($media, 'get_media_queue_status')) {
+                $queue_status = $media->get_media_queue_status('best');
+            }
             return array(
                 'preferredEditor' => (string) ($support['preferred_editor'] ?? ''),
                 'lastImageEditorClass' => (string) ($support['last_image_editor_class'] ?? ''),
@@ -7526,6 +8843,7 @@ public static function delete_all_plugin_data_and_deactivate()
                 'gdWebp' => !empty($support['gd_webp']),
                 'imagickAvif' => !empty($support['imagick_avif']),
                 'imagickWebp' => !empty($support['imagick_webp']),
+                'queue' => is_array($queue_status) ? $queue_status : array('enabled' => false),
             );
         }
 

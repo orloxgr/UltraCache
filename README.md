@@ -13,10 +13,10 @@ UltraCache is a production-oriented WordPress performance plugin focused on page
 
 ## Current build
 
-- Version: `2.56.122`
-- Build type: Full CSS Bundle mode and CSS delivery controls
-- Runtime focus: CSS Bundle Mode now supports Safe, Aggressive, and Full CSS Bundle while preserving the lightweight SR7 LCP preload helper and strong safe-third-party delay behavior.
-- Default behavior: Flush All Cache preserves the Google Fonts cache; Google Fonts are rebuilt only from the dashboard button or WP-CLI.
+- Version: `2.56.140`
+- Build type: Media queue UX/state safety pass
+- Runtime focus: resumable media conversion queue, already-optimized reporting, and optimized-storage repair safety.
+- Default behavior: diagnostics are read-only; cleanup keeps the existing grace period and per-run delete limit.
 
 ## Recommended setup
 
@@ -200,7 +200,87 @@ Check:
 
 ## Changelog
 
+### 2.56.140
+- Public release audit fixes: moved conversion support details into the AVIF/WebP Batch Conversion box, hardened media queue REST args, removed REST media format aliasing, added local URL guard to Inspect URL, and added destructive filesystem allowed-root guards.
+
+### 2.56.139
+- UI polish: keep Warm Cache action buttons in a single vertical column.
+- UI polish: add spacing between media conversion operation counters.
+
+### 2.56.138
+- Moved AVIF/WebP batch conversion into its own dashboard box below Media Optimization.
+- Added visible buttons for Start/Resume Conversion, Rebuild Media Queue, Verify/Repair Queue, Retry Failed, and Clear Completed Queue Rows.
+- Moved media conversion live progress/logs into the Batch Conversion box only; cache warm-up UI is unchanged.
+- Added media-only operation copy and counters for attachments checked, image units checked, AVIF generated, WebP generated, already optimized, and failed.
+- Added REST endpoints for media queue status, rebuild, process, repair, retry failed, and clear completed.
+
+### 2.56.137
+- Media queue UX/state safety: complete queues now report already optimized instead of running unnecessary batches.
+- Added optimized-storage missing detection and repair requeue path when AVIF/WebP output folders disappear.
+- Limited media queue rebuilds preserve existing completed queue state.
+- Hotfix: cleaned the media conversion WP-CLI contract so `--format` controls output only and `--media-format` controls image targets.
+- Fixed media conversion dashboard progress so attachment progress cannot exceed the queue total while image units are tracked separately.
+- Improved media queue building and pause display copy so queue-building state is explicit.
+
+### 2.56.135
+- Added a persistent media conversion queue table for resumable AVIF/WebP processing.
+- Media conversion now processes pending queue items instead of re-scanning the full library for every run.
+- Added queue status, rebuild, process, retry-failed, and clear-completed support to the WP-CLI media command.
+- Admin media diagnostics now show conversion queue pending/done/failed/skipped counts.
+
+### 2.56.134
+- Polished cache storage diagnostics so CSS bundle file counts use recognized bundle files instead of double-counting delayed-font CSS files.
+- Show capped storage scans as minimum values in the dashboard, including AVIF/WebP counts such as 8,000+.
+- Clarified WP-CLI cleanup reporting with recognized CSS bundle before/after counts, old orphan-like files eligible for cleanup, and recent orphan-like files protected by grace.
+
+### 2.56.132
+- Fixed a WP-CLI scheduled cleanup fatal by declaring the static warm-suppression flag used while cleanup purges cache.
+
+### 2.56.131
+- Fixed **Consolidate Remaining CSS** so the leftover CSS bundle pass follows the independent `leftoverCssBundleEnabled` setting in `safe`, `aggressive`, and `full` CSS bundle modes. The selected main CSS bundle mode no longer silently disables leftover consolidation, and leftover-generated files now use a semantic `bundle-leftover-*` filename prefix.
+
+### 2.56.130
+- UI polish pass: move Font Pipeline Diagnostics into Advanced Diagnostics, simplify CSS Bundle Summary, remove duplicate Speed Diagnostics CSS source list, add feature request support link, and compact Media Batch support info.
+
+### 2.56.129
+- Security/cache correctness audit pass: secret redaction, hard sensitive-query cache bypass floor, and diagnostics.
+
+### 2.56.128
+- Varnish/Reverse Proxy UI clarity build. Clarifies HTTP endpoint vs admin-secret modes, improves status diagnostics, dynamic effective purge method labels, and secret-safe admin status display.
+
+### 2.56.127g
+- Makes CLS image-dimension optimization use the faster img-only regex path by default to reduce STORE rewrite cost.
+- Adds per-request CLS image dimension resolution caching for repeated image URLs.
+- Keeps the precise WP_HTML_Tag_Processor path available behind the `ucwp_cls_dimensions_use_html_tag_processor` filter.
+
+### 2.56.127e
+- Adds Frontend Rewrite Stage Breakdown to Speed Diagnostics so slow HTML rewrite stages are visible.
+- Fixes CSS duplicate diagnostics so single non-blocking delayed-font links no longer count as duplicates.
+- Clarifies that profiler sub-stage timings are diagnostic and may not add up exactly due nested wrappers.
+
+### 2.56.127d
+- Deepened the Speed Diagnostics UltraCache overhead probe for template_redirect and buffering setup timings.
+- Ignored noscript stylesheet fallbacks in critical-path duplicate/mixed CSS diagnostics to avoid false blocking reports.
+- Add Speed Diagnostics UltraCache overhead probe for maybe_start_buffering sub-steps.
+- Add duplicate/mixed-status CSS link diagnostics for delayed-font and bundle links.
+
+### 2.56.127b
+- Renames the admin Performance Profiler UI to Speed Diagnostics with clearer user-facing button labels.
+- Saves the timing breakdown immediately for profiler-triggered STORE requests while keeping normal visitor store bookkeeping deferred.
+- Replaces the technical missing STORE profile message with a clearer timing-breakdown diagnostic message.
+
+### 2.56.127
+- Polishes object-cache visibility without changing the object-cache engine/drop-in behavior.
+- Reports the real fallback backend dynamically in stats instead of assuming APCu.
+- Adds fallback message metadata to object-cache stats for clearer Redis → APCu/runtime reporting.
+- Makes APCu warnings less alarming when APCu is used only for analytics/shared-memory and not as the active object-cache backend.
+
 ### 2.56.122
+- Makes CSS bundles proxy-stale-safe by preserving `css-bundles/` during purge and using cleanup grace for old bundles.
+- Treats main CSS bundles and delayed-font companion CSS files as a lifecycle pair.
+- Adds cached HTML validation for missing css-bundle references and resets cron warm-up queue after cache flush.
+
+### 2.56.121
 - Regression fix: restores the dependency-aware ordered delayed-loader path for same-host scripts instead of forcing native `defer` for every local asset.
 - Prevents grouped inline-before / inline-after configs from running out of order for integrations such as Complianz, Google Site Kit, WooCommerce and similar scripts.
 - Keeps **JS Delay / Defer Exclusions** and hard dependency blockers as the final priority.

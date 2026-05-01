@@ -33,6 +33,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
         /** @var array<string, array<string, mixed>> */
         private $delayed_font_css_assets_current_request = array();
 
+        /** @var array<string, array<string, mixed>> */
+        private $cls_dimension_resolution_cache_current_request = array();
+
 
         /** @var string */
         private $page_cache_generation_lock_name = '';
@@ -54,6 +57,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         /**  bool */
         private $store_profile_shutdown_written = false;
+
+        /** @var array<int, array<string, mixed>> */
+        private $deferred_store_post_response_actions = array();
 
         public static function get_instance()
         {
@@ -101,6 +107,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_start_checkpoint'), -1000);
             add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_end_checkpoint'), PHP_INT_MAX);
             add_action('wp_enqueue_scripts', array($this, 'cleanup_asset_chain_enqueue_assets'), 9999);
+            add_action('shutdown', array($this, 'run_deferred_store_post_response_actions'), PHP_INT_MAX - 2);
             add_action('shutdown', array($this, 'update_store_profile_after_shutdown'), PHP_INT_MAX);
             add_filter('script_loader_tag', array($this, 'defer_scripts'), 10, 3);
             add_filter('style_loader_src', array($this, 'add_display_swap_to_google_fonts'), 20, 2);
@@ -879,6 +886,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function record_analytics_frontpage_css_warm(array $result = array())
         {
+            $this->record_last_css_bundle_summary($result);
+
             self::mutate_analytics(function ($analytics) use ($result) {
                 $stats = isset($result['stats']) && is_array($result['stats']) ? $result['stats'] : array();
                 $analytics['frontpageCssStylesScanned'] = (int) ($analytics['frontpageCssStylesScanned'] ?? 0) + max(0, (int) ($stats['scanned'] ?? 0));
@@ -901,6 +910,54 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 );
                 return $analytics;
             });
+        }
+
+        private function record_last_css_bundle_summary(array $result = array())
+        {
+            if (!function_exists('update_option')) {
+                return;
+            }
+
+            $stats = isset($result['stats']) && is_array($result['stats']) ? $result['stats'] : array();
+            $verification = isset($result['warmVerification']) && is_array($result['warmVerification']) ? $result['warmVerification'] : array();
+            $source_urls = isset($result['sourceUrls']) && is_array($result['sourceUrls']) ? array_values(array_unique(array_map('strval', $result['sourceUrls']))) : array();
+
+            $summary = array(
+                'version' => (defined('UCWP_VERSION') ? (string) UCWP_VERSION : ''),
+                'success' => !empty($result['success']),
+                'message' => isset($result['message']) ? (string) $result['message'] : '',
+                'bundleCount' => max(0, (int) ($result['bundleCount'] ?? 0)),
+                'bundleFile' => isset($result['bundleFile']) ? (string) $result['bundleFile'] : '',
+                'bundleUrl' => isset($result['bundleUrl']) ? (string) $result['bundleUrl'] : '',
+                'bundleBytes' => max(0, (int) ($result['bundleBytes'] ?? 0)),
+                'delayedFontFile' => isset($result['delayedFontFile']) ? (string) $result['delayedFontFile'] : '',
+                'delayedFontUrl' => isset($result['delayedFontUrl']) ? (string) $result['delayedFontUrl'] : '',
+                'delayedFontBytes' => max(0, (int) ($result['delayedFontBytes'] ?? 0)),
+                'delayedFontFaceBlocks' => max(0, (int) ($result['delayedFontFaceBlocks'] ?? ($stats['delayedFontFaceBlocks'] ?? 0))),
+                'stylesBundled' => max(0, (int) ($stats['bundled'] ?? 0)),
+                'stylesScanned' => max(0, (int) ($stats['scanned'] ?? 0)),
+                'stylesSkipped' => max(0, (int) ($stats['skipped'] ?? 0)),
+                'stylesUnresolved' => max(0, (int) ($stats['unresolved'] ?? 0)),
+                'sourceUrlCount' => count($source_urls),
+                'sourceUrls' => array_slice($source_urls, 0, 25),
+                'warmVerification' => array(
+                    'checked' => !empty($verification['checked']),
+                    'cachedHtmlAvailable' => !empty($verification['cachedHtmlAvailable']),
+                    'containsCssBundle' => !empty($verification['containsCssBundle']),
+                    'cssBundleRefs' => max(0, (int) ($verification['cssBundleRefs'] ?? 0)),
+                    'stylesheetLinks' => max(0, (int) ($verification['stylesheetLinks'] ?? 0)),
+                    'message' => isset($verification['message']) ? (string) $verification['message'] : '',
+                ),
+                'time' => current_time('timestamp'),
+                'time_mysql' => current_time('mysql'),
+            );
+
+            if (false === get_option('ucwp_last_css_bundle_summary', false)) {
+                add_option('ucwp_last_css_bundle_summary', $summary, '', 'no');
+                return;
+            }
+
+            update_option('ucwp_last_css_bundle_summary', $summary, false);
         }
 
         private function record_analytics_sr7_lcp(array $stats = array())
@@ -1101,12 +1158,18 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 $this->profile_request_checkpoint('early_hit_served');
                 exit;
             }
+            $this->profile_request_checkpoint('early_hit_check_end');
 
+            $this->profile_request_checkpoint('page_generation_lock_before');
             $this->maybe_acquire_page_generation_lock();
             $this->profile_request_checkpoint('page_generation_lock_checked', array('has_lock' => '' !== (string) $this->page_cache_generation_lock_name ? 'true' : 'false'));
 
+            $this->profile_request_checkpoint('record_analytics_miss_start');
             $this->record_analytics_miss();
+            $this->profile_request_checkpoint('record_analytics_miss_end');
+            $this->profile_request_checkpoint('send_debug_headers_start');
             $this->send_debug_headers('MISS');
+            $this->profile_request_checkpoint('send_debug_headers_end');
             $this->buffering = true;
             $this->profile_request_checkpoint('buffer_start');
             ob_start(array($this, 'cache_output_callback'));
@@ -1114,12 +1177,16 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function maybe_acquire_page_generation_lock()
         {
+            $this->profile_request_checkpoint('page_generation_lock_before_current_url');
             $url = $this->get_current_request_url();
+            $this->profile_request_checkpoint('page_generation_lock_after_current_url', array('url_empty' => '' === (string) $url ? 'yes' : 'no'));
             if ('' === $url) {
                 return false;
             }
 
+            $this->profile_request_checkpoint('page_generation_lock_before_cache_path');
             $file_path = $this->get_cache_path($url);
+            $this->profile_request_checkpoint('page_generation_lock_after_cache_path', array('file_path_empty' => '' === (string) $file_path ? 'yes' : 'no'));
             if ('' === $file_path) {
                 return false;
             }
@@ -1186,15 +1253,22 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
+            $this->profile_request_checkpoint('early_hit_before_current_url');
             $url = $this->get_current_request_url();
+            $this->profile_request_checkpoint('early_hit_after_current_url', array('url_length' => strlen((string) $url)));
             if ('' === $url) {
                 return false;
             }
 
+            $this->profile_request_checkpoint('early_hit_before_cache_path');
             $file_path = $this->get_cache_path($url);
+            $this->profile_request_checkpoint('early_hit_after_cache_path', array('file_path_empty' => '' === (string) $file_path ? 'yes' : 'no'));
+            $this->profile_request_checkpoint('early_hit_before_file_stat');
             if ('' === $file_path || !is_readable($file_path) || filesize($file_path) <= 255) {
+                $this->profile_request_checkpoint('early_hit_no_file_return');
                 return false;
             }
+            $this->profile_request_checkpoint('early_hit_after_file_stat');
 
             return $this->maybe_serve_cache_file_path($file_path, 'HIT', $reason);
         }
@@ -1206,14 +1280,19 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
+            $this->profile_request_checkpoint('early_hit_before_file_read', array('file' => basename((string) $file_path)));
             $html = ucwp_safe_file_get_contents($file_path);
+            $this->profile_request_checkpoint('early_hit_after_file_read', array('html_bytes' => is_string($html) ? strlen($html) : 0));
             if (!is_string($html) || '' === $html) {
                 return false;
             }
 
+            $this->profile_request_checkpoint('early_hit_before_css_ref_validation');
             if (!$this->validate_cached_html_css_bundle_refs($html, $file_path)) {
+                $this->profile_request_checkpoint('early_hit_css_ref_validation_failed');
                 return false;
             }
+            $this->profile_request_checkpoint('early_hit_after_css_ref_validation');
 
             $mtime = filemtime($file_path);
             $age = $mtime ? max(0, time() - (int) $mtime) : 0;
@@ -1242,7 +1321,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return true;
             }
 
+            $this->profile_request_checkpoint('css_bundle_ref_validation_before_scan');
             $missing = $this->get_missing_css_bundle_refs_from_html($html);
+            $this->profile_request_checkpoint('css_bundle_ref_validation_after_scan', array('missing_count' => count($missing)));
             if (empty($missing)) {
                 return true;
             }
@@ -1344,9 +1425,18 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $html;
             }
 
+            $store_write_started_at = microtime(true);
             $write_ok = $this->profile_store_event('final_cache_write', $html, function ($html) use ($file_path) {
                 return $this->write_cache_file($file_path, $html);
             });
+            $store_write_ms = (int) round((microtime(true) - $store_write_started_at) * 1000);
+            if (!headers_sent()) {
+                header('X-Ultra-Cache-Store-Write-Ms: ' . (string) $store_write_ms);
+                $warning_threshold_ms = (int) apply_filters('ucwp_store_write_warning_ms', 1200);
+                if ($store_write_ms >= max(250, $warning_threshold_ms)) {
+                    header('X-Ultra-Cache-Store-Warning: slow-write-' . (string) $store_write_ms . 'ms');
+                }
+            }
             if (!$write_ok || !file_exists($file_path)) {
                 $this->record_analytics_store_skip('write-failed');
                 if ($this->is_internal_revalidate_request()) {
@@ -1358,17 +1448,29 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $html;
             }
 
-            $this->record_analytics_store();
             if ($this->is_internal_revalidate_request()) {
                 $this->clear_revalidate_lock($url);
                 if (!headers_sent()) {
                     header('X-Ultra-Cache-Revalidate: refreshed');
                 }
             }
-            $this->record_cache_event('store', array('url' => $url, 'file' => $file_path));
             $this->send_debug_headers('STORE');
+            if (!headers_sent()) {
+                header('X-Ultra-Cache-Store-Post-Response: deferred');
+            }
             $this->profile_request_checkpoint('cache_output_callback_end', array('html_bytes' => is_string($html) ? strlen($html) : 0));
-            $this->finalize_store_profile('STORE', '', $file_path);
+
+            // Speed Diagnostics requests need the timing breakdown saved before the
+            // dashboard REST request returns. Normal visitor analytics still stay
+            // deferred so the 2.56.123 TTFB protection remains intact.
+            if ($this->is_store_profiler_enabled()) {
+                $this->finalize_store_profile('STORE', '', $file_path);
+            }
+
+            $this->defer_store_post_response_action('store_success', array(
+                'url' => $url,
+                'file_path' => $file_path,
+            ));
             $this->release_page_generation_lock();
 
             return $html;
@@ -1389,32 +1491,42 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
-            if (!$this->validate_cached_html_css_bundle_refs($html, '')) {
-                $this->record_cache_event('skip-store-missing-css-bundle-ref', array('file' => $file_path));
+            $write_lock_name = 'page-cache-write-' . md5((string) $file_path);
+            if (!$this->acquire_runtime_lock($write_lock_name, 90)) {
+                $this->record_cache_event('store-write-lock-busy', array('file' => $file_path));
                 return false;
             }
 
-            if (!$this->write_cache_variant_atomically($file_path, $html)) {
-                return false;
-            }
-
-            $settings = $this->get_settings();
-            if (!empty($settings['gzip_enabled']) && function_exists('gzencode')) {
-                self::gz_file_put_contents($file_path . '.gz', $html);
-            } else {
-                ucwp_safe_unlink($file_path . '.gz');
-            }
-
-            if (!empty($settings['brotli_enabled']) && function_exists('brotli_compress')) {
-                $compressed = brotli_compress($html, 11, BROTLI_TEXT);
-                if (false !== $compressed) {
-                    $this->write_cache_variant_atomically($file_path . '.br', $compressed);
+            try {
+                if (!$this->validate_cached_html_css_bundle_refs($html, '')) {
+                    $this->record_cache_event('skip-store-missing-css-bundle-ref', array('file' => $file_path));
+                    return false;
                 }
-            } else {
-                ucwp_safe_unlink($file_path . '.br');
-            }
 
-            return true;
+                if (!$this->write_cache_variant_atomically($file_path, $html)) {
+                    return false;
+                }
+
+                $settings = $this->get_settings();
+                if (!empty($settings['gzip_enabled']) && function_exists('gzencode')) {
+                    self::gz_file_put_contents($file_path . '.gz', $html);
+                } else {
+                    ucwp_safe_unlink($file_path . '.gz');
+                }
+
+                if (!empty($settings['brotli_enabled']) && function_exists('brotli_compress')) {
+                    $compressed = brotli_compress($html, 11, BROTLI_TEXT);
+                    if (false !== $compressed) {
+                        $this->write_cache_variant_atomically($file_path . '.br', $compressed);
+                    }
+                } else {
+                    ucwp_safe_unlink($file_path . '.br');
+                }
+
+                return true;
+            } finally {
+                $this->release_runtime_lock($write_lock_name);
+            }
         }
 
         private function get_page_cache_variant_cap_per_bucket()
@@ -1718,6 +1830,17 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'template_redirect_global_start',
                 'template_redirect_start',
                 'maybe_start_buffering_start',
+                'maybe_start_buffering_after_reentry_check',
+                'maybe_start_buffering_before_should_bypass',
+                'maybe_start_buffering_after_should_bypass',
+                'early_hit_check_start',
+                'early_hit_check_end',
+                'page_generation_lock_before',
+                'page_generation_lock_checked',
+                'record_analytics_miss_start',
+                'record_analytics_miss_end',
+                'send_debug_headers_start',
+                'send_debug_headers_end',
                 'buffer_start',
                 'cache_output_callback_start',
                 'cache_output_callback_end',
@@ -2212,6 +2335,42 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $offset = (int) $offset;
             $head_end = is_int($head_end) ? $head_end : -1;
             return ($head_end < 0 || $offset <= $head_end) ? 'head' : 'body';
+        }
+
+        private function get_html_tag_ranges_by_name($html, $tag_name)
+        {
+            $html = is_string($html) ? $html : (string) $html;
+            $tag_name = preg_replace('/[^a-z0-9_-]/i', '', (string) $tag_name);
+            if ('' === $html || '' === $tag_name) {
+                return array();
+            }
+
+            $ranges = array();
+            if (preg_match_all("/<" . preg_quote($tag_name, "/") . "\\b[^>]*>[\\s\\S]*?<\\/" . preg_quote($tag_name, "/") . ">/i", $html, $matches, PREG_OFFSET_CAPTURE)) {
+                foreach ((array) $matches[0] as $match) {
+                    $start = isset($match[1]) ? (int) $match[1] : -1;
+                    $text = isset($match[0]) ? (string) $match[0] : '';
+                    if ($start >= 0 && '' !== $text) {
+                        $ranges[] = array($start, $start + strlen($text));
+                    }
+                }
+            }
+
+            return $ranges;
+        }
+
+        private function is_html_offset_inside_ranges($offset, array $ranges)
+        {
+            $offset = (int) $offset;
+            foreach ($ranges as $range) {
+                if (!is_array($range) || count($range) < 2) {
+                    continue;
+                }
+                if ($offset >= (int) $range[0] && $offset < (int) $range[1]) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private function get_matching_fragment($handle, $url, $tag, array $fragments)
@@ -3240,6 +3399,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $settings = $this->get_settings();
             $head_end = stripos($html, '</head>');
             $head_end = false === $head_end ? -1 : (int) $head_end;
+            $noscript_ranges = $this->get_html_tag_ranges_by_name($html, 'noscript');
 
             $styles = array();
             $scripts = array();
@@ -3253,6 +3413,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 foreach ((array) $matches[0] as $match) {
                     $tag = isset($match[0]) ? (string) $match[0] : '';
                     $offset = isset($match[1]) ? (int) $match[1] : 0;
+                    if ($this->is_html_offset_inside_ranges($offset, $noscript_ranges)) {
+                        continue;
+                    }
                     if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
                         continue;
                     }
@@ -3327,12 +3490,17 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 'render_blocking_non_bundle_stylesheet_hrefs' => array(),
             );
 
-            if ('' === $html || !preg_match_all('/<link\b[^>]*>/i', $html, $matches)) {
+            $noscript_ranges = $this->get_html_tag_ranges_by_name($html, 'noscript');
+            if ('' === $html || !preg_match_all('/<link\b[^>]*>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
                 return $result;
             }
 
-            foreach ((array) $matches[0] as $tag_html) {
-                $tag_html = (string) $tag_html;
+            foreach ((array) $matches[0] as $match) {
+                $tag_html = isset($match[0]) ? (string) $match[0] : '';
+                $offset = isset($match[1]) ? (int) $match[1] : 0;
+                if ($this->is_html_offset_inside_ranges($offset, $noscript_ranges)) {
+                    continue;
+                }
                 if (!$this->html_tag_rel_contains_stylesheet($tag_html)) {
                     continue;
                 }
@@ -3395,6 +3563,41 @@ if (!class_exists('Ultra_Cache_Engine')) {
             ));
         }
 
+        private function defer_store_post_response_action($type, array $payload = array())
+        {
+            $this->deferred_store_post_response_actions[] = array(
+                'type' => sanitize_key((string) $type),
+                'payload' => $payload,
+            );
+        }
+
+        public function run_deferred_store_post_response_actions()
+        {
+            if (empty($this->deferred_store_post_response_actions)) {
+                return;
+            }
+
+            $actions = $this->deferred_store_post_response_actions;
+            $this->deferred_store_post_response_actions = array();
+
+            foreach ($actions as $action) {
+                if (!is_array($action)) {
+                    continue;
+                }
+
+                $type = isset($action['type']) ? sanitize_key((string) $action['type']) : '';
+                $payload = isset($action['payload']) && is_array($action['payload']) ? $action['payload'] : array();
+
+                if ('store_success' === $type) {
+                    $url = isset($payload['url']) ? (string) $payload['url'] : '';
+                    $file_path = isset($payload['file_path']) ? (string) $payload['file_path'] : '';
+
+                    $this->record_analytics_store();
+                    $this->record_cache_event('store', array('url' => $url, 'file' => $file_path));
+                    $this->finalize_store_profile('STORE', '', $file_path);
+                }
+            }
+        }
         public function update_store_profile_after_shutdown()
         {
             if (!$this->is_store_profiler_enabled() || empty($this->store_profile) || $this->store_profile_shutdown_written) {
@@ -5884,7 +6087,10 @@ UCWP_DELAY_LOADER;
                 }
             }
 
-            if (!empty($settings['leftover_css_bundle']) && !empty($settings['homepage_css_bundle']) && isset($bundle_mode) && 'aggressive' === $bundle_mode) {
+            if (!empty($settings['leftover_css_bundle']) && !empty($settings['homepage_css_bundle']) && isset($bundle_mode) && in_array((string) $bundle_mode, array('safe', 'aggressive', 'full'), true)) {
+                // Consolidate Remaining CSS is an independent post-bundle pass. It should
+                // follow the user's leftoverCssBundleEnabled setting regardless of the
+                // selected main CSS bundle mode; the mode only controls the main bundle.
                 $html = $this->profile_store_stage('consolidate-leftover-css-bundle', $html, function ($html) use ($settings) {
                     return $this->maybe_consolidate_leftover_stylesheet_links($html, $settings);
                 });
@@ -7983,7 +8189,12 @@ JS;
                 return $result;
             }
 
-            if (class_exists('WP_HTML_Tag_Processor')) {
+            // The tag processor is precise, but it scans every HTML tag and was measured as
+            // expensive on large Elementor/WooCommerce pages. The regex implementation only walks
+            // <img> tags and uses the same dimension resolver, so make it the default for STORE
+            // path performance. A filter keeps the processor available for targeted debugging.
+            $use_tag_processor = (bool) apply_filters('ucwp_cls_dimensions_use_html_tag_processor', false);
+            if ($use_tag_processor && class_exists('WP_HTML_Tag_Processor')) {
                 return $this->inject_safe_cls_dimensions_with_tag_processor($html);
             }
 
@@ -8168,6 +8379,33 @@ JS;
                 return array('skipped' => true);
             }
 
+            $cache_url = $this->normalize_public_resource_url($absolute_url);
+            if ('' !== $cache_url) {
+                $fragment_pos = strpos($cache_url, '#');
+                if (false !== $fragment_pos) {
+                    $cache_url = substr($cache_url, 0, $fragment_pos);
+                }
+                $query_pos = strpos($cache_url, '?');
+                if (false !== $query_pos) {
+                    $cache_url = substr($cache_url, 0, $query_pos);
+                }
+            }
+
+            $cache_key = '' !== $cache_url ? md5($cache_url) : '';
+            if ('' !== $cache_key && isset($this->cls_dimension_resolution_cache_current_request[$cache_key])) {
+                return $this->cls_dimension_resolution_cache_current_request[$cache_key];
+            }
+
+            $resolution = $this->get_uncached_safe_cls_dimensions_for_image_url($absolute_url);
+            if ('' !== $cache_key) {
+                $this->cls_dimension_resolution_cache_current_request[$cache_key] = $resolution;
+            }
+
+            return $resolution;
+        }
+
+        private function get_uncached_safe_cls_dimensions_for_image_url($absolute_url)
+        {
             $converted_source_dimensions = $this->get_source_dimensions_for_ultracache_converted_image_url($absolute_url);
             if ($converted_source_dimensions['width'] > 0 && $converted_source_dimensions['height'] > 0) {
                 return $converted_source_dimensions;
@@ -8190,7 +8428,6 @@ JS;
                 'skipped' => false,
             );
         }
-
         private function get_source_dimensions_for_ultracache_converted_image_url($url)
         {
             $source_url = $this->map_ultracache_converted_image_url_to_upload_url($url);
@@ -13417,6 +13654,36 @@ HTML;
             return false;
         }
 
+        private function get_hard_security_excluded_query_args()
+        {
+            return array(
+                '_wpnonce',
+                '_ajax_nonce',
+                'nonce',
+                'security',
+                'token',
+                'auth',
+                'auth_token',
+                'access_token',
+                'key',
+                'order_key',
+                'password',
+                'pass',
+                'pwd',
+                'redirect_to',
+                'customer-logout',
+                'logout',
+                'pay_for_order',
+                'cancel_order',
+                'download_file',
+            );
+        }
+
+        private function merge_hard_security_excluded_query_args(array $excluded_query_args)
+        {
+            return array_values(array_unique(array_merge($excluded_query_args, $this->get_hard_security_excluded_query_args())));
+        }
+
         private function query_contains_excluded_keys($query, array $excluded_query_args)
         {
             if ('' === (string) $query) {
@@ -13801,11 +14068,15 @@ HTML;
         private function is_profile_bypass_request()
         {
             $header_flag = sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_PROFILE_BYPASS'));
-            if ('1' !== $header_flag && 'true' !== strtolower((string) $header_flag)) {
+            $query_flag = sanitize_text_field(ucwp_query_value('ucwp_profile_bypass'));
+            if ('1' !== $header_flag && 'true' !== strtolower((string) $header_flag) && '1' !== $query_flag && 'true' !== strtolower((string) $query_flag)) {
                 return false;
             }
 
             $token = sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_TOKEN'));
+            if ('' === $token) {
+                $token = sanitize_text_field(ucwp_query_value('ucwp_rt'));
+            }
             if ('' === $token) {
                 return false;
             }
@@ -13912,6 +14183,7 @@ HTML;
 
             $cookies_to_bypass = array(
                 'wordpress_logged_in_',
+                'wordpress_sec_',
                 'comment_author_',
                 'wp-postpass_',
                 'woocommerce_items_in_cart',
@@ -13956,7 +14228,10 @@ HTML;
                     $ucwp_query_vars_for_cacheability['ucwp_rt'],
                     $ucwp_query_vars_for_cacheability['ucwp_store_profile'],
                     $ucwp_query_vars_for_cacheability['ucwp_callback_profile'],
-                    $ucwp_query_vars_for_cacheability['ucwp_store_profile_verbose_settings']
+                    $ucwp_query_vars_for_cacheability['ucwp_store_profile_verbose'],
+                    $ucwp_query_vars_for_cacheability['ucwp_store_profile_verbose_settings'],
+                    $ucwp_query_vars_for_cacheability['ucwp_profile_bypass'],
+                    $ucwp_query_vars_for_cacheability['ucwp_profile_run']
                 );
                 $query = !empty($ucwp_query_vars_for_cacheability) ? http_build_query($ucwp_query_vars_for_cacheability) : '';
             }
@@ -13972,6 +14247,7 @@ HTML;
             $this->profile_request_checkpoint('should_bypass_after_excluded_path_rules');
 
             $excluded_query_args = !empty($settings['excluded_query_args']) && is_array($settings['excluded_query_args']) ? $settings['excluded_query_args'] : array();
+            $excluded_query_args = $this->merge_hard_security_excluded_query_args($excluded_query_args);
             if ('' !== $query) {
                 $this->profile_request_checkpoint('should_bypass_before_excluded_query_args', array('rule_count' => count($excluded_query_args)));
                 if ($this->query_contains_excluded_keys($query, $excluded_query_args)) {
@@ -15075,7 +15351,7 @@ HTML;
                 return true;
             }
 
-            if ('aggressive' !== $mode) {
+            if (!in_array($mode, array('aggressive', 'leftover'), true)) {
                 return false;
             }
 
@@ -15474,7 +15750,7 @@ HTML;
 ";
             }
 
-            $mode = in_array((string) $mode, array('safe', 'aggressive', 'full'), true) ? (string) $mode : 'safe';
+            $mode = in_array((string) $mode, array('safe', 'aggressive', 'full', 'leftover'), true) ? (string) $mode : 'safe';
             $bundle_content = trim($bundle_prelude . trim($bundle_body)) . "
 ";
             $content_hash = md5($bundle_content);
@@ -16030,7 +16306,7 @@ HTML;
             }
 
             $media = strtolower(trim((string) $this->extract_attribute_from_html_tag($tag_html, 'media')));
-            if (!$this->is_homepage_css_bundle_allowed_media($media, 'aggressive')) {
+            if (!$this->is_homepage_css_bundle_allowed_media($media, 'leftover')) {
                 return array('asset' => array(), 'skip' => 'media');
             }
 
@@ -16168,7 +16444,7 @@ HTML;
                 return $html;
             }
 
-            $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, 'aggressive');
+            $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, 'leftover');
             if (empty($bundle['success'])) {
                 $stats['skipped_reason'] = !empty($bundle['message']) ? (string) $bundle['message'] : 'bundle-build-failed';
                 $this->record_leftover_css_bundle_profile($stats);
@@ -16964,6 +17240,7 @@ HTML;
 
             $excluded_paths = !empty($settings['excluded_paths']) && is_array($settings['excluded_paths']) ? $settings['excluded_paths'] : array();
             $excluded_query_args = !empty($settings['excluded_query_args']) && is_array($settings['excluded_query_args']) ? $settings['excluded_query_args'] : array();
+            $excluded_query_args = $this->merge_hard_security_excluded_query_args($excluded_query_args);
             $dynamic_paths = array(
                 '/cart/',
                 '/checkout/',
@@ -17116,7 +17393,7 @@ HTML;
             $query = '';
             if (!empty($parts['query'])) {
                 parse_str((string) $parts['query'], $query_vars);
-                unset($query_vars['ucwp_revalidate'], $query_vars['ucwp_rt'], $query_vars['ucwp_store_profile'], $query_vars['ucwp_callback_profile'], $query_vars['ucwp_store_profile_verbose_settings']);
+                unset($query_vars['ucwp_revalidate'], $query_vars['ucwp_rt'], $query_vars['ucwp_store_profile'], $query_vars['ucwp_callback_profile'], $query_vars['ucwp_store_profile_verbose'], $query_vars['ucwp_store_profile_verbose_settings'], $query_vars['ucwp_profile_bypass'], $query_vars['ucwp_profile_run']);
                 if (!empty($query_vars)) {
                     ksort($query_vars);
                     $query = http_build_query($query_vars);
@@ -17753,6 +18030,7 @@ HTML;
             }
 
             $excluded_query_args = !empty($settings['excluded_query_args']) && is_array($settings['excluded_query_args']) ? $settings['excluded_query_args'] : array();
+            $excluded_query_args = $this->merge_hard_security_excluded_query_args($excluded_query_args);
             if ('' !== $query) {
                 if ($this->query_contains_excluded_keys($query, $excluded_query_args)) {
                     $this->last_bypass_reason = 'excluded-query-arg';
