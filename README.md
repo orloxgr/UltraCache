@@ -13,7 +13,7 @@ UltraCache is a production-oriented WordPress performance plugin focused on page
 
 ## Current build
 
-- Version: `2.56.140`
+- Version: `2.56.141`
 - Build type: Media queue UX/state safety pass
 - Runtime focus: resumable media conversion queue, already-optimized reporting, and optimized-storage repair safety.
 - Default behavior: diagnostics are read-only; cleanup keeps the existing grace period and per-run delete limit.
@@ -199,6 +199,9 @@ Check:
 - Whether the issue disappears when CSS bundling/async CSS is disabled.
 
 ## Changelog
+
+### 2.56.141
+- Release candidate cleanup: bumped metadata/readme version and removed stray control characters from Varnish/server cache detection regular expressions. No runtime feature behavior changes.
 
 ### 2.56.140
 - Public release audit fixes: moved conversion support details into the AVIF/WebP Batch Conversion box, hardened media queue REST args, removed REST media format aliasing, added local URL guard to Inspect URL, and added destructive filesystem allowed-root guards.

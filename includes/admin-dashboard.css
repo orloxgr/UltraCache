@@ -1402,7 +1402,7 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	}
 }
 
-/* UltraCache 2.56.140 UI polish: keep warm cache actions vertical and space media counters. */
+/* UltraCache UI polish: keep warm cache actions vertical and space media counters. */
 .uc-warm-cache-actions {
 	display: flex !important;
 	flex-direction: column !important;

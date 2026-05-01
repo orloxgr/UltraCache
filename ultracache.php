@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.140
+ * Version: 2.56.141
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.140');
+    define('UCWP_VERSION', '2.56.141');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -6610,7 +6610,7 @@ public static function delete_all_plugin_data_and_deactivate()
             $body = trim((string) wp_remote_retrieve_body($response));
             $content_type = strtolower(trim((string) wp_remote_retrieve_header($response, 'content-type')));
             $summary = self::summarize_varnish_http_body($body);
-            $looks_like_html = (false !== strpos($content_type, 'text/html')) || ('' !== $body && preg_match('/<(?:!doctype|html|head|body)/i', $body));
+            $looks_like_html = (false !== strpos($content_type, 'text/html')) || ('' !== $body && preg_match('/<(?:!doctype|html|head|body)\b/i', $body));
 
             if ($code < 200 || $code >= 300) {
                 $detail = 'HTTP ' . $code . ($message !== '' ? ' ' . $message : '');
@@ -7085,7 +7085,7 @@ public static function delete_all_plugin_data_and_deactivate()
                 $status['nginx_cache'] = ('' !== $status['x_fastcgi_cache'])
                     || ('' !== $status['x_proxy_cache'])
                     || ('' !== $status['x_cache_status'])
-                    || ((false !== strpos($server_lower, 'nginx')) && (preg_match('/(hit|miss|bypass|expired|stale|updating|revalidated)/i', $status['x_cache']) || preg_match('/(hit|miss|bypass|expired|stale|updating|revalidated)/i', $status['x_cache_status'])));
+                    || ((false !== strpos($server_lower, 'nginx')) && (preg_match('/\b(hit|miss|bypass|expired|stale|updating|revalidated)\b/i', $status['x_cache']) || preg_match('/\b(hit|miss|bypass|expired|stale|updating|revalidated)\b/i', $status['x_cache_status'])));
                 $status['litespeed_cache'] = ('' !== $status['x_litespeed_cache'])
                     || ('' !== $status['x_qc_cache'])
                     || (false !== strpos($server_lower, 'litespeed'));

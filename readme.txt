@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp, apcu
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.56.140
+Stable tag: 2.56.141
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -103,6 +103,9 @@ UltraCache now prefers WordPress `WP_HTML_Tag_Processor` for many tag/attribute 
 8. Review Diagnostics for page cache, object cache backend, analytics backend, OPcache/APCu cards, CSS Bundle Summary, and generated drop-in versions.
 
 == Changelog ==
+
+= 2.56.141 =
+* Release candidate cleanup: bumped metadata/readme version and removed stray control characters from Varnish/server cache detection regular expressions. No runtime feature behavior changes.
 
 = 2.56.140 =
 * Public release audit fixes: moved conversion support details into the AVIF/WebP Batch Conversion box, hardened media queue REST args, removed REST media format aliasing, added local URL guard to Inspect URL, and added destructive filesystem allowed-root guards.
