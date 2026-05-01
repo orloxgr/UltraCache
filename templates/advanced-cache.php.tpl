@@ -84,6 +84,14 @@ if (!function_exists('ucwp_safe_stream_socket_client')) {
     }
 }
 
+
+if (!function_exists('ucwp_advanced_cache_debug_headers_enabled')) {
+    function ucwp_advanced_cache_debug_headers_enabled() {
+        $flag = isset($_SERVER['HTTP_X_ULTRACACHE_DEBUG']) ? strtolower(trim((string) $_SERVER['HTTP_X_ULTRACACHE_DEBUG'])) : '';
+        return in_array($flag, array('1', 'true', 'yes', 'on'), true);
+    }
+}
+
 if (!function_exists('ucwp_normalize_cache_path')) {
     function ucwp_normalize_cache_path($path) {
         $path = is_string($path) ? trim($path) : '';
@@ -458,6 +466,20 @@ $is_revalidate_request = (
     && hash_equals((string) $runtime_config['revalidate_secret'], $revalidate_token)
 );
 if ($is_revalidate_request) {
+    return;
+}
+
+$profile_bypass_header = ucwp_server_var('HTTP_X_ULTRACACHE_PROFILE_BYPASS', '');
+$profile_bypass_token = ucwp_server_var('HTTP_X_ULTRACACHE_TOKEN', '');
+$is_profile_bypass_request = (
+    ('1' === $profile_bypass_header || 'true' === strtolower((string) $profile_bypass_header))
+    && !empty($runtime_config['revalidate_secret'])
+    && hash_equals((string) $runtime_config['revalidate_secret'], (string) $profile_bypass_token)
+);
+if ($is_profile_bypass_request) {
+    if (!headers_sent()) {
+        header('X-Ultra-Cache-Profile-Bypass: advanced-cache');
+    }
     return;
 }
 
@@ -1273,6 +1295,9 @@ if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_t
     header('Content-Type: text/html; charset=UTF-8');
     header('Vary: Accept, Accept-Encoding', false);
     header('X-Ultra-Cache: STALE');
+    if (ucwp_advanced_cache_debug_headers_enabled()) {
+        header('X-Ultra-Cache-Source: advanced-cache');
+    }
     header('X-Ultra-Cache-Age: ' . (string) $age);
     header('X-Ultra-Cache-Revalidate: ' . ($queued ? 'queued' : 'pending'));
     $ucwp_safe_readfile($serve_file);
@@ -1284,6 +1309,9 @@ $ucwp_record_hit($bucket, $encoding_bucket, false);
 header('Content-Type: text/html; charset=UTF-8');
 header('Vary: Accept, Accept-Encoding', false);
 header('X-Ultra-Cache: HIT');
+if (ucwp_advanced_cache_debug_headers_enabled()) {
+    header('X-Ultra-Cache-Source: advanced-cache');
+}
 header('X-Ultra-Cache-Age: ' . (string) $age);
 $ucwp_safe_readfile($serve_file);
 exit;

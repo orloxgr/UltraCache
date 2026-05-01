@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.43
+ * Version: 2.56.121
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.43');
+    define('UCWP_VERSION', '2.56.121');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -185,6 +185,687 @@ if (!function_exists('ucwp_query_value')) {
         return is_scalar($value) ? (string) $value : '';
     }
 }
+
+if (!function_exists('ucwp_request_profiler_enabled')) {
+    function ucwp_request_profiler_enabled()
+    {
+        $query_flag = strtolower(trim((string) ucwp_query_value('ucwp_store_profile')));
+        $header_flag = strtolower(trim((string) ucwp_server_value('HTTP_X_ULTRACACHE_STORE_PROFILE')));
+        $constant_flag = defined('UCWP_STORE_PROFILE') && UCWP_STORE_PROFILE;
+
+        return ('1' === $query_flag || 'true' === $query_flag || '1' === $header_flag || 'true' === $header_flag || $constant_flag);
+    }
+}
+
+if (!function_exists('ucwp_request_callback_profiler_enabled')) {
+    function ucwp_request_callback_profiler_enabled()
+    {
+        if (!ucwp_request_profiler_enabled()) {
+            return false;
+        }
+
+        $query_flag = strtolower(trim((string) ucwp_query_value('ucwp_callback_profile')));
+        $header_flag = strtolower(trim((string) ucwp_server_value('HTTP_X_ULTRACACHE_CALLBACK_PROFILE')));
+        $constant_flag = defined('UCWP_CALLBACK_PROFILE') && UCWP_CALLBACK_PROFILE;
+
+        return ('1' === $query_flag || 'true' === $query_flag || '1' === $header_flag || 'true' === $header_flag || $constant_flag);
+    }
+}
+
+if (!function_exists('ucwp_request_profile_request_started_at')) {
+    function ucwp_request_profile_request_started_at()
+    {
+        if (isset($_SERVER['REQUEST_TIME_FLOAT']) && is_numeric($_SERVER['REQUEST_TIME_FLOAT'])) {
+            return (float) $_SERVER['REQUEST_TIME_FLOAT'];
+        }
+
+        if (isset($_SERVER['REQUEST_TIME']) && is_numeric($_SERVER['REQUEST_TIME'])) {
+            return (float) $_SERVER['REQUEST_TIME'];
+        }
+
+        return microtime(true);
+    }
+}
+
+if (!function_exists('ucwp_request_profile_sanitize_stage')) {
+    function ucwp_request_profile_sanitize_stage($stage)
+    {
+        $stage = strtolower((string) $stage);
+        $stage = preg_replace('/[^a-z0-9_\-.]+/', '_', $stage);
+        $stage = trim((string) $stage, '_-.');
+
+        return '' !== $stage ? substr($stage, 0, 96) : 'checkpoint';
+    }
+}
+
+if (!function_exists('ucwp_request_profile_current_hook_summary')) {
+    function ucwp_request_profile_current_hook_summary($hook_name)
+    {
+        global $wp_filter;
+
+        $hook_name = (string) $hook_name;
+        if ('' === $hook_name || empty($wp_filter[$hook_name]) || !is_object($wp_filter[$hook_name])) {
+            return array();
+        }
+
+        $callbacks = isset($wp_filter[$hook_name]->callbacks) && is_array($wp_filter[$hook_name]->callbacks) ? $wp_filter[$hook_name]->callbacks : array();
+        if (empty($callbacks)) {
+            return array('hook' => $hook_name, 'callback_count' => 0, 'priorities' => array());
+        }
+
+        $count = 0;
+        $priorities = array();
+        foreach ($callbacks as $priority => $items) {
+            $item_count = is_array($items) ? count($items) : 0;
+            $count += $item_count;
+            $priorities[] = (string) $priority . ':' . (string) $item_count;
+        }
+
+        return array(
+            'hook' => $hook_name,
+            'callback_count' => $count,
+            'priorities' => $priorities,
+        );
+    }
+}
+
+if (!function_exists('ucwp_request_profile_callback_label')) {
+    function ucwp_request_profile_callback_label($callback)
+    {
+        if (is_string($callback)) {
+            return $callback;
+        }
+
+        if (is_array($callback) && count($callback) >= 2) {
+            $target = $callback[0];
+            $method = is_scalar($callback[1]) ? (string) $callback[1] : 'unknown';
+            if (is_object($target)) {
+                return get_class($target) . '->' . $method;
+            }
+            if (is_string($target)) {
+                return $target . '::' . $method;
+            }
+        }
+
+        if ($callback instanceof Closure) {
+            return 'Closure';
+        }
+
+        if (is_object($callback) && method_exists($callback, '__invoke')) {
+            return get_class($callback) . '::__invoke';
+        }
+
+        return 'unknown_callback';
+    }
+}
+
+if (!function_exists('ucwp_request_profile_hook_priority_details')) {
+    function ucwp_request_profile_hook_priority_details($hook_name, $priority, $limit = 30)
+    {
+        global $wp_filter;
+
+        $hook_name = (string) $hook_name;
+        $priority_key = (string) $priority;
+        if ('' === $hook_name || empty($wp_filter[$hook_name]) || !is_object($wp_filter[$hook_name])) {
+            return array(
+                'hook' => $hook_name,
+                'priority' => $priority_key,
+                'callback_count' => 0,
+                'callbacks' => array(),
+            );
+        }
+
+        $callbacks = isset($wp_filter[$hook_name]->callbacks) && is_array($wp_filter[$hook_name]->callbacks) ? $wp_filter[$hook_name]->callbacks : array();
+        $items = array();
+        if (array_key_exists($priority, $callbacks) && is_array($callbacks[$priority])) {
+            $items = $callbacks[$priority];
+        } elseif (array_key_exists($priority_key, $callbacks) && is_array($callbacks[$priority_key])) {
+            $items = $callbacks[$priority_key];
+        }
+
+        $labels = array();
+        $count = 0;
+        foreach ($items as $item) {
+            $count++;
+            if (count($labels) >= (int) $limit) {
+                continue;
+            }
+            $cb = is_array($item) && array_key_exists('function', $item) ? $item['function'] : $item;
+            $labels[] = ucwp_request_profile_callback_label($cb);
+        }
+
+        return array(
+            'hook' => $hook_name,
+            'priority' => $priority_key,
+            'callback_count' => $count,
+            'callbacks' => $labels,
+            'truncated' => $count > count($labels),
+        );
+    }
+}
+
+if (!function_exists('ucwp_request_profile_verbose_settings_enabled')) {
+    function ucwp_request_profile_verbose_settings_enabled()
+    {
+        $query_flag = strtolower(trim((string) ucwp_query_value('ucwp_store_profile_verbose_settings')));
+        $header_flag = strtolower(trim((string) ucwp_server_value('HTTP_X_ULTRACACHE_STORE_PROFILE_VERBOSE_SETTINGS')));
+        $constant_flag = defined('UCWP_STORE_PROFILE_VERBOSE_SETTINGS') && UCWP_STORE_PROFILE_VERBOSE_SETTINGS;
+        $query_verbose_flag = strtolower(trim((string) ucwp_query_value('ucwp_store_profile_verbose')));
+        $header_verbose_flag = strtolower(trim((string) ucwp_server_value('HTTP_X_ULTRACACHE_STORE_PROFILE_VERBOSE')));
+        $constant_verbose_flag = defined('UCWP_STORE_PROFILE_VERBOSE') && UCWP_STORE_PROFILE_VERBOSE;
+
+        return (
+            '1' === $query_flag
+            || 'true' === $query_flag
+            || '1' === $header_flag
+            || 'true' === $header_flag
+            || $constant_flag
+            || '1' === $query_verbose_flag
+            || 'true' === $query_verbose_flag
+            || '1' === $header_verbose_flag
+            || 'true' === $header_verbose_flag
+            || $constant_verbose_flag
+        );
+    }
+}
+
+
+if (!function_exists('ucwp_request_profile_verbose_enabled')) {
+    function ucwp_request_profile_verbose_enabled()
+    {
+        $query_flag = strtolower(trim((string) ucwp_query_value('ucwp_store_profile_verbose')));
+        $header_flag = strtolower(trim((string) ucwp_server_value('HTTP_X_ULTRACACHE_STORE_PROFILE_VERBOSE')));
+        $constant_flag = defined('UCWP_STORE_PROFILE_VERBOSE') && UCWP_STORE_PROFILE_VERBOSE;
+
+        return ('1' === $query_flag || 'true' === $query_flag || '1' === $header_flag || 'true' === $header_flag || $constant_flag || ucwp_request_profile_verbose_settings_enabled());
+    }
+}
+
+if (!function_exists('ucwp_request_profile_compact_stages')) {
+    function ucwp_request_profile_compact_stages()
+    {
+        return array(
+            'plugin_file_loaded' => true,
+            'ultracache_wp_construct_start' => true,
+            'ultracache_dependencies_loaded' => true,
+            'ultracache_hooks_registered' => true,
+            'dependency_load_start' => true,
+            'dependency_load_end' => true,
+            'engine_construct' => true,
+            'plugins_loaded_p-1000' => true,
+            'plugins_loaded_p0' => true,
+            'plugins_loaded_p4_before_components' => true,
+            'plugins_loaded_p5_before_components' => true,
+            'plugins_loaded_p5_components' => true,
+            'plugins_loaded_p6_after_components' => true,
+            'plugins_loaded_p18_before_reconcile' => true,
+            'plugins_loaded_p19_before_page_cache_reconcile' => true,
+            'page_cache_reconcile_skipped' => true,
+            'page_cache_reconcile_light_start' => true,
+            'page_cache_reconcile_light_end' => true,
+            'page_cache_reconcile_full_start' => true,
+            'page_cache_reconcile_full_end' => true,
+            'plugins_loaded_p20_before_object_cache_reconcile' => true,
+            'object_cache_reconcile_skipped' => true,
+            'object_cache_reconcile_light_start' => true,
+            'object_cache_reconcile_light_end' => true,
+            'object_cache_reconcile_full_start' => true,
+            'object_cache_reconcile_full_end' => true,
+            'plugins_loaded_p21_before_runtime_config_reconcile' => true,
+            'runtime_config_reconcile_skipped' => true,
+            'runtime_config_reconcile_light_start' => true,
+            'runtime_config_reconcile_light_end' => true,
+            'runtime_config_reconcile_full_before_sync' => true,
+            'runtime_config_reconcile_full_after_sync' => true,
+            'plugins_loaded_p22_after_reconcile' => true,
+            'plugins_loaded_end' => true,
+            'setup_theme_start' => true,
+            'setup_theme_end' => true,
+            'after_setup_theme_start' => true,
+            'after_setup_theme_end' => true,
+            'init_start' => true,
+            'init' => true,
+            'init_end' => true,
+            'wp_loaded_start' => true,
+            'wp_loaded' => true,
+            'wp_loaded_end' => true,
+            'template_redirect_global_start' => true,
+            'template_redirect_start' => true,
+            'maybe_start_buffering_start' => true,
+            'maybe_start_buffering_reentry_return' => true,
+            'maybe_start_buffering_after_should_bypass' => true,
+            'bypass_selected' => true,
+            'should_bypass_return' => true,
+            'early_hit_check_start' => true,
+            'early_hit_served' => true,
+            'page_generation_lock_checked' => true,
+            'buffer_start' => true,
+            'template_redirect_global_end' => true,
+            'wp_head_start' => true,
+            'wp_enqueue_scripts_start' => true,
+            'wp_enqueue_scripts_end' => true,
+            'wp_head_end' => true,
+            'shutdown_start' => true,
+            'cache_output_callback_start' => true,
+            'store_profile_start' => true,
+            'cache_output_callback_end' => true,
+            'store_profile_finalize_start' => true,
+            'shutdown_end' => true,
+            'engine_shutdown_profile_update' => true,
+            'callback_slow' => true,
+        );
+    }
+}
+
+if (!function_exists('ucwp_request_profile_should_record_checkpoint')) {
+    function ucwp_request_profile_should_record_checkpoint($stage)
+    {
+        $stage = ucwp_request_profile_sanitize_stage($stage);
+        if (ucwp_request_profile_verbose_enabled()) {
+            return true;
+        }
+
+        $compact = ucwp_request_profile_compact_stages();
+        if (isset($compact[$stage])) {
+            return true;
+        }
+
+        if (0 === strpos($stage, 'advanced_cache_setup_')) {
+            return true;
+        }
+
+        if (0 === strpos($stage, 'callback_') && ucwp_request_callback_profiler_enabled()) {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('ucwp_request_profile_settings_checkpoint')) {
+    function ucwp_request_profile_settings_checkpoint($stage, array $extra = array())
+    {
+        if (!ucwp_request_profile_verbose_settings_enabled()) {
+            return;
+        }
+
+        ucwp_request_profile_checkpoint($stage, $extra);
+    }
+}
+
+if (!function_exists('ucwp_request_profile_normalize_path')) {
+    function ucwp_request_profile_normalize_path($path)
+    {
+        $path = str_replace('\\', '/', (string) $path);
+        return preg_replace('#/+#', '/', $path);
+    }
+}
+
+if (!function_exists('ucwp_request_profile_relative_path')) {
+    function ucwp_request_profile_relative_path($file, $base)
+    {
+        $file = ucwp_request_profile_normalize_path($file);
+        $base = rtrim(ucwp_request_profile_normalize_path($base), '/') . '/';
+        if ('' !== $base && 0 === strpos($file, $base)) {
+            return ltrim(substr($file, strlen($base)), '/');
+        }
+
+        return '';
+    }
+}
+
+if (!function_exists('ucwp_request_profile_callback_origin')) {
+    function ucwp_request_profile_callback_origin($callback)
+    {
+        $file = '';
+        $line = 0;
+        try {
+            if (is_string($callback) && function_exists($callback)) {
+                $ref = new ReflectionFunction($callback);
+                $file = (string) $ref->getFileName();
+                $line = (int) $ref->getStartLine();
+            } elseif ($callback instanceof Closure) {
+                $ref = new ReflectionFunction($callback);
+                $file = (string) $ref->getFileName();
+                $line = (int) $ref->getStartLine();
+            } elseif (is_array($callback) && count($callback) >= 2) {
+                $target = $callback[0];
+                $method = is_scalar($callback[1]) ? (string) $callback[1] : '';
+                if ('' !== $method && (is_object($target) || is_string($target)) && method_exists($target, $method)) {
+                    $ref = new ReflectionMethod($target, $method);
+                    $file = (string) $ref->getFileName();
+                    $line = (int) $ref->getStartLine();
+                }
+            } elseif (is_object($callback) && method_exists($callback, '__invoke')) {
+                $ref = new ReflectionMethod($callback, '__invoke');
+                $file = (string) $ref->getFileName();
+                $line = (int) $ref->getStartLine();
+            }
+        } catch (Throwable $e) {
+            $file = '';
+            $line = 0;
+        }
+
+        $file = ucwp_request_profile_normalize_path($file);
+        $type = 'unknown';
+        $name = '';
+        $relative = '';
+
+        if ('' !== $file) {
+            $plugin_dir = defined('WP_PLUGIN_DIR') ? ucwp_request_profile_normalize_path(WP_PLUGIN_DIR) : '';
+            $mu_plugin_dir = defined('WPMU_PLUGIN_DIR') ? ucwp_request_profile_normalize_path(WPMU_PLUGIN_DIR) : '';
+            $content_dir = defined('WP_CONTENT_DIR') ? ucwp_request_profile_normalize_path(WP_CONTENT_DIR) : '';
+            $abs_path = defined('ABSPATH') ? ucwp_request_profile_normalize_path(ABSPATH) : '';
+
+            if ('' !== $plugin_dir && '' !== ($relative = ucwp_request_profile_relative_path($file, $plugin_dir))) {
+                $type = 'plugin';
+                $parts = explode('/', $relative);
+                $name = (string) reset($parts);
+            } elseif ('' !== $mu_plugin_dir && '' !== ($relative = ucwp_request_profile_relative_path($file, $mu_plugin_dir))) {
+                $type = 'mu-plugin';
+                $parts = explode('/', $relative);
+                $name = (string) reset($parts);
+            } elseif (function_exists('get_stylesheet_directory') && '' !== ($relative = ucwp_request_profile_relative_path($file, get_stylesheet_directory()))) {
+                $type = 'theme';
+                $name = function_exists('get_stylesheet') ? (string) get_stylesheet() : 'stylesheet';
+            } elseif (function_exists('get_template_directory') && '' !== ($relative = ucwp_request_profile_relative_path($file, get_template_directory()))) {
+                $type = 'theme';
+                $name = function_exists('get_template') ? (string) get_template() : 'template';
+            } elseif ('' !== $content_dir && '' !== ($relative = ucwp_request_profile_relative_path($file, $content_dir))) {
+                $type = 'wp-content';
+                $parts = explode('/', $relative);
+                $name = (string) reset($parts);
+            } elseif ('' !== $abs_path && '' !== ($relative = ucwp_request_profile_relative_path($file, $abs_path))) {
+                $type = 'core';
+                $parts = explode('/', $relative);
+                $name = (string) reset($parts);
+            }
+        }
+
+        return array(
+            'type' => $type,
+            'name' => $name,
+            'file' => $file,
+            'relative_file' => $relative,
+            'line' => $line,
+        );
+    }
+}
+
+if (!function_exists('ucwp_request_profile_record_callback_timing')) {
+    function ucwp_request_profile_record_callback_timing($hook_name, $priority, $index, $callback_id, $label, array $origin, $start_ms, $duration_ms)
+    {
+        if (!ucwp_request_callback_profiler_enabled()) {
+            return;
+        }
+
+        if (!isset($GLOBALS['ucwp_request_profile_callback_timings']) || !is_array($GLOBALS['ucwp_request_profile_callback_timings'])) {
+            $GLOBALS['ucwp_request_profile_callback_timings'] = array();
+        }
+
+        if (!isset($GLOBALS['ucwp_request_profile_callback_timing_summary']) || !is_array($GLOBALS['ucwp_request_profile_callback_timing_summary'])) {
+            $GLOBALS['ucwp_request_profile_callback_timing_summary'] = array();
+        }
+
+        $duration_ms = (int) max(0, $duration_ms);
+        $entry = array(
+            'hook' => (string) $hook_name,
+            'priority' => (string) $priority,
+            'callback_index' => (string) $index,
+            'callback_id' => (string) $callback_id,
+            'callback_label' => (string) $label,
+            'duration_ms' => $duration_ms,
+            'start_ms' => (int) max(0, $start_ms),
+            'origin_type' => (string) ($origin['type'] ?? ''),
+            'origin_name' => (string) ($origin['name'] ?? ''),
+            'origin_file' => (string) ($origin['relative_file'] ?? ''),
+            'origin_line' => (int) ($origin['line'] ?? 0),
+        );
+
+        $GLOBALS['ucwp_request_profile_callback_timings'][] = $entry;
+
+        $key = implode('|', array($entry['hook'], $entry['priority'], $entry['callback_label'], $entry['origin_type'], $entry['origin_name'], $entry['origin_file']));
+        if (!isset($GLOBALS['ucwp_request_profile_callback_timing_summary'][$key])) {
+            $GLOBALS['ucwp_request_profile_callback_timing_summary'][$key] = array(
+                'hook' => $entry['hook'],
+                'priority' => $entry['priority'],
+                'callback_label' => $entry['callback_label'],
+                'origin_type' => $entry['origin_type'],
+                'origin_name' => $entry['origin_name'],
+                'origin_file' => $entry['origin_file'],
+                'count' => 0,
+                'total_ms' => 0,
+                'max_ms' => 0,
+            );
+        }
+
+        $GLOBALS['ucwp_request_profile_callback_timing_summary'][$key]['count']++;
+        $GLOBALS['ucwp_request_profile_callback_timing_summary'][$key]['total_ms'] += $duration_ms;
+        if ($duration_ms > (int) $GLOBALS['ucwp_request_profile_callback_timing_summary'][$key]['max_ms']) {
+            $GLOBALS['ucwp_request_profile_callback_timing_summary'][$key]['max_ms'] = $duration_ms;
+        }
+
+        if ($duration_ms >= 200) {
+            ucwp_request_profile_checkpoint('callback_slow', array(
+                'target_hook' => $entry['hook'],
+                'target_priority' => $entry['priority'],
+                'target_callback' => $entry['callback_label'],
+                'callback' => $entry['callback_label'],
+                'callback_label' => $entry['callback_label'],
+                'duration_ms' => $duration_ms,
+                'origin_type' => $entry['origin_type'],
+                'origin_name' => $entry['origin_name'],
+                'origin_file' => $entry['origin_file'],
+                'plugin' => ('plugin' === $entry['origin_type']) ? $entry['origin_name'] : '',
+                'file' => $entry['origin_file'],
+            ));
+        }
+    }
+}
+
+if (!function_exists('ucwp_get_request_profile_callback_timings')) {
+    function ucwp_get_request_profile_callback_timings($limit = 120)
+    {
+        $timings = isset($GLOBALS['ucwp_request_profile_callback_timings']) && is_array($GLOBALS['ucwp_request_profile_callback_timings']) ? $GLOBALS['ucwp_request_profile_callback_timings'] : array();
+        usort($timings, function ($a, $b) {
+            return (int) ($b['duration_ms'] ?? 0) <=> (int) ($a['duration_ms'] ?? 0);
+        });
+
+        return array_slice($timings, 0, max(1, (int) $limit));
+    }
+}
+
+if (!function_exists('ucwp_get_request_profile_callback_timing_summary')) {
+    function ucwp_get_request_profile_callback_timing_summary($limit = 80)
+    {
+        $summary = isset($GLOBALS['ucwp_request_profile_callback_timing_summary']) && is_array($GLOBALS['ucwp_request_profile_callback_timing_summary']) ? array_values($GLOBALS['ucwp_request_profile_callback_timing_summary']) : array();
+        foreach ($summary as $i => $row) {
+            $count = max(1, (int) ($row['count'] ?? 1));
+            $summary[$i]['avg_ms'] = (int) round(((int) ($row['total_ms'] ?? 0)) / $count);
+        }
+
+        usort($summary, function ($a, $b) {
+            $a_total = (int) ($a['total_ms'] ?? 0);
+            $b_total = (int) ($b['total_ms'] ?? 0);
+            if ($a_total === $b_total) {
+                return (int) ($b['max_ms'] ?? 0) <=> (int) ($a['max_ms'] ?? 0);
+            }
+            return $b_total <=> $a_total;
+        });
+
+        return array_slice($summary, 0, max(1, (int) $limit));
+    }
+}
+
+if (!function_exists('ucwp_request_profile_wrap_hook_callbacks')) {
+    function ucwp_request_profile_wrap_hook_callbacks($hook_name, $priorities = null)
+    {
+        if (!ucwp_request_callback_profiler_enabled()) {
+            return;
+        }
+
+        global $wp_filter;
+        $hook_name = (string) $hook_name;
+        if ('' === $hook_name || empty($wp_filter[$hook_name]) || !is_object($wp_filter[$hook_name]) || empty($wp_filter[$hook_name]->callbacks) || !is_array($wp_filter[$hook_name]->callbacks)) {
+            ucwp_request_profile_checkpoint('callback_wrap_skipped', array('target_hook' => $hook_name, 'reason' => 'no_callbacks'));
+            return;
+        }
+
+        if (!isset($GLOBALS['ucwp_request_profile_wrapped_callbacks']) || !is_array($GLOBALS['ucwp_request_profile_wrapped_callbacks'])) {
+            $GLOBALS['ucwp_request_profile_wrapped_callbacks'] = array();
+        }
+        if (!isset($GLOBALS['ucwp_request_profile_wrapped_callbacks'][$hook_name])) {
+            $GLOBALS['ucwp_request_profile_wrapped_callbacks'][$hook_name] = array();
+        }
+
+        $available_priorities = array_keys($wp_filter[$hook_name]->callbacks);
+        $target_priorities = null === $priorities ? $available_priorities : array_map('intval', (array) $priorities);
+        $wrapped = 0;
+        $priority_counts = array();
+
+        foreach ($target_priorities as $priority) {
+            $priority_key = (string) $priority;
+            $actual_priority = null;
+            if (array_key_exists($priority, $wp_filter[$hook_name]->callbacks)) {
+                $actual_priority = $priority;
+            } elseif (array_key_exists($priority_key, $wp_filter[$hook_name]->callbacks)) {
+                $actual_priority = $priority_key;
+            }
+
+            if (null === $actual_priority || empty($wp_filter[$hook_name]->callbacks[$actual_priority]) || !is_array($wp_filter[$hook_name]->callbacks[$actual_priority])) {
+                $priority_counts[$priority_key] = 0;
+                continue;
+            }
+
+            $index = 0;
+            foreach ($wp_filter[$hook_name]->callbacks[$actual_priority] as $callback_id => $item) {
+                if (!is_array($item) || !array_key_exists('function', $item)) {
+                    $index++;
+                    continue;
+                }
+
+                $wrapped_key = (string) $actual_priority . ':' . (is_scalar($callback_id) ? (string) $callback_id : (string) $index);
+                if (!empty($GLOBALS['ucwp_request_profile_wrapped_callbacks'][$hook_name][$wrapped_key])) {
+                    $index++;
+                    continue;
+                }
+
+                $original_callback = $item['function'];
+                if (!is_callable($original_callback)) {
+                    $index++;
+                    continue;
+                }
+
+                $accepted_args = isset($item['accepted_args']) ? (int) $item['accepted_args'] : 1;
+                if ($accepted_args < 0) {
+                    $accepted_args = 0;
+                }
+
+                $label = ucwp_request_profile_callback_label($original_callback);
+                $origin = ucwp_request_profile_callback_origin($original_callback);
+                $current_index = $index;
+                $current_id = is_scalar($callback_id) ? (string) $callback_id : 'callback_' . (string) $current_index;
+                $current_priority = (string) $actual_priority;
+
+                $wp_filter[$hook_name]->callbacks[$actual_priority][$callback_id]['function'] = function () use ($hook_name, $original_callback, $accepted_args, $current_priority, $current_index, $current_id, $label, $origin) {
+                    $args = func_get_args();
+                    if ($accepted_args >= 0) {
+                        $args = array_slice($args, 0, $accepted_args);
+                    }
+
+                    $request_start = ucwp_request_profile_request_started_at();
+                    $start = microtime(true);
+                    $result = null;
+                    try {
+                        $result = call_user_func_array($original_callback, $args);
+                    } finally {
+                        $end = microtime(true);
+                        ucwp_request_profile_record_callback_timing(
+                            $hook_name,
+                            $current_priority,
+                            $current_index,
+                            $current_id,
+                            $label,
+                            $origin,
+                            (int) round(max(0, $start - $request_start) * 1000),
+                            (int) round(max(0, $end - $start) * 1000)
+                        );
+                    }
+
+                    return $result;
+                };
+
+                $GLOBALS['ucwp_request_profile_wrapped_callbacks'][$hook_name][$wrapped_key] = true;
+                $wrapped++;
+                $index++;
+            }
+
+            $priority_counts[$priority_key] = $index;
+        }
+
+        ucwp_request_profile_checkpoint('callback_wrap_done', array(
+            'target_hook' => $hook_name,
+            'wrapped_count' => (string) $wrapped,
+            'priority_counts' => $priority_counts,
+        ));
+    }
+}
+
+if (!function_exists('ucwp_request_profile_checkpoint')) {
+    function ucwp_request_profile_checkpoint($stage, array $extra = array())
+    {
+        if (!ucwp_request_profiler_enabled()) {
+            return;
+        }
+
+        $stage = ucwp_request_profile_sanitize_stage($stage);
+        if (!ucwp_request_profile_should_record_checkpoint($stage)) {
+            return;
+        }
+
+        if (!isset($GLOBALS['ucwp_request_profile_checkpoints']) || !is_array($GLOBALS['ucwp_request_profile_checkpoints'])) {
+            $GLOBALS['ucwp_request_profile_checkpoints'] = array();
+        }
+
+        $now = microtime(true);
+        $request_start = ucwp_request_profile_request_started_at();
+        $last = isset($GLOBALS['ucwp_request_profile_last_checkpoint_at']) && is_numeric($GLOBALS['ucwp_request_profile_last_checkpoint_at'])
+            ? (float) $GLOBALS['ucwp_request_profile_last_checkpoint_at']
+            : $request_start;
+
+        $current_hook = function_exists('current_filter') ? (string) current_filter() : '';
+        $checkpoint = array_merge(array(
+            'stage' => $stage,
+            'source' => 'plugin',
+            'hook' => $current_hook,
+            'at_ms' => (int) round(max(0, $now - $request_start) * 1000),
+            'since_previous_ms' => (int) round(max(0, $now - $last) * 1000),
+            'memory_bytes' => function_exists('memory_get_usage') ? (int) memory_get_usage(true) : 0,
+            'peak_memory_bytes' => function_exists('memory_get_peak_usage') ? (int) memory_get_peak_usage(true) : 0,
+        ), $extra);
+
+        if (ucwp_request_profile_verbose_enabled() && '' !== $current_hook && !isset($checkpoint['hook_summary'])) {
+            $summary = ucwp_request_profile_current_hook_summary($current_hook);
+            if (!empty($summary)) {
+                $checkpoint['hook_summary'] = $summary;
+            }
+        }
+
+        $GLOBALS['ucwp_request_profile_checkpoints'][] = $checkpoint;
+        $GLOBALS['ucwp_request_profile_last_checkpoint_at'] = $now;
+    }
+}
+
+if (!function_exists('ucwp_get_request_profile_checkpoints')) {
+    function ucwp_get_request_profile_checkpoints()
+    {
+        return isset($GLOBALS['ucwp_request_profile_checkpoints']) && is_array($GLOBALS['ucwp_request_profile_checkpoints'])
+            ? $GLOBALS['ucwp_request_profile_checkpoints']
+            : array();
+    }
+}
+
+ucwp_request_profile_checkpoint('plugin_file_loaded');
 
 if (!function_exists('ucwp_php_string_literal')) {
     function ucwp_php_string_literal($value)
@@ -905,8 +1586,11 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private function __construct()
         {
+            ucwp_request_profile_checkpoint('ultracache_wp_construct_start');
             $this->load_dependencies();
+            ucwp_request_profile_checkpoint('ultracache_dependencies_loaded');
             $this->register_hooks();
+            ucwp_request_profile_checkpoint('ultracache_hooks_registered');
         }
 
         private function load_dependencies()
@@ -921,14 +1605,84 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             foreach ($files as $file) {
                 if (file_exists($file)) {
+                    ucwp_request_profile_checkpoint('dependency_load_start', array('file' => basename((string) $file)));
                     require_once $file;
+                    ucwp_request_profile_checkpoint('dependency_load_end', array('file' => basename((string) $file)));
                 }
+            }
+        }
+
+        private function register_request_profile_hooks()
+        {
+            if (!ucwp_request_profiler_enabled()) {
+                return;
+            }
+
+            $hooks = array(
+                array('plugins_loaded', -1000, 'plugins_loaded_p-1000'),
+                array('plugins_loaded', 0, 'plugins_loaded_p0'),
+                array('plugins_loaded', 5, 'plugins_loaded_p5_components'),
+                array('plugins_loaded', 18, 'plugins_loaded_p18_before_reconcile'),
+                array('plugins_loaded', 19, 'plugins_loaded_p19_before_page_cache_reconcile'),
+                array('plugins_loaded', 20, 'plugins_loaded_p20_before_object_cache_reconcile'),
+                array('plugins_loaded', 21, 'plugins_loaded_p21_before_runtime_config_reconcile'),
+                array('plugins_loaded', 22, 'plugins_loaded_p22_after_reconcile'),
+                array('plugins_loaded', PHP_INT_MAX, 'plugins_loaded_end'),
+                array('setup_theme', -1000, 'setup_theme_start'),
+                array('setup_theme', PHP_INT_MAX, 'setup_theme_end'),
+                array('after_setup_theme', -1000, 'after_setup_theme_start'),
+                array('after_setup_theme', PHP_INT_MAX, 'after_setup_theme_end'),
+                array('init', -1000, 'init_start'),
+                array('init', PHP_INT_MAX, 'init_end'),
+                array('wp_loaded', -1000, 'wp_loaded_start'),
+                array('wp_loaded', PHP_INT_MAX, 'wp_loaded_end'),
+                array('template_redirect', -1000, 'template_redirect_global_start'),
+                array('template_redirect', PHP_INT_MAX, 'template_redirect_global_end'),
+                array('wp_head', -1000, 'wp_head_start'),
+                array('wp_head', PHP_INT_MAX, 'wp_head_end'),
+                array('shutdown', -1000, 'shutdown_start'),
+                array('shutdown', PHP_INT_MAX, 'shutdown_end'),
+            );
+
+
+            foreach ($hooks as $hook) {
+                add_action($hook[0], function () use ($hook) {
+                    ucwp_request_profile_checkpoint($hook[2]);
+                }, $hook[1]);
+            }
+
+
+            if (ucwp_request_callback_profiler_enabled()) {
+                add_action('init', function () {
+                    ucwp_request_profile_checkpoint('callback_profiler_wrap_init', array('target_priorities' => array('1', '2', '5', '10', '20')));
+                    ucwp_request_profile_wrap_hook_callbacks('init', array(1, 2, 5, 10, 20));
+                }, 0);
+
+
+                add_action('wp_loaded', function () {
+                    ucwp_request_profile_checkpoint('callback_profiler_wrap_pre_template');
+                    ucwp_request_profile_wrap_hook_callbacks('template_redirect');
+                    ucwp_request_profile_wrap_hook_callbacks('wp_enqueue_scripts');
+                    ucwp_request_profile_wrap_hook_callbacks('wp_calculate_image_srcset');
+                    ucwp_request_profile_wrap_hook_callbacks('shutdown');
+                }, 1000);
+
+                add_action('wp_head', function () {
+                    ucwp_request_profile_checkpoint('callback_profiler_wrap_pre_head_output');
+                    ucwp_request_profile_wrap_hook_callbacks('wp_enqueue_scripts');
+                    ucwp_request_profile_wrap_hook_callbacks('style_loader_src');
+                    ucwp_request_profile_wrap_hook_callbacks('style_loader_tag');
+                    ucwp_request_profile_wrap_hook_callbacks('script_loader_src');
+                    ucwp_request_profile_wrap_hook_callbacks('script_loader_tag');
+                    ucwp_request_profile_wrap_hook_callbacks('wp_calculate_image_srcset');
+                }, -999);
             }
         }
 
         private function register_hooks()
         {
-                        add_action('plugins_loaded', array($this, 'bootstrap_components'), 5);
+            $this->register_request_profile_hooks();
+            add_action('plugins_loaded', array($this, 'bootstrap_components'), 5);
             add_action('plugins_loaded', array($this, 'reconcile_page_cache_dropin'), 19);
             add_action('plugins_loaded', array($this, 'reconcile_object_cache_dropin'), 20);
             add_action('plugins_loaded', array($this, 'reconcile_runtime_config'), 21);
@@ -1107,34 +1861,294 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         public function reconcile_object_cache_dropin()
         {
-            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
-                Ultra_Cache_Object_Cache_Manager::sync_dropin();
+            ucwp_request_profile_checkpoint('object_cache_reconcile_entry');
+
+            $is_full_reconcile = $this->should_run_full_object_cache_reconcile();
+            ucwp_request_profile_checkpoint('object_cache_reconcile_context_checked', array(
+                'full_reconcile' => $is_full_reconcile ? 'true' : 'false',
+            ));
+
+            if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
+                ucwp_request_profile_checkpoint('object_cache_reconcile_skipped', array('reason' => 'manager_class_missing'));
+                return;
             }
+
+            // Frontend traffic performs only a read-only drop-in health check.
+            // File writes/removals remain in admin, activation, settings-save, and WP-CLI contexts
+            // so WordPress Filesystem API can be used where mutation is required.
+            if (!$is_full_reconcile) {
+                ucwp_request_profile_checkpoint('object_cache_reconcile_frontend_before_raw_setting');
+                $object_cache_enabled = self::is_object_cache_enabled_raw_fast();
+                ucwp_request_profile_checkpoint('object_cache_reconcile_frontend_after_raw_setting', array(
+                    'object_cache_enabled' => $object_cache_enabled ? 'true' : 'false',
+                ));
+
+                if (!$object_cache_enabled) {
+                    ucwp_request_profile_checkpoint('object_cache_reconcile_skipped', array('reason' => 'disabled_frontend_fast'));
+                    return;
+                }
+
+                ucwp_request_profile_checkpoint('object_cache_reconcile_light_start');
+                $status = method_exists('Ultra_Cache_Object_Cache_Manager', 'get_dropin_status_fast')
+                    ? Ultra_Cache_Object_Cache_Manager::get_dropin_status_fast()
+                    : array('healthy' => false, 'reason' => 'status_method_missing');
+
+                if (!empty($status['healthy']) && function_exists('wp_using_ext_object_cache')) {
+                    wp_using_ext_object_cache(true);
+                }
+
+                ucwp_request_profile_checkpoint('object_cache_reconcile_light_end', array(
+                    'mode' => 'read_only_frontend',
+                    'healthy' => !empty($status['healthy']) ? 'true' : 'false',
+                    'reason' => isset($status['reason']) ? (string) $status['reason'] : '',
+                    'exists' => !empty($status['exists']) ? 'true' : 'false',
+                    'readable' => !empty($status['readable']) ? 'true' : 'false',
+                    'has_marker' => !empty($status['has_marker']) ? 'true' : 'false',
+                    'build' => isset($status['build']) ? (string) $status['build'] : '',
+                    'expected_build' => isset($status['expected_build']) ? (string) $status['expected_build'] : '',
+                ));
+                return;
+            }
+
+            ucwp_request_profile_checkpoint('object_cache_reconcile_full_start', array('mode' => 'admin_cli_repair'));
+            if (method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
+                $result = Ultra_Cache_Object_Cache_Manager::sync_dropin();
+                ucwp_request_profile_checkpoint('object_cache_reconcile_full_end', array(
+                    'mode' => 'admin_cli_repair',
+                    'result' => $result ? 'true' : 'false',
+                ));
+                return;
+            }
+
+            ucwp_request_profile_checkpoint('object_cache_reconcile_full_end', array(
+                'mode' => 'admin_cli_repair',
+                'result' => 'method_missing',
+            ));
+        }
+
+        private function should_run_full_object_cache_reconcile()
+        {
+            if (defined('WP_CLI') && WP_CLI) {
+                return true;
+            }
+
+            if (function_exists('is_admin') && is_admin()) {
+                return true;
+            }
+
+            return false;
+        }
+
+        private function should_run_full_page_cache_reconcile()
+        {
+            if (defined('WP_CLI') && WP_CLI) {
+                return true;
+            }
+
+            // File mutations are intentionally kept in privileged/admin contexts.
+            // Public frontend requests only perform a read-only health check so they
+            // do not initialize WP_Filesystem or attempt drop-in repair on traffic.
+            if (function_exists('is_admin') && is_admin()) {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static function is_page_cache_enabled_raw_fast()
+        {
+            static $cached = null;
+
+            if (null !== $cached) {
+                return $cached;
+            }
+
+            $saved = get_option(UCWP_SETTINGS_KEY, array());
+            $cached = is_array($saved) && !empty($saved['pageCacheEnabled']);
+
+            return $cached;
+        }
+
+        private static function is_object_cache_enabled_raw_fast()
+        {
+            static $cached = null;
+
+            if (null !== $cached) {
+                return $cached;
+            }
+
+            $saved = get_option(UCWP_SETTINGS_KEY, array());
+            $cached = is_array($saved) && !empty($saved['objectCacheEnabled']);
+
+            return $cached;
+        }
+
+        private static function should_use_live_settings_support_checks()
+        {
+            if (defined('WP_CLI') && WP_CLI) {
+                return true;
+            }
+
+            if (defined('REST_REQUEST') && REST_REQUEST) {
+                return true;
+            }
+
+            if (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
+                return true;
+            }
+
+            if (function_exists('is_admin') && is_admin()) {
+                return true;
+            }
+
+            return false;
         }
 
         public function reconcile_page_cache_dropin()
         {
+            ucwp_request_profile_checkpoint('page_cache_reconcile_entry');
+
+            $is_full_reconcile = $this->should_run_full_page_cache_reconcile();
+            ucwp_request_profile_checkpoint('page_cache_reconcile_context_checked', array(
+                'full_reconcile' => $is_full_reconcile ? 'true' : 'false',
+            ));
+
+            // Frontend traffic must stay cheap and read-only. Do not call the full
+            // dashboard settings sanitizer here because it may canonicalize/update the
+            // settings option. File writes and repairs remain in admin/CLI contexts.
+            if (!$is_full_reconcile) {
+                ucwp_request_profile_checkpoint('page_cache_reconcile_frontend_before_raw_setting');
+                $page_cache_enabled = self::is_page_cache_enabled_raw_fast();
+                ucwp_request_profile_checkpoint('page_cache_reconcile_frontend_after_raw_setting', array(
+                    'page_cache_enabled' => $page_cache_enabled ? 'true' : 'false',
+                ));
+
+                if (!$page_cache_enabled || !defined('WP_CACHE') || !WP_CACHE) {
+                    ucwp_request_profile_checkpoint('page_cache_reconcile_skipped', array('reason' => 'disabled_or_wp_cache_false_frontend_fast'));
+                    return;
+                }
+
+                ucwp_request_profile_checkpoint('page_cache_reconcile_frontend_before_engine_class');
+                $engine_class = self::get_engine_class();
+                ucwp_request_profile_checkpoint('page_cache_reconcile_frontend_after_engine_class', array(
+                    'engine_class' => $engine_class ? 'true' : 'false',
+                ));
+                if (!$engine_class) {
+                    ucwp_request_profile_checkpoint('page_cache_reconcile_skipped', array('reason' => 'engine_class_missing'));
+                    return;
+                }
+
+                ucwp_request_profile_checkpoint('page_cache_reconcile_light_start');
+                $status = method_exists($engine_class, 'get_advanced_cache_dropin_status')
+                    ? $engine_class::get_advanced_cache_dropin_status()
+                    : array('healthy' => false, 'reason' => 'status_method_missing');
+
+                ucwp_request_profile_checkpoint('page_cache_reconcile_light_end', array(
+                    'mode' => 'read_only_frontend',
+                    'healthy' => !empty($status['healthy']) ? 'true' : 'false',
+                    'reason' => isset($status['reason']) ? (string) $status['reason'] : '',
+                    'exists' => !empty($status['exists']) ? 'true' : 'false',
+                    'readable' => !empty($status['readable']) ? 'true' : 'false',
+                    'has_marker' => !empty($status['has_marker']) ? 'true' : 'false',
+                    'build' => isset($status['build']) ? (string) $status['build'] : '',
+                    'expected_build' => isset($status['expected_build']) ? (string) $status['expected_build'] : '',
+                ));
+                return;
+            }
+
+            ucwp_request_profile_checkpoint('page_cache_reconcile_full_before_settings');
             $settings = self::get_dashboard_settings();
+            ucwp_request_profile_checkpoint('page_cache_reconcile_full_after_settings', array(
+                'page_cache_enabled' => !empty($settings['pageCacheEnabled']) ? 'true' : 'false',
+            ));
+
             if (empty($settings['pageCacheEnabled']) || !defined('WP_CACHE') || !WP_CACHE) {
+                ucwp_request_profile_checkpoint('page_cache_reconcile_skipped', array('reason' => 'disabled_or_wp_cache_false_admin_cli'));
                 return;
             }
 
             $engine_class = self::get_engine_class();
-            if ($engine_class && method_exists($engine_class, 'setup_advanced_cache')) {
-                $engine_class::setup_advanced_cache();
+            if (!$engine_class) {
+                ucwp_request_profile_checkpoint('page_cache_reconcile_skipped', array('reason' => 'engine_class_missing'));
+                return;
             }
+
+            ucwp_request_profile_checkpoint('page_cache_reconcile_full_start', array('mode' => 'admin_cli_repair'));
+            if (method_exists($engine_class, 'setup_advanced_cache')) {
+                $engine_class::setup_advanced_cache(true);
+            }
+            ucwp_request_profile_checkpoint('page_cache_reconcile_full_end', array('mode' => 'admin_cli_repair'));
         }
 
         public function reconcile_runtime_config()
         {
-            $settings = self::get_dashboard_settings();
-            if (empty($settings['pageCacheEnabled']) || !defined('WP_CACHE') || !WP_CACHE) {
+            ucwp_request_profile_checkpoint('runtime_config_reconcile_entry');
+
+            $is_full_reconcile = $this->should_run_full_runtime_config_reconcile();
+            ucwp_request_profile_checkpoint('runtime_config_reconcile_context_checked', array(
+                'full_reconcile' => $is_full_reconcile ? 'true' : 'false',
+            ));
+
+            if (!$is_full_reconcile) {
+                ucwp_request_profile_checkpoint('runtime_config_reconcile_frontend_before_raw_setting');
+                $page_cache_enabled = self::is_page_cache_enabled_raw_fast();
+                ucwp_request_profile_checkpoint('runtime_config_reconcile_frontend_after_raw_setting', array(
+                    'page_cache_enabled' => $page_cache_enabled ? 'true' : 'false',
+                ));
+
+                if (!$page_cache_enabled || !defined('WP_CACHE') || !WP_CACHE) {
+                    ucwp_request_profile_checkpoint('runtime_config_reconcile_skipped', array('reason' => 'disabled_or_wp_cache_false_frontend_fast'));
+                    return;
+                }
+
+                ucwp_request_profile_checkpoint('runtime_config_reconcile_light_start');
+                $status = self::get_runtime_config_status_fast();
+                ucwp_request_profile_checkpoint('runtime_config_reconcile_light_end', array(
+                    'mode' => 'read_only_frontend',
+                    'healthy' => !empty($status['healthy']) ? 'true' : 'false',
+                    'reason' => isset($status['reason']) ? (string) $status['reason'] : '',
+                    'exists' => !empty($status['exists']) ? 'true' : 'false',
+                    'readable' => !empty($status['readable']) ? 'true' : 'false',
+                    'valid_json' => !empty($status['valid_json']) ? 'true' : 'false',
+                ));
                 return;
             }
 
-            if (self::runtime_config_needs_sync()) {
-                self::sync_runtime_config();
+            ucwp_request_profile_checkpoint('runtime_config_reconcile_full_before_settings');
+            $settings = self::get_dashboard_settings();
+            ucwp_request_profile_checkpoint('runtime_config_reconcile_full_after_settings', array(
+                'page_cache_enabled' => !empty($settings['pageCacheEnabled']) ? 'true' : 'false',
+            ));
+
+            if (empty($settings['pageCacheEnabled']) || !defined('WP_CACHE') || !WP_CACHE) {
+                ucwp_request_profile_checkpoint('runtime_config_reconcile_skipped', array('reason' => 'disabled_or_wp_cache_false_admin_cli'));
+                return;
             }
+
+            ucwp_request_profile_checkpoint('runtime_config_reconcile_full_before_needs_sync');
+            $needs_sync = self::runtime_config_needs_sync();
+            ucwp_request_profile_checkpoint('runtime_config_reconcile_full_after_needs_sync', array(
+                'needs_sync' => $needs_sync ? 'true' : 'false',
+            ));
+
+            if ($needs_sync) {
+                ucwp_request_profile_checkpoint('runtime_config_reconcile_full_before_sync');
+                self::sync_runtime_config();
+                ucwp_request_profile_checkpoint('runtime_config_reconcile_full_after_sync');
+            }
+        }
+
+        private function should_run_full_runtime_config_reconcile()
+        {
+            if (defined('WP_CLI') && WP_CLI) {
+                return true;
+            }
+
+            if (function_exists('is_admin') && is_admin()) {
+                return true;
+            }
+
+            return false;
         }
 
         public function bootstrap_components()
@@ -1229,9 +2243,15 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         public static function get_dashboard_defaults()
         {
+            ucwp_request_profile_checkpoint('sanitize_settings_before_compression_support');
             $compression_support = self::get_compression_support_status();
-            $frontend_compression = self::get_frontend_compression_probe_status();
+            ucwp_request_profile_checkpoint('sanitize_settings_after_compression_support', array('brotli' => !empty($compression_support['brotli']) ? 'true' : 'false', 'gzip' => !empty($compression_support['gzip']) ? 'true' : 'false'));
+            ucwp_request_profile_checkpoint('sanitize_settings_before_frontend_compression_cached');
+            $frontend_compression = self::get_frontend_compression_probe_status(false);
+            ucwp_request_profile_checkpoint('sanitize_settings_after_frontend_compression_cached', array('brotli' => !empty($frontend_compression['brotli']) ? 'true' : 'false', 'gzip' => !empty($frontend_compression['gzip']) ? 'true' : 'false', 'broken_brotli' => !empty($frontend_compression['brokenBrotli']) ? 'true' : 'false', 'broken_gzip' => !empty($frontend_compression['brokenGzip']) ? 'true' : 'false'));
+            ucwp_request_profile_checkpoint('sanitize_settings_before_media_support');
             $media_support = self::get_media_support_status();
+            ucwp_request_profile_checkpoint('sanitize_settings_after_media_support', array('supported' => !empty($media_support['supported']) ? 'true' : 'false'));
             $crawl_scope_summary = self::get_crawl_scope_summary();
             $default_scheduled_warm_limit = max(1, (int) ($crawl_scope_summary['defaultScheduledWarmLimit'] ?? 0));
 
@@ -1256,14 +2276,25 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'mediaGenerateOnDemandEnabled' => false,
                 'mediaOutputMode'            => 'auto',
                 'deferJsEnabled'             => false,
+                'deferAllJsEnabled'          => false,
                 'deferJsForceList'           => '',
-                'deferJsExcludeList'         => "revslider\nsr7\ntptools\nelementor-frontend\nswiper\nslick\nsplide\nowl.carousel\nsmartslider\nn2-ss\nhtml_types/image\nhtml_types/color\nhtml_types/label",
-                'delayThirdPartyJsEnabled'   => false,
+                'deferJsExcludeList'         => '',
+                'delaySafeThirdPartyJsEnabled'   => false,
+                'lazyMailerliteNonceEnabled' => true,
+                'delaySafeThirdPartyJsPatterns' => implode("\n", self::get_default_safe_third_party_delay_patterns()),
+                'delayFunctionalThirdPartyJsEnabled' => false,
+                'delayFunctionalThirdPartyJsPatterns' => implode("\n", self::get_default_functional_third_party_delay_patterns()),
+                'delayThirdPartyJsExcludeList' => '',
                 'asyncExternalScriptsEnabled'=> false,
                 'homepageCssBundleEnabled'   => false,
                 'homepageCssBundleInlineEnabled' => false,
+                'leftoverCssBundleEnabled'   => false,
                 'homepageCssBundleExcludeList' => '',
                 'homepageCssBundleMode'      => 'safe',
+                'delayIconFontsEnabled'      => false,
+                'delayIconFontsAutoDetectEnabled' => true,
+                'delayIconFontsList'         => implode("\n", self::get_default_delay_icon_font_patterns()),
+                'delayIconFontsExcludeList'  => implode("\n", self::get_default_delay_icon_font_exclude_patterns()),
                 'cssBundleScope'            => 'homepage',
                 'pageCssBundleOnEntryEnabled' => false,
                 'frontendSafeModeEnabled'    => false,
@@ -1278,6 +2309,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'lcpImagePriorityEnabled'    => false,
                 'lcpBoundaryDeferEnabled'    => false,
                 'lcpImagePriorityOverride'   => '',
+                'manualLcpHeroSelector'      => '',
                 'mainThreadReliefEnabled'    => false,
                 'criticalRequestChainReliefEnabled' => false,
                 'criticalResourcePreloadList' => '',
@@ -1354,6 +2386,209 @@ if (!class_exists('Ultra_Cache_WP')) {
             );
         }
 
+        private static function get_default_delay_icon_font_patterns()
+        {
+            return array(
+                'fa-solid-900',
+                'fa-regular',
+                'fa-brands',
+                'fontawesome',
+                'font awesome',
+                'eicons',
+                'dashicons',
+                'bokifa-icon',
+                'icomoon',
+                'flaticon',
+                'themify',
+                'simple-line-icons',
+                'linearicons',
+                'material-icons',
+                'materialicons',
+                'ionicons',
+            );
+        }
+
+        private static function get_default_delay_icon_font_exclude_patterns()
+        {
+            return array(
+                'manrope',
+                'fraunces',
+                'roboto',
+                'open-sans',
+                'inter',
+                'lato',
+                'montserrat',
+                'poppins',
+                'source-sans',
+                'noto',
+                '2920108',
+                'google-fonts',
+                'body',
+                'heading',
+            );
+        }
+
+        private static function get_default_js_delay_defer_exclusion_patterns()
+        {
+            return array(
+                'revslider',
+                'sr7',
+                'tptools',
+                'elementor-frontend',
+                'swiper',
+                'slick',
+                'splide',
+                'owl.carousel',
+                'smartslider',
+                'n2-ss',
+                'html_types/image',
+                'html_types/color',
+                'html_types/label',
+                'official-mailerlite-sign-up-forms/assets/js/localization/validation-messages.js',
+                'validation-messages.js',
+            );
+        }
+
+        private static function get_defer_all_js_legacy_conservative_exclusion_patterns()
+        {
+            return array(
+                'official-mailerlite-sign-up-forms/assets/js/localization/validation-messages.js',
+                'revslider',
+                'sliderrevolution',
+                'slider-revolution',
+                'revolution',
+                'sr7',
+                'rs6',
+                'rs7',
+                'tptools',
+                'tp-tools',
+                'rs-module',
+                'wp-block-themepunch-revslider',
+                'swiper',
+                'swiper-bundle',
+                'slick',
+                'splide',
+                'owl.carousel',
+                'smartslider',
+                'smart-slider',
+                'n2-ss',
+                'elementor',
+                'elementor-frontend',
+                'frontend-modules',
+                'webpack.runtime',
+                'webpack-pro.runtime',
+                'pro-elements-handlers',
+                'smartmenus',
+                'html_types/image',
+                'html_types/color',
+                'html_types/label',
+                'html_types/slide',
+                'html_types/slider',
+                'product-ajax-search',
+                'search-popup',
+                'nav-mobile',
+                'megamenu',
+                'header-cart',
+                'cart-canvas',
+                'off-canvas',
+                'woocommerce-products-filter',
+                'woof_',
+                'contact-form-7',
+                'author-arc',
+                'typewriting-author-arc/assets/js/form-handler.js',
+                'mailerlite',
+                'mailchimp',
+                'mc4wp',
+                'complianz',
+                'cmplz',
+                'cky-',
+            );
+        }
+
+        private static function strip_defer_all_js_legacy_conservative_exclusions($value)
+        {
+            $normalized = self::normalize_textarea_setting($value);
+            if ('' === $normalized) {
+                return '';
+            }
+
+            $legacy = array();
+            foreach (self::get_defer_all_js_legacy_conservative_exclusion_patterns() as $pattern) {
+                $pattern = strtolower(trim((string) $pattern));
+                if ('' !== $pattern) {
+                    $legacy[$pattern] = true;
+                }
+            }
+
+            $kept = array();
+            foreach (preg_split('/\r\n|\r|\n/', $normalized) as $line) {
+                $line = trim((string) $line);
+                if ('' === $line) {
+                    continue;
+                }
+                if (isset($legacy[strtolower($line)])) {
+                    continue;
+                }
+                $kept[] = $line;
+            }
+
+            return implode("\n", array_values(array_unique($kept)));
+        }
+
+        private static function get_default_safe_third_party_delay_patterns()
+        {
+            return array(
+                'googletagmanager.com',
+                'google-analytics.com',
+                'gtag/js',
+                'gtm.js',
+                'googlesitekit-events-provider',
+                'google-site-kit/dist/assets/js',
+                'connect.facebook.net',
+                'fbevents.js',
+                'fbq',
+                'analytics.tiktok.com',
+                'snap.licdn.com',
+                'insight.min.js',
+                'bat.bing.com',
+                'clarity.ms',
+                'static.hotjar.com',
+                'script.hotjar.com',
+                's.pinimg.com',
+                'pintrk',
+                'doubleclick.net',
+                'googleadservices.com',
+                'taboola',
+                'outbrain',
+                'yahoo',
+                'yimg.com',
+            );
+        }
+
+        private static function get_default_functional_third_party_delay_patterns()
+        {
+            return array(
+                'recaptcha',
+                'hcaptcha',
+                'google.com/recaptcha',
+                'gstatic.com/recaptcha',
+                'maps.googleapis.com',
+                'maps.gstatic.com',
+                'complianz',
+                'cmplz',
+
+                'cookieyes',
+                'cky-',
+                'intercom',
+                'crisp.chat',
+                'tawk.to',
+                'zendesk',
+                'calendly',
+                'typeform',
+                'jotform',
+            );
+        }
+
         public static function get_crawl_scope_summary()
         {
             $fallback = array(
@@ -1395,6 +2630,12 @@ if (!class_exists('Ultra_Cache_WP')) {
             });
 
             return implode("\n", array_values(array_unique($lines)));
+        }
+
+        private static function merge_textarea_settings($first, $second)
+        {
+            $lines = array_merge(self::parse_textarea_setting($first), self::parse_textarea_setting($second));
+            return self::normalize_textarea_setting($lines);
         }
 
         private static function normalize_multiline_setting_with_callback($value, callable $callback, $limit = 200)
@@ -1566,7 +2807,7 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function sanitize_homepage_css_bundle_mode($value)
         {
             $value = strtolower(trim((string) $value));
-            return in_array($value, array('safe', 'aggressive'), true) ? $value : 'safe';
+            return in_array($value, array('safe', 'aggressive', 'full'), true) ? $value : 'safe';
         }
 
         private static function sanitize_css_bundle_scope($value)
@@ -1930,10 +3171,16 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'mediaGenerateOnUploadEnabled',
                 'mediaGenerateOnDemandEnabled',
                 'deferJsEnabled',
-                'delayThirdPartyJsEnabled',
+                'deferAllJsEnabled',
+                'delaySafeThirdPartyJsEnabled',
+                'lazyMailerliteNonceEnabled',
+                'delayFunctionalThirdPartyJsEnabled',
                 'asyncExternalScriptsEnabled',
                 'homepageCssBundleEnabled',
                 'homepageCssBundleInlineEnabled',
+                'leftoverCssBundleEnabled',
+                'delayIconFontsEnabled',
+                'delayIconFontsAutoDetectEnabled',
                 'pageCssBundleOnEntryEnabled',
                 'frontendSafeModeEnabled',
                 'sliderSafeModeEnabled',
@@ -1989,8 +3236,22 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['cacheExceptionQueryArgs']   = self::sanitize_setting_key_list($settings['cacheExceptionQueryArgs']);
             $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
             $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
-            $settings['deferJsExcludeList']       = self::normalize_textarea_setting($settings['deferJsExcludeList']);
+            $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
+            $old_default_js_exclusions = self::normalize_textarea_setting(self::get_default_js_delay_defer_exclusion_patterns());
+            if ($old_default_js_exclusions === $settings['deferJsExcludeList']) {
+                $settings['deferJsExcludeList'] = '';
+            }
+            // Manual JS Delay / Defer Exclusions must be durable. Do not strip
+            // lines while Defer all JS is enabled: this field is the user's final
+            // escape hatch for aggressive defer regressions such as inline globals.
+            $settings['deferJsExcludeList'] = self::normalize_textarea_setting($settings['deferJsExcludeList']);
+            $settings['delayNonCriticalJsExcludeList'] = '';
+            $settings['delaySafeThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delaySafeThirdPartyJsPatterns']);
+            $settings['delayFunctionalThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delayFunctionalThirdPartyJsPatterns']);
+            $settings['delayThirdPartyJsExcludeList'] = self::normalize_textarea_setting($settings['delayThirdPartyJsExcludeList']);
             $settings['homepageCssBundleExcludeList'] = self::normalize_textarea_setting($settings['homepageCssBundleExcludeList']);
+            $settings['delayIconFontsList'] = self::normalize_textarea_setting($settings['delayIconFontsList']);
+            $settings['delayIconFontsExcludeList'] = self::normalize_textarea_setting($settings['delayIconFontsExcludeList']);
             $settings['homepageCssBundleMode'] = self::sanitize_homepage_css_bundle_mode($settings['homepageCssBundleMode']);
             $settings['cssBundleScope'] = self::sanitize_css_bundle_scope($settings['cssBundleScope'] ?? 'homepage');
             $settings['asyncCssExcludeList']       = self::normalize_textarea_setting($settings['asyncCssExcludeList']);
@@ -1999,6 +3260,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['assetCleanupExcludeList'] = self::normalize_textarea_setting($settings['assetCleanupExcludeList']);
             $settings['googleFontsAdditionalScanUrls'] = self::normalize_textarea_setting($settings['googleFontsAdditionalScanUrls']);
             $settings['lcpImagePriorityOverride'] = self::normalize_textarea_setting($settings['lcpImagePriorityOverride']);
+            $settings['manualLcpHeroSelector'] = self::normalize_textarea_setting($settings['manualLcpHeroSelector']);
             $settings['criticalResourcePreloadList'] = self::normalize_textarea_setting($settings['criticalResourcePreloadList']);
             $settings['criticalFetchPreloadList'] = self::normalize_textarea_setting($settings['criticalFetchPreloadList']);
             $settings['criticalRequestChainDelayList'] = self::normalize_textarea_setting($settings['criticalRequestChainDelayList']);
@@ -2018,10 +3280,10 @@ if (!class_exists('Ultra_Cache_WP')) {
             $settings['varnishCliKey']             = trim((string) $settings['varnishCliKey']);
             $settings['varnishCliMethod']          = ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN';
 
-            // LCP Boundary Defer is intentionally unavailable while either broad Frontend Safe Mode
-            // or Slider/Hero Safe Mode is selected. The runtime path also enforces this guard,
-            // but normalizing the saved setting keeps UI, REST, WP-CLI, and cached runtime config honest.
-            if (!empty($settings['frontendSafeModeEnabled']) || !empty($settings['sliderSafeModeEnabled'])) {
+            // LCP Boundary Defer stays unavailable in broad Frontend Safe Mode, but it remains
+            // user-controllable with Slider/Hero Safe Mode. Slider/Hero mode now uses the same
+            // conservative boundary deferral path while keeping slider/runtime assets protected.
+            if (!empty($settings['frontendSafeModeEnabled'])) {
                 $settings['lcpBoundaryDeferEnabled'] = false;
             }
 
@@ -2033,7 +3295,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['gzipEnabled'] = false;
             }
 
-            $frontend_compression = self::get_frontend_compression_probe_status();
+            $frontend_compression = self::get_frontend_compression_probe_status(false);
             if (!empty($frontend_compression['brotli']) || !empty($frontend_compression['brokenBrotli'])) {
                 $settings['brotliEnabled'] = false;
             }
@@ -2041,7 +3303,18 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['gzipEnabled'] = false;
             }
 
-            $object_cache_support = self::get_object_cache_support_status();
+            $live_support_checks = self::should_use_live_settings_support_checks();
+            ucwp_request_profile_checkpoint(
+                $live_support_checks ? 'sanitize_settings_before_object_cache_support_live' : 'sanitize_settings_before_object_cache_support_cached'
+            );
+            $object_cache_support = self::get_object_cache_support_status($live_support_checks);
+            ucwp_request_profile_checkpoint(
+                $live_support_checks ? 'sanitize_settings_after_object_cache_support_live' : 'sanitize_settings_after_object_cache_support_cached',
+                array(
+                    'available' => !empty($object_cache_support['available']) ? 'true' : 'false',
+                    'source' => isset($object_cache_support['source']) ? (string) $object_cache_support['source'] : '',
+                )
+            );
             if (empty($object_cache_support['available'])) {
                 $settings['objectCacheEnabled'] = false;
             }
@@ -2053,7 +3326,9 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $settings['mediaGenerateOnDemandEnabled'] = false;
             }
 
+            ucwp_request_profile_checkpoint('sanitize_settings_before_varnish_support');
             $varnish_support = self::get_varnish_support_status();
+            ucwp_request_profile_checkpoint('sanitize_settings_after_varnish_support', array('available' => !empty($varnish_support['available']) ? 'true' : 'false'));
             if (empty($varnish_support['available'])) {
                 $settings['varnishCliEnabled'] = false;
             }
@@ -2074,6 +3349,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             self::$dashboard_settings_cache = null;
             self::$settings_cache = null;
             delete_transient('ucwp_frontend_compression_probe_v1');
+            delete_transient('ucwp_object_cache_support_status_v1');
             ucwp_reset_loopback_ssl_status();
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_settings_cache')) {
@@ -2083,23 +3359,39 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         public static function get_dashboard_settings()
         {
+            ucwp_request_profile_checkpoint('dashboard_settings_start');
             if (null !== self::$dashboard_settings_cache) {
+                ucwp_request_profile_checkpoint('dashboard_settings_cache_hit');
                 return self::$dashboard_settings_cache;
             }
 
+            ucwp_request_profile_checkpoint('dashboard_settings_before_get_option');
             $saved = get_option(UCWP_SETTINGS_KEY, array());
+            ucwp_request_profile_checkpoint('dashboard_settings_after_get_option', array(
+                'raw_is_array' => is_array($saved) ? 'true' : 'false',
+                'raw_count' => is_array($saved) ? count($saved) : 0,
+            ));
             $raw_saved = is_array($saved) ? $saved : array();
+            ucwp_request_profile_checkpoint('dashboard_settings_before_sanitize');
             $sanitized = self::sanitize_dashboard_settings($raw_saved);
+            ucwp_request_profile_checkpoint('dashboard_settings_after_sanitize', array(
+                'sanitized_count' => is_array($sanitized) ? count($sanitized) : 0,
+            ));
 
             // This private build does not need a backward-compatibility layer. Keep the
             // stored option canonical so invalid combinations from previous local builds
             // do not remain visible in direct option reads, CLI checks, or diagnostics.
+            ucwp_request_profile_checkpoint('dashboard_settings_before_canonical_compare');
             if (!is_array($saved) || wp_json_encode($raw_saved) !== wp_json_encode($sanitized)) {
+                ucwp_request_profile_checkpoint('dashboard_settings_before_update_option');
                 update_option(UCWP_SETTINGS_KEY, $sanitized, false);
+                ucwp_request_profile_checkpoint('dashboard_settings_after_update_option');
             }
+            ucwp_request_profile_checkpoint('dashboard_settings_after_canonical_compare');
 
             self::$dashboard_settings_cache = $sanitized;
 
+            ucwp_request_profile_checkpoint('dashboard_settings_end');
             return self::$dashboard_settings_cache;
         }
 
@@ -2182,12 +3474,19 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         public static function get_settings()
         {
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_start');
             if (null !== self::$settings_cache) {
+                ucwp_request_profile_settings_checkpoint('wp_get_settings_cache_hit');
                 return self::$settings_cache;
             }
 
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_before_dashboard_settings');
             $ui = self::get_dashboard_settings();
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_after_dashboard_settings', array(
+                'dashboard_settings_count' => is_array($ui) ? count($ui) : 0,
+            ));
 
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_before_runtime_textareas');
             $excluded_paths = self::parse_textarea_setting($ui['cacheExceptionPaths']);
             if (empty($excluded_paths)) {
                 $excluded_paths = self::get_default_excluded_paths();
@@ -2199,11 +3498,18 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             $query_allowlist = self::parse_textarea_setting(self::sanitize_setting_key_list($ui['cacheQueryStringAllowlist']));
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_after_runtime_textareas', array(
+                'excluded_paths_count' => count($excluded_paths),
+                'excluded_query_args_count' => count($excluded_query_args),
+                'query_allowlist_count' => count($query_allowlist),
+            ));
             $defer_js_enabled = !empty($ui['deferJsEnabled']);
-            $delay_third_party_js_enabled = !empty($ui['delayThirdPartyJsEnabled']);
+            $defer_all_js_enabled = $defer_js_enabled && !empty($ui['deferAllJsEnabled']);
+            $delay_safe_third_party_js_enabled = !empty($ui['delaySafeThirdPartyJsEnabled']);
+            $delay_functional_third_party_js_enabled = !empty($ui['delayFunctionalThirdPartyJsEnabled']);
             $delay_non_critical_js_enabled = !empty($ui['delayNonCriticalJsEnabled']);
             $defer_stage_aggressive = $delay_non_critical_js_enabled;
-            $defer_stage_balanced = $delay_third_party_js_enabled || $defer_stage_aggressive;
+            $defer_stage_balanced = $delay_safe_third_party_js_enabled || $delay_functional_third_party_js_enabled || $defer_stage_aggressive;
             $defer_stage_safe = $defer_js_enabled || $defer_stage_balanced;
 
             self::$settings_cache = array(
@@ -2228,16 +3534,27 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cache_stats_enabled'          => !empty($ui['cacheStatsEnabled']),
                 'preload_on_save'              => !empty($ui['preRenderOnSave']),
                 'defer_js'                     => $defer_js_enabled,
+                'defer_all_js'                 => $defer_all_js_enabled,
                 'defer_stage_safe'             => $defer_stage_safe,
                 'defer_stage_balanced'         => $defer_stage_balanced,
                 'defer_stage_aggressive'       => $defer_stage_aggressive,
                 'defer_js_force_list'          => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsForceList'])),
                 'defer_js_exclude_list'        => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
-                'delay_third_party_js'         => $delay_third_party_js_enabled,
+                'delay_safe_third_party_js'         => $delay_safe_third_party_js_enabled,
+                'lazy_mailerlite_nonce'        => !empty($ui['lazyMailerliteNonceEnabled']),
+                'delay_safe_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delaySafeThirdPartyJsPatterns'])),
+                'delay_functional_third_party_js' => $delay_functional_third_party_js_enabled,
+                'delay_functional_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayFunctionalThirdPartyJsPatterns'])),
+                'delay_third_party_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayThirdPartyJsExcludeList'])),
                 'async_external_scripts'       => !empty($ui['asyncExternalScriptsEnabled']),
                 'homepage_css_bundle'         => !empty($ui['homepageCssBundleEnabled']),
                 'homepage_css_bundle_inline'  => !empty($ui['homepageCssBundleInlineEnabled']),
+                'leftover_css_bundle'       => !empty($ui['leftoverCssBundleEnabled']),
                 'homepage_css_bundle_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['homepageCssBundleExcludeList'])),
+                'delay_icon_fonts'            => !empty($ui['delayIconFontsEnabled']),
+                'delay_icon_fonts_auto_detect' => !empty($ui['delayIconFontsAutoDetectEnabled']),
+                'delay_icon_fonts_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsList'])),
+                'delay_icon_fonts_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsExcludeList'])),
                 'homepage_css_bundle_mode'    => self::sanitize_homepage_css_bundle_mode($ui['homepageCssBundleMode']),
                 'css_bundle_scope'            => self::sanitize_css_bundle_scope($ui['cssBundleScope'] ?? 'homepage'),
                 'page_css_bundle_on_entry'    => !empty($ui['pageCssBundleOnEntryEnabled']),
@@ -2250,10 +3567,11 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'aggressive_async_css_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['aggressiveAsyncCssExcludeList'])),
                 'delay_non_critical_js'        => $delay_non_critical_js_enabled,
                 'delay_non_critical_js_aggressive' => $defer_stage_aggressive,
-                'delay_non_critical_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayNonCriticalJsExcludeList'])),
+                'delay_non_critical_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
                 'lcp_image_priority'           => !empty($ui['lcpImagePriorityEnabled']),
                 'lcp_boundary_defer'           => !empty($ui['lcpBoundaryDeferEnabled']),
                 'lcp_image_priority_override_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['lcpImagePriorityOverride'])),
+                'manual_lcp_hero_selector_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['manualLcpHeroSelector'] ?? '')),
                 'main_thread_relief'          => !empty($ui['mainThreadReliefEnabled']),
                 'critical_request_chain_relief' => !empty($ui['criticalRequestChainReliefEnabled']),
                 'critical_resource_preload_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalResourcePreloadList'])),
@@ -2298,6 +3616,9 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'excluded_query_args'          => $excluded_query_args,
             );
 
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_after_runtime_map', array(
+                'settings_count' => count(self::$settings_cache),
+            ));
             return self::$settings_cache;
         }
 
@@ -2475,6 +3796,41 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             return true;
+        }
+
+        private static function get_runtime_config_status_fast()
+        {
+            $path = self::get_runtime_config_path();
+            $status = array(
+                'exists' => file_exists($path),
+                'readable' => is_readable($path),
+                'valid_json' => false,
+                'healthy' => false,
+                'reason' => '',
+            );
+
+            if (!$status['exists']) {
+                $status['reason'] = 'missing';
+                return $status;
+            }
+
+            if (!$status['readable']) {
+                $status['reason'] = 'not_readable';
+                return $status;
+            }
+
+            $raw = file_get_contents($path);
+            if (!is_string($raw) || '' === $raw) {
+                $status['reason'] = 'empty_or_read_failed';
+                return $status;
+            }
+
+            $decoded = json_decode($raw, true);
+            $status['valid_json'] = is_array($decoded);
+            $status['healthy'] = $status['valid_json'];
+            $status['reason'] = $status['healthy'] ? 'present_valid_json' : 'invalid_json';
+
+            return $status;
         }
 
         private static function runtime_config_needs_sync()
@@ -4058,6 +5414,7 @@ public static function delete_all_plugin_data_and_deactivate()
                     'stats'        => self::get_engine_stats(),
                     'settings'     => self::get_dashboard_settings_for_client(),
                     'defaults'     => self::get_dashboard_defaults_for_client(),
+                    'jsDelayDeferRecommendedExclusions' => implode("\n", self::get_default_js_delay_defer_exclusion_patterns()),
                     'avifSupport'  => self::get_media_support_status(),
                     'diagnostics'  => self::get_dashboard_diagnostics(),
                     'crawlScopeSummary' => self::get_crawl_scope_summary(),
@@ -4508,13 +5865,8 @@ public static function delete_all_plugin_data_and_deactivate()
             );
         }
 
-        private static function get_frontend_compression_probe_status()
+        private static function get_frontend_compression_probe_status($allow_live_probe = false)
         {
-            $cached = get_transient('ucwp_frontend_compression_probe_v1');
-            if (is_array($cached)) {
-                return $cached;
-            }
-
             $status = array(
                 'detected'      => false,
                 'gzip'          => false,
@@ -4522,7 +5874,22 @@ public static function delete_all_plugin_data_and_deactivate()
                 'brokenGzip'    => false,
                 'brokenBrotli'  => false,
                 'message'       => '',
+                'cachedOnly'    => false,
+                'liveProbe'     => false,
             );
+
+            $cached = get_transient('ucwp_frontend_compression_probe_v1');
+            if (is_array($cached)) {
+                return array_merge($status, $cached, array('cachedOnly' => true));
+            }
+
+            if (!$allow_live_probe) {
+                $status['cachedOnly'] = true;
+                $status['message'] = 'Frontend compression probe has not run yet. Live loopback probing is skipped during normal settings sanitization.';
+                return $status;
+            }
+
+            $status['liveProbe'] = true;
 
             $probe_base = home_url('/');
             if ('' === (string) $probe_base) {
@@ -5572,7 +6939,7 @@ public static function delete_all_plugin_data_and_deactivate()
                     ),
                     'preferred' => (string) $compression['preferred'],
                     'message'   => (string) $compression['message'],
-                    'serverDefault' => self::get_frontend_compression_probe_status(),
+                    'serverDefault' => self::get_frontend_compression_probe_status(false),
                 ),
                 'wpCache' => self::get_wp_cache_define_status(),
                 'googleFonts' => self::get_google_fonts_cache_diagnostics(),
@@ -5906,8 +7273,23 @@ public static function delete_all_plugin_data_and_deactivate()
             return $snapshot;
         }
 
-        private static function get_object_cache_support_status()
+        private static function get_object_cache_support_status($allow_live_check = true)
         {
+            $cache_key = 'ucwp_object_cache_support_status_v1';
+            $allow_live_check = (bool) $allow_live_check;
+
+            if (!$allow_live_check) {
+                $cached = get_transient($cache_key);
+                if (is_array($cached)) {
+                    $cached['source'] = 'cached';
+                    return $cached;
+                }
+
+                $light = self::get_object_cache_support_status_light();
+                $light['source'] = 'light_frontend_default';
+                return $light;
+            }
+
             $dropin_installable = true;
             $message   = '';
 
@@ -5921,8 +7303,22 @@ public static function delete_all_plugin_data_and_deactivate()
                 }
             }
 
+            $status = self::get_object_cache_support_status_light();
+            $status['available'] = $dropin_installable;
+            $status['dropinInstallable'] = $dropin_installable;
+            $status['message'] = $message;
+            $status['source'] = 'live';
+
+            set_transient($cache_key, $status, 5 * MINUTE_IN_SECONDS);
+
+            return $status;
+        }
+
+        private static function get_object_cache_support_status_light()
+        {
             $apcu_available  = function_exists('apcu_fetch') && function_exists('apcu_store') && (!function_exists('apcu_enabled') || apcu_enabled());
             $redis_available = (bool) (class_exists('Redis') || extension_loaded('redis'));
+            $dropin_installable = class_exists('Ultra_Cache_Object_Cache_Manager');
 
             return array(
                 // Kept for compatibility with the dashboard JS. This means the drop-in can be installed, not that Redis is connected.
@@ -5930,11 +7326,12 @@ public static function delete_all_plugin_data_and_deactivate()
                 'dropinInstallable'          => $dropin_installable,
                 'persistentBackendAvailable' => $redis_available,
                 'localBackendAvailable'      => $apcu_available,
-                'message'                    => $message,
+                'message'                    => $dropin_installable ? '' : self::maybe_translate('Object cache helper not available.'),
                 'apcu'      => array(
                     'available' => $apcu_available,
                     'message'   => $apcu_available ? '' : self::maybe_translate('APCu extension is not loaded or not enabled.'),
                 ),
+                'source' => 'light',
             );
         }
 

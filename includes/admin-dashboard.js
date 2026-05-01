@@ -59,12 +59,19 @@
 		'mediaGenerateOnDemandEnabled',
 		'mediaOutputMode',
 		'deferJsEnabled',
+		'deferAllJsEnabled',
 		'deferJsForceList',
 		'deferJsExcludeList',
-		'delayThirdPartyJsEnabled',
+		'delaySafeThirdPartyJsEnabled',
+		'lazyMailerliteNonceEnabled',
+		'delaySafeThirdPartyJsPatterns',
+		'delayFunctionalThirdPartyJsEnabled',
+		'delayFunctionalThirdPartyJsPatterns',
+		'delayThirdPartyJsExcludeList',
 		'asyncExternalScriptsEnabled',
 		'homepageCssBundleEnabled',
 		'homepageCssBundleInlineEnabled',
+		'leftoverCssBundleEnabled',
 		'homepageCssBundleExcludeList',
 		'homepageCssBundleMode',
 		'cssBundleScope',
@@ -81,6 +88,7 @@
 		'lcpImagePriorityEnabled',
 		'lcpBoundaryDeferEnabled',
 		'lcpImagePriorityOverride',
+		'manualLcpHeroSelector',
 		'mainThreadReliefEnabled',
 		'criticalRequestChainReliefEnabled',
 		'criticalResourcePreloadList',
@@ -124,6 +132,37 @@
 	];
 
 
+	const CRITICAL_SETTING_KEYS = [
+		'pageCacheEnabled',
+		'objectCacheEnabled',
+		'gzipEnabled',
+		'brotliEnabled',
+		'homepageCssBundleEnabled',
+		'homepageCssBundleMode',
+		'homepageCssBundleInlineEnabled',
+		'leftoverCssBundleEnabled',
+		'cssBundleScope',
+		'pageCssBundleOnEntryEnabled',
+		'deferJsEnabled',
+		'delaySafeThirdPartyJsEnabled',
+		'lazyMailerliteNonceEnabled',
+		'delayFunctionalThirdPartyJsEnabled',
+		'delayNonCriticalJsEnabled',
+		'criticalRequestChainReliefEnabled',
+		'lcpBoundaryDeferEnabled',
+		'manualLcpHeroSelector',
+		'frontendSafeModeEnabled',
+		'sliderSafeModeEnabled',
+		'woocommerceSafeModeEnabled',
+		'cacheQueryStringsEnabled',
+		'googleFontsLocalOptimizationEnabled',
+		'selfHostedFontCssOptimizationEnabled',
+		'selfHostedFontRuntimeRewriteEnabled',
+		'cronWarmEnabled',
+		'cronWarmStartAfterCleanup',
+		'cronWarmStartAfterManualPurge'
+	];
+
 	const PERFORMANCE_PROFILE_ORDER = ['off', 'safe', 'balanced', 'aggressive'];
 	const PERFORMANCE_PROFILE_DISPLAY_ORDER = ['custom', 'off', 'safe', 'balanced', 'aggressive'];
 	const PERFORMANCE_PROFILE_CUSTOM = {
@@ -133,26 +172,26 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: 'All Off', description: 'Disable page cache, object cache, media, CSS, JS, fonts, prefetch, warmup, and scheduled jobs. Best for first install or troubleshooting.', patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, delayThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, pageCssBundleOnEntryEnabled: false,
-			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
+			deferJsEnabled: false, delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
+			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
-			homepageCssBundleMode: 'safe', cssBundleScope: 'homepage', mediaOutputMode: 'auto',
+			homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: true, cssBundleScope: 'homepage', mediaOutputMode: 'auto',
 		} },
 		safe: { label: 'Safe', description: 'Enables page caching, WooCommerce-safe bypasses, browser cache headers, save-time warmup, and stale protection. No JS/CSS/media rewrites.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: false, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, deferJsEnabled: false, delayThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false, cssBundleScope: 'homepage',
+			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', deferJsEnabled: false, delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false, cssBundleScope: 'homepage',
 		} },
 		balanced: { label: 'Balanced', description: 'Adds object cache, media optimization, Safe CLS/LCP image hints, conservative JS defer, safe CSS bundling, and font-display improvements.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
-			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, homepageCssBundleMode: 'safe', cssBundleScope: 'homepage', pageCssBundleOnEntryEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
+			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
+			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: true, cssBundleScope: 'homepage', pageCssBundleOnEntryEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, cronWarmEnabled: false, cacheCleanupEnabled: false, cacheQueryStringsEnabled: false,
 		} },
 		aggressive: { label: 'Aggressive', description: 'Balanced plus delayed third-party JS, main-thread relief, aggressive CSS bundling, manual CSS bundle warm actions, speculation prefetch, cron HTML warmup, and scheduled cleanup.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, lcpBoundaryDeferEnabled: true, deferJsEnabled: true, delayThirdPartyJsEnabled: true, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
-			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: true, homepageCssBundleMode: 'aggressive', cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: true, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
+			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, lcpBoundaryDeferEnabled: true, deferJsEnabled: true, delaySafeThirdPartyJsEnabled: true, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
+			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: true, leftoverCssBundleEnabled: false, homepageCssBundleMode: 'aggressive', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: true, cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: true, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: true, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, cacheCleanupEnabled: true, cacheQueryStringsEnabled: false,
 		} },
 	};
@@ -560,6 +599,50 @@
 		window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
 	}
 
+	function normalizeSettingListLines(value) {
+		return String(value || '')
+			.split(/\r?\n/)
+			.map((line) => String(line || '').trim())
+			.filter((line) => line.length > 0);
+	}
+
+	function mergeUniqueSettingLines(currentValue, additions) {
+		const currentLines = normalizeSettingListLines(currentValue);
+		const normalizedExisting = currentLines.map((line) => line.toLowerCase());
+		const addedLines = [];
+		normalizeSettingListLines(Array.isArray(additions) ? additions.join('\n') : additions).forEach((line) => {
+			const normalized = line.toLowerCase();
+			const duplicate = normalizedExisting.some((existing) => existing === normalized || existing.indexOf(normalized) !== -1 || normalized.indexOf(existing) !== -1);
+			if (!duplicate) {
+				normalizedExisting.push(normalized);
+				currentLines.push(line);
+				addedLines.push(line);
+			}
+		});
+		return {
+			value: currentLines.join('\n'),
+			addedLines,
+			added: addedLines.length,
+		};
+	}
+
+	function getJsDelaySafetySuggestions(scan) {
+		const suggestions = scan && Array.isArray(scan.suggestions) ? scan.suggestions : [];
+		return suggestions
+			.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored && item.appendable !== false && item.category !== 'review-only')
+			.map((item) => String(item.suggestedExclusion).trim())
+			.filter((line) => line.length > 0);
+	}
+
+	function isSuggestionPresentInDraft(draftValue, suggestion) {
+		const lines = normalizeSettingListLines(draftValue).map((line) => line.toLowerCase());
+		const target = String(suggestion || '').trim().toLowerCase();
+		if (!target) {
+			return false;
+		}
+		return lines.some((line) => line === target || line.indexOf(target) !== -1 || target.indexOf(line) !== -1);
+	}
+
 	function sleep(ms) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
@@ -583,6 +666,8 @@
 			apcu_flush: { path: 'apcu/flush', method: 'POST' },
 			redis_test: { path: 'object-cache/redis-test', method: 'POST' },
 			object_cache_flush: { path: 'object-cache/flush', method: 'POST' },
+			performance_profile_last: { path: 'performance-profile/last', method: 'GET' },
+			performance_profile_clear: { path: 'performance-profile/clear', method: 'POST' },
 			cron_warm_start: { path: 'cron-warm/start', method: 'POST' },
 			cron_warm_stop: { path: 'cron-warm/stop', method: 'POST' },
 			cron_warm_tick: { path: 'cron-warm/tick', method: 'POST' },
@@ -1164,6 +1249,430 @@
 					variant: 'primary',
 				}, saveLabel || 'Save'),
 			]),
+		]);
+	}
+
+	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onLoadLatestProfileScan }) {
+		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
+		const [draft, setDraft] = useState(value || "");
+		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
+		const [scan, setScan] = useState(null);
+		const [populateBusy, setPopulateBusy] = useState(false);
+		const [scanBusy, setScanBusy] = useState(false);
+		const [debugScanBusy, setDebugScanBusy] = useState(false);
+
+		useEffect(() => {
+			setDraft(value || '');
+		}, [value]);
+
+		const currentValue = String(value || '');
+		const draftValue = String(draft || '');
+		const hasChanges = draftValue !== currentValue;
+		const suggestions = scan && Array.isArray(scan.suggestions) ? scan.suggestions : [];
+		const actionableSuggestions = suggestions.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored);
+		const appendableSuggestions = actionableSuggestions.filter((item) => item.appendable !== false && item.category !== 'review-only');
+		const reviewOnlySuggestions = actionableSuggestions.filter((item) => item.appendable === false || item.category === 'review-only');
+		const missingAppendableSuggestions = appendableSuggestions.filter((item) => !isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
+		const alreadyListedAppendableSuggestions = appendableSuggestions.filter((item) => isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
+		const missingReviewOnlySuggestions = reviewOnlySuggestions.filter((item) => !isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
+		const totalDetected = scan && typeof scan.suggestionCount !== 'undefined' ? Number(scan.suggestionCount || 0) : suggestions.length;
+		const liveMissingCount = missingAppendableSuggestions.length;
+		const liveAlreadyListedCount = alreadyListedAppendableSuggestions.length;
+		const reviewOnlyCount = reviewOnlySuggestions.length;
+
+		function appendJsExclusionLine(line) {
+			const suggestion = String(line || '').trim();
+			if (!suggestion) {
+				return;
+			}
+			const merged = mergeUniqueSettingLines(draftValue, suggestion);
+			setDraft(merged.value);
+		}
+
+		function renderSuggestionItem(item, keyPrefix, index) {
+			const line = item && item.suggestedExclusion ? String(item.suggestedExclusion) : '';
+			const present = isSuggestionPresentInDraft(draftValue, line);
+			const reviewOnly = item && (item.appendable === false || item.category === 'review-only');
+			const statusText = reviewOnly ? (present ? 'already listed · review only' : 'review only') : (present ? 'already listed' : 'missing');
+			const statusClass = reviewOnly ? 'text-sky-300' : (present ? 'text-emerald-400' : 'text-amber-300');
+			const metaRows = [
+				['Status', statusText, statusClass],
+				['Confidence', item && item.confidence ? String(item.confidence) : '—', 'text-zinc-300'],
+				['Category', item && item.categoryLabel ? String(item.categoryLabel) : (reviewOnly ? 'Review-only candidates' : 'Detected recommendation'), reviewOnly ? 'text-sky-300' : 'text-violet-300'],
+			];
+			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-3 space-y-2 border border-white/5', key: keyPrefix + '-' + index + '-' + line }, [
+				h('div', { className: 'space-y-1' }, [
+					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Suggested exclusion'),
+					h('div', { className: 'flex flex-wrap items-center gap-2' }, [
+						h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
+						line ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled || present, onClick: () => appendJsExclusionLine(line) }, present ? 'Already in exclusions' : 'Append') : null,
+					]),
+				]),
+				h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-2' }, metaRows.map((row, rowIndex) => h('div', { className: 'rounded bg-black/15 px-2 py-1', key: keyPrefix + '-meta-' + index + '-' + rowIndex }, [
+					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, row[0]),
+					h('div', { className: 'text-[11px] font-semibold ' + row[2] }, row[1]),
+				]))),
+				item.reason ? h('div', { className: 'text-zinc-400 leading-relaxed pt-1' }, item.reason) : null,
+				item.sample ? h('div', { className: 'text-zinc-500 leading-relaxed break-all bg-black/15 rounded px-2 py-1.5' }, [
+					h('span', { className: 'text-zinc-400 font-semibold' }, 'Sample: '),
+					String(item.sample),
+				]) : null,
+			]);
+		}
+
+		function getSuggestionGroupInfo(item) {
+			const line = item && item.suggestedExclusion ? String(item.suggestedExclusion).toLowerCase() : '';
+			const reason = item && item.reason ? String(item.reason) : '';
+			const text = line + ' ' + reason.toLowerCase();
+			if (/revslider|sr7|tptools|tp-tools|rs6|rs-module|slider revolution/.test(text)) {
+				return { key: 'slider-revolution-sr7', title: 'Slider Revolution / SR7', reason: 'Slider Revolution / SR7 assets or markup were detected on this page. Keep slider runtime assets protected unless visually tested.' };
+			}
+			if (/swiper|swiper-bundle/.test(text)) {
+				return { key: 'swiper', title: 'Swiper', reason: 'Swiper slider/carousel assets or markup were detected on this page.' };
+			}
+			if (/slick/.test(text)) {
+				return { key: 'slick', title: 'Slick carousel', reason: 'Slick carousel assets or markup were detected on this page.' };
+			}
+			if (/splide|owl\.carousel|smartslider|n2-ss|layerslider|masterslider|metaslider|soliloquy|royalslider|flickity|glide/.test(text)) {
+				return { key: 'other-slider-carousel', title: 'Other slider / carousel', reason: 'Slider or carousel assets were detected on this page.' };
+			}
+			if (/elementor|frontend-modules|webpack\.runtime/.test(text)) {
+				return { key: 'elementor', title: 'Elementor runtime', reason: 'Elementor assets or widgets were detected on this page. Keep core runtime dependencies protected unless dependency-safe testing passes.' };
+			}
+			if (/divi|et-core|et-builder/.test(text)) {
+				return { key: 'divi', title: 'Divi / Elegant Themes', reason: 'Divi builder assets were detected on this page.' };
+			}
+			if (/wpbakery|vc_|bricks|oxygen|beaver-builder|fl-builder|fusion-builder|avada|thrive|seedprod|siteorigin|spectra|uagb|kadence|generateblocks/.test(text)) {
+				return { key: 'builder-runtime', title: 'Builder runtime', reason: 'Builder/runtime assets were detected on this page.' };
+			}
+			if (/complianz|cmplz/.test(text)) {
+				return { key: 'complianz', title: 'Complianz consent scripts', reason: 'Complianz consent assets were detected. Consent/cookie scripts are safer outside Delay JS.' };
+			}
+			if (/cookieyes|cookielawinfo|cky-|cookiebot|iubenda|onetrust|optanon/.test(text)) {
+				return { key: 'consent-management', title: 'Cookie / consent management', reason: 'Cookie/consent-management assets were detected. Consent scripts are safer outside Delay JS.' };
+			}
+			if (/mailerlite|validation-messages|mailchimp|mc4wp|klaviyo|hubspot|contact-form-7|wpforms|gform|gravityforms|formidable|ninja-forms|fluentform|forminator|recaptcha|hcaptcha|turnstile/.test(text)) {
+				return { key: 'forms-validation', title: 'Forms / validation / newsletter', reason: 'Form, validation, newsletter, or CRM assets were detected on this page.' };
+			}
+			if (/woocommerce|wc-|cart|checkout|account|add-to-cart|wc-cart-fragments|stripe|paypal|braintree|klarna|afterpay|square/.test(text)) {
+				return { key: 'ecommerce-checkout', title: 'WooCommerce / ecommerce', reason: 'Commerce or checkout-related markers were detected. Review before excluding broadly.' };
+			}
+			if (/gtag|gtm|datalayer|adsbygoogle|stats\.wp\.com|_stq|facebook\.net|fbevents|hotjar|clarity|googletagmanager|google-analytics/.test(text)) {
+				return { key: 'tracking-ads', title: 'Tracking / ads', reason: 'Tracking or ads scripts were detected. These are review-only because delaying them often improves performance but may affect tracking timing.' };
+			}
+			return { key: item && item.category ? String(item.category) : 'other', title: item && item.categoryLabel ? String(item.categoryLabel) : 'Other detected recommendation', reason: reason };
+		}
+
+		function groupSuggestionItems(items) {
+			const groups = [];
+			const byKey = {};
+			(items || []).forEach((item) => {
+				const info = getSuggestionGroupInfo(item);
+				if (!byKey[info.key]) {
+					byKey[info.key] = { key: info.key, title: info.title, reason: info.reason, items: [] };
+					groups.push(byKey[info.key]);
+				}
+				byKey[info.key].items.push(item);
+			});
+			return groups;
+		}
+
+		function renderSuggestionGroup(group, keyPrefix, index, collapsed) {
+			const items = group && Array.isArray(group.items) ? group.items : [];
+			const missingCount = items.filter((item) => !isSuggestionPresentInDraft(draftValue, item && item.suggestedExclusion)).length;
+			const reviewOnly = items.some((item) => item && (item.appendable === false || item.category === 'review-only'));
+			const lines = items.map((item) => String(item && item.suggestedExclusion ? item.suggestedExclusion : '').trim()).filter(Boolean);
+			const summaryStatus = reviewOnly ? 'review only' : (missingCount ? (missingCount + ' missing') : 'covered');
+			return h('details', { className: 'rounded-lg bg-black/20 px-3 py-2', key: keyPrefix + '-group-' + index + '-' + group.key, open: !collapsed }, [
+				h('summary', { className: 'cursor-pointer list-none flex flex-wrap items-center justify-between gap-2' }, [
+					h('span', { className: 'text-zinc-200 font-semibold' }, group.title || 'Detected group'),
+					h('span', { className: reviewOnly ? 'text-sky-300 font-mono text-[11px]' : (missingCount ? 'text-amber-300 font-mono text-[11px]' : 'text-emerald-300 font-mono text-[11px]') }, summaryStatus + ' · ' + items.length + ' line(s)'),
+				]),
+				group.reason ? h('div', { className: 'text-zinc-500 mt-2' }, group.reason) : null,
+				lines.length ? h('div', { className: 'mt-2 flex flex-wrap gap-1' }, lines.map((line, lineIndex) => h('code', { className: 'font-mono text-[11px] text-emerald-300 bg-black/25 rounded px-2 py-1 break-all', key: keyPrefix + '-line-' + index + '-' + lineIndex }, line))) : null,
+				h('div', { className: 'mt-2 space-y-2' }, items.map((item, itemIndex) => renderSuggestionItem(item, keyPrefix + '-detail-' + index, itemIndex))),
+			]);
+		}
+
+		function renderSuggestionSection(title, count, items, emptyText, keyPrefix, note, options) {
+			const opts = options || {};
+			const grouped = !!opts.grouped;
+			const collapsed = !!opts.collapsed;
+			const groups = grouped ? groupSuggestionItems(items) : [];
+			return h('div', { className: 'mt-3', key: keyPrefix }, [
+				h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
+					h('span', { className: 'text-zinc-300 font-semibold' }, title),
+					h('span', { className: count ? 'text-amber-300 font-mono' : 'text-emerald-300 font-mono' }, String(count || 0)),
+				]),
+				note ? h('div', { className: 'text-[11px] text-zinc-500 mb-2' }, note) : null,
+				items.length ? (grouped ? h('div', { className: 'space-y-2' }, groups.map((group, index) => renderSuggestionGroup(group, keyPrefix, index, collapsed))) : h('div', { className: 'space-y-2' }, items.map((item, index) => renderSuggestionItem(item, keyPrefix, index)))) : h('div', { className: 'text-zinc-500' }, emptyText),
+			]);
+		}
+
+		async function handlePopulateDefaults() {
+			if (disabled || populateBusy || typeof onPopulateDefaults !== 'function') {
+				return;
+			}
+			setPopulateBusy(true);
+			try {
+				const next = await onPopulateDefaults(draftValue);
+				if (typeof next === 'string') {
+					setDraft(next);
+				}
+			} finally {
+				setPopulateBusy(false);
+			}
+		}
+
+		async function handleScan() {
+			if (disabled || scanBusy || typeof onScan !== 'function') {
+				return;
+			}
+			setScanBusy(true);
+			try {
+				const result = await onScan(scanUrl);
+				if (result && typeof result === 'object') {
+					setScan(result);
+				}
+			} finally {
+				setScanBusy(false);
+			}
+		}
+
+		async function handleDebugLoadLatestProfileScan() {
+			if (disabled || debugScanBusy || typeof onLoadLatestProfileScan !== 'function') {
+				return;
+			}
+			setDebugScanBusy(true);
+			try {
+				const result = await onLoadLatestProfileScan();
+				if (result && typeof result === 'object') {
+					setScan(result);
+				}
+			} finally {
+				setDebugScanBusy(false);
+			}
+		}
+
+		function handleAppendSuggestions() {
+			const lines = getJsDelaySafetySuggestions(scan).filter((line) => !isSuggestionPresentInDraft(draftValue, line));
+			if (!lines.length) {
+				return;
+			}
+			const merged = mergeUniqueSettingLines(draftValue, lines);
+			setDraft(merged.value);
+		}
+
+		return h('div', { className: 'uc-field-wrap', style: { gridColumn: '1 / -1' } }, [
+			h('label', { className: 'uc-field-label' }, 'JS Delay / Defer Exclusions'),
+			h('div', { className: 'text-xs text-zinc-500 mb-2' }, 'Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Defer JS, Defer all JS, Delay safe/functional third-party JS, Delay non-critical/local JS, LCP Boundary Defer, and Main Thread Relief where applicable. Scan suggestions are appended only if missing; existing custom lines are preserved.'),
+			h('textarea', {
+				className: 'uc-field-input uc-field-textarea',
+				value: draft,
+				disabled: !!disabled,
+				placeholder: placeholder || '',
+				onChange: (e) => setDraft(e.target.value),
+			}),
+			h('div', { className: 'mt-3 mb-2' }, [
+				h('label', { className: 'uc-field-label' }, 'Page URL to scan'),
+				h('input', {
+					type: 'url',
+					className: 'uc-field-input',
+					value: scanUrl,
+					disabled: !!disabled || scanBusy,
+					placeholder: defaultScanUrl || 'https://example.com/page/',
+					onChange: (e) => setScanUrl(e.target.value),
+				}),
+				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Scan a same-site page. UltraCache profiles that exact URL and shows live missing exclusions based on the textarea above; nothing is applied automatically.'),
+			]),
+			h('div', { className: 'mt-3 mb-3 flex flex-wrap items-center gap-2', style: { justifyContent: 'space-evenly', padding: '5px 0' } }, [
+				h(Button, { key: 'defaults', onClick: handlePopulateDefaults, disabled: !!disabled || populateBusy }, populateBusy ? 'Populating…' : 'Populate Defaults'),
+				h(Button, { key: 'scan', onClick: handleScan, disabled: !!disabled || scanBusy }, scanBusy ? 'Scanning…' : 'Run JS Delay / Defer Scan'),
+				h(Button, { key: 'debug-scan', onClick: handleDebugLoadLatestProfileScan, disabled: !!disabled || debugScanBusy }, debugScanBusy ? 'Loading…' : 'Debug: Latest Profile'),
+				h(Button, { key: 'append', onClick: handleAppendSuggestions, disabled: !!disabled || !liveMissingCount }, 'Append Missing Recommended' + (liveMissingCount ? ' (' + liveMissingCount + ')' : '')),
+				h(Button, { key: 'save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, 'Save Exclusions'),
+			]),
+			scan ? h('div', { className: 'mt-3 mb-2 text-xs bg-black/20 rounded-xl px-3 py-3', style: { padding: '5px' } }, [
+				h('div', { className: 'flex flex-wrap items-center justify-between gap-3 mb-2' }, [
+					h('span', { className: 'text-zinc-300 font-bold' }, 'JS Delay / Defer Safety Scan'),
+					(scan.scannedUrl || scan.profileUrl || scan.url) ? h('span', { className: 'text-zinc-500 font-mono break-all' }, String(scan.scannedUrl || scan.profileUrl || scan.url)) : null,
+				]),
+				h('div', { className: 'grid grid-cols-1 md:grid-cols-5 gap-2 mb-3' }, [
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Detected'), h('div', { className: 'font-mono text-zinc-200' }, String(totalDetected || suggestions.length || 0))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Recommended'), h('div', { className: 'font-mono text-zinc-200' }, String(appendableSuggestions.length))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Missing'), h('div', { className: liveMissingCount ? 'font-mono text-amber-300' : 'font-mono text-emerald-300' }, String(liveMissingCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Already listed'), h('div', { className: 'font-mono text-emerald-300' }, String(liveAlreadyListedCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Review-only'), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
+				]),
+				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing recommended exclusions. The visible JS Delay / Defer Exclusions list already covers the appendable scan results.', 'missing-recommended', 'These are the only lines Append Missing Recommended will add.'),
+				renderSuggestionSection('Already listed recommended', liveAlreadyListedCount, alreadyListedAppendableSuggestions, 'No recommended exclusions are already listed yet.', 'already-listed-recommended', 'Grouped and collapsed by default. These scan matches are already covered by your textarea, including broad fragments that cover variant paths.', { grouped: true, collapsed: true }),
+				renderSuggestionSection('Review-only detected', reviewOnlyCount, reviewOnlySuggestions, 'No review-only candidates were detected.', 'review-only-detected', 'Grouped and collapsed by default. Review-only items are shown for awareness and are not appended automatically.', { grouped: true, collapsed: true }),
+			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, 'Enter a same-site URL, then click Run JS Delay / Defer Scan. Debug: Latest Profile loads the last WP-CLI/advanced profile only.'),
+		]);
+	}
+
+
+	function CssBundleExclusionsDiagnosticsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onRunDiagnostics, onDownloadJson, onClearResult, profile, onCopyCssExclusion }) {
+		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
+		const [draft, setDraft] = useState(value || '');
+		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
+		const [populateBusy, setPopulateBusy] = useState(false);
+		const [scanBusy, setScanBusy] = useState(false);
+
+		useEffect(() => {
+			setDraft(value || '');
+		}, [value]);
+
+		const currentValue = String(value || '');
+		const draftValue = String(draft || '');
+		const hasChanges = draftValue !== currentValue;
+		const current = profile && profile.available ? profile : null;
+		const cssBundle = current && current.cssBundle ? current.cssBundle : {};
+		const leftoverCssBundle = cssBundle && cssBundle.leftoverCssBundle ? cssBundle.leftoverCssBundle : {};
+		const asyncCssDiagnostics = cssBundle && cssBundle.asyncCssDiagnostics ? cssBundle.asyncCssDiagnostics : {};
+		const criticalChain = current && current.criticalRequestChain ? current.criticalRequestChain : {};
+		const sourceTop = cssBundle && Array.isArray(cssBundle.sourceTop) ? cssBundle.sourceTop : [];
+		const protectedStyles = criticalChain && Array.isArray(criticalChain.styleCandidates) ? criticalChain.styleCandidates.filter((item) => item && item.protected) : [];
+		const renderBlockingHrefs = cssBundle && Array.isArray(cssBundle.renderBlockingHrefs) ? cssBundle.renderBlockingHrefs : [];
+
+		async function handlePopulateDefaults() {
+			if (disabled || populateBusy || typeof onPopulateDefaults !== 'function') {
+				return;
+			}
+			setPopulateBusy(true);
+			try {
+				const next = await onPopulateDefaults(draftValue);
+				if (typeof next === 'string') {
+					setDraft(next);
+				}
+			} finally {
+				setPopulateBusy(false);
+			}
+		}
+
+		async function handleRunDiagnostics() {
+			if (disabled || scanBusy || typeof onRunDiagnostics !== 'function') {
+				return;
+			}
+			setScanBusy(true);
+			try {
+				await onRunDiagnostics(scanUrl || defaultScanUrl);
+			} finally {
+				setScanBusy(false);
+			}
+		}
+
+		function appendCssExclusionLine(line) {
+			const suggestion = String(line || '').trim();
+			if (!suggestion) {
+				return;
+			}
+			const merged = mergeUniqueSettingLines(draftValue, suggestion);
+			setDraft(merged.value);
+		}
+
+		function isCssExclusionCovered(line) {
+			const suggestion = String(line || '').trim().toLowerCase();
+			if (!suggestion) {
+				return true;
+			}
+			return normalizeSettingListLines(draftValue).map((item) => String(item || '').trim().toLowerCase()).some((existing) => existing === suggestion || existing.indexOf(suggestion) !== -1 || suggestion.indexOf(existing) !== -1);
+		}
+
+		function renderMetric(label, value, hint, tone) {
+			const valueClass = tone === 'warning' ? 'text-amber-300' : (tone === 'success' ? 'text-emerald-300' : 'text-zinc-200');
+			return h('div', { className: 'bg-black/20 rounded-xl px-3 py-3' }, [
+				h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, label),
+				h('div', { className: 'font-mono font-bold mt-1 ' + valueClass }, value),
+				hint ? h('div', { className: 'text-zinc-500 mt-1' }, hint) : null,
+			]);
+		}
+
+		function renderDiagnosticsResult() {
+			if (!current) {
+				return h('div', { className: 'mt-3 text-[11px] text-zinc-500 bg-black/15 rounded-xl px-3 py-3' }, 'No CSS diagnostics result loaded yet. Enter a same-site URL and click Run CSS Diagnostics.');
+			}
+
+			return h('div', { className: 'mt-4 text-xs bg-black/20 rounded-xl px-3 py-3 space-y-4' }, [
+				h('div', { className: 'flex flex-wrap items-center justify-between gap-3' }, [
+					h('div', { className: 'text-zinc-300 font-bold' }, 'CSS Critical Path / Render Blocking Diagnostics'),
+					h('div', { className: 'text-zinc-500 font-mono break-all text-right' }, current.profileUrl || current.url || scanUrl || ''),
+				]),
+				h('div', { className: 'grid grid-cols-1 md:grid-cols-6 gap-2' }, [
+					renderMetric('Main bundle', cssBundle.fileExists ? formatBytes(cssBundle.fileBytes || 0) : 'Not built', formatNumber(cssBundle.sourceUrlCount || 0) + ' source stylesheet(s)', (cssBundle.fileBytes || 0) > 153600 ? 'warning' : 'success'),
+					renderMetric('Leftover bundle', leftoverCssBundle.enabled ? (leftoverCssBundle.success ? 'Active' : 'Skipped') : 'Disabled', leftoverCssBundle.enabled ? (formatNumber(leftoverCssBundle.replacedLinkCount || 0) + ' replaced · ' + formatBytes(leftoverCssBundle.bundleBytes || 0)) : 'Consolidate Remaining CSS is off', leftoverCssBundle.enabled && leftoverCssBundle.success ? 'success' : 'warning'),
+					renderMetric('Async CSS', asyncCssDiagnostics.available ? formatNumber(asyncCssDiagnostics.rewritten || 0) + ' applied' : 'No scan', asyncCssDiagnostics.available ? (formatNumber(asyncCssDiagnostics.scanned || 0) + ' scanned · ' + formatNumber(asyncCssDiagnostics.skipped || 0) + ' skipped') : 'Run CSS Diagnostics', (asyncCssDiagnostics.rewritten || 0) > 0 ? 'success' : 'warning'),
+					renderMetric('Final CSS links', formatNumber(cssBundle.stylesheetLinks || 0), formatNumber(cssBundle.renderBlockingBundleLinks || 0) + ' bundle · ' + formatNumber(cssBundle.renderBlockingNonBundleLinks || 0) + ' outside bundle', (cssBundle.stylesheetLinks || 0) > 8 ? 'warning' : 'success'),
+					renderMetric('Render-blocking CSS', formatNumber(cssBundle.renderBlockingStylesheets || 0), 'Final render-blocking stylesheet link(s)', (cssBundle.renderBlockingStylesheets || 0) > 0 ? 'warning' : 'success'),
+					renderMetric('Protected CSS', formatNumber(criticalChain.protectedStyleCount || protectedStyles.length || 0), 'Slider/hero/safety protected', 'neutral'),
+				]),
+				h('div', { className: 'text-[11px] text-zinc-400 leading-relaxed' }, [
+					h('strong', { className: 'text-zinc-300' }, 'Recommendation: '),
+					(leftoverCssBundle.enabled && leftoverCssBundle.success)
+						? 'Leftover CSS consolidation is active. The remaining candidate is the main render-blocking CSS bundle: review critical CSS split or async non-critical bundle mode.'
+						: 'Run/test Consolidate Remaining CSS first if visual output is safe, then review whether the main bundle needs a critical CSS split.',
+				]),
+				sourceTop.length ? h('details', { className: 'rounded-xl bg-black/15 px-3 py-2' }, [
+					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, 'Top CSS bundle sources by bytes'),
+					h('div', { className: 'mt-3 space-y-2' }, sourceTop.slice(0, 8).map((item, index) => {
+						const suggestion = item && item.suggestedExclusion ? String(item.suggestedExclusion) : '';
+						return h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'cssdiag-source-' + index }, [
+							h('div', { className: 'flex items-center justify-between gap-4' }, [
+								h('span', { className: 'break-all text-zinc-300' }, item.url || 'unknown stylesheet'),
+								h('span', { className: (item.largeSourceWarning ? 'font-mono text-amber-300 shrink-0' : 'font-mono text-zinc-300 shrink-0') }, formatBytes(item.bytes || 0)),
+							]),
+							suggestion ? h('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [
+								h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1' }, suggestion),
+								h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled || isCssExclusionCovered(suggestion), onClick: () => appendCssExclusionLine(suggestion) }, isCssExclusionCovered(suggestion) ? 'Already in exclusions' : 'Append exclusion line'),
+							]) : null,
+						]);
+					})),
+				]) : null,
+				asyncCssDiagnostics.available ? h('details', { className: 'rounded-xl bg-black/15 px-3 py-2' }, [
+					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, 'Async Remaining CSS decisions'),
+					h('div', { className: 'mt-3 text-[11px] text-zinc-400 leading-relaxed' }, 'CSS Bundle Exclusions do not disable Async CSS. Low-risk mode may still skip theme/layout, Elementor, WooCommerce, or other critical CSS. Aggressive Async CSS uses the visible Aggressive Async CSS Exclude List plus hard admin-only exclusions.'),
+					asyncCssDiagnostics.reasonCounts ? h('div', { className: 'mt-3 flex flex-wrap gap-2' }, Object.keys(asyncCssDiagnostics.reasonCounts).slice(0, 12).map((key) => h('span', { className: 'font-mono text-[11px] bg-black/25 rounded px-2 py-1', key: 'async-reason-' + key }, key + ': ' + formatNumber(asyncCssDiagnostics.reasonCounts[key] || 0)))) : null,
+					Array.isArray(asyncCssDiagnostics.items) && asyncCssDiagnostics.items.length ? h('div', { className: 'mt-3 space-y-1' }, asyncCssDiagnostics.items.slice(0, 16).map((item, index) => h('div', { className: 'text-[11px] bg-black/20 rounded px-2 py-1', key: 'async-item-' + index }, [
+						h('div', { className: item.status === 'applied' ? 'text-emerald-300 font-bold' : (item.status === 'unresolved' ? 'text-amber-300 font-bold' : 'text-zinc-300 font-bold') }, (item.status || 'unknown') + ' · ' + (item.reason || 'unknown')),
+						h('code', { className: 'block font-mono text-zinc-400 break-all mt-1' }, item.url || item.path || 'unknown stylesheet'),
+					]))) : null,
+				]) : null,				renderBlockingHrefs.length ? h('details', { className: 'rounded-xl bg-black/15 px-3 py-2' }, [
+					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, 'Remaining render-blocking stylesheet URLs'),
+					h('div', { className: 'mt-3 space-y-1' }, renderBlockingHrefs.slice(0, 12).map((url, index) => h('code', { className: 'block font-mono text-[11px] text-zinc-300 break-all bg-black/20 rounded px-2 py-1', key: 'cssdiag-rb-' + index }, url))),
+				]) : null,
+			]);
+		}
+
+		return h('div', { className: 'uc-field-wrap', style: { gridColumn: '1 / -1' } }, [
+			h('label', { className: 'uc-field-label' }, 'CSS Bundle Exclusions'),
+			h('div', { className: 'text-xs text-zinc-500 mb-2' }, 'Optional newline-separated URL fragments. Matching stylesheets stay outside generated CSS bundles and load normally as their original stylesheet links. Use exclusions only when a stylesheet breaks inside the bundle or tested slower when bundled.'),
+			h('textarea', {
+				className: 'uc-field-input uc-field-textarea',
+				value: draft,
+				disabled: !!disabled,
+				placeholder: placeholder || '',
+				onChange: (e) => setDraft(e.target.value),
+			}),
+			h('div', { className: 'mt-3 mb-2' }, [
+				h('label', { className: 'uc-field-label' }, 'Page URL to diagnose'),
+				h('input', {
+					type: 'url',
+					className: 'uc-field-input',
+					value: scanUrl,
+					disabled: !!disabled || scanBusy,
+					placeholder: defaultScanUrl || 'https://example.com/page/',
+					onChange: (e) => setScanUrl(e.target.value),
+				}),
+				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Run a profile-bypass diagnostic for this same-site URL. Nothing is changed automatically.'),
+			]),
+			h('div', { className: 'mt-3 mb-3 flex flex-wrap items-center gap-2', style: { justifyContent: 'space-evenly', padding: '5px 0' } }, [
+				h(Button, { key: 'defaults', onClick: handlePopulateDefaults, disabled: !!disabled || populateBusy }, populateBusy ? 'Populating…' : 'Populate Defaults'),
+				h(Button, { key: 'run-css', onClick: handleRunDiagnostics, disabled: !!disabled || scanBusy }, scanBusy ? 'Running…' : 'Run CSS Diagnostics'),
+				h(Button, { key: 'download-css', onClick: onDownloadJson, disabled: !!disabled || !current }, 'Download CSS JSON'),
+				h(Button, { key: 'clear-css', onClick: onClearResult, disabled: !!disabled || !current }, 'Clear CSS Result'),
+				h(Button, { key: 'save-css', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, 'Save Exclusions'),
+			]),
+			renderDiagnosticsResult(),
 		]);
 	}
 
@@ -1790,6 +2299,191 @@
 	}
 
 
+	function PerformanceProfilerCard({ profile, busy, onRun, onDownload, onClear, onCopyCssExclusion }) {
+		const current = profile && profile.available ? profile : null;
+		const slowCheckpoints = current && Array.isArray(current.slowCheckpoints) ? current.slowCheckpoints : [];
+		const callbackTop = current && Array.isArray(current.callbackTop) ? current.callbackTop : [];
+		const originTop = current && Array.isArray(current.originTop) ? current.originTop : [];
+		const modeLabel = current ? (current.mode || current.requestMode || 'compact') : 'none';
+		const cssBundle = current && current.cssBundle ? current.cssBundle : {};
+		const criticalChain = current && current.criticalRequestChain ? current.criticalRequestChain : {};
+		const jsDelaySafetyScan = current && current.jsDelaySafetyScan ? current.jsDelaySafetyScan : {};
+		const criticalStyleCandidates = criticalChain && Array.isArray(criticalChain.styleCandidates) ? criticalChain.styleCandidates : [];
+		const criticalScriptCandidates = criticalChain && Array.isArray(criticalChain.scriptCandidates) ? criticalChain.scriptCandidates : [];
+		const inlineCssWarning = !!(cssBundle && ((cssBundle.inlineStyleBytes || 0) > 524288 || (cssBundle.finalHtmlBytes || 0) > 1048576));
+		const cssBundleCriticalWarning = !!(cssBundle && ((cssBundle.fileBytes || 0) > 153600 || (cssBundle.veryLargeBundleWarning || false)));
+		const cssBundleSourceTop = cssBundle && Array.isArray(cssBundle.sourceTop) ? cssBundle.sourceTop : [];
+		const leftoverCssBundle = cssBundle && cssBundle.leftoverCssBundle ? cssBundle.leftoverCssBundle : {};
+		const copyCssExclusion = typeof onCopyCssExclusion === 'function' ? onCopyCssExclusion : function () {};
+
+		const summaryRows = current ? [
+			['Mode', modeLabel],
+			['Status', (current.status || '—') + (current.cacheStatus ? ' / ' + current.cacheStatus : '')],
+			['Total request', formatNumber(current.totalRequestDurationMs || current.requestMs || 0) + ' ms'],
+			['STORE processing', formatNumber(current.storeProfileDurationMs || 0) + ' ms'],
+			['Shutdown total', formatNumber(current.shutdownTotalDurationMs || 0) + ' ms'],
+			['Slowest rewrite stage', current.slowestStage && current.slowestStage.stage ? current.slowestStage.stage + ' · ' + formatNumber(current.slowestStage.durationMs || 0) + ' ms' : '—'],
+			['Checkpoints', formatNumber(current.checkpointCount || 0)],
+			['Callback rows', formatNumber(current.callbackTimingSummaryCount || 0)],
+			['CSS bundle', cssBundle.fileExists ? (formatBytes(cssBundle.fileBytes || 0) + ' · ' + formatNumber(cssBundle.sourceUrlCount || 0) + ' sources' + (cssBundle.mode ? ' · ' + cssBundle.mode : '')) : 'Not built in this run'],
+			['CSS source bytes', cssBundle.sourceBytesTotal ? formatBytes(cssBundle.sourceBytesTotal || 0) : '—'],
+			['Largest CSS source', cssBundle.largestSourceUrl ? (formatBytes(cssBundle.largestSourceBytes || 0) + ' · ' + cssBundle.largestSourceUrl) : '—'],
+			['Render-blocking CSS', formatNumber(cssBundle.renderBlockingStylesheets || 0) + ' links · ' + formatNumber(cssBundle.renderBlockingBundleLinks || 0) + ' bundle · ' + formatNumber(cssBundle.renderBlockingNonBundleLinks || 0) + ' outside bundle'],
+			['Leftover CSS bundle', cssBundle.leftoverCssBundle && cssBundle.leftoverCssBundle.enabled ? ((cssBundle.leftoverCssBundle.success ? 'Built · ' : 'Skipped · ') + formatNumber(cssBundle.leftoverCssBundle.replacedLinkCount || 0) + ' links · ' + formatBytes(cssBundle.leftoverCssBundle.bundleBytes || 0) + (cssBundle.leftoverCssBundle.skippedReason ? ' · ' + cssBundle.leftoverCssBundle.skippedReason : '')) : 'Disabled'],
+			['Critical request chain', criticalChain.available ? (formatNumber(criticalChain.renderBlockingStyleCount || 0) + ' blocking CSS · ' + formatNumber(criticalChain.renderBlockingScriptCount || 0) + ' blocking JS · ' + formatNumber(criticalChain.delayedScriptCount || 0) + ' delayed JS') : '—'],
+			['JS delay safety scan', jsDelaySafetyScan.available ? (formatNumber(jsDelaySafetyScan.suggestionCount || 0) + ' suggestion(s) · ' + formatNumber(jsDelaySafetyScan.missingCount || 0) + ' missing') : '—'],
+			['Final HTML size', cssBundle.finalHtmlBytes ? formatBytes(cssBundle.finalHtmlBytes || 0) : '—'],
+			['Inline CSS bytes', cssBundle.inlineStyleBytes ? (formatBytes(cssBundle.inlineStyleBytes || 0) + ' · ' + formatNumber(cssBundle.inlineStyleTags || 0) + ' style tag(s)') : '0 B'],
+			['CSS bundle fallbacks', formatNumber(cssBundle.fallbackLinks || 0) + ' links · ' + formatNumber(cssBundle.fallbackMarkers || 0) + ' markers · ' + formatNumber(cssBundle.noscriptTags || 0) + ' noscript tags'],
+		] : [];
+
+		return h('details', { className: 'uc-card uc-accordion uc-performance-profiler', key: 'performance-profiler' }, [
+			h('summary', { className: 'uc-accordion__summary uc-performance-profiler__summary', key: 'summary' }, [
+				h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
+					h('div', { className: 'uc-accordion__title', key: 'title' }, 'Performance Profiler'),
+					h('div', { className: 'uc-accordion__description', key: 'description' }, 'Find what slows down the first uncached page build.'),
+				]),
+				h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
+			]),
+			h('div', { className: 'uc-accordion__body uc-performance-profiler__body', key: 'body' }, [
+				h('div', { className: 'uc-card-warning mb-4', key: 'warning' }, [
+					h('strong', { key: 'title' }, 'Use this when the first visit after purge feels slow. '),
+					'Compact helps you see which phase costs time. Callback Profiler shows which plugin, theme, or WordPress core area is responsible. Verbose is only for cases where the normal summary is not enough.',
+				]),
+				inlineCssWarning ? h('div', { className: 'uc-card-warning mb-4', key: 'inline-css-warning' }, [
+					h('strong', { key: 'title' }, 'Inline CSS Bundling generated large cached HTML. '),
+					'Last profile: inline CSS ' + formatBytes(cssBundle.inlineStyleBytes || 0) + ', final HTML ' + formatBytes(cssBundle.finalHtmlBytes || 0) + '. This setting is still respected; UltraCache will not silently switch it to external CSS. Disable Inline CSS Bundling if this size is too high for the site/server.'
+				]) : null,
+				cssBundleCriticalWarning ? h('div', { className: 'uc-card-warning mb-4', key: 'css-bundle-critical-warning' }, [
+					h('strong', { key: 'title' }, 'Large render-blocking CSS bundle detected. '),
+					'Last profile: bundle ' + formatBytes(cssBundle.fileBytes || 0) + ' from ' + formatNumber(cssBundle.sourceUrlCount || 0) + ' source stylesheet(s). This is diagnostic only; UltraCache is not changing CSS loading automatically.'
+				]) : null,
+				h('div', { className: 'uc-profiler-actions mb-4', key: 'actions' }, [
+					h(Button, { key: 'compact', variant: 'primary', disabled: !!busy, onClick: () => onRun('compact') }, busy ? 'Profiling…' : 'Run Compact Store Profile'),
+					h(Button, { key: 'verbose', disabled: !!busy, onClick: () => onRun('verbose') }, 'Run Verbose Store Profile'),
+					h(Button, { key: 'callback', disabled: !!busy, onClick: () => onRun('callback') }, 'Run Callback Profiler'),
+					h(Button, { key: 'download', disabled: !!busy || !current, onClick: onDownload }, 'Download JSON'),
+					h(Button, { key: 'clear', variant: 'danger', disabled: !!busy || !current, onClick: onClear }, 'Clear Last Profile'),
+				]),
+				current ? h('div', { className: 'uc-detail-list mb-4', key: 'summary-list' }, summaryRows.map((row) => h(DetailRow, { key: row[0], label: row[0], value: row[1] }))) : h('div', { className: 'text-sm text-zinc-500', key: 'empty' }, 'No profiler result loaded yet.'),
+				current ? h('div', { className: 'mt-4 mb-4 bg-black/20 rounded-2xl px-4 py-4', key: 'css-critical-path-diagnostics' }, [
+					h('div', { className: 'flex items-center justify-between gap-4 mb-3', key: 'heading' }, [
+						h('div', { key: 'copy' }, [
+							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, 'CSS Critical Path / Render Blocking Diagnostics'),
+							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, 'Summary of the CSS calls left in the first render path. Diagnostic only; no CSS loading behavior is changed automatically.'),
+						]),
+						h('span', { className: ((cssBundle.renderBlockingStylesheets || 0) > 0 ? 'font-mono text-amber-300 shrink-0' : 'font-mono text-emerald-300 shrink-0'), key: 'status' }, formatNumber(cssBundle.renderBlockingStylesheets || 0) + ' blocking CSS'),
+					]),
+					h('div', { className: 'grid grid-cols-1 md:grid-cols-4 gap-3 text-xs', key: 'cards' }, [
+						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'main' }, [
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Main bundle'),
+							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, cssBundle.fileExists ? formatBytes(cssBundle.fileBytes || 0) : 'Not built'),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, formatNumber(cssBundle.sourceUrlCount || 0) + ' source stylesheet(s)' + (cssBundle.mode ? ' · ' + cssBundle.mode : '')),
+						]),
+						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'leftover' }, [
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Leftover bundle'),
+							h('div', { className: leftoverCssBundle.enabled && leftoverCssBundle.success ? 'text-emerald-300 font-bold mt-1' : 'text-zinc-200 font-bold mt-1', key: 'value' }, leftoverCssBundle.enabled ? (leftoverCssBundle.success ? 'Built' : 'Skipped') : 'Disabled'),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, formatNumber(leftoverCssBundle.replacedLinkCount || 0) + ' replaced · ' + formatBytes(leftoverCssBundle.bundleBytes || 0)),
+						]),
+						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'links' }, [
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Final CSS links'),
+							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(cssBundle.stylesheetLinks || 0)),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, formatNumber(cssBundle.renderBlockingBundleLinks || 0) + ' bundle · ' + formatNumber(cssBundle.renderBlockingNonBundleLinks || 0) + ' outside bundle'),
+						]),
+						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'protected' }, [
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Protected CSS'),
+							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(criticalChain.protectedStyleCount || 0)),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, 'Slider/hero or safety protected'),
+						]),
+					]),
+					(cssBundle.renderBlockingStylesheets || 0) > 0 ? h('div', { className: 'mt-3 text-[11px] text-zinc-400 leading-relaxed', key: 'recommendation' }, [
+						h('strong', { className: 'text-zinc-300', key: 'title' }, 'Recommended next check: '),
+						(leftoverCssBundle.enabled && leftoverCssBundle.success) ? 'Leftover CSS consolidation is active. The remaining larger issue is the main render-blocking CSS bundle, so the next optimization candidate is critical CSS split / async non-critical bundle mode.' : 'Test Consolidate Remaining CSS first if visual output is safe, then review whether the main bundle needs a critical CSS split.',
+					]) : null,
+				]) : null,
+					current && cssBundleSourceTop.length ? h('div', { className: 'mt-4', key: 'css-source-top' }, [
+						h('div', { className: 'flex items-center justify-between gap-4 mb-2', key: 'heading' }, [
+							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, 'Top CSS bundle sources by bytes'),
+							h('div', { className: 'text-[11px] text-zinc-500 text-right', key: 'hint' }, 'Copy a suggestion into CSS Bundle Exclusions only after visual testing.'),
+						]),
+						h('div', { className: 'space-y-2', key: 'items' }, cssBundleSourceTop.slice(0, 8).map((item, index) => {
+							const suggestion = item && item.suggestedExclusion ? String(item.suggestedExclusion) : '';
+							return h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'css-source-' + index }, [
+								h('div', { className: 'flex items-center justify-between gap-4', key: 'main' }, [
+									h('span', { className: 'break-all', key: 'url' }, item.url || 'unknown stylesheet'),
+									h('span', { className: (item.largeSourceWarning ? 'font-mono text-amber-300 shrink-0' : 'font-mono text-zinc-300 shrink-0'), key: 'bytes' }, formatBytes(item.bytes || 0)),
+								]),
+								h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, (item.type || 'local') + (item.preparedBytes ? ' · prepared ' + formatBytes(item.preparedBytes || 0) : '') + (item.largeSourceWarning ? ' · heavy source' : '')),
+								suggestion ? h('div', { className: 'mt-2 flex flex-wrap items-center gap-2', key: 'suggestion' }, [
+									h('span', { className: 'text-zinc-500', key: 'label' }, 'Suggested exclusion:'),
+									h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1', key: 'code' }, suggestion),
+									h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', onClick: () => copyCssExclusion(suggestion), key: 'copy' }, 'Copy exclusion line'),
+								]) : null,
+							]);
+						})),
+					]) : null,
+					current && (criticalStyleCandidates.length || criticalScriptCandidates.length) ? h('div', { className: 'mt-4', key: 'critical-chain' }, [
+						h('div', { className: 'flex items-center justify-between gap-4 mb-2', key: 'heading' }, [
+							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, 'Critical Request Chain Candidates'),
+							h('div', { className: 'text-[11px] text-zinc-500 text-right', key: 'hint' }, 'Diagnostic only: shows why CSS/JS remains blocking, delayed, or protected.'),
+						]),
+						criticalStyleCandidates.length ? h('div', { className: 'mb-3', key: 'styles' }, [
+							h('div', { className: 'text-[11px] text-zinc-500 uppercase tracking-wider mb-2', key: 'styles-label' }, 'Styles'),
+							h('div', { className: 'space-y-2', key: 'style-items' }, criticalStyleCandidates.slice(0, 10).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'critical-style-' + index }, [
+								h('div', { className: 'flex items-center justify-between gap-4', key: 'main' }, [
+									h('span', { className: 'break-all', key: 'url' }, item.url || item.path || 'unknown stylesheet'),
+									h('span', { className: item.renderBlocking ? 'font-mono text-amber-300 shrink-0' : 'font-mono text-emerald-300 shrink-0', key: 'status' }, item.status || 'unknown'),
+								]),
+								h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, (item.origin || 'local') + ' · ' + (item.location || 'head') + (item.bytes ? ' · ' + formatBytes(item.bytes || 0) : '') + (item.protected ? ' · protected' : '')),
+								item.reason ? h('div', { className: 'text-zinc-400 mt-1', key: 'reason' }, item.reason) : null,
+								item.suggestedAction ? h('div', { className: 'text-emerald-300 mt-1', key: 'suggestion' }, item.suggestedAction) : null,
+							]))),
+						]) : null,
+						criticalScriptCandidates.length ? h('div', { key: 'scripts' }, [
+							h('div', { className: 'text-[11px] text-zinc-500 uppercase tracking-wider mb-2', key: 'scripts-label' }, 'Scripts'),
+							h('div', { className: 'space-y-2', key: 'script-items' }, criticalScriptCandidates.slice(0, 12).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'critical-script-' + index }, [
+								h('div', { className: 'flex items-center justify-between gap-4', key: 'main' }, [
+									h('span', { className: 'break-all', key: 'url' }, item.url || item.path || 'unknown script'),
+									h('span', { className: item.renderBlocking ? 'font-mono text-amber-300 shrink-0' : (item.delayed ? 'font-mono text-emerald-300 shrink-0' : 'font-mono text-zinc-300 shrink-0'), key: 'status' }, item.status || 'unknown'),
+								]),
+								h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, (item.origin || 'local') + ' · ' + (item.location || 'head') + (item.handle ? ' · ' + item.handle : '') + (item.bytes ? ' · ' + formatBytes(item.bytes || 0) : '') + (item.protected ? ' · protected' : '')),
+								item.reason ? h('div', { className: 'text-zinc-400 mt-1', key: 'reason' }, item.reason) : null,
+								item.suggestedAction ? h('div', { className: 'text-emerald-300 mt-1', key: 'suggestion' }, item.suggestedAction) : null,
+							]))),
+						]) : null,
+					]) : null,
+				current ? h('div', { className: 'mt-4', key: 'origin-summary' }, [
+					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, 'Plugin / Theme Time Summary'),
+					originTop.length ? h('div', { className: 'space-y-2', key: 'items' }, originTop.slice(0, 12).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'origin-' + index }, [
+						h('div', { className: 'flex items-center justify-between gap-4', key: 'main' }, [
+							h('span', { key: 'name' }, (item.originName || 'unknown') + ' · ' + (item.originType || 'origin')),
+							h('span', { className: 'font-mono text-amber-300', key: 'ms' }, formatNumber(item.totalMs || 0) + 'ms'),
+						]),
+						h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, formatNumber(item.callbackCount || 0) + ' callback groups' + (item.topCallback ? ' · slowest: ' + item.topCallback + ' (' + formatNumber(item.topCallbackMs || 0) + 'ms)' : '')),
+					]))) : h('div', { className: 'text-xs text-zinc-500 bg-black/20 rounded-xl px-3 py-2', key: 'empty' }, 'Run Callback Profiler to see total delay grouped by plugin, theme, and WordPress core.'),
+				]) : null,
+				current && slowCheckpoints.length ? h('div', { className: 'mt-4', key: 'slow' }, [
+					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, 'Slow checkpoints'),
+					h('div', { className: 'space-y-2', key: 'items' }, slowCheckpoints.slice(0, 6).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'slow-' + index }, [
+						h('span', { className: 'font-mono text-amber-300', key: 'ms' }, formatNumber(item.deltaMs || 0) + 'ms '),
+						h('span', { key: 'stage' }, item.stage || 'unknown'),
+						item.hook ? h('span', { className: 'text-zinc-500', key: 'hook' }, ' · ' + item.hook) : null,
+						item.callback ? h('span', { className: 'text-zinc-500', key: 'cb' }, ' · ' + item.callback) : null,
+					]))),
+				]) : null,
+				current && callbackTop.length ? h('div', { className: 'mt-4', key: 'callbacks' }, [
+					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, 'Top slow callbacks'),
+					h('div', { className: 'space-y-2', key: 'items' }, callbackTop.slice(0, 8).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'cb-' + index }, [
+						h('span', { className: 'font-mono text-amber-300', key: 'ms' }, formatNumber(item.totalMs || 0) + 'ms '),
+						h('span', { key: 'callback' }, item.callback || 'unknown callback'),
+						h('span', { className: 'text-zinc-500', key: 'meta' }, ' · ' + (item.origin || 'unknown') + ' · ' + (item.hook || 'hook') + ':' + (item.priority || '')),
+					]))),
+				]) : null,
+			]),
+		]);
+	}
+
+
 	function VarnishCard({ form, diagnostics, busy, onFieldChange, onSave, onTest, onFlushAll }) {
 		const varnish = diagnostics.varnish || {};
 		const last = varnish.last || {};
@@ -2278,6 +2972,9 @@
 		const [inspectUrl, setInspectUrl] = useState('');
 		const [inspectBusy, setInspectBusy] = useState(false);
 		const [inspectResult, setInspectResult] = useState(null);
+		const [performanceProfile, setPerformanceProfile] = useState(null);
+		const [cssDiagnosticsUrl, setCssDiagnosticsUrl] = useState((typeof ucwp !== 'undefined' && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || '') : '');
+		const [cssDiagnosticsBusy, setCssDiagnosticsBusy] = useState(false);
 		const [homepageHtmlBusy, setHomepageHtmlBusy] = useState(false);
 		const [homepageHtmlCssBusy, setHomepageHtmlCssBusy] = useState(false);
 		const [allUrlsCssBusy, setAllUrlsCssBusy] = useState(false);
@@ -2345,6 +3042,25 @@
 				}
 			};
 		}, []);
+
+		useEffect(() => {
+			const handleBeforeUnload = (event) => {
+				const processActive = !!(process && process.active);
+				const actionActive = hasActiveQueuedDashboardAction();
+				const saveActive = !!(settingsSaveTimerRef.current || settingsSaveInFlightRef.current || hasPendingSettingsPatch());
+
+				if (!saveActive && !actionActive && !processActive && !busy) {
+					return undefined;
+				}
+
+				event.preventDefault();
+				event.returnValue = '';
+				return '';
+			};
+
+			window.addEventListener('beforeunload', handleBeforeUnload);
+			return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+		}, [busy, process && process.active, asyncActions]);
 		useEffect(() => {
 			if (!Array.isArray(toasts) || !toasts.length) {
 				return undefined;
@@ -2827,6 +3543,26 @@
 			return !!Object.keys(pendingSettingsPatchRef.current || {}).length;
 		}
 
+		function hasActiveQueuedDashboardAction() {
+			return Object.keys(queuedActionKeysRef.current || {}).some((key) => !!queuedActionKeysRef.current[key]);
+		}
+
+		function hasDashboardWorkInProgress() {
+			return !!(
+				settingsSaveTimerRef.current ||
+				settingsSaveInFlightRef.current ||
+				hasPendingSettingsPatch() ||
+				hasActiveQueuedDashboardAction()
+			);
+		}
+
+		function isCriticalSettingsPatch(patch) {
+			if (!patch || typeof patch !== 'object') {
+				return false;
+			}
+			return Object.keys(patch).some((key) => CRITICAL_SETTING_KEYS.indexOf(key) !== -1);
+		}
+
 		function applyServerSettings(responseSettings) {
 			if (!responseSettings || typeof responseSettings !== 'object') {
 				return;
@@ -2898,7 +3634,7 @@
 			throw new Error('Dashboard processing action timed out.');
 		}
 
-		async function waitForSettingsSaveToSettle(maxWaitMs = 6000) {
+		async function waitForSettingsSaveToSettle(maxWaitMs = 15000) {
 			const startedAt = Date.now();
 			while (settingsSaveInFlightRef.current && (Date.now() - startedAt) < maxWaitMs) {
 				await sleep(50);
@@ -2908,26 +3644,40 @@
 
 		async function syncQueuedSettingsBeforeAction() {
 			if (settingsSaveTimerRef.current || hasPendingSettingsPatch()) {
+				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Saving queued settings before running action…', persistent: true });
 				await flushQueuedSettings();
 			}
-			await waitForSettingsSaveToSettle();
+
+			if (!(await waitForSettingsSaveToSettle())) {
+				throw new Error('Settings are still saving. Please wait for the save to finish before running this action.');
+			}
+
 			if (hasPendingSettingsPatch()) {
+				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Saving queued settings before running action…', persistent: true });
 				await flushQueuedSettings();
-				await waitForSettingsSaveToSettle();
+				if (!(await waitForSettingsSaveToSettle())) {
+					throw new Error('Settings are still saving. Please wait for the save to finish before running this action.');
+				}
 			}
 		}
 
 		async function queueDashboardAction(action, params, labels, key, afterResult) {
 			const actionKey = key || action;
+			const toastId = 'ucwp-action-' + actionKey;
 			if (queuedActionKeysRef.current[actionKey]) {
-				pushToast({ type: 'info', text: (labels && labels.alreadyQueued) || 'This dashboard action is already processing.' });
+				pushToast({ id: toastId, type: 'info', text: (labels && labels.alreadyQueued) || 'This dashboard action is already processing.', persistent: true });
 				return null;
 			}
 
-			await syncQueuedSettingsBeforeAction();
+			try {
+				await syncQueuedSettingsBeforeAction();
+			} catch (error) {
+				pushToast({ id: toastId, type: 'error', text: error && error.message ? error.message : 'Could not save queued settings before running this action.' });
+				return null;
+			}
 
 			setAsyncActionState(actionKey, true, (labels && labels.runningLabel) || 'Processing via dashboard…');
-			pushToast({ id: 'ucwp-action-' + actionKey, type: 'info', text: (labels && labels.queued) || 'Processing via dashboard…', duration: 2200 });
+			pushToast({ id: toastId, type: 'info', text: (labels && labels.queued) || 'Processing via dashboard…', persistent: true });
 
 			try {
 				const queued = await apiRequest('queue_action', { action, params: params || {} });
@@ -2949,15 +3699,124 @@
 				}
 				const ok = completed && completed.status === 'done';
 				pushToast({
+					id: toastId,
 					type: ok ? 'success' : 'error',
 					text: (completed && completed.message) || (ok ? ((labels && labels.success) || 'Action completed.') : ((labels && labels.failed) || 'Action failed.')),
 				});
 				return completed;
 			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : ((labels && labels.failed) || 'Dashboard processing action failed.') });
+				pushToast({ id: toastId, type: 'error', text: error && error.message ? error.message : ((labels && labels.failed) || 'Dashboard processing action failed.') });
 				return null;
 			} finally {
 				setAsyncActionState(actionKey, false);
+			}
+		}
+
+		async function runPerformanceProfile(mode) {
+			const normalizedMode = ['compact', 'verbose', 'callback'].indexOf(mode) !== -1 ? mode : 'compact';
+			const actionKey = 'performance_profile_' + normalizedMode;
+			await queueDashboardAction('performance_profile', { mode: normalizedMode }, {
+				queued: 'Performance profiler processing via dashboard…',
+				success: 'Performance profile completed.',
+				failed: 'Performance profile failed.',
+				runningLabel: 'Profiling…',
+			}, actionKey, (result) => {
+				if (result && result.performanceProfile) {
+					setPerformanceProfile(result.performanceProfile);
+				}
+			});
+		}
+
+		async function downloadPerformanceProfileJson() {
+			try {
+				const response = await apiRequest('performance_profile_last', {});
+				if (!response || !response.profile) {
+					throw new Error('No profiler JSON is available yet.');
+				}
+				if (response.performanceProfile) {
+					setPerformanceProfile(response.performanceProfile);
+				}
+				const id = (response.performanceProfile && response.performanceProfile.requestId) ? response.performanceProfile.requestId : Date.now();
+				triggerFileDownload('ultracache-performance-profile-' + String(id).slice(0, 32) + '.json', JSON.stringify(response.profile, null, 2), 'application/json');
+				pushToast({ type: 'success', text: 'Profiler JSON prepared.' });
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to download profiler JSON.' });
+			}
+		}
+
+		async function clearPerformanceProfile() {
+			try {
+				await apiRequest('performance_profile_clear', {});
+				setPerformanceProfile(null);
+				pushToast({ type: 'success', text: 'Last performance profile cleared.' });
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to clear performance profile.' });
+			}
+		}
+
+
+		async function runCssDiagnosticsForUrl(url) {
+			const targetUrl = String(url || '').trim() || ((typeof ucwp !== 'undefined' && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || '') : '');
+			if (!targetUrl) {
+				pushToast({ type: 'warning', text: 'Enter a same-site URL to diagnose.' });
+				return null;
+			}
+			setCssDiagnosticsBusy(true);
+			try {
+				return await queueDashboardAction('performance_profile', { mode: 'compact', url: targetUrl }, {
+					queued: 'CSS diagnostics profile processing via dashboard…',
+					success: 'CSS diagnostics completed.',
+					failed: 'CSS diagnostics failed.',
+					runningLabel: 'Diagnosing CSS…',
+				}, 'css_diagnostics_ui', (result) => {
+					if (result && result.performanceProfile) {
+						setPerformanceProfile(result.performanceProfile);
+					}
+				});
+			} finally {
+				setCssDiagnosticsBusy(false);
+			}
+		}
+
+		async function downloadCssDiagnosticsJson() {
+			try {
+				const response = await apiRequest('performance_profile_last', {});
+				if (!response || !response.profile) {
+					throw new Error('No CSS diagnostics JSON is available yet. Run CSS Diagnostics first.');
+				}
+				if (response.performanceProfile) {
+					setPerformanceProfile(response.performanceProfile);
+				}
+				const profile = response.performanceProfile || {};
+				const id = profile.requestId || Date.now();
+				triggerFileDownload('ultracache-css-diagnostics-' + String(id).slice(0, 32) + '.json', JSON.stringify(response.profile, null, 2), 'application/json');
+				pushToast({ type: 'success', text: 'CSS diagnostics JSON prepared.' });
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to download CSS diagnostics JSON.' });
+			}
+		}
+
+		async function clearCssDiagnosticsResult() {
+			await clearPerformanceProfile();
+		}
+
+		async function copyCssBundleExclusionSuggestion(value) {
+			const text = String(value || '').trim();
+			if (!text) {
+				pushToast({ type: 'warning', text: 'No CSS exclusion suggestion is available for this source.' });
+				return;
+			}
+			try {
+				if (window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText) {
+					await window.navigator.clipboard.writeText(text);
+					pushToast({ type: 'success', text: 'CSS bundle exclusion line copied.' });
+					return;
+				}
+			} catch (error) {
+				// Fall through to the manual prompt fallback below.
+			}
+			if (window.prompt) {
+				window.prompt('Copy this line into CSS Bundle Exclusions after visual testing:', text);
 			}
 		}
 
@@ -2980,8 +3839,9 @@
 				return;
 			}
 
+			const criticalPatch = isCriticalSettingsPatch(patch);
 			settingsSaveInFlightRef.current = true;
-			pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Saving queued settings…', persistent: true });
+			pushToast({ id: 'ucwp-settings-queue', type: 'info', text: criticalPatch ? 'Saving critical cache settings…' : 'Saving queued settings…', persistent: true });
 
 			try {
 				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
@@ -2993,7 +3853,7 @@
 					applyEffectiveSettingsFromCommitted();
 				}
 				applyDashboardPayload(response || {});
-				pushToast({ id: 'ucwp-settings-queue', type: 'success', text: hasPendingSettingsPatch() ? 'Queued settings saved. More changes are pending…' : 'Queued settings saved.' });
+				pushToast({ id: 'ucwp-settings-queue', type: 'success', text: hasPendingSettingsPatch() ? 'Queued settings saved. More changes are pending…' : (criticalPatch ? 'Critical cache settings saved.' : 'Queued settings saved.') });
 			} catch (error) {
 				applyEffectiveSettingsFromCommitted();
 				pushToast({ id: 'ucwp-settings-queue', type: 'error', text: error && error.message ? error.message : 'Queued settings failed to save.' });
@@ -3012,10 +3872,11 @@
 			const next = Object.assign({}, settingsRef.current || {}, patch);
 			settingsRef.current = next;
 			setSettings(next);
+			const criticalPatch = isCriticalSettingsPatch(patch);
 			if (settingsSaveInFlightRef.current) {
-				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Saving queued settings…', persistent: true });
+				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: criticalPatch ? 'Saving critical cache settings…' : 'Saving queued settings…', persistent: true });
 			} else {
-				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Settings queued…', duration: 1400 });
+				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: criticalPatch ? 'Critical cache settings queued. Saving shortly…' : 'Settings queued. Saving shortly…', persistent: true });
 			}
 
 			if (settingsSaveTimerRef.current) {
@@ -3283,6 +4144,127 @@
 			}
 		}
 
+		async function populateDefaultSettingList(settingKey, label) {
+			const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
+			const value = Object.prototype.hasOwnProperty.call(defaultsPayload, settingKey)
+				? String(defaultsPayload[settingKey] || '')
+				: '';
+			if (!value.trim()) {
+				pushToast({ type: 'warning', text: 'No recommended defaults are defined for ' + label + '.' });
+				return '';
+			}
+			pushToast({ type: 'success', text: 'Populated ' + label + ' with recommended defaults.' });
+			return value;
+		}
+
+		async function populateDeferDelayExclusionDefaults(currentDraft) {
+			const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
+			let defaults = ucwp && typeof ucwp.jsDelayDeferRecommendedExclusions !== 'undefined'
+				? String(ucwp.jsDelayDeferRecommendedExclusions || '')
+				: '';
+			if (!defaults.trim() && Object.prototype.hasOwnProperty.call(defaultsPayload, 'deferJsExcludeList')) {
+				defaults = String(defaultsPayload.deferJsExcludeList || '');
+			}
+			if (!defaults.trim()) {
+				pushToast({ type: 'warning', text: 'No recommended JS Delay / Defer defaults are defined.' });
+				return String(currentDraft || '');
+			}
+			const merged = mergeUniqueSettingLines(currentDraft, defaults);
+			pushToast({ type: merged.added ? 'success' : 'info', text: merged.added ? ('Added ' + merged.added + ' missing default exclusion(s).') : 'All recommended JS Delay / Defer defaults are already present.' });
+			return merged.value;
+		}
+
+
+		async function populateCssBundleExclusionDefaults(currentDraft) {
+			const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
+			const defaults = Object.prototype.hasOwnProperty.call(defaultsPayload, 'homepageCssBundleExcludeList')
+				? String(defaultsPayload.homepageCssBundleExcludeList || '')
+				: '';
+			if (!defaults.trim()) {
+				pushToast({ type: 'warning', text: 'No recommended CSS Bundle Exclusion defaults are defined.' });
+				return String(currentDraft || '');
+			}
+			const merged = mergeUniqueSettingLines(currentDraft, defaults);
+			pushToast({ type: merged.added ? 'success' : 'info', text: merged.added ? ('Added ' + merged.added + ' missing CSS bundle exclusion default(s).') : 'All recommended CSS bundle defaults are already present.' });
+			return merged.value;
+		}
+
+			async function populateDelayIconFontsDefaults(currentDraft) {
+				const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
+				const defaults = Object.prototype.hasOwnProperty.call(defaultsPayload, 'delayIconFontsList')
+					? String(defaultsPayload.delayIconFontsList || '')
+					: '';
+				if (!defaults.trim()) {
+					pushToast({ type: 'warning', text: 'No recommended delayed icon font patterns are defined.' });
+					return String(currentDraft || '');
+				}
+				const merged = mergeUniqueSettingLines(currentDraft, defaults);
+				pushToast({ type: merged.added ? 'success' : 'info', text: merged.added ? ('Added ' + merged.added + ' delayed icon font pattern(s).') : 'All recommended delayed icon font patterns are already present.' });
+				return merged.value;
+			}
+
+			async function populateDelayIconFontExclusionDefaults(currentDraft) {
+				const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
+				const defaults = Object.prototype.hasOwnProperty.call(defaultsPayload, 'delayIconFontsExcludeList')
+					? String(defaultsPayload.delayIconFontsExcludeList || '')
+					: '';
+				if (!defaults.trim()) {
+					pushToast({ type: 'warning', text: 'No recommended delayed font exclusions are defined.' });
+					return String(currentDraft || '');
+				}
+				const merged = mergeUniqueSettingLines(currentDraft, defaults);
+				pushToast({ type: merged.added ? 'success' : 'info', text: merged.added ? ('Added ' + merged.added + ' delayed font exclusion(s).') : 'All recommended delayed font exclusions are already present.' });
+				return merged.value;
+			}
+
+
+		async function loadLatestJsDelaySafetyScan() {
+			try {
+				const response = await apiRequest('performance_profile_last', {});
+				const profile = response && response.performanceProfile ? response.performanceProfile : null;
+				if (profile) {
+					setPerformanceProfile(profile);
+				}
+				const scan = profile && profile.jsDelaySafetyScan ? profile.jsDelaySafetyScan : null;
+				if (!scan || !scan.available) {
+					pushToast({ type: 'warning', text: 'No JS Delay Safety Scan is available. Run a STORE profile for the page first.' });
+					return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0 };
+				}
+				pushToast({ type: scan.missingCount ? 'warning' : 'success', text: scan.missingCount ? ('Found ' + scan.missingCount + ' missing suggested Defer/Delay exclusion(s).') : 'No missing JS delay exclusions found in the latest profile.' });
+				return scan;
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to load JS Delay Safety Scan.' });
+				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0 };
+			}
+		}
+
+
+		async function runJsDelaySafetyScanForUrl(url) {
+			const scanUrl = String(url || '').trim() || ((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/');
+			const completed = await queueDashboardAction('performance_profile', { mode: 'compact', url: scanUrl }, {
+				queued: 'JS Delay Safety Scan queued…',
+				success: 'JS Delay Safety Scan completed.',
+				failed: 'JS Delay Safety Scan failed.',
+				runningLabel: 'Scanning JS delay issues…',
+			}, 'performance_profile_js_delay_scan', (result) => {
+				if (result && result.performanceProfile) {
+					setPerformanceProfile(result.performanceProfile);
+				}
+			});
+			const result = completed && completed.result ? completed.result : {};
+			const profile = result && result.performanceProfile ? result.performanceProfile : null;
+			const scan = profile && profile.jsDelaySafetyScan ? profile.jsDelaySafetyScan : null;
+			if (!scan || !scan.available) {
+				pushToast({ type: 'warning', text: 'No JS delay dependency suggestions were found for this URL.' });
+				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl };
+			}
+			const enrichedScan = Object.assign({}, scan, {
+				scannedUrl: (profile && (profile.profileUrl || profile.url)) ? (profile.profileUrl || profile.url) : scanUrl,
+				scannedAt: profile && profile.scannedAt ? profile.scannedAt : '',
+			});
+			pushToast({ type: enrichedScan.missingCount ? 'warning' : 'success', text: enrichedScan.missingCount ? ('Found ' + enrichedScan.missingCount + ' missing suggested Defer/Delay exclusion(s).') : 'No missing JS delay exclusions found for this URL.' });
+			return enrichedScan;
+		}
 		function updateMediaOptimizationSetting(value) {
 
 			queueSettingsPatch({
@@ -3300,7 +4282,6 @@
 		function updateSliderSafeModeSetting(value) {
 			queueSettingsPatch({
 				sliderSafeModeEnabled: value,
-				lcpBoundaryDeferEnabled: value ? false : !!settings.lcpBoundaryDeferEnabled,
 			});
 		}
 
@@ -4189,12 +5170,36 @@ h(ToggleRow, {
 									key: 'defer-stage-one',
 								}),
 h(ToggleRow, {
-									label: 'Delay third-party JS',
-									description: 'Delay known third-party scripts until user interaction or the normal fallback timeout. Use the advanced exclusions accordion for sliders, menus, checkout, forms, and other fragile frontend scripts.',
-									checked: settings.delayThirdPartyJsEnabled,
-									onChange: (value) => updateSetting('delayThirdPartyJsEnabled', value),
+									label: 'Defer all JS',
+									description: 'Aggressive manual mode. When Enable Defer JS is on, UltraCache adds native defer to every eligible frontend script except truly core dependency scripts such as jQuery and core WP globals/dependencies. Manual JS Delay / Defer Exclusions are preserved and always win over this aggressive mode.',
+									checked: !!settings.deferAllJsEnabled,
+									onChange: (value) => updateSetting('deferAllJsEnabled', value),
+									disabled: busy || !settings.deferJsEnabled,
+									key: 'defer-all-js',
+								}),
+h(ToggleRow, {
+									label: 'Delay safe third-party JS',
+									description: 'Delay analytics, pixels, ads, tracking, and marketing scripts until user interaction or a late safe fallback timeout, keeping them out of the initial PageSpeed/LCP/TBT critical window. Examples: Google Analytics, gtag, GTM, Google Site Kit event providers, Meta Pixel, TikTok Pixel, LinkedIn Insight, Pinterest Tag, Bing UET, Hotjar, Clarity, DoubleClick, Google Ads, Taboola, Outbrain, and Yahoo tracking.',
+									checked: settings.delaySafeThirdPartyJsEnabled,
+									onChange: (value) => updateSetting('delaySafeThirdPartyJsEnabled', value),
 									disabled: busy,
-									key: 'defer-stage-two',
+									key: 'delay-safe-third-party-js',
+								}),
+h(ToggleRow, {
+									label: 'Lazy MailerLite nonce refresh',
+									description: 'Prevents MailerLite forms from calling wp-admin/admin-ajax.php on page load for ml_create_nonce. The nonce is refreshed on first form interaction or before submit, so cached pages avoid the load-time admin-ajax request.',
+									checked: !!settings.lazyMailerliteNonceEnabled,
+									onChange: (value) => updateSetting('lazyMailerliteNonceEnabled', value),
+									disabled: busy || !!settings.frontendSafeModeEnabled,
+									key: 'lazy-mailerlite-nonce-refresh',
+								}),
+	h(ToggleRow, {
+									label: 'Delay functional third-party JS',
+									description: 'Delay third-party scripts that provide visible functionality, such as cookie banners, captcha, maps, chat widgets, booking widgets, embedded forms, and review widgets. If a form, map, captcha, checkout, or cookie banner misbehaves, add its script keyword to exclusions.',
+									checked: !!settings.delayFunctionalThirdPartyJsEnabled,
+									onChange: (value) => updateSetting('delayFunctionalThirdPartyJsEnabled', value),
+									disabled: busy,
+									key: 'delay-functional-third-party-js',
 								}),
 					h(ToggleRow, {
 						label: 'Delay non-critical/local JS',
@@ -4222,10 +5227,10 @@ h(ToggleRow, {
 								}),
 h(ToggleRow, {
 									label: 'LCP Boundary Defer',
-									description: 'Use the detected LCP image as a conservative visual boundary and delay eligible local enhancement scripts printed after that boundary. Disabled when Frontend Safe Mode or Fix sliders / hero sections is enabled, because those modes intentionally avoid this rewrite path.',
+									description: 'Uses the LCP image detected by LCP Image Priority as a visual boundary. Eligible local scripts printed after that image in the HTML are delayed.',
 									checked: !!settings.lcpBoundaryDeferEnabled,
 									onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
-									disabled: busy || !settings.lcpImagePriorityEnabled || !!settings.frontendSafeModeEnabled || !!settings.sliderSafeModeEnabled,
+										disabled: busy || !settings.lcpImagePriorityEnabled || !!settings.frontendSafeModeEnabled,
 									key: 'lcp-boundary-defer',
 								})
 					]
@@ -4240,7 +5245,7 @@ h(
 					[
 						h(ToggleRow, {
 							label: 'CSS Bundling',
-							description: 'Create local UltraCache CSS bundles for eligible stylesheet links. Choose the scope below: homepage-only for safest cache reuse, shared for a common site bundle, or per-page for isolated landing/page optimization.',
+                                description: 'Create local UltraCache CSS bundles for eligible stylesheet links. Choose the scope and mode below: Safe, Aggressive, or Full CSS Bundle.',
 							checked: settings.homepageCssBundleEnabled,
 							onChange: (value) => updateSetting('homepageCssBundleEnabled', value),
 							disabled: busy,
@@ -4248,7 +5253,7 @@ h(
 						}),
 						h('div', { className: 'uc-css-bundle-scope-field', key: 'css-bundle-scope-wrap' }, h(SelectField, {
 							label: 'CSS Bundling Scope',
-							description: 'Choose exactly one scope for generated CSS bundles. Homepage only is safest, shared reuses the homepage bundle where possible, and per-page creates separate bundles for cacheable pages.',
+                                description: 'Choose exactly one scope for generated CSS bundles. Homepage only is safest, shared reuses the homepage bundle where possible, and per-page creates separate bundles for cacheable pages.',
 							value: settings.cssBundleScope || 'homepage',
 							onChange: (value) => updateSetting('cssBundleScope', value),
 							disabled: busy || !settings.homepageCssBundleEnabled,
@@ -4258,29 +5263,34 @@ h(
 								{ value: 'per-page', label: 'Per-page bundles' },
 							],
 						})),
-h(ToggleRow, {
-							label: 'CSS Safe Bundling',
-							description: 'Conservative CSS bundling. Injects the generated bundle without removing original stylesheet links. If Fix sliders / hero sections detects fragile slider markup, safe bundle replacement may be skipped on that page to protect the hero area.',
-							checked: 'aggressive' !== settings.homepageCssBundleMode,
-							onChange: (value) => updateSetting('homepageCssBundleMode', value ? 'safe' : 'aggressive'),
-							disabled: busy || !settings.homepageCssBundleEnabled,
-							key: 'homepage-css-bundle-stage-1',
-						}),
-h(ToggleRow, {
-							label: 'CSS Aggressive Bundling',
-							description: 'Includes the safe local CSS rules and additionally accepts local screen/all media stylesheets. It replaces matched stylesheet links with the generated bundle while still skipping external, async, disabled, unreadable, and excluded CSS.',
-							checked: 'aggressive' === settings.homepageCssBundleMode,
-							onChange: (value) => updateSetting('homepageCssBundleMode', value ? 'aggressive' : 'safe'),
-							disabled: busy || !settings.homepageCssBundleEnabled,
-							key: 'homepage-css-bundle-stage-2',
-						}),
+	h('div', { className: 'uc-css-bundle-mode-field', key: 'css-bundle-mode-wrap' }, h(SelectField, {
+								label: 'CSS Bundle Mode',
+								description: 'Choose how broadly UltraCache combines eligible local stylesheet links. Full CSS Bundle consolidates all eligible local CSS, while still respecting visible CSS Bundle Exclusions and unreadable/non-local safeguards.',
+								value: settings.homepageCssBundleMode || 'safe',
+								onChange: (value) => updateSetting('homepageCssBundleMode', value),
+								disabled: busy || !settings.homepageCssBundleEnabled,
+								options: [
+									{ value: 'safe', label: 'Safe' },
+									{ value: 'aggressive', label: 'Aggressive' },
+									{ value: 'full', label: 'Full CSS Bundle' },
+								],
+							})),
+
 h(ToggleRow, {
 							label: 'Inline CSS Bundling',
-							description: 'Inline the generated page CSS bundle directly into the document head instead of loading it as a separate stylesheet request.',
+							description: 'Inline the generated page CSS bundle directly into the document head. This is user-controlled and can greatly increase cached HTML size when the generated bundle is large; STORE profiler now shows final HTML size, inline CSS bytes, and fallback counts.',
 							checked: settings.homepageCssBundleInlineEnabled,
 							onChange: (value) => updateSetting('homepageCssBundleInlineEnabled', value),
 							disabled: busy || !settings.homepageCssBundleEnabled,
 							key: 'homepage-css-bundle-inline',
+						}),
+h(ToggleRow, {
+							label: 'Consolidate Remaining CSS',
+							description: 'After the main CSS bundle is injected, combine eligible leftover non-protected local stylesheet links into one extra CSS file. SR7/Revolution/Swiper/Slick hero CSS remains protected; this targets small leftover plugin/theme CSS calls that still block rendering.',
+							checked: !!settings.leftoverCssBundleEnabled,
+							onChange: (value) => updateSetting('leftoverCssBundleEnabled', value),
+							disabled: busy || !settings.homepageCssBundleEnabled,
+							key: 'leftover-css-bundle',
 						}),
 h(ToggleRow, {
 							label: 'Create CSS Bundle on Entry / Warm',
@@ -4304,7 +5314,7 @@ h(
 					Card,
 					{
 						title: 'Fonts Optimization',
-						description: 'Optimize Google Fonts and self-hosted font CSS delivery.',
+						description: 'Optimize Google Fonts, self-hosted font CSS delivery, and optional delayed icon-font loading.',
 						key: 'fonts-optimization-card',
 					},
 					[
@@ -4332,6 +5342,22 @@ h(ToggleRow, {
 							onChange: (value) => updateSetting('selfHostedFontCssOptimizationEnabled', value),
 							disabled: busy,
 							key: 'self-hosted-fonts',
+						}),
+h(ToggleRow, {
+							label: 'Delay icon font-face blocks',
+							description: 'Move matching icon-font @font-face blocks out of the main CSS bundle and load them as a non-render-blocking delayed font stylesheet. This can reduce critical font loading, but icons may appear slightly later.',
+							checked: !!settings.delayIconFontsEnabled,
+							onChange: (value) => updateSetting('delayIconFontsEnabled', value),
+							disabled: busy,
+							key: 'delay-icon-fonts',
+						}),
+h(ToggleRow, {
+							label: 'Auto-detect likely icon fonts',
+							description: 'Use broad icon-font heuristics such as Font Awesome, eicons, dashicons, icomoon, flaticon, theme icon fonts, private unicode glyph usage, and /icons/ or /webfonts/ paths. The visible include/exclude lists below still win.',
+							checked: !!settings.delayIconFontsAutoDetectEnabled,
+							onChange: (value) => updateSetting('delayIconFontsAutoDetectEnabled', value),
+							disabled: busy || !settings.delayIconFontsEnabled,
+							key: 'delay-icon-fonts-auto-detect',
 						}),
 h(ToggleRow, {
 							label: 'Advanced Runtime Font CSS Rewrite',
@@ -4380,7 +5406,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 										}),
 										h(ToggleRow, {
 											label: 'Fix sliders / hero sections',
-											description: 'When Revolution Slider, SR7, Swiper, Slick, or similar hero/slider markup is detected, UltraCache protects slider/runtime assets, skips risky structural rewrites, disables LCP Boundary Defer, and keeps SR7 first-slide LCP priority on the lifecycle-safe path when LCP Image Priority is enabled.',
+											description: 'When Revolution Slider, SR7, Swiper, Slick, or similar hero/slider markup is detected, UltraCache protects slider/runtime assets, skips risky structural rewrites, and keeps SR7 first-slide LCP priority on the lifecycle-safe path when LCP Image Priority is enabled.',
 											checked: !!settings.sliderSafeModeEnabled,
 											onChange: (value) => updateSliderSafeModeSetting(value),
 											disabled: busy,
@@ -4405,22 +5431,28 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'cache-engine-advanced-fields' }, [
 											h(SaveableTextAreaField, {
 												label: 'Exclude Paths From Caching',
-												description: 'One path per line. Prefix matching is supported. Example: /members/ or /thank-you/.',
+												description: 'One path per line. This is the visible/editable cache path safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.',
 												value: settings.cacheExceptionPaths || '',
 												onSave: (value) => updateSetting('cacheExceptionPaths', value),
 												disabled: busy,
 												placeholder: '/cart/\n/checkout/\n/my-account/',
 												saveLabel: 'Save Excluded Paths',
+												populateLabel: 'Populate Defaults',
+												populateWarning: 'Your current excluded paths will be replaced with the recommended defaults.',
+												onPopulate: () => populateDefaultSettingList('cacheExceptionPaths', 'excluded paths'),
 												key: 'exclude-paths-from-caching',
 											}),
 											h(SaveableTextAreaField, {
 												label: 'Excluded query-string args from Caching',
-												description: 'One query key per line. URLs containing any of these query-string args always bypass cache. Use this for carts, previews, searches, dynamic filters, tracking actions, and other unsafe parameters.',
+												description: 'One query key per line. This is the visible/editable unsafe query-arg safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.',
 												value: settings.cacheExceptionQueryArgs || '',
 												onSave: (value) => updateSetting('cacheExceptionQueryArgs', value),
 												disabled: busy,
 												placeholder: 'preview\nadd-to-cart\nwc-ajax',
 												saveLabel: 'Save Excluded Query-string Args',
+												populateLabel: 'Populate Defaults',
+												populateWarning: 'Your current excluded query-string args will be replaced with the recommended defaults.',
+												onPopulate: () => populateDefaultSettingList('cacheExceptionQueryArgs', 'excluded query-string args'),
 												key: 'excluded-query-string-args-from-caching',
 											}),
 											h(SaveableTextAreaField, {
@@ -4460,15 +5492,42 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 												saveLabel: 'Save Force Defer List',
 												key: 'defer-those-scripts-list',
 											}),
+											null,
 											h(SaveableTextAreaField, {
-												label: 'Defer / Delay Exclusions',
-												description: 'Optional newline-separated handle or URL fragments. Matching scripts are left untouched by Defer JS and Delay JS. Use this for sliders, menus, checkout, forms, videos, and scripts that must run during initial render.',
-												value: settings.deferJsExcludeList || '',
-												onSave: (value) => updateSetting('deferJsExcludeList', value),
-												disabled: busy,
-												placeholder: 'revslider\nsr7\ntptools\nelementor-frontend\nswiper\nslick\nsmartslider\nn2-ss',
-												saveLabel: 'Save Exclusions',
-												key: 'defer-stages-exclude-list',
+												label: 'Safe Third-Party Delay Patterns',
+												description: 'Visible/default patterns used by Delay safe third-party JS. Matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded. Safe third-party scripts use a later automatic fallback than functional/local delayed scripts.',
+												value: settings.delaySafeThirdPartyJsPatterns || '',
+												onSave: (value) => updateSetting('delaySafeThirdPartyJsPatterns', value),
+												disabled: busy || !settings.delaySafeThirdPartyJsEnabled,
+												placeholder: 'googletagmanager.com\ngoogle-analytics.com\nconnect.facebook.net\nclarity.ms',
+												saveLabel: 'Save Safe Third-Party Patterns',
+												populateLabel: 'Populate Defaults',
+												populateWarning: 'Your current safe third-party delay patterns will be replaced with the recommended defaults.',
+												onPopulate: () => populateDefaultSettingList('delaySafeThirdPartyJsPatterns', 'safe third-party delay patterns'),
+												key: 'delay-safe-third-party-patterns',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Functional Third-Party Delay Patterns',
+												description: 'Visible/default patterns used by Delay functional third-party JS. Matching consent, captcha, maps, chat, booking, embedded form, and widget scripts are delayed unless excluded.',
+												value: settings.delayFunctionalThirdPartyJsPatterns || '',
+												onSave: (value) => updateSetting('delayFunctionalThirdPartyJsPatterns', value),
+												disabled: busy || !settings.delayFunctionalThirdPartyJsEnabled,
+												placeholder: 'recaptcha\nhcaptcha\nmaps.googleapis.com\ncomplianz\ncmplz',
+												saveLabel: 'Save Functional Third-Party Patterns',
+												populateLabel: 'Populate Defaults',
+												populateWarning: 'Your current functional third-party delay patterns will be replaced with the recommended defaults.',
+												onPopulate: () => populateDefaultSettingList('delayFunctionalThirdPartyJsPatterns', 'functional third-party delay patterns'),
+												key: 'delay-functional-third-party-patterns',
+											}),
+											h(SaveableTextAreaField, {
+												label: 'Third-Party Delay Exclusions',
+												description: 'Optional extra newline-separated handle or URL fragments. Matching scripts stay out of Delay safe third-party JS and Delay functional third-party JS. The shared JS Delay / Defer Exclusions list also applies.',
+												value: settings.delayThirdPartyJsExcludeList || '',
+												onSave: (value) => updateSetting('delayThirdPartyJsExcludeList', value),
+												disabled: busy || (!settings.delaySafeThirdPartyJsEnabled && !settings.delayFunctionalThirdPartyJsEnabled),
+												placeholder: 'checkout\npayment\ncritical-widget',
+												saveLabel: 'Save Third-Party Delay Exclusions',
+												key: 'delay-third-party-exclusions',
 											}),
 											h(SaveableTextAreaField, {
 												label: 'Manual Priority Preloads',
@@ -4486,7 +5545,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 												value: settings.criticalFetchPreloadList || '',
 												onSave: (value) => updateSetting('criticalFetchPreloadList', value),
 												disabled: busy || !settings.criticalRequestChainReliefEnabled,
-												placeholder: '/sliders/1?srengine=7&slideid=2\n/sliders/1?srengine=7&slideid=3',
+												placeholder: '/dynamic-endpoint?example=1\n/custom-feed/page-2',
 												saveLabel: 'Save Fetch URL Preloads',
 												key: 'critical-fetch-preload-list',
 											}),
@@ -4502,27 +5561,21 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											}),
 											h(SaveableTextAreaField, {
 												label: 'Asset Cleanup Exclusions',
-												description: 'Optional newline-separated handle, URL, or HTML fragments. When a page/request matches one of these fragments, Asset Chain Cleanup is skipped to protect builders, search, carts, checkout, and custom widgets.',
+												description: 'Optional newline-separated handle, URL, or HTML fragments. This is the visible/editable Asset Cleanup safeguard list for builders, search, carts, checkout, and custom widgets.',
 												value: settings.assetCleanupExcludeList || '',
 												onSave: (value) => updateSetting('assetCleanupExcludeList', value),
 												disabled: busy || !settings.assetChainCleanupEnabled,
 												placeholder: 'elementor\nrevslider\nfibosearch\ncart\ncheckout',
 												saveLabel: 'Save Asset Exclusions',
+												populateLabel: 'Populate Defaults',
+												populateWarning: 'Your current Asset Cleanup exclusions will be replaced with the recommended defaults.',
+												onPopulate: () => populateDefaultSettingList('assetCleanupExcludeList', 'Asset Cleanup exclusions'),
 												key: 'asset-cleanup-exclude-list',
 											}),
-											h(SaveableTextAreaField, {
-												label: 'CSS Bundle Exclusions',
-												description: 'Optional newline-separated URL fragments. Matching stylesheets stay outside generated CSS bundles.',
-												value: settings.homepageCssBundleExcludeList || '',
-												onSave: (value) => updateSetting('homepageCssBundleExcludeList', value),
-												disabled: busy || !settings.homepageCssBundleEnabled,
-												placeholder: '/widget-mega-menu.min.css\n/front.css',
-												saveLabel: 'Save CSS Bundle Exclusions',
-												key: 'homepage-css-bundle-exclude-list',
-											}),
+											null,
 											h(SaveableTextAreaField, {
 												label: 'Async CSS Exclude List',
-												description: 'Optional newline-separated URL fragments. Matching stylesheets will not be rewritten to async loading.',
+												description: 'Optional newline-separated URL fragments. Matching stylesheets will not be rewritten to async loading. This is the visible/editable Async CSS safeguard list.',
 												value: settings.asyncCssExcludeList || '',
 												onSave: (value) => updateSetting('asyncCssExcludeList', value),
 												disabled: busy || !settings.asyncCssEnabled,
@@ -4532,7 +5585,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											}),
 											h(SaveableTextAreaField, {
 												label: 'Aggressive Async CSS Exclude List',
-												description: 'Optional newline-separated handle or URL fragments. Matching local stylesheets stay in normal blocking flow even when Aggressive Async CSS is enabled.',
+												description: 'Optional newline-separated handle or URL fragments. Matching local stylesheets stay in normal blocking flow even when Aggressive Async CSS is enabled. This is the visible/editable Aggressive Async CSS safeguard list.',
 												value: settings.aggressiveAsyncCssExcludeList || '',
 												onSave: (value) => updateSetting('aggressiveAsyncCssExcludeList', value),
 												disabled: busy || !settings.aggressiveAsyncCssEnabled,
@@ -4549,8 +5602,65 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 												placeholder: '/wp-content/uploads/hero.webp\nhero-home.jpg',
 												saveLabel: 'Save LCP Image URL',
 												key: 'lcp-priority-override',
+										}),
+										h(SaveableTextAreaField, {
+											label: 'Manual LCP Hero / Slider selector',
+											description: 'Optional CSS selector or plain ID for the main above-the-fold hero/slider. Example: #main-hero, homepage-slider, or .hero-slider. When found, UltraCache searches this block first for the LCP preload target and boundary context.',
+											value: settings.manualLcpHeroSelector || '',
+											onSave: (value) => updateSetting('manualLcpHeroSelector', value),
+											disabled: busy || !!settings.frontendSafeModeEnabled || !settings.lcpImagePriorityEnabled,
+											placeholder: '#main-hero\n.hero-slider',
+											saveLabel: 'Save Hero Selector',
+											key: 'manual-lcp-hero-selector',
 											}),
 										]),
+										h(CssBundleExclusionsDiagnosticsField, {
+											value: settings.homepageCssBundleExcludeList || '',
+											onSave: (value) => updateSetting('homepageCssBundleExcludeList', value),
+											disabled: busy || !settings.homepageCssBundleEnabled,
+											placeholder: '/wp-content/plugins/plugin-name/assets/style.css\n/wp-content/themes/theme-name/assets/critical.css',
+											onPopulateDefaults: populateCssBundleExclusionDefaults,
+											onRunDiagnostics: runCssDiagnosticsForUrl,
+											onDownloadJson: downloadCssDiagnosticsJson,
+											onClearResult: clearCssDiagnosticsResult,
+											profile: performanceProfile,
+											onCopyCssExclusion: copyCssBundleExclusionSuggestion,
+											key: 'homepage-css-bundle-exclude-diagnostics-field',
+										}),
+										h(SaveableTextAreaField, {
+											label: 'Delay These Fonts / Patterns',
+											description: 'Newline-separated font-family, filename, or URL fragments. Matching @font-face blocks are moved from the main CSS bundle into a delayed non-render-blocking font stylesheet. Use this mainly for icon fonts.',
+											value: settings.delayIconFontsList || '',
+											onSave: (value) => updateSetting('delayIconFontsList', value),
+											disabled: busy,
+											placeholder: 'fa-solid-900\nfontawesome\neicons\ndashicons\nbokifa-icon\nicomoon\nflaticon',
+											saveLabel: 'Save Delayed Font Patterns',
+											onPopulate: populateDelayIconFontsDefaults,
+											populateWarning: 'Your current delayed font pattern list will be merged with recommended defaults.',
+											key: 'delay-icon-fonts-list',
+										}),
+										h(SaveableTextAreaField, {
+											label: 'Never Delay These Fonts / Patterns',
+											description: 'Newline-separated font-family, filename, or URL fragments that must stay inside the normal CSS flow. Use this to protect body, heading, and brand fonts such as Manrope or Fraunces.',
+											value: settings.delayIconFontsExcludeList || '',
+											onSave: (value) => updateSetting('delayIconFontsExcludeList', value),
+											disabled: busy,
+											placeholder: 'manrope\nfraunces\nroboto\ninter\ngoogle-fonts',
+											saveLabel: 'Save Font Exclusions',
+											onPopulate: populateDelayIconFontExclusionDefaults,
+											populateWarning: 'Your current delayed font exclusion list will be merged with recommended defaults.',
+											key: 'delay-icon-fonts-exclude-list',
+										}),
+										h(DeferDelayExclusionsField, {
+											value: settings.deferJsExcludeList || '',
+											onSave: (value) => updateSetting('deferJsExcludeList', value),
+											disabled: busy,
+											placeholder: 'jquery-dependent-widget\ncheckout\ncart\nrevslider\nsr7\ntptools\ncritical-menu',
+											onPopulateDefaults: populateDeferDelayExclusionDefaults,
+											onScan: runJsDelaySafetyScanForUrl,
+											onLoadLatestProfileScan: loadLatestJsDelaySafetyScan,
+											key: 'defer-stages-exclude-list-final',
+										})
 									]),
 								])
 			]),
@@ -4670,6 +5780,15 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					h(DiagnosticsCard, { diagnostics, stats, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, key: 'diagnostics' }),
 					h(ActivitySummaryCard, { stats, cssBundleDiagnostics, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, key: 'activity-summary' }),
 				]),
+				h(PerformanceProfilerCard, {
+					profile: performanceProfile,
+					busy: !!(asyncActions.performance_profile_compact || asyncActions.performance_profile_verbose || asyncActions.performance_profile_callback),
+					onRun: runPerformanceProfile,
+					onDownload: downloadPerformanceProfileJson,
+					onClear: clearPerformanceProfile,
+					onCopyCssExclusion: copyCssBundleExclusionSuggestion,
+					key: 'performance-profiler-card'
+				}),
 				settings.cacheStatsEnabled ? h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }) : null,
 
 			h(

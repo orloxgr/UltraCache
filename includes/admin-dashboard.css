@@ -1363,3 +1363,41 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 #uc-dashboard .text-right {
 	text-align: right;
 }
+
+/* Performance Profiler */
+.uc-performance-profiler {
+	padding: 0;
+	overflow: hidden;
+}
+
+.uc-performance-profiler .uc-accordion__summary {
+	padding: 24px;
+}
+
+.uc-performance-profiler .uc-accordion__body {
+	padding: 24px;
+}
+
+.uc-profiler-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-evenly;
+	align-items: flex-start;
+	align-content: center;
+	gap: 12px;
+}
+
+.uc-profiler-actions .uc-btn {
+	margin: 0;
+	white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+	.uc-profiler-actions {
+		justify-content: stretch;
+	}
+
+	.uc-profiler-actions .uc-btn {
+		flex: 1 1 100%;
+	}
+}

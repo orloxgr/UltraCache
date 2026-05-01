@@ -82,12 +82,12 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
         public function sanitize_homepage_css_bundle_mode_param($value)
         {
             $value = strtolower(trim((string) $value));
-            return in_array($value, array('safe', 'aggressive'), true) ? $value : 'safe';
+            return in_array($value, array('safe', 'aggressive', 'full'), true) ? $value : 'safe';
         }
 
         public function validate_homepage_css_bundle_mode_param($value)
         {
-            return in_array(strtolower(trim((string) $value)), array('safe', 'aggressive'), true);
+            return in_array(strtolower(trim((string) $value)), array('safe', 'aggressive', 'full'), true);
         }
 
         public function sanitize_css_bundle_scope_param($value)
@@ -144,14 +144,24 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'mediaGenerateOnDemandEnabled'        => array('type' => 'boolean', 'required' => false),
                 'mediaOutputMode'                     => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_media_output_mode_param'), 'validate_callback' => array($this, 'validate_media_output_mode_param')),
                 'deferJsEnabled'                       => array('type' => 'boolean', 'required' => false),
+                'deferAllJsEnabled'                    => array('type' => 'boolean', 'required' => false),
                 'deferJsForceList'                   => array('type' => 'string', 'required' => false),
                 'deferJsExcludeList'                   => array('type' => 'string', 'required' => false),
-                'delayThirdPartyJsEnabled'             => array('type' => 'boolean', 'required' => false),
+                'delaySafeThirdPartyJsEnabled'             => array('type' => 'boolean', 'required' => false),
+                'delaySafeThirdPartyJsPatterns'       => array('type' => 'string', 'required' => false),
+                'delayFunctionalThirdPartyJsEnabled'  => array('type' => 'boolean', 'required' => false),
+                'delayFunctionalThirdPartyJsPatterns' => array('type' => 'string', 'required' => false),
+                'delayThirdPartyJsExcludeList'        => array('type' => 'string', 'required' => false),
                 'asyncExternalScriptsEnabled'          => array('type' => 'boolean', 'required' => false),
                 'homepageCssBundleEnabled'             => array('type' => 'boolean', 'required' => false),
                 'homepageCssBundleInlineEnabled'       => array('type' => 'boolean', 'required' => false),
+                'leftoverCssBundleEnabled'           => array('type' => 'boolean', 'required' => false),
                 'homepageCssBundleExcludeList'         => array('type' => 'string', 'required' => false),
                 'homepageCssBundleMode'                => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_homepage_css_bundle_mode_param'), 'validate_callback' => array($this, 'validate_homepage_css_bundle_mode_param')),
+                'delayIconFontsEnabled'                => array('type' => 'boolean', 'required' => false),
+                'delayIconFontsAutoDetectEnabled'      => array('type' => 'boolean', 'required' => false),
+                'delayIconFontsList'                   => array('type' => 'string', 'required' => false),
+                'delayIconFontsExcludeList'            => array('type' => 'string', 'required' => false),
                 'cssBundleScope'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_css_bundle_scope_param'), 'validate_callback' => array($this, 'validate_css_bundle_scope_param')),
                 'pageCssBundleOnEntryEnabled'          => array('type' => 'boolean', 'required' => false),
                 'frontendSafeModeEnabled'            => array('type' => 'boolean', 'required' => false),
@@ -166,6 +176,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'lcpImagePriorityEnabled'              => array('type' => 'boolean', 'required' => false),
                 'lcpBoundaryDeferEnabled'              => array('type' => 'boolean', 'required' => false),
                 'lcpImagePriorityOverride'             => array('type' => 'string', 'required' => false),
+                'manualLcpHeroSelector'                => array('type' => 'string', 'required' => false),
                 'mainThreadReliefEnabled'              => array('type' => 'boolean', 'required' => false),
                 'criticalRequestChainReliefEnabled'     => array('type' => 'boolean', 'required' => false),
                 'criticalResourcePreloadList'           => array('type' => 'string', 'required' => false),
@@ -476,6 +487,20 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
                         'callback'            => array($this, 'optimize_media'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
+                '/performance-profile/last' => array(
+                    array(
+                        'methods'             => WP_REST_Server::READABLE,
+                        'callback'            => array($this, 'get_performance_profile_last'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
+                '/performance-profile/clear' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'clear_performance_profile_last'),
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
@@ -1078,6 +1103,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'apcu_flush',
                 'redis_test',
                 'google_fonts_rebuild_cache',
+                'performance_profile',
             );
         }
 
@@ -1091,6 +1117,7 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                 'warm_frontpage_html_css',
                 'varnish_flush_all',
                 'google_fonts_rebuild_cache',
+                'performance_profile',
             );
         }
 
@@ -1387,6 +1414,8 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
                             $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
                         }
                         return $result;
+                    case 'performance_profile':
+                        return $this->run_performance_profile_job($params);
                 }
             } catch (Throwable $error) {
                 return array('success' => false, 'message' => $error->getMessage());
@@ -1395,6 +1424,401 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
             }
 
             return array('success' => false, 'message' => 'Unsupported dashboard processing action.');
+        }
+
+        private function normalize_performance_profile_mode($mode)
+        {
+            $mode = sanitize_key((string) $mode);
+            return in_array($mode, array('compact', 'verbose', 'callback'), true) ? $mode : 'compact';
+        }
+
+        private function normalize_performance_profile_url($url)
+        {
+            $url = trim((string) $url);
+            if ('' === $url) {
+                $url = home_url('/');
+            }
+
+            if (0 === strpos($url, '/')) {
+                $url = home_url($url);
+            }
+
+            $url = esc_url_raw($url);
+            $parts = wp_parse_url($url);
+            $home_parts = wp_parse_url(home_url('/'));
+            $home_host = isset($home_parts['host']) ? strtolower((string) $home_parts['host']) : '';
+            $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+
+            if ('' === $home_host || '' === $host || $host !== $home_host) {
+                return new WP_Error('ucwp_profile_url_not_allowed', 'Only same-site URLs can be scanned.');
+            }
+
+            $scheme = isset($parts['scheme']) && in_array(strtolower((string) $parts['scheme']), array('http', 'https'), true) ? strtolower((string) $parts['scheme']) : '';
+            if ('' === $scheme) {
+                $scheme = isset($home_parts['scheme']) ? strtolower((string) $home_parts['scheme']) : 'https';
+            }
+
+            $path = isset($parts['path']) ? (string) $parts['path'] : '/';
+            if ('' === $path) {
+                $path = '/';
+            }
+
+            $port = isset($parts['port']) ? ':' . (int) $parts['port'] : '';
+            $query = isset($parts['query']) && '' !== (string) $parts['query'] ? '?' . (string) $parts['query'] : '';
+
+            return $scheme . '://' . $host . $port . $path . $query;
+        }
+
+        private function summarize_performance_profile($profile)
+        {
+            if (!is_array($profile) || empty($profile)) {
+                return array();
+            }
+
+            $request_profile = isset($profile['request_profile']) && is_array($profile['request_profile']) ? $profile['request_profile'] : array();
+            $checkpoints = isset($request_profile['checkpoints']) && is_array($request_profile['checkpoints']) ? $request_profile['checkpoints'] : array();
+            $callbacks = isset($request_profile['callback_timing_summary']) && is_array($request_profile['callback_timing_summary']) ? $request_profile['callback_timing_summary'] : array();
+            $callback_timings = isset($request_profile['callback_timings']) && is_array($request_profile['callback_timings']) ? $request_profile['callback_timings'] : array();
+            $slow_checkpoints = array();
+            foreach ($checkpoints as $checkpoint) {
+                if (!is_array($checkpoint)) {
+                    continue;
+                }
+                $delta = isset($checkpoint['since_previous_ms']) ? (int) $checkpoint['since_previous_ms'] : 0;
+                if ($delta < 200) {
+                    continue;
+                }
+                $slow_checkpoints[] = array(
+                    'stage'    => isset($checkpoint['stage']) ? (string) $checkpoint['stage'] : '',
+                    'deltaMs'  => $delta,
+                    'atMs'     => isset($checkpoint['at_ms']) ? (int) $checkpoint['at_ms'] : 0,
+                    'hook'     => isset($checkpoint['hook']) ? (string) $checkpoint['hook'] : '',
+                    'reason'   => isset($checkpoint['reason']) ? (string) $checkpoint['reason'] : '',
+                    'source'   => isset($checkpoint['source']) ? (string) $checkpoint['source'] : '',
+                    'callback' => isset($checkpoint['callback_label']) ? (string) $checkpoint['callback_label'] : (isset($checkpoint['callback']) ? (string) $checkpoint['callback'] : ''),
+                    'origin'   => isset($checkpoint['origin_name']) ? (string) $checkpoint['origin_name'] : '',
+                );
+            }
+            usort($slow_checkpoints, function ($a, $b) {
+                return (int) ($b['deltaMs'] ?? 0) <=> (int) ($a['deltaMs'] ?? 0);
+            });
+
+            $callback_top = array();
+            $origin_totals = array();
+            foreach ($callbacks as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+
+                $origin_type = isset($entry['origin_type']) ? (string) $entry['origin_type'] : 'unknown';
+                $origin_name = isset($entry['origin_name']) ? (string) $entry['origin_name'] : 'unknown';
+                $origin_key = trim($origin_type . ':' . $origin_name, ':');
+                if ('' === $origin_key) {
+                    $origin_key = 'unknown:unknown';
+                    $origin_type = 'unknown';
+                    $origin_name = 'unknown';
+                }
+
+                $total_ms = isset($entry['total_ms']) ? (int) $entry['total_ms'] : 0;
+                $max_ms = isset($entry['max_ms']) ? (int) $entry['max_ms'] : 0;
+                $count = isset($entry['count']) ? (int) $entry['count'] : 0;
+                $callback_label = isset($entry['callback_label']) ? (string) $entry['callback_label'] : '';
+
+                if (!isset($origin_totals[$origin_key])) {
+                    $origin_totals[$origin_key] = array(
+                        'origin'        => $origin_key,
+                        'originType'    => $origin_type,
+                        'originName'    => $origin_name,
+                        'totalMs'       => 0,
+                        'maxMs'         => 0,
+                        'count'         => 0,
+                        'callbackCount' => 0,
+                        'topCallback'   => '',
+                        'topCallbackMs' => 0,
+                    );
+                }
+
+                $origin_totals[$origin_key]['totalMs'] += $total_ms;
+                $origin_totals[$origin_key]['count'] += $count;
+                $origin_totals[$origin_key]['callbackCount']++;
+                if ($max_ms > $origin_totals[$origin_key]['maxMs']) {
+                    $origin_totals[$origin_key]['maxMs'] = $max_ms;
+                }
+                if ($total_ms > $origin_totals[$origin_key]['topCallbackMs']) {
+                    $origin_totals[$origin_key]['topCallbackMs'] = $total_ms;
+                    $origin_totals[$origin_key]['topCallback'] = $callback_label;
+                }
+            }
+
+            usort($origin_totals, function ($a, $b) {
+                return (int) ($b['totalMs'] ?? 0) <=> (int) ($a['totalMs'] ?? 0);
+            });
+
+            foreach (array_slice($callbacks, 0, 12) as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $callback_top[] = array(
+                    'hook'      => isset($entry['hook']) ? (string) $entry['hook'] : '',
+                    'priority'  => isset($entry['priority']) ? (string) $entry['priority'] : '',
+                    'callback'  => isset($entry['callback_label']) ? (string) $entry['callback_label'] : '',
+                    'origin'    => trim((isset($entry['origin_type']) ? (string) $entry['origin_type'] : '') . ':' . (isset($entry['origin_name']) ? (string) $entry['origin_name'] : ''), ':'),
+                    'file'      => isset($entry['origin_file']) ? (string) $entry['origin_file'] : '',
+                    'count'     => isset($entry['count']) ? (int) $entry['count'] : 0,
+                    'totalMs'   => isset($entry['total_ms']) ? (int) $entry['total_ms'] : 0,
+                    'maxMs'     => isset($entry['max_ms']) ? (int) $entry['max_ms'] : 0,
+                    'avgMs'     => isset($entry['avg_ms']) ? (int) $entry['avg_ms'] : 0,
+                );
+            }
+            $raw_request_mode = isset($request_profile['mode']) ? sanitize_key((string) $request_profile['mode']) : 'compact';
+            if (!in_array($raw_request_mode, array('compact', 'verbose', 'callback'), true)) {
+                $raw_request_mode = 'compact';
+            }
+            $display_mode = count($callbacks) > 0 ? 'callback' : $raw_request_mode;
+
+
+            $slowest = isset($profile['slowest_stage']) && is_array($profile['slowest_stage']) ? $profile['slowest_stage'] : array();
+            $largest = isset($profile['largest_positive_delta']) && is_array($profile['largest_positive_delta']) ? $profile['largest_positive_delta'] : array();
+            $css_context = isset($profile['css_bundle_context_after']) && is_array($profile['css_bundle_context_after']) ? $profile['css_bundle_context_after'] : array();
+            $critical_request_chain = isset($profile['critical_request_chain']) && is_array($profile['critical_request_chain']) ? $profile['critical_request_chain'] : array();
+            $js_delay_safety_scan = isset($profile['js_delay_safety_scan']) && is_array($profile['js_delay_safety_scan']) ? $profile['js_delay_safety_scan'] : array();
+            $leftover_css_bundle = isset($profile['leftover_css_bundle']) && is_array($profile['leftover_css_bundle']) ? $profile['leftover_css_bundle'] : array();            $async_css_diagnostics = isset($profile['async_css_diagnostics']) && is_array($profile['async_css_diagnostics']) ? $profile['async_css_diagnostics'] : array();
+            $final_stage = array();
+            if (isset($profile['stages']) && is_array($profile['stages'])) {
+                foreach ($profile['stages'] as $stage_entry) {
+                    if (is_array($stage_entry)) {
+                        $final_stage = $stage_entry;
+                    }
+                }
+            }
+
+            return array(
+                'available'                     => true,
+                'version'                       => isset($profile['version']) ? (string) $profile['version'] : (defined('UCWP_VERSION') ? UCWP_VERSION : ''),
+                'requestId'                     => isset($profile['request_id']) ? (string) $profile['request_id'] : '',
+                'url'                           => isset($profile['url']) ? (string) $profile['url'] : '',
+                'status'                        => isset($profile['status']) ? (string) $profile['status'] : '',
+                'reason'                        => isset($profile['reason']) ? (string) $profile['reason'] : '',
+                'mode'                          => $display_mode,
+                'requestMode'                   => $display_mode,
+                'rawRequestMode'                => $raw_request_mode,
+                'finishedAtUtc'                 => isset($profile['finished_at_utc']) ? (string) $profile['finished_at_utc'] : '',
+                'totalRequestDurationMs'        => isset($profile['total_request_duration_ms']) ? (int) $profile['total_request_duration_ms'] : 0,
+                'storeProfileDurationMs'        => isset($profile['total_duration_ms']) ? (int) $profile['total_duration_ms'] : 0,
+                'shutdownTotalDurationMs'       => isset($profile['shutdown_total_duration_ms']) ? (int) $profile['shutdown_total_duration_ms'] : 0,
+                'unmeasuredBeforeStoreProfileMs'=> isset($request_profile['unmeasured_before_store_profile_ms']) ? (int) $request_profile['unmeasured_before_store_profile_ms'] : 0,
+                'checkpointCount'               => count($checkpoints),
+                'callbackTimingSummaryCount'    => count($callbacks),
+                'callbackTimingsCount'          => count($callback_timings),
+                'slowestStage'                  => array(
+                    'stage'      => isset($slowest['stage']) ? (string) $slowest['stage'] : '',
+                    'durationMs' => isset($slowest['duration_ms']) ? (int) $slowest['duration_ms'] : 0,
+                ),
+                'largestPositiveDelta'          => array(
+                    'stage'      => isset($largest['stage']) ? (string) $largest['stage'] : '',
+                    'deltaBytes' => isset($largest['delta_bytes']) ? (int) $largest['delta_bytes'] : 0,
+                ),
+                'criticalRequestChain'          => array(
+                    'available'                   => !empty($critical_request_chain['available']),
+                    'renderBlockingStyleCount'    => isset($critical_request_chain['render_blocking_style_count']) ? (int) $critical_request_chain['render_blocking_style_count'] : 0,
+                    'renderBlockingScriptCount'   => isset($critical_request_chain['render_blocking_script_count']) ? (int) $critical_request_chain['render_blocking_script_count'] : 0,
+                    'delayedScriptCount'          => isset($critical_request_chain['delayed_script_count']) ? (int) $critical_request_chain['delayed_script_count'] : 0,
+                    'protectedScriptCount'        => isset($critical_request_chain['protected_script_count']) ? (int) $critical_request_chain['protected_script_count'] : 0,
+                    'protectedStyleCount'         => isset($critical_request_chain['protected_style_count']) ? (int) $critical_request_chain['protected_style_count'] : 0,
+                    'styleCandidates'             => isset($critical_request_chain['style_candidates']) && is_array($critical_request_chain['style_candidates']) ? array_slice($critical_request_chain['style_candidates'], 0, 40) : array(),
+                    'scriptCandidates'            => isset($critical_request_chain['script_candidates']) && is_array($critical_request_chain['script_candidates']) ? array_slice($critical_request_chain['script_candidates'], 0, 60) : array(),
+                ),
+                'jsDelaySafetyScan'            => array(
+                    'available'              => !empty($js_delay_safety_scan['available']),
+                    'suggestionCount'        => isset($js_delay_safety_scan['suggestion_count']) ? (int) $js_delay_safety_scan['suggestion_count'] : 0,
+                    'missingCount'           => isset($js_delay_safety_scan['missing_count']) ? (int) $js_delay_safety_scan['missing_count'] : 0,
+                    'alreadyExcludedCount'   => isset($js_delay_safety_scan['already_excluded_count']) ? (int) $js_delay_safety_scan['already_excluded_count'] : 0,
+                    'suggestions'            => isset($js_delay_safety_scan['suggestions']) && is_array($js_delay_safety_scan['suggestions']) ? array_slice($js_delay_safety_scan['suggestions'], 0, 80) : array(),
+                ),
+                'cssBundle'                     => array(
+                    'fileExists'                  => !empty($css_context['bundle_file_exists']),
+                    'fileBytes'                   => isset($css_context['bundle_file_bytes']) ? (int) $css_context['bundle_file_bytes'] : 0,
+                    'sourceUrlCount'              => isset($css_context['source_url_count']) ? (int) $css_context['source_url_count'] : 0,
+                    'sourceBytesTotal'            => isset($css_context['source_bytes_total']) ? (int) $css_context['source_bytes_total'] : 0,
+                    'largestSourceBytes'          => isset($css_context['largest_source_bytes']) ? (int) $css_context['largest_source_bytes'] : 0,
+                    'largestSourceUrl'            => isset($css_context['largest_source_url']) ? (string) $css_context['largest_source_url'] : '',
+                    'sourceTop'                   => isset($css_context['source_top']) && is_array($css_context['source_top']) ? array_slice($css_context['source_top'], 0, 12) : array(),
+                    'mode'                        => isset($css_context['mode']) ? (string) $css_context['mode'] : '',
+                    'largeBundleWarning'          => !empty($css_context['large_bundle_warning']),
+                    'veryLargeBundleWarning'      => !empty($css_context['very_large_bundle_warning']),
+                    'sourceControlReady'          => !empty($css_context['source_control_ready']),
+                    'leftoverCssBundle'          => array(
+                        'enabled'               => !empty($leftover_css_bundle['enabled']),
+                        'success'               => !empty($leftover_css_bundle['success']),
+                        'candidateCount'        => isset($leftover_css_bundle['candidate_count']) ? (int) $leftover_css_bundle['candidate_count'] : 0,
+                        'replacedLinkCount'     => isset($leftover_css_bundle['replaced_link_count']) ? (int) $leftover_css_bundle['replaced_link_count'] : 0,
+                        'skippedProtectedCount' => isset($leftover_css_bundle['skipped_protected_count']) ? (int) $leftover_css_bundle['skipped_protected_count'] : 0,
+                        'skippedReason'         => isset($leftover_css_bundle['skipped_reason']) ? (string) $leftover_css_bundle['skipped_reason'] : '',
+                        'bundleUrl'             => isset($leftover_css_bundle['bundle_url']) ? (string) $leftover_css_bundle['bundle_url'] : '',
+                        'bundleBytes'           => isset($leftover_css_bundle['bundle_bytes']) ? (int) $leftover_css_bundle['bundle_bytes'] : 0,
+                        'sourceBytesTotal'      => isset($leftover_css_bundle['source_bytes_total']) ? (int) $leftover_css_bundle['source_bytes_total'] : 0,
+                    ),
+                    'finalHtmlBytes'              => isset($final_stage['bytes_out']) ? (int) $final_stage['bytes_out'] : 0,
+                    'stylesheetLinks'             => isset($final_stage['stylesheet_links']) ? (int) $final_stage['stylesheet_links'] : 0,
+                    'renderBlockingStylesheets'   => isset($final_stage['render_blocking_stylesheet_links']) ? (int) $final_stage['render_blocking_stylesheet_links'] : 0,
+                    'renderBlockingBundleLinks'   => isset($final_stage['render_blocking_css_bundle_links']) ? (int) $final_stage['render_blocking_css_bundle_links'] : 0,
+                    'renderBlockingNonBundleLinks'=> isset($final_stage['render_blocking_non_bundle_stylesheet_links']) ? (int) $final_stage['render_blocking_non_bundle_stylesheet_links'] : 0,
+                    'renderBlockingHrefs'         => isset($final_stage['render_blocking_stylesheet_hrefs']) && is_array($final_stage['render_blocking_stylesheet_hrefs']) ? array_slice($final_stage['render_blocking_stylesheet_hrefs'], 0, 20) : array(),
+                    'renderBlockingNonBundleHrefs'=> isset($final_stage['render_blocking_non_bundle_stylesheet_hrefs']) && is_array($final_stage['render_blocking_non_bundle_stylesheet_hrefs']) ? array_slice($final_stage['render_blocking_non_bundle_stylesheet_hrefs'], 0, 20) : array(),
+                    'noscriptTags'                => isset($final_stage['noscript_tags']) ? (int) $final_stage['noscript_tags'] : 0,
+                    'externalLinks'               => isset($final_stage['page_css_bundle_external_links']) ? (int) $final_stage['page_css_bundle_external_links'] : 0,
+                    'inlineStyleTags'             => isset($final_stage['page_css_bundle_inline_style_tags']) ? (int) $final_stage['page_css_bundle_inline_style_tags'] : 0,
+                    'inlineStyleBytes'            => isset($final_stage['page_css_bundle_inline_style_bytes']) ? (int) $final_stage['page_css_bundle_inline_style_bytes'] : 0,
+                    'fallbackMarkers'             => isset($final_stage['page_css_bundle_fallback_markers']) ? (int) $final_stage['page_css_bundle_fallback_markers'] : 0,
+                    'fallbackBlocks'              => isset($final_stage['page_css_bundle_fallback_blocks']) ? (int) $final_stage['page_css_bundle_fallback_blocks'] : 0,
+                    'fallbackLinks'               => isset($final_stage['page_css_bundle_fallback_links']) ? (int) $final_stage['page_css_bundle_fallback_links'] : 0,
+                    'leftoverBundleRefs'        => isset($final_stage['leftover_css_bundle_refs']) ? (int) $final_stage['leftover_css_bundle_refs'] : 0,
+                    'leftoverBundleMarkers'     => isset($final_stage['leftover_css_bundle_markers']) ? (int) $final_stage['leftover_css_bundle_markers'] : 0,                    'asyncCssDiagnostics'        => array(
+                        'available'          => !empty($async_css_diagnostics['available']),
+                        'enabled'            => !empty($async_css_diagnostics['enabled']),
+                        'aggressiveEnabled'  => !empty($async_css_diagnostics['aggressive_enabled']),
+                        'safe'               => !isset($async_css_diagnostics['safe']) || !empty($async_css_diagnostics['safe']),
+                        'scanned'            => isset($async_css_diagnostics['scanned']) ? (int) $async_css_diagnostics['scanned'] : 0,
+                        'rewritten'          => isset($async_css_diagnostics['rewritten']) ? (int) $async_css_diagnostics['rewritten'] : 0,
+                        'skipped'            => isset($async_css_diagnostics['skipped']) ? (int) $async_css_diagnostics['skipped'] : 0,
+                        'unresolved'         => isset($async_css_diagnostics['unresolved']) ? (int) $async_css_diagnostics['unresolved'] : 0,
+                        'reasonCounts'       => isset($async_css_diagnostics['reason_counts']) && is_array($async_css_diagnostics['reason_counts']) ? $async_css_diagnostics['reason_counts'] : array(),
+                        'items'              => isset($async_css_diagnostics['items']) && is_array($async_css_diagnostics['items']) ? array_slice($async_css_diagnostics['items'], 0, 80) : array(),
+                    ),
+                ),
+                'slowCheckpoints'               => array_slice($slow_checkpoints, 0, 12),
+                'callbackTop'                   => $callback_top,
+                'originTop'                     => array_slice($origin_totals, 0, 12),
+            );
+        }
+
+        public function get_performance_profile_last()
+        {
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'get_last_store_profile')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'STORE profiler helper is not available.'), 500);
+            }
+
+            $profile = $engine->get_last_store_profile();
+            if (!is_array($profile) || empty($profile)) {
+                return new WP_REST_Response(array('success' => true, 'message' => 'No STORE profiler report found yet.', 'performanceProfile' => array(), 'profile' => null), 200);
+            }
+
+            return new WP_REST_Response(array(
+                'success'            => true,
+                'message'            => 'Last STORE profiler report loaded.',
+                'performanceProfile' => $this->summarize_performance_profile($profile),
+                'profile'            => $profile,
+            ), 200);
+        }
+
+        public function clear_performance_profile_last()
+        {
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'clear_last_store_profile')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'STORE profiler helper is not available.'), 500);
+            }
+
+            $ok = (bool) $engine->clear_last_store_profile();
+            return new WP_REST_Response(array(
+                'success' => true,
+                'cleared' => $ok,
+                'message' => $ok ? 'Last STORE profiler report cleared.' : 'No STORE profiler report was present.',
+            ), 200);
+        }
+
+        private function run_performance_profile_job(array $params)
+        {
+            $mode = $this->normalize_performance_profile_mode($params['mode'] ?? 'compact');
+            $engine = $this->get_engine();
+            if (!$engine || !method_exists($engine, 'get_last_store_profile')) {
+                return array('success' => false, 'message' => 'STORE profiler helper is not available.');
+            }
+
+            if (method_exists($engine, 'clear_last_store_profile')) {
+                $engine->clear_last_store_profile();
+            }
+
+            $headers = array(
+                'X-UltraCache-Store-Profile'  => '1',
+                'X-UltraCache-Debug'          => '1',
+                'X-UltraCache-Profile-Bypass' => '1',
+                'X-UltraCache-Token'          => wp_hash('ucwp-revalidate-v1'),
+            );
+            if ('verbose' === $mode) {
+                $headers['X-UltraCache-Store-Profile-Verbose'] = '1';
+            }
+            if ('callback' === $mode) {
+                $headers['X-UltraCache-Callback-Profile'] = '1';
+            }
+
+            $url = $this->normalize_performance_profile_url($params['url'] ?? home_url('/'));
+            if (is_wp_error($url)) {
+                return array(
+                    'success' => false,
+                    'message' => $url->get_error_message(),
+                    'performanceProfile' => array('available' => false, 'mode' => $mode),
+                );
+            }
+
+            $started = microtime(true);
+            $response = wp_remote_get($url, array(
+                'timeout'     => 90,
+                'redirection' => 3,
+                'headers'     => $headers,
+                'user-agent'  => 'UltraCache Dashboard Profiler/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown') . '; ' . home_url('/'),
+            ));
+            $elapsed_ms = (int) round((microtime(true) - $started) * 1000);
+
+            if (is_wp_error($response)) {
+                return array(
+                    'success' => false,
+                    'message' => 'Profiler request failed: ' . $response->get_error_message(),
+                    'performanceProfile' => array('available' => false, 'mode' => $mode),
+                );
+            }
+
+            $code = (int) wp_remote_retrieve_response_code($response);
+            $cache_status = (string) wp_remote_retrieve_header($response, 'x-ultra-cache');
+            $cache_source = (string) wp_remote_retrieve_header($response, 'x-ultra-cache-source');
+            $profile_header = (string) wp_remote_retrieve_header($response, 'x-ultra-cache-store-profile');
+            $body = wp_remote_retrieve_body($response);
+
+            $profile = $engine->get_last_store_profile();
+            if (!is_array($profile) || empty($profile)) {
+                return array(
+                    'success' => false,
+                    'message' => 'Profiler request completed but no STORE profile report was saved. Cache status: ' . ($cache_status ?: 'unknown') . '.',
+                    'performanceProfile' => array(
+                        'available' => false,
+                        'mode' => $mode,
+                        'responseCode' => $code,
+                        'requestMs' => $elapsed_ms,
+                        'cacheStatus' => $cache_status,
+                        'cacheSource' => $cache_source,
+                        'profileHeader' => $profile_header,
+                        'bodyBytes' => is_string($body) ? strlen($body) : 0,
+                    ),
+                );
+            }
+
+            $summary = $this->summarize_performance_profile($profile);
+            $summary['mode'] = $mode;
+            $summary['profileUrl'] = $url;
+            $summary['scannedAt'] = function_exists('current_time') ? current_time('mysql') : gmdate('c');
+            $summary['responseCode'] = $code;
+            $summary['requestMs'] = $elapsed_ms;
+            $summary['cacheStatus'] = $cache_status;
+            $summary['cacheSource'] = $cache_source;
+            $summary['profileHeader'] = $profile_header;
+            $summary['bodyBytes'] = is_string($body) ? strlen($body) : 0;
+            $summary['cacheBypassedForDiagnostic'] = true;
+
+            return array(
+                'success' => true,
+                'message' => strtoupper($mode) . ' performance profile completed.',
+                'performanceProfile' => $summary,
+            );
         }
 
         private function unwrap_rest_payload($response)

@@ -145,6 +145,55 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			return trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
 		}
 
+		public static function get_dropin_status_fast() {
+			$dropin = self::get_dropin_path();
+			$status = array(
+				'exists' => file_exists($dropin),
+				'readable' => is_readable($dropin),
+				'has_marker' => false,
+				'build' => '',
+				'expected_build' => defined('UCWP_VERSION') ? (string) UCWP_VERSION : '',
+				'healthy' => false,
+				'reason' => '',
+			);
+
+			if (!$status['exists']) {
+				$status['reason'] = 'missing';
+				return $status;
+			}
+
+			if (!$status['readable']) {
+				$status['reason'] = 'not_readable';
+				return $status;
+			}
+
+			$contents = file_get_contents($dropin);
+			if (!is_string($contents) || '' === $contents) {
+				$status['reason'] = 'empty_or_read_failed';
+				return $status;
+			}
+
+			$status['has_marker'] = false !== strpos($contents, 'UltraCache generated object-cache drop-in');
+			if (preg_match('/Drop-in Build:\s*([^\r\n]+)/', $contents, $matches)) {
+				$status['build'] = trim((string) $matches[1]);
+			}
+
+			if (!$status['has_marker']) {
+				$status['reason'] = 'marker_missing';
+				return $status;
+			}
+
+			if ('' !== $status['expected_build'] && '' !== $status['build'] && $status['build'] !== $status['expected_build']) {
+				$status['reason'] = 'build_mismatch';
+				return $status;
+			}
+
+			$status['healthy'] = true;
+			$status['reason'] = 'current';
+
+			return $status;
+		}
+
 		private static function get_redis_secret_config_path() {
 			return trailingslashit(UCWP_OBJECT_CACHE_DIR) . '.redis-auth.php';
 		}
