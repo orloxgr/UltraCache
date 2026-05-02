@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.171
+ * Version: 2.56.173
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.171');
+    define('UCWP_VERSION', '2.56.173');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1329,6 +1329,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cssBundleFilesDeleted' => max(0, $css_files_before - $css_files_after),
                 'cssBundleOldOrphanLikeBefore' => max(0, (int) ($css_before['oldOrphanLikeFiles'] ?? 0)),
                 'cssBundleRecentOrphanLikeBefore' => max(0, (int) ($css_before['recentOrphanLikeFiles'] ?? 0)),
+                'cssBundleProtectedByCachedHtmlBefore' => max(0, (int) ($css_before['protectedByCachedHtmlRefs'] ?? 0)),
+                'cssBundleCachedHtmlRefsBefore' => max(0, (int) ($css_before['cachedHtmlRefFiles'] ?? 0)),
                 'cssBundleCleanupLimit' => max(0, (int) ($css_after['cleanupDeleteLimit'] ?? self::get_storage_cleanup_max_deletes_per_run())),
                 'cssBundleGraceSeconds' => max(0, (int) ($css_after['graceSeconds'] ?? self::get_storage_cleanup_grace_seconds())),
             );

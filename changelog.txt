@@ -1,3 +1,8 @@
+= 2.56.173 - CSS Bundle Cleanup Cached HTML Ref Protection =
+* Protect orphan-like CSS bundle files during cleanup when existing cached HTML files still reference them.
+* Added cached HTML CSS reference diagnostics for CSS bundle storage.
+* No intentional change to bundle build, warm-up, media, or object-cache behavior.
+
 = 2.56.171 - Media Converter Split =
 * Refactored the large media converter class into dedicated media traits for diagnostics, background generation, persistent queue handling, conversion, path/URL resolution, and frontend HTML rewrites.
 * Kept class-media-converter.php as a small orchestrator that loads and composes the new media traits.

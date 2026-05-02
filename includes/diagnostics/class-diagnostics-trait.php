@@ -561,7 +561,137 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             return $summary;
         }
 
-        private static function analyze_css_bundle_storage_for_diagnostics($css_bundle_dir, array $manifest_active_files = array())
+        private static function extract_css_bundle_ref_basenames_from_html_for_diagnostics($html)
+        {
+            $html = (string) $html;
+            $refs = array();
+            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+                return $refs;
+            }
+
+            preg_match_all('#(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css#i', $html, $absolute_matches);
+            preg_match_all('#/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css#i', $html, $path_matches);
+
+            $matches = array_merge(
+                isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
+                isset($path_matches[0]) && is_array($path_matches[0]) ? $path_matches[0] : array()
+            );
+
+            foreach (array_unique(array_map('strval', $matches)) as $ref) {
+                $path = (string) wp_parse_url($ref, PHP_URL_PATH);
+                if ('' === $path) {
+                    $path = $ref;
+                }
+
+                $basename = basename(rawurldecode($path));
+                if ('' === $basename || !preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                    continue;
+                }
+
+                $refs[$basename] = true;
+                if (preg_match('/-delayed-fonts\.css$/i', $basename)) {
+                    $pair = (string) preg_replace('/-delayed-fonts\.css$/i', '.css', $basename);
+                    if ('' !== $pair) {
+                        $refs[$pair] = true;
+                    }
+                } else {
+                    $companion = (string) preg_replace('/\.css$/i', '-delayed-fonts.css', $basename);
+                    if ('' !== $companion) {
+                        $refs[$companion] = true;
+                    }
+                }
+            }
+
+            return $refs;
+        }
+
+        private static function scan_cached_html_css_bundle_refs_for_diagnostics($cache_dir, $max_files = 800)
+        {
+            $cache_dir = trailingslashit(wp_normalize_path((string) $cache_dir));
+            $max_files = max(100, min(10000, (int) $max_files));
+            $summary = array(
+                'refs' => array(),
+                'filesScanned' => 0,
+                'filesWithRefs' => 0,
+                'truncated' => false,
+                'maxFiles' => $max_files,
+                'error' => '',
+                'timedOut' => false,
+            );
+            $deadline = microtime(true) + 1.5;
+
+            if (!is_dir($cache_dir) || !is_readable($cache_dir)) {
+                return $summary;
+            }
+
+            try {
+                $iterator = new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator($cache_dir, FilesystemIterator::SKIP_DOTS)
+                );
+
+                foreach ($iterator as $file_info) {
+                    if (microtime(true) >= $deadline) {
+                        $summary['truncated'] = true;
+                        $summary['timedOut'] = true;
+                        break;
+                    }
+                    if (!$file_info->isFile()) {
+                        continue;
+                    }
+
+                    $path = wp_normalize_path((string) $file_info->getPathname());
+                    $name = strtolower((string) $file_info->getFilename());
+
+                    if (false !== strpos($path, '/css-bundles/') || false !== strpos($path, '/google-fonts/') || false !== strpos($path, '/font-css/') || false !== strpos($path, '/diagnostics/') || false !== strpos($path, '/locks/')) {
+                        continue;
+                    }
+
+                    if (!preg_match('/\.html$/i', $name)) {
+                        continue;
+                    }
+
+                    $summary['filesScanned']++;
+                    $size = (int) $file_info->getSize();
+                    if ($size <= 0 || $size > 2097152) {
+                        if ($summary['filesScanned'] >= $max_files) {
+                            $summary['truncated'] = true;
+                            break;
+                        }
+                        continue;
+                    }
+
+                    $html = ucwp_safe_file_get_contents($path, 'css bundle cached html ref diagnostics scan');
+                    if (!is_string($html) || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+                        if ($summary['filesScanned'] >= $max_files) {
+                            $summary['truncated'] = true;
+                            break;
+                        }
+                        continue;
+                    }
+
+                    $refs = self::extract_css_bundle_ref_basenames_from_html_for_diagnostics($html);
+                    if (!empty($refs)) {
+                        $summary['filesWithRefs']++;
+                        foreach ($refs as $basename => $enabled) {
+                            if (!empty($enabled)) {
+                                $summary['refs'][$basename] = true;
+                            }
+                        }
+                    }
+
+                    if ($summary['filesScanned'] >= $max_files) {
+                        $summary['truncated'] = true;
+                        break;
+                    }
+                }
+            } catch (Exception $e) {
+                $summary['error'] = (string) $e->getMessage();
+            }
+
+            return $summary;
+        }
+
+        private static function analyze_css_bundle_storage_for_diagnostics($css_bundle_dir, array $manifest_active_files = array(), $cache_dir = '')
         {
             $css_bundle_dir = trailingslashit(wp_normalize_path((string) $css_bundle_dir));
             $grace_seconds = self::get_storage_cleanup_grace_seconds();
@@ -574,6 +704,10 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     $active[basename($file)] = true;
                 }
             }
+
+            $cache_dir = '' !== (string) $cache_dir ? (string) $cache_dir : dirname($css_bundle_dir);
+            $cached_html_refs = self::scan_cached_html_css_bundle_refs_for_diagnostics($cache_dir);
+            $cached_html_ref_files = isset($cached_html_refs['refs']) && is_array($cached_html_refs['refs']) ? $cached_html_refs['refs'] : array();
 
             $summary = array(
                 'dirExists' => is_dir($css_bundle_dir),
@@ -617,9 +751,19 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'recentFiles' => 0,
                 'oldFiles' => 0,
                 'activeManifestFiles' => count($active),
+                'cachedHtmlRefFiles' => count($cached_html_ref_files),
+                'cachedHtmlRefFilesScanned' => max(0, (int) ($cached_html_refs['filesScanned'] ?? 0)),
+                'cachedHtmlRefFilesWithRefs' => max(0, (int) ($cached_html_refs['filesWithRefs'] ?? 0)),
+                'cachedHtmlRefScanLimit' => max(0, (int) ($cached_html_refs['maxFiles'] ?? 0)),
+                'cachedHtmlRefScanTruncated' => !empty($cached_html_refs['truncated']),
+                'cachedHtmlRefScanTimedOut' => !empty($cached_html_refs['timedOut']),
+                'cachedHtmlRefScanError' => isset($cached_html_refs['error']) ? (string) $cached_html_refs['error'] : '',
                 'orphanLikeFiles' => 0,
                 'oldOrphanLikeFiles' => 0,
                 'recentOrphanLikeFiles' => 0,
+                'protectedByCachedHtmlRefs' => 0,
+                'oldProtectedByCachedHtmlRefs' => 0,
+                'recentProtectedByCachedHtmlRefs' => 0,
                 'largestFiles' => array(),
                 'warningLevel' => 'ok',
                 'message' => '',
@@ -679,10 +823,21 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 }
 
                 $pair = (string) preg_replace('/-delayed-fonts\.css$/i', '.css', $basename);
+                $companion = preg_match('/-delayed-fonts\.css$/i', $basename)
+                    ? $pair
+                    : (string) preg_replace('/\.css$/i', '-delayed-fonts.css', $basename);
                 $is_active = isset($active[$basename]) || ('' !== $pair && isset($active[$pair]));
+                $is_referenced_by_cached_html = isset($cached_html_ref_files[$basename]) || ('' !== $pair && isset($cached_html_ref_files[$pair])) || ('' !== $companion && isset($cached_html_ref_files[$companion]));
                 if (!$is_active) {
                     $summary['orphanLikeFiles']++;
-                    if ($recent) {
+                    if ($is_referenced_by_cached_html) {
+                        $summary['protectedByCachedHtmlRefs']++;
+                        if ($recent) {
+                            $summary['recentProtectedByCachedHtmlRefs']++;
+                        } else {
+                            $summary['oldProtectedByCachedHtmlRefs']++;
+                        }
+                    } elseif ($recent) {
                         $summary['recentOrphanLikeFiles']++;
                     } else {
                         $summary['oldOrphanLikeFiles']++;
@@ -702,7 +857,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $summary['largestFiles'] = array_slice($largest, 0, 5);
 
             $summary['cleanupPolicyMessage'] = sprintf(
-                'Cleanup keeps orphan-like CSS bundle files for %s before deletion and removes at most %d file(s) per run. These values come from Automation & Scheduling settings and can still be overridden by filters.',
+                'Cleanup keeps orphan-like CSS bundle files for %s before deletion, protects files still referenced by cached HTML, and removes at most %d file(s) per run. These values come from Automation & Scheduling settings and can still be overridden by filters.',
                 $summary['graceSecondsLabel'],
                 (int) $delete_limit
             );
@@ -719,6 +874,14 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     number_format_i18n((int) $summary['oldOrphanLikeFiles']),
                     (int) $delete_limit
                 );
+            }
+            if ($summary['protectedByCachedHtmlRefs'] > 0) {
+                $summary['cachedHtmlProtectedMessage'] = sprintf(
+                    '%s orphan-like CSS bundle file(s) are protected because cached HTML still references them.',
+                    number_format_i18n((int) $summary['protectedByCachedHtmlRefs'])
+                );
+            } else {
+                $summary['cachedHtmlProtectedMessage'] = '';
             }
 
             if ($summary['totalFiles'] >= 500 || $summary['oldOrphanLikeFiles'] >= 120) {
@@ -753,7 +916,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 $active_files[] = (string) $file;
             }
 
-            $css_storage = self::analyze_css_bundle_storage_for_diagnostics($css_bundle_dir, $active_files);
+            $css_storage = self::analyze_css_bundle_storage_for_diagnostics($css_bundle_dir, $active_files, $cache_dir);
             $page_cache = self::scan_storage_path_for_diagnostics($cache_dir, array(
                 'recursive' => true,
                 'maxFiles' => 8000,

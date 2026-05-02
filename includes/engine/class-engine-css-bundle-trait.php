@@ -182,6 +182,121 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             return (string) preg_replace('/-delayed-fonts\.css$/i', '.css', $basename);
         }
 
+
+        private function get_css_bundle_companion_basename($basename)
+        {
+            $basename = (string) $basename;
+            if ('' === $basename || !preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                return '';
+            }
+
+            if (preg_match('/-delayed-fonts\.css$/i', $basename)) {
+                return $this->get_css_bundle_pair_basename($basename);
+            }
+
+            return (string) preg_replace('/\.css$/i', '-delayed-fonts.css', $basename);
+        }
+
+        private function get_css_bundle_ref_basenames_from_html($html)
+        {
+            $html = (string) $html;
+            $refs = array();
+            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+                return $refs;
+            }
+
+            preg_match_all('#(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css#i', $html, $absolute_matches);
+            preg_match_all('#/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css#i', $html, $path_matches);
+
+            $matches = array_merge(
+                isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
+                isset($path_matches[0]) && is_array($path_matches[0]) ? $path_matches[0] : array()
+            );
+
+            foreach (array_unique(array_map('strval', $matches)) as $ref) {
+                $path = (string) wp_parse_url($ref, PHP_URL_PATH);
+                if ('' === $path) {
+                    $path = $ref;
+                }
+                $basename = basename(rawurldecode($path));
+                if ('' === $basename || !preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                    continue;
+                }
+                $refs[$basename] = true;
+                $companion = $this->get_css_bundle_companion_basename($basename);
+                if ('' !== $companion) {
+                    $refs[$companion] = true;
+                }
+            }
+
+            return $refs;
+        }
+
+        private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
+        {
+            $cache_dir = trailingslashit(UCWP_CACHE_DIR);
+            $protected = array();
+            $max_files = max(100, min(2000, (int) $max_files));
+            $deadline = microtime(true) + 1.5;
+
+            if (!is_dir($cache_dir) || !is_readable($cache_dir)) {
+                return $protected;
+            }
+
+            $scanned = 0;
+            try {
+                $iterator = new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator($cache_dir, FilesystemIterator::SKIP_DOTS)
+                );
+
+                foreach ($iterator as $file_info) {
+                    if (microtime(true) >= $deadline) {
+                        break;
+                    }
+                    if (!$file_info->isFile()) {
+                        continue;
+                    }
+
+                    $path = wp_normalize_path((string) $file_info->getPathname());
+                    $name = strtolower((string) $file_info->getFilename());
+
+                    if (false !== strpos($path, '/css-bundles/') || false !== strpos($path, '/google-fonts/') || false !== strpos($path, '/font-css/') || false !== strpos($path, '/diagnostics/') || false !== strpos($path, '/locks/')) {
+                        continue;
+                    }
+
+                    if (!preg_match('/\.html$/i', $name)) {
+                        continue;
+                    }
+
+                    $scanned++;
+                    $size = (int) $file_info->getSize();
+                    if ($size <= 0 || $size > 2097152) {
+                        if ($scanned >= $max_files) {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    $html = ucwp_safe_file_get_contents($path, 'css bundle cached html ref cleanup scan');
+                    if (is_string($html) && false !== stripos($html, '/cache/ultracache/css-bundles/')) {
+                        foreach ($this->get_css_bundle_ref_basenames_from_html($html) as $basename => $enabled) {
+                            if (!empty($enabled)) {
+                                $protected[$basename] = true;
+                            }
+                        }
+                    }
+
+                    if ($scanned >= $max_files) {
+                        break;
+                    }
+                }
+            } catch (Exception $e) {
+                return $protected;
+            }
+
+            return $protected;
+        }
+
         private function normalize_css_bundle_entry_for_manifest(array $entry)
         {
             if (empty($entry['bundleFile']) || !is_readable((string) $entry['bundleFile']) || filesize((string) $entry['bundleFile']) <= 0) {
@@ -206,7 +321,9 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             }
 
             $active = $this->get_frontpage_css_manifest_bundle_files($manifest);
+            $cached_html_refs = $this->get_css_bundle_cached_html_ref_basenames();
             $deleted = 0;
+            $protected_by_cached_html = 0;
             $max_deletes = $this->get_css_bundle_cleanup_max_deletes_per_run();
             $files = (array) glob(trailingslashit($dir) . '*.css');
 
@@ -219,6 +336,12 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 $basename = basename($file);
                 $pair_basename = $this->get_css_bundle_pair_basename($basename);
                 if (isset($active[$basename]) || ('' !== $pair_basename && isset($active[$pair_basename]))) {
+                    continue;
+                }
+
+                $companion_basename = $this->get_css_bundle_companion_basename($basename);
+                if (isset($cached_html_refs[$basename]) || ('' !== $pair_basename && isset($cached_html_refs[$pair_basename])) || ('' !== $companion_basename && isset($cached_html_refs[$companion_basename]))) {
+                    $protected_by_cached_html++;
                     continue;
                 }
 
@@ -238,11 +361,12 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 }
             }
 
-            if ($deleted > 0) {
+            if ($deleted > 0 || $protected_by_cached_html > 0) {
                 $this->record_cache_event('page-css-bundle-cleanup', array(
                     'deleted' => $deleted,
                     'max' => $max_deletes,
                     'grace_seconds' => $this->get_css_bundle_cleanup_grace_seconds(),
+                    'protected_by_cached_html' => $protected_by_cached_html,
                 ));
             }
 
@@ -257,14 +381,23 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             }
 
             $deleted = 0;
+            $cached_html_refs = $force ? array() : $this->get_css_bundle_cached_html_ref_basenames();
             $max_deletes = $force ? PHP_INT_MAX : $this->get_css_bundle_cleanup_max_deletes_per_run();
             foreach ((array) glob(trailingslashit($dir) . '*.css') as $file) {
                 $file = (string) $file;
                 if ('' === $file || !is_file($file)) {
                     continue;
                 }
-                if (!$force && $this->is_css_bundle_file_recently_protected($file)) {
-                    continue;
+                if (!$force) {
+                    $basename = basename($file);
+                    $pair_basename = $this->get_css_bundle_pair_basename($basename);
+                    $companion_basename = $this->get_css_bundle_companion_basename($basename);
+                    if (isset($cached_html_refs[$basename]) || ('' !== $pair_basename && isset($cached_html_refs[$pair_basename])) || ('' !== $companion_basename && isset($cached_html_refs[$companion_basename]))) {
+                        continue;
+                    }
+                    if ($this->is_css_bundle_file_recently_protected($file)) {
+                        continue;
+                    }
                 }
                 if (ucwp_safe_unlink($file)) {
                     $deleted++;

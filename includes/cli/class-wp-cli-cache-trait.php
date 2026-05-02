@@ -420,12 +420,14 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
             }
 
             WP_CLI::success(sprintf(
-                'Scheduled cleanup finished. CSS bundles deleted: %d. Recognized CSS bundle files before/after: %d/%d. Old orphan-like eligible before: %d. Recent orphan-like protected by grace before: %d. Cleanup limit: %d/run. Grace: %d seconds. Warmed %d URL(s).',
+                'Scheduled cleanup finished. CSS bundles deleted: %d. Recognized CSS bundle files before/after: %d/%d. Old orphan-like eligible before: %d. Recent orphan-like protected by grace before: %d. Protected by cached HTML before: %d. Cached HTML CSS refs before: %d. Cleanup limit: %d/run. Grace: %d seconds. Warmed %d URL(s).',
                 (int) ($result['cssBundleFilesDeleted'] ?? 0),
                 (int) ($result['cssBundleFilesBefore'] ?? 0),
                 (int) ($result['cssBundleFilesAfter'] ?? 0),
                 (int) ($result['cssBundleOldOrphanLikeBefore'] ?? 0),
                 (int) ($result['cssBundleRecentOrphanLikeBefore'] ?? 0),
+                (int) ($result['cssBundleProtectedByCachedHtmlBefore'] ?? 0),
+                (int) ($result['cssBundleCachedHtmlRefsBefore'] ?? 0),
                 (int) ($result['cssBundleCleanupLimit'] ?? 0),
                 (int) ($result['cssBundleGraceSeconds'] ?? 0),
                 (int) ($result['warmed'] ?? 0)
