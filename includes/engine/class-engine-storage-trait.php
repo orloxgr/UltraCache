@@ -1,0 +1,449 @@
+<?php
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
+    trait Ultra_Cache_Engine_Storage_Trait
+    {
+        private function wait_for_page_cache_file($file_path, $timeout_seconds = 12.0)
+        {
+            $file_path = (string) $file_path;
+            if ('' === $file_path) {
+                return false;
+            }
+
+            $deadline = microtime(true) + max(0.5, (float) $timeout_seconds);
+            do {
+                clearstatcache(true, $file_path);
+                if (is_readable($file_path) && filesize($file_path) > 255) {
+                    return true;
+                }
+                usleep(200000);
+            } while (microtime(true) < $deadline);
+
+            return false;
+        }
+
+        private function maybe_serve_cached_file_during_wp_boot($reason = 'early-hit')
+        {
+            if ($this->is_profile_bypass_request()) {
+                if (!headers_sent()) {
+                    header('X-Ultra-Cache-Profile-Bypass: wp-engine');
+                }
+                return false;
+            }
+
+            $this->profile_request_checkpoint('early_hit_before_current_url');
+            $url = $this->get_current_request_url();
+            $this->profile_request_checkpoint('early_hit_after_current_url', array('url_length' => strlen((string) $url)));
+            if ('' === $url) {
+                return false;
+            }
+
+            $this->profile_request_checkpoint('early_hit_before_cache_path');
+            $file_path = $this->get_cache_path($url);
+            $this->profile_request_checkpoint('early_hit_after_cache_path', array('file_path_empty' => '' === (string) $file_path ? 'yes' : 'no'));
+            $this->profile_request_checkpoint('early_hit_before_file_stat');
+            if ('' === $file_path || !is_readable($file_path) || filesize($file_path) <= 255) {
+                $this->profile_request_checkpoint('early_hit_no_file_return');
+                return false;
+            }
+            $this->profile_request_checkpoint('early_hit_after_file_stat');
+
+            return $this->maybe_serve_cache_file_path($file_path, 'HIT', $reason);
+        }
+
+        private function maybe_serve_cache_file_path($file_path, $status = 'HIT', $reason = '')
+        {
+            $file_path = (string) $file_path;
+            if ('' === $file_path || !is_readable($file_path)) {
+                return false;
+            }
+
+            $this->profile_request_checkpoint('early_hit_before_file_read', array('file' => basename((string) $file_path)));
+            $html = ucwp_safe_file_get_contents($file_path);
+            $this->profile_request_checkpoint('early_hit_after_file_read', array('html_bytes' => is_string($html) ? strlen($html) : 0));
+            if (!is_string($html) || '' === $html) {
+                return false;
+            }
+
+            $this->profile_request_checkpoint('early_hit_before_css_ref_validation');
+            if (!$this->validate_cached_html_css_bundle_refs($html, $file_path)) {
+                $this->profile_request_checkpoint('early_hit_css_ref_validation_failed');
+                return false;
+            }
+            $this->profile_request_checkpoint('early_hit_after_css_ref_validation');
+
+            $mtime = filemtime($file_path);
+            $age = $mtime ? max(0, time() - (int) $mtime) : 0;
+            if (!headers_sent()) {
+                header('Content-Type: text/html; charset=UTF-8');
+                header('Vary: Accept, Accept-Encoding', false);
+                header('X-Ultra-Cache: ' . strtoupper((string) $status));
+                if ($this->should_send_source_debug_header()) {
+                    header('X-Ultra-Cache-Source: wp-engine');
+                }
+                header('X-Ultra-Cache-Age: ' . (string) $age);
+                if ('' !== (string) $reason) {
+                    header('X-Ultra-Cache-Reason: ' . substr(preg_replace('/[^A-Za-z0-9_. -]/', '-', (string) $reason), 0, 120));
+                }
+            }
+
+            $this->record_analytics_hit();
+            echo $html;
+            return true;
+        }
+
+        private function validate_cached_html_css_bundle_refs($html, $cache_file = '')
+        {
+            $html = (string) $html;
+            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+                return true;
+            }
+
+            $this->profile_request_checkpoint('css_bundle_ref_validation_before_scan');
+            $missing = $this->get_missing_css_bundle_refs_from_html($html);
+            $this->profile_request_checkpoint('css_bundle_ref_validation_after_scan', array('missing_count' => count($missing)));
+            if (empty($missing)) {
+                return true;
+            }
+
+            $cache_file = (string) $cache_file;
+            if ('' !== $cache_file) {
+                ucwp_safe_unlink($cache_file);
+                ucwp_safe_unlink($cache_file . '.gz');
+                ucwp_safe_unlink($cache_file . '.br');
+            }
+
+            $this->record_cache_event('stale-css-bundle-html-invalidated', array(
+                'file' => $cache_file,
+                'missing' => array_slice(array_values($missing), 0, 20),
+                'missing_count' => count($missing),
+            ));
+
+            if (!headers_sent()) {
+                header('X-Ultra-Cache-Stale-CSS-Bundle: invalidated');
+            }
+
+            return false;
+        }
+
+        private function get_missing_css_bundle_refs_from_html($html)
+        {
+            $html = (string) $html;
+            $missing = array();
+            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+                return $missing;
+            }
+
+            preg_match_all('#(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s\"\'<>?#)]+\.css#i', $html, $absolute_matches);
+            preg_match_all('#/wp-content/cache/ultracache/css-bundles/[^\s\"\'<>?#)]+\.css#i', $html, $path_matches);
+
+            $refs = array_merge(
+                isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
+                isset($path_matches[0]) && is_array($path_matches[0]) ? $path_matches[0] : array()
+            );
+
+            $refs = array_values(array_unique(array_map('strval', $refs)));
+            $bundle_dir = wp_normalize_path($this->get_frontpage_css_dir());
+            foreach ($refs as $ref) {
+                $path = (string) wp_parse_url($ref, PHP_URL_PATH);
+                if ('' === $path) {
+                    $path = $ref;
+                }
+                $basename = basename(rawurldecode($path));
+                if ('' === $basename || false === preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                    continue;
+                }
+
+                $file = wp_normalize_path($bundle_dir . $basename);
+                clearstatcache(true, $file);
+                if (!is_readable($file) || filesize($file) <= 0) {
+                    $missing[$basename] = $basename;
+                }
+            }
+
+            return array_values($missing);
+        }
+
+        private function write_cache_file($file_path, $html)
+        {
+            $html = $this->profile_store_stage('final_google_fonts_rewrite_inside_write', $html, function ($html) {
+                return $this->apply_final_google_fonts_rewrite_before_cache_store($html);
+            });
+            $dir = dirname($file_path);
+            if (!file_exists($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !file_exists($dir)) {
+                return false;
+            }
+
+            if ($this->page_cache_variant_cap_reached($file_path)) {
+                $this->record_cache_event('variant-cap', array('file' => $file_path));
+                return false;
+            }
+
+            $write_lock_name = 'page-cache-write-' . md5((string) $file_path);
+            if (!$this->acquire_runtime_lock($write_lock_name, 90)) {
+                $this->record_cache_event('store-write-lock-busy', array('file' => $file_path));
+                return false;
+            }
+
+            try {
+                if (!$this->validate_cached_html_css_bundle_refs($html, '')) {
+                    $this->record_cache_event('skip-store-missing-css-bundle-ref', array('file' => $file_path));
+                    return false;
+                }
+
+                if (!$this->write_cache_variant_atomically($file_path, $html)) {
+                    return false;
+                }
+
+                $settings = $this->get_settings();
+                if (!empty($settings['gzip_enabled']) && function_exists('gzencode')) {
+                    self::gz_file_put_contents($file_path . '.gz', $html);
+                } else {
+                    ucwp_safe_unlink($file_path . '.gz');
+                }
+
+                if (!empty($settings['brotli_enabled']) && function_exists('brotli_compress')) {
+                    $compressed = brotli_compress($html, 11, BROTLI_TEXT);
+                    if (false !== $compressed) {
+                        $this->write_cache_variant_atomically($file_path . '.br', $compressed);
+                    }
+                } else {
+                    ucwp_safe_unlink($file_path . '.br');
+                }
+
+                return true;
+            } finally {
+                $this->release_runtime_lock($write_lock_name);
+            }
+        }
+
+        private function get_page_cache_variant_cap_per_bucket()
+        {
+            /**
+             * Safety cap for same path + same image bucket HTML variants.
+             * Normal operation should produce one hash per bucket for a plain URL.
+             * Extra variants are only expected for explicitly allowlisted query args.
+             */
+            $cap = (int) apply_filters('ucwp_page_cache_variant_cap_per_bucket', 8);
+            return max(3, min(50, $cap));
+        }
+
+        private function page_cache_variant_cap_reached($file_path)
+        {
+            $file_path = (string) $file_path;
+            if ('' === $file_path || file_exists($file_path)) {
+                return false;
+            }
+
+            $basename = basename($file_path);
+            if (!preg_match('/^index-(orig|webp|avif)-[a-f0-9]{32}\.html$/', $basename, $matches)) {
+                return false;
+            }
+
+            $dir = dirname($file_path);
+            if (!is_dir($dir) || !is_readable($dir)) {
+                return false;
+            }
+
+            $bucket = $matches[1];
+            $pattern = trailingslashit($dir) . 'index-' . $bucket . '-*.html';
+            $existing = glob($pattern);
+            if (!is_array($existing)) {
+                return false;
+            }
+
+            return count($existing) >= $this->get_page_cache_variant_cap_per_bucket();
+        }
+
+        private function write_cache_variant_atomically($path, $contents)
+        {
+            $dir = dirname($path);
+            if (!file_exists($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !file_exists($dir)) {
+                return false;
+            }
+
+            $tmp = $path . '.tmp-' . uniqid('', true);
+            $result = ucwp_safe_file_put_contents($tmp, $contents, LOCK_EX);
+            if (false === $result) {
+                ucwp_safe_unlink($tmp);
+                return false;
+            }
+
+            if (!ucwp_safe_rename($tmp, $path)) {
+                ucwp_safe_unlink($tmp);
+                return false;
+            }
+
+            clearstatcache(true, $tmp);
+            clearstatcache(true, $path);
+            if (!file_exists($path) || file_exists($tmp)) {
+                ucwp_safe_unlink($tmp);
+                return false;
+            }
+
+            return true;
+        }
+
+        private static function gz_file_put_contents($path, $html)
+        {
+            $gz = gzencode($html, 9);
+            if (false === $gz) {
+                return;
+            }
+
+            $dir = dirname($path);
+            if (!file_exists($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !file_exists($dir)) {
+                return;
+            }
+
+            $tmp = $path . '.tmp-' . uniqid('', true);
+            if (false === ucwp_safe_file_put_contents($tmp, $gz, LOCK_EX)) {
+                ucwp_safe_unlink($tmp);
+                return;
+            }
+
+            if (!ucwp_safe_rename($tmp, $path)) {
+                ucwp_safe_unlink($tmp);
+            }
+        }
+
+        private function normalize_path_value($path)
+        {
+            $path = '/' . ltrim((string) $path, '/');
+            return '/' === $path ? '/' : trailingslashit(rtrim($path, '/'));
+        }
+
+        private function matches_path_rule($path, $rule)
+        {
+            $path = $this->normalize_path_value($path);
+            $rule = trim((string) $rule);
+            if ('' === $rule) {
+                return false;
+            }
+
+            $wildcard = false;
+            if ('*' === substr($rule, -1)) {
+                $wildcard = true;
+                $rule = substr($rule, 0, -1);
+            }
+
+            $rule = $this->normalize_path_value($rule);
+            if ('/' === $rule) {
+                return '/' === $path;
+            }
+
+            if ($path === $rule) {
+                return true;
+            }
+
+            return $wildcard || 0 === strpos($path, $rule);
+        }
+
+        private function path_matches_any_rule($path, array $rules)
+        {
+            foreach ($rules as $rule) {
+                if ($this->matches_path_rule($path, $rule)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function get_revalidate_lock_path($url)
+        {
+            $file = $this->get_cache_path($url, 'orig');
+            return $file ? $file . '.revalidate.lock' : '';
+        }
+
+        private function get_runtime_lock_file($name)
+        {
+            $safe = preg_replace('/[^a-z0-9_-]/', '-', strtolower((string) $name));
+            $safe = trim((string) $safe, '-');
+            if ('' === $safe) {
+                $safe = 'runtime';
+            }
+
+            $dir = trailingslashit(UCWP_CACHE_DIR) . 'locks/';
+            if (!is_dir($dir)) {
+                wp_mkdir_p($dir);
+            }
+
+            return $dir . $safe . '.lock';
+        }
+
+        private function delete_cache_variants($file)
+        {
+            foreach (array($file, $file . '.gz', $file . '.br') as $variant) {
+                if (file_exists($variant)) {
+                    ucwp_safe_unlink($variant);
+                }
+            }
+        }
+
+        public function get_cache_path($url, $bucket = null)
+        {
+            $normalized = $this->normalize_url($url);
+            if (empty($normalized)) {
+                return '';
+            }
+
+            $parts = wp_parse_url($normalized);
+            $host = isset($parts['host']) ? sanitize_file_name(strtolower((string) $parts['host'])) : 'site';
+            $path = isset($parts['path']) ? trim((string) $parts['path'], '/') : '';
+            $path = preg_replace('#[^A-Za-z0-9/_-]#', '-', $path);
+            $path = trim((string) $path, '/');
+            if ('' === $path) {
+                $path = 'index';
+            }
+
+            if (null === $bucket) {
+                $bucket = $this->get_request_image_bucket();
+            }
+
+            $bucket = in_array((string) $bucket, array('avif', 'webp', 'orig'), true) ? (string) $bucket : 'orig';
+            $hash = md5($normalized);
+            $base_dir = trailingslashit(UCWP_CACHE_DIR) . $host . '/' . $path;
+
+            return trailingslashit($base_dir) . 'index-' . $bucket . '-' . $hash . '.html';
+        }
+
+        private function get_cache_paths_for_all_buckets($url)
+        {
+            $files = array();
+            foreach (array('orig', 'webp', 'avif') as $bucket) {
+                $file = $this->get_cache_path($url, $bucket);
+                if ($file) {
+                    $files[] = $file;
+                }
+            }
+
+            return array_values(array_unique($files));
+        }
+
+        private function infer_bucket_from_cache_path($path)
+        {
+            $path = (string) $path;
+            if ('' === $path) {
+                return '';
+            }
+
+            if (false !== strpos($path, 'index-avif-')) {
+                return 'avif';
+            }
+
+            if (false !== strpos($path, 'index-webp-')) {
+                return 'webp';
+            }
+
+            if (false !== strpos($path, 'index-orig-')) {
+                return 'orig';
+            }
+
+            return '';
+        }
+    }
+}

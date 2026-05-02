@@ -356,6 +356,34 @@
 		return formatCount(value, isMinimum) + ' files';
 	}
 
+	function formatDurationSeconds(value) {
+		const seconds = Number(value || 0);
+		if (!Number.isFinite(seconds) || seconds <= 0) {
+			return '0 seconds';
+		}
+		if (seconds % 86400 === 0) {
+			const days = seconds / 86400;
+			return formatNumber(days) + ' day' + (days === 1 ? '' : 's');
+		}
+		if (seconds % 3600 === 0) {
+			const hours = seconds / 3600;
+			return formatNumber(hours) + ' hour' + (hours === 1 ? '' : 's');
+		}
+		if (seconds % 60 === 0) {
+			const minutes = seconds / 60;
+			return formatNumber(minutes) + ' minute' + (minutes === 1 ? '' : 's');
+		}
+		return formatNumber(seconds) + ' seconds';
+	}
+
+	function getCssCleanupGraceLabel(storageCssBundles) {
+		return storageCssBundles.graceSecondsLabel || formatDurationSeconds(storageCssBundles.graceSeconds || 0);
+	}
+
+	function getCssCleanupDeleteLimitLabel(storageCssBundles) {
+		return storageCssBundles.cleanupDeleteLimitLabel || (formatNumber(storageCssBundles.cleanupDeleteLimit || 0) + ' files per cleanup run');
+	}
+
 	function getDefaultScheduledWarmLimit() {
 		const value = Number(crawlScopeSummary.defaultScheduledWarmLimit || 0);
 		if (Number.isFinite(value) && value > 0) {
@@ -1755,6 +1783,46 @@
 		]);
 	}
 
+
+	function NumberRow({ label, description, value, onChange, disabled, min, max, step, className }) {
+		return h('div', { className: classNames('uc-number-row flex items-center justify-between gap-4 py-4', className || '') }, [
+			h('div', { key: 'left', className: 'min-w-0 pr-4' }, [
+				label ? h('div', { className: 'text-sm font-medium text-white' }, label) : null,
+				description ? h('div', { className: 'text-xs text-zinc-500 mt-1' }, description) : null,
+			]),
+			h('input', {
+				key: 'right',
+				type: 'number',
+				className: 'uc-field-input uc-number-row-input',
+				value: value,
+				disabled: !!disabled,
+				min: typeof min === 'number' ? min : 0,
+				max: typeof max === 'number' ? max : undefined,
+				step: typeof step === 'number' ? step : 1,
+				onChange: (e) => onChange(e.target.value),
+			}),
+		]);
+	}
+
+
+	function TextRow({ label, description, value, onChange, disabled, placeholder, type, className }) {
+		return h('div', { className: classNames('uc-number-row flex items-center justify-between gap-4 py-4', className || '') }, [
+			h('div', { key: 'left', className: 'min-w-0 pr-4' }, [
+				label ? h('div', { className: 'text-sm font-medium text-white' }, label) : null,
+				description ? h('div', { className: 'text-xs text-zinc-500 mt-1' }, description) : null,
+			]),
+			h('input', {
+				key: 'right',
+				type: type || 'text',
+				className: 'uc-field-input uc-number-row-input',
+				value: value || '',
+				disabled: !!disabled,
+				placeholder: placeholder || '',
+				onChange: (e) => onChange(e.target.value),
+			}),
+		]);
+	}
+
 	function TextField({ label, description, value, onChange, disabled, placeholder, onKeyDown, type }) {
 		return h('div', { className: 'uc-field-wrap' }, [
 			label ? h('label', { className: 'uc-field-label' }, label) : null,
@@ -2057,8 +2125,8 @@
 			['HTML/page cache', false, formatBytes(storagePageCache.bytes || 0) + ' · ' + formatFileCount(storagePageCache.files || 0, !!storagePageCache.truncated) + (storagePageCache.truncated ? ' · capped scan' : '')],
 			['CSS bundle storage', storageCssBundles.warningLevel === 'ok', formatBytes(storageCssBundles.bytes || 0) + ' · ' + formatFileCount(storageCssBundles.recognizedBundleFiles || storageCssBundles.totalFiles || storageCssBundles.files || 0, false)],
 			['CSS recent / old files', false, formatNumber(storageCssBundles.recentFiles || 0) + ' / ' + formatNumber(storageCssBundles.oldFiles || 0)],
-			['CSS orphan-like files', storageCssBundles.oldOrphanLikeFiles === 0, formatNumber(storageCssBundles.orphanLikeFiles || 0) + ' total · ' + formatNumber(storageCssBundles.oldOrphanLikeFiles || 0) + ' old eligible · ' + formatNumber(storageCssBundles.recentOrphanLikeFiles || 0) + ' recent/protected'],
-			['Cleanup grace / delete limit', false, formatNumber(storageCssBundles.graceSeconds || 0) + 's · ' + formatNumber(storageCssBundles.cleanupDeleteLimit || 0) + '/run'],
+			['CSS orphan-like files', storageCssBundles.oldOrphanLikeFiles === 0, formatNumber(storageCssBundles.orphanLikeFiles || 0) + ' total · ' + formatNumber(storageCssBundles.oldOrphanLikeFiles || 0) + ' eligible · ' + formatNumber(storageCssBundles.recentOrphanLikeFiles || 0) + ' protected by grace'],
+			['Cleanup grace / delete limit', false, getCssCleanupGraceLabel(storageCssBundles) + ' · ' + getCssCleanupDeleteLimitLabel(storageCssBundles)],
 			['Generated AVIF/WebP storage', false, formatBytes(storageMediaCache.bytes || 0) + ' · ' + formatFileCount(storageMediaCache.files || 0, !!storageMediaCache.truncated) + ' · AVIF ' + formatCount(storageMediaCache.avifFiles || 0, !!storageMediaCache.avifTruncated) + ' / WebP ' + formatCount(storageMediaCache.webpFiles || 0, !!storageMediaCache.webpTruncated)],
 		];
 
@@ -2204,8 +2272,10 @@
 			['Safe / leftover / aggressive / full', false, formatNumber(storageCssBundles.safeFiles || 0) + ' / ' + formatNumber(storageCssBundles.leftoverFiles || 0) + ' / ' + formatNumber(storageCssBundles.aggressiveFiles || 0) + ' / ' + formatNumber(storageCssBundles.fullFiles || 0)],
 			['Recent / old CSS files', false, formatNumber(storageCssBundles.recentFiles || 0) + ' / ' + formatNumber(storageCssBundles.oldFiles || 0)],
 			['Manifest-active CSS files', false, formatNumber(storageCssBundles.activeManifestFiles || 0)],
-			['Orphan-like CSS files', storageCssBundles.oldOrphanLikeFiles === 0, formatNumber(storageCssBundles.orphanLikeFiles || 0) + ' total · ' + formatNumber(storageCssBundles.oldOrphanLikeFiles || 0) + ' old eligible · ' + formatNumber(storageCssBundles.recentOrphanLikeFiles || 0) + ' recent/protected'],
-			['Cleanup grace / delete limit', false, formatNumber(storageCssBundles.graceSeconds || 0) + 's · ' + formatNumber(storageCssBundles.cleanupDeleteLimit || 0) + '/run'],
+			['Orphan-like CSS files', storageCssBundles.oldOrphanLikeFiles === 0, formatNumber(storageCssBundles.orphanLikeFiles || 0) + ' total · ' + formatNumber(storageCssBundles.oldOrphanLikeFiles || 0) + ' eligible · ' + formatNumber(storageCssBundles.recentOrphanLikeFiles || 0) + ' protected by grace'],
+			['Cleanup grace / delete limit', false, getCssCleanupGraceLabel(storageCssBundles) + ' · ' + getCssCleanupDeleteLimitLabel(storageCssBundles)],
+			['Cleanup policy source', false, (storageCssBundles.cleanupPolicySource || 'dashboard/filter') + ' · ' + (storageCssBundles.cleanupGraceFilter || 'ucwp_css_bundle_cleanup_grace_seconds') + ' · ' + (storageCssBundles.cleanupDeleteLimitFilter || 'ucwp_css_bundle_cleanup_max_deletes_per_run')],
+			['Cleanup bounds', false, 'Grace ' + (storageCssBundles.cleanupGraceMinLabel || formatDurationSeconds(storageCssBundles.cleanupGraceMinSeconds || 3600)) + '–' + (storageCssBundles.cleanupGraceMaxLabel || formatDurationSeconds(storageCssBundles.cleanupGraceMaxSeconds || 604800)) + ' · delete limit ' + formatNumber(storageCssBundles.cleanupDeleteLimitMin || 5) + '–' + formatNumber(storageCssBundles.cleanupDeleteLimitMax || 500)],
 		];
 
 		const mediaQueueDiag = mediaRuntimeDiag.queue || {};
@@ -2299,6 +2369,9 @@
 						h('div', { className: 'uc-section-title' }, 'CSS bundle storage'),
 						renderRows(cssStorageRows, storageCssBundles.warningLevel === 'warning' ? 'warning' : 'neutral'),
 						storageCssBundles.message ? h('div', { className: storageCssBundles.warningLevel === 'ok' ? 'mt-3 text-xs text-zinc-500' : 'mt-3 text-xs text-cyan-300' }, storageCssBundles.message) : null,
+						storageCssBundles.cleanupPolicyMessage ? h('div', { className: 'mt-2 text-xs text-zinc-400' }, storageCssBundles.cleanupPolicyMessage) : null,
+						storageCssBundles.recentProtectedMessage ? h('div', { className: 'mt-2 text-xs text-cyan-300' }, storageCssBundles.recentProtectedMessage) : null,
+						storageCssBundles.oldEligibleMessage ? h('div', { className: 'mt-2 text-xs text-amber-300' }, storageCssBundles.oldEligibleMessage) : null,
 						Array.isArray(storageCssBundles.largestFiles) && storageCssBundles.largestFiles.length ? h('div', { className: 'mt-4 rounded bg-black/10 p-4 space-y-3' }, [
 							h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400' }, 'Largest CSS bundle files'),
 							storageCssBundles.largestFiles.map(function(file) {
@@ -2794,7 +2867,7 @@
 					],
 					key: 'method',
 				}),
-				h(NumberField, {
+				h(NumberRow, {
 					label: 'Timeout (seconds)',
 					description: isAdminMode ? 'Connection and read timeout for each Varnish admin endpoint.' : 'Connection and read timeout for each Varnish HTTP endpoint.',
 					value: form.varnishCliTimeoutSeconds || 2,
@@ -2804,15 +2877,15 @@
 					step: 1,
 					key: 'timeout',
 				}),
+				h(ToggleRow, {
+					label: 'Debug log',
+					description: 'Saves immediately. Write Varnish request details to wp-content/cache/ultracache/logs/varnish-cli.log',
+					checked: !!form.varnishCliDebug,
+					onChange: (value) => onFieldChange('varnishCliDebug', value),
+					disabled: busy,
+					key: 'debug',
+				}),
 			]),
-			h(ToggleRow, {
-				label: 'Debug log',
-				description: 'Saves immediately. Write Varnish request details to wp-content/cache/ultracache/logs/varnish-cli.log',
-				checked: !!form.varnishCliDebug,
-				onChange: (value) => onFieldChange('varnishCliDebug', value),
-				disabled: busy,
-				key: 'debug',
-			}),
 			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
 				h(Button, { onClick: onSave, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Save Varnish Settings'),
 				h(Button, { onClick: onTest, disabled: busy || !form.varnishCliEnabled || !varnish.available || actionsBlocked, variant: 'light' }, busy ? 'Working…' : 'Test Selected Varnish Mode'),
@@ -3033,27 +3106,26 @@
 			]),
 			backend === 'disk' ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, 'Disk object cache is advanced/debug only and is not recommended for production. It can create many small files and may be slower than leaving persistent object cache disabled.') : null,
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
-				h(SelectField, {
-					label: 'Object Cache Fallback',
-					description: 'Used only when the selected backend cannot connect or is unavailable. Runtime-only cache is always the final emergency fallback.',
-					value: fallbackPolicy,
-					onChange: (value) => onFieldChange('objectCacheFallbackBackend', value),
-					disabled: busy,
-					options: [
-						{ value: 'none', label: 'None / runtime-only' },
-						{ value: 'apcu', label: 'APCu' },
-						{ value: 'disk', label: 'Disk (advanced/debug)' },
-					],
-				}),
-				h('div', { className: 'text-xs text-zinc-400 bg-zinc-900/60 rounded-xl px-3 py-3' }, [
-					h('div', { className: 'font-semibold text-zinc-200 mb-1' }, 'Fallback policy'),
-					h('div', null, 'Selected: ' + ('none' === fallbackPolicy ? 'None / runtime-only' : backendLabel(fallbackPolicy)) + '. Active fallback: ' + fallbackStatusText + '.'),
-					'disk' === fallbackPolicy ? h('div', { className: 'mt-2 text-amber-300' }, 'Disk fallback is advanced/debug only and may add filesystem I/O.') : null,
+				h('div', { className: 'uc-field-wrap' }, [
+					h('label', { className: 'uc-field-label' }, 'Object Cache Fallback'),
+					h('div', { className: 'text-xs text-zinc-500 mb-2' }, 'Used only when the selected backend cannot connect or is unavailable. Runtime-only cache is always the final emergency fallback.'),
+					h('div', { className: 'text-xs text-zinc-400 mb-2' }, 'Selected: ' + ('none' === fallbackPolicy ? 'None / runtime-only' : backendLabel(fallbackPolicy)) + '. Active fallback: ' + fallbackStatusText + '.'),
+					'disk' === fallbackPolicy ? h('div', { className: 'text-xs text-amber-300 mb-2' }, 'Disk fallback is advanced/debug only and may add filesystem I/O.') : null,
+					h('div', { className: 'uc-select-wrap' }, [
+						h('select', {
+							className: 'uc-field-input uc-field-select',
+							value: fallbackPolicy,
+							disabled: !!busy,
+							onChange: (e) => onFieldChange('objectCacheFallbackBackend', e.target.value),
+						}, [
+							h('option', { value: 'none', key: 'none' }, 'None / runtime-only'),
+							h('option', { value: 'apcu', key: 'apcu' }, 'APCu'),
+							h('option', { value: 'disk', key: 'disk' }, 'Disk (advanced/debug)'),
+						]),
+						h('span', { className: 'uc-select-icon', 'aria-hidden': true }, '▾'),
+					]),
 				]),
-			]),
-			fallbackActive ? h('div', { className: 'mt-4 text-xs text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded-xl px-3 py-2' }, fallbackMessage) : null,
-			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
-				h(TextField, {
+				h(TextRow, {
 					label: 'Redis host',
 					description: 'Common default: 127.0.0.1',
 					value: form.redisHost || '127.0.0.1',
@@ -3062,7 +3134,10 @@
 					placeholder: '127.0.0.1',
 					key: 'redis-host',
 				}),
-				h(NumberField, {
+			]),
+			fallbackActive ? h('div', { className: 'mt-4 text-xs text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded-xl px-3 py-2' }, fallbackMessage) : null,
+			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
+				h(NumberRow, {
 					label: 'Redis port',
 					description: 'Common default: 6379',
 					value: form.redisPort || 6379,
@@ -3072,7 +3147,7 @@
 					step: 1,
 					key: 'redis-port',
 				}),
-				h(TextField, {
+				h(TextRow, {
 					label: 'Redis password',
 					description: form.redisPasswordConfigured ? 'A saved Redis password already exists. Leave blank to keep it, or enter a new one to replace it.' : 'Leave empty when the server does not require auth.',
 					value: form.redisPassword || '',
@@ -3082,7 +3157,7 @@
 					type: 'password',
 					key: 'redis-password',
 				}),
-				h(NumberField, {
+				h(NumberRow, {
 					label: 'Redis database',
 					description: 'Usually 0. Typical range: 0-15.',
 					value: typeof form.redisDatabase === 'undefined' ? 0 : form.redisDatabase,
@@ -3092,7 +3167,7 @@
 					step: 1,
 					key: 'redis-db',
 				}),
-				h(TextField, {
+				h(TextRow, {
 					label: 'Redis prefix / namespace',
 					description: 'Optional. Leave blank for automatic site-specific prefix.',
 					value: form.redisPrefix || '',
@@ -3101,7 +3176,7 @@
 					placeholder: 'leave blank for auto',
 					key: 'redis-prefix',
 				}),
-				h(NumberField, {
+				h(NumberRow, {
 					label: 'Connect timeout (ms)',
 					description: 'Advanced. Default: 200ms.',
 					value: typeof form.redisConnectTimeoutMs === 'undefined' ? 200 : form.redisConnectTimeoutMs,
@@ -3111,7 +3186,7 @@
 					step: 50,
 					key: 'redis-connect-timeout',
 				}),
-				h(NumberField, {
+				h(NumberRow, {
 					label: 'Read timeout (ms)',
 					description: 'Advanced. Default: 200ms.',
 					value: typeof form.redisReadTimeoutMs === 'undefined' ? 200 : form.redisReadTimeoutMs,
@@ -3412,6 +3487,8 @@
 			cacheExceptionQueryArgs: initialSettings.cacheExceptionQueryArgs || '',
 			cacheQueryStringAllowlist: initialSettings.cacheQueryStringAllowlist || '',
 			cacheCleanupIntervalHours: initialSettings.cacheCleanupIntervalHours || 24,
+			cssBundleCleanupGraceHours: typeof initialSettings.cssBundleCleanupGraceHours === 'undefined' ? 48 : initialSettings.cssBundleCleanupGraceHours,
+			cssBundleCleanupDeleteLimit: typeof initialSettings.cssBundleCleanupDeleteLimit === 'undefined' ? 60 : initialSettings.cssBundleCleanupDeleteLimit,
 			cronWarmPagesPerMinute: typeof initialSettings.cronWarmPagesPerMinute === 'undefined' ? 2 : initialSettings.cronWarmPagesPerMinute,
 			scheduledWarmLimit: typeof initialSettings.scheduledWarmLimit === 'undefined' ? getDefaultScheduledWarmLimit() : initialSettings.scheduledWarmLimit,
 			cacheFreshTtlMinutes: initialSettings.cacheFreshTtlMinutes || 15,
@@ -3661,6 +3738,8 @@
 				cacheExceptionQueryArgs: settings.cacheExceptionQueryArgs || '',
 				cacheQueryStringAllowlist: settings.cacheQueryStringAllowlist || '',
 				cacheCleanupIntervalHours: settings.cacheCleanupIntervalHours || 24,
+				cssBundleCleanupGraceHours: typeof settings.cssBundleCleanupGraceHours === 'undefined' ? 48 : settings.cssBundleCleanupGraceHours,
+				cssBundleCleanupDeleteLimit: typeof settings.cssBundleCleanupDeleteLimit === 'undefined' ? 60 : settings.cssBundleCleanupDeleteLimit,
 				cronWarmPagesPerMinute: typeof settings.cronWarmPagesPerMinute === 'undefined' ? 2 : settings.cronWarmPagesPerMinute,
 				scheduledWarmLimit: typeof settings.scheduledWarmLimit === 'undefined' ? getDefaultScheduledWarmLimit() : settings.scheduledWarmLimit,
 				cacheFreshTtlMinutes: settings.cacheFreshTtlMinutes || 15,
@@ -3671,6 +3750,8 @@
 			settings.cacheExceptionQueryArgs,
 			settings.cacheQueryStringAllowlist,
 			settings.cacheCleanupIntervalHours,
+			settings.cssBundleCleanupGraceHours,
+			settings.cssBundleCleanupDeleteLimit,
 			settings.cronWarmPagesPerMinute,
 			settings.scheduledWarmLimit,
 			settings.cacheFreshTtlMinutes,
@@ -4204,7 +4285,7 @@
 				if (typeof afterResult === 'function') {
 					afterResult(result, completed);
 				}
-				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'object_cache_full_count', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'apcu_flush', 'varnish_flush_all'].indexOf(action) !== -1) {
+				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'object_cache_full_count', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'apcu_flush', 'varnish_flush_all', 'google_fonts_rebuild_cache'].indexOf(action) !== -1) {
 					try {
 						await refreshStats();
 					} catch (error) {}
@@ -4825,6 +4906,8 @@
 				const response = await apiRequest('save_settings', {
 					settings_json: JSON.stringify({
 						cacheCleanupIntervalHours: Number(advancedForm.cacheCleanupIntervalHours || 24),
+						cssBundleCleanupGraceHours: Number(advancedForm.cssBundleCleanupGraceHours || 48),
+						cssBundleCleanupDeleteLimit: Number(advancedForm.cssBundleCleanupDeleteLimit || 60),
 						cronWarmPagesPerMinute: Number(advancedForm.cronWarmPagesPerMinute || 0),
 						scheduledWarmLimit: Number(advancedForm.scheduledWarmLimit || advancedForm.cronWarmPagesPerMinute || 0),
 						cacheFreshTtlMinutes: Number(advancedForm.cacheFreshTtlMinutes || 15),
@@ -5472,9 +5555,14 @@ async function deleteAllPluginDataAndDeactivate() {
 		};
 		const googleFontsDiag = diagnostics && diagnostics.googleFonts ? diagnostics.googleFonts : {};
 		const fontPipelineDiag = diagnostics && diagnostics.fontPipeline ? diagnostics.fontPipeline : {};
-		const googleFontsStatusText = googleFontsDiag.built
-			? ('Google Fonts cache: Built · Stylesheets: ' + formatNumber(googleFontsDiag.cssFiles || 0) + ' · Font files: ' + formatNumber(googleFontsDiag.fontFiles || 0))
-			: 'Google Fonts cache: Not built yet — original Google Fonts URLs will remain.';
+		const googleFontsStatusText = googleFontsDiag.message
+			? String(googleFontsDiag.message)
+			: (googleFontsDiag.built
+				? ('Google Fonts cache: Built · Stylesheets: ' + formatNumber(googleFontsDiag.cssFiles || 0) + ' · Font files: ' + formatNumber(googleFontsDiag.fontFiles || 0))
+				: 'Google Fonts cache: Not built yet — rebuild required.');
+		const googleFontsLastScanText = googleFontsDiag.lastScanAt
+			? ('Last scan: ' + formatNumber(googleFontsDiag.lastScanScannedUrls || 0) + ' URL(s) · ' + formatNumber(googleFontsDiag.lastScanGoogleFontsUrls || 0) + ' remote Google Fonts stylesheet(s) · ' + formatNumber(googleFontsDiag.lastScanBuilt || 0) + ' built · ' + formatNumber(googleFontsDiag.lastScanFailed || 0) + ' failed')
+			: '';
 		const warmBusy = busy || process.active || homepageHtmlBusy || homepageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy;
 		const warmDisabledMessage = !pageCacheReady
 			? 'Please enable Page Caching first or select a profile before warming cache.'
@@ -6029,13 +6117,13 @@ h(
 					Card,
 					{
 						title: 'Fonts Optimization',
-						description: 'Optimize Google Fonts, self-hosted font CSS delivery, and optional delayed icon-font loading.',
+						description: 'Optimize remote Google Fonts, local @font-face display behavior, self-hosted font CSS delivery, and optional delayed icon-font loading.',
 						key: 'fonts-optimization-card',
 					},
 					[
 						h(ToggleRow, {
-							label: 'Google Fonts display=swap',
-							description: 'Append display=swap to Google Fonts requests generated by themes and plugins.',
+							label: 'Font Display Optimization',
+							description: 'Adds font-display: swap to local @font-face declarations when missing and appends display=swap to remote Google Fonts requests. Uses the existing Google Fonts Swap setting internally for backward compatibility.',
 							checked: settings.googleFontsSwapEnabled,
 							onChange: (value) => updateSetting('googleFontsSwapEnabled', value),
 							disabled: busy,
@@ -6049,7 +6137,10 @@ h(ToggleRow, {
 							disabled: busy,
 							key: 'google-fonts-local',
 						}),
-h('div', { className: 'uc-muted mt-2 text-xs', key: 'google-fonts-cache-status' }, googleFontsStatusText),
+h('div', { className: 'uc-muted mt-2 text-xs', key: 'google-fonts-cache-status' }, [
+							googleFontsStatusText,
+							googleFontsLastScanText ? h('div', { className: 'mt-1 text-[11px] text-zinc-500', key: 'google-fonts-last-scan' }, googleFontsLastScanText) : null,
+						]),
 h(ToggleRow, {
 							label: 'Optimize Self-Hosted Font CSS',
 							description: 'Rewrite local @font-face CSS to add font-display: swap, normalize font URLs, and preload up to two likely first-paint WOFF2 files.',
@@ -6415,7 +6506,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'cron-warm-enabled',
 						}),
 						h(ToggleRow, {
-							label: 'Start after Scheduled Cleanup',
+							label: 'Start Cron Warm Up after Scheduled Cleanup',
 							description: 'Start the cron warm queue after the scheduled cleanup purge completes.',
 							checked: settings.cronWarmStartAfterCleanup,
 							onChange: (value) => updateSetting('cronWarmStartAfterCleanup', value),
@@ -6423,12 +6514,39 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'cleanup-warm',
 						}),
 						h(ToggleRow, {
-							label: 'Start after Flush All Cache',
+							label: 'Start Cron Warm Up after Flush All Cache',
 							description: 'Start the cron warm queue after a manual full cache purge.',
 							checked: !!settings.cronWarmStartAfterManualPurge,
 							onChange: (value) => updateSetting('cronWarmStartAfterManualPurge', value),
 							disabled: busy || !settings.cronWarmEnabled,
 							key: 'manual-purge-warm',
+						}),
+						h(NumberRow, {
+							label: 'Cleanup interval (hours)',
+							description: 'Use 24 for daily, 168 for weekly, or any custom number of hours.',
+							value: advancedForm.cacheCleanupIntervalHours,
+							onChange: (value) => updateAdvancedField('cacheCleanupIntervalHours', value),
+							disabled: busy,
+							min: 1,
+							key: 'cleanup-hours',
+						}),
+						h(NumberRow, {
+							label: 'Cron warm pages per minute',
+							description: 'How many HTML URLs to warm per minute in the cron warm-up queue. Homepage is always warmed first. CSS bundles are not rebuilt by cron. Lower values are safer on slower servers. Set 0 to pause queue processing.',
+							value: advancedForm.cronWarmPagesPerMinute,
+							onChange: (value) => updateAdvancedField('cronWarmPagesPerMinute', value),
+							disabled: busy,
+							min: 0,
+							key: 'warm-limit',
+						}),
+						h(NumberRow, {
+							label: 'Scheduled warm limit',
+							description: getScheduledWarmLimitSummary(),
+							value: advancedForm.scheduledWarmLimit,
+							onChange: (value) => updateAdvancedField('scheduledWarmLimit', value),
+							disabled: busy || !settings.cronWarmEnabled,
+							min: 0,
+							key: 'scheduled-warm-limit',
 						}),
 						h(ToggleRow, {
 							label: 'Stale While Revalidate',
@@ -6438,36 +6556,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							disabled: busy,
 							key: 'swr-toggle',
 						}),
-					]),
-					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
-						h(NumberField, {
-							label: 'Cleanup interval (hours)',
-							description: 'Use 24 for daily, 168 for weekly, or any custom number of hours.',
-							value: advancedForm.cacheCleanupIntervalHours,
-							onChange: (value) => updateAdvancedField('cacheCleanupIntervalHours', value),
-							disabled: busy,
-							min: 1,
-							key: 'cleanup-hours',
-						}),
-						h(NumberField, {
-							label: 'Cron warm pages per minute',
-							description: 'How many HTML URLs to warm per minute in the cron warm-up queue. Homepage is always warmed first. CSS bundles are not rebuilt by cron. Lower values are safer on slower servers. Set 0 to pause queue processing.',
-							value: advancedForm.cronWarmPagesPerMinute,
-							onChange: (value) => updateAdvancedField('cronWarmPagesPerMinute', value),
-							disabled: busy,
-							min: 0,
-							key: 'warm-limit',
-						}),
-						h(NumberField, {
-							label: 'Scheduled warm limit',
-							description: getScheduledWarmLimitSummary(),
-							value: advancedForm.scheduledWarmLimit,
-							onChange: (value) => updateAdvancedField('scheduledWarmLimit', value),
-							disabled: busy || !settings.cronWarmEnabled,
-							min: 0,
-							key: 'scheduled-warm-limit',
-						}),
-						h(NumberField, {
+						h(NumberRow, {
 							label: 'Fresh TTL (minutes)',
 							description: 'Serve a normal cache hit while the file age stays within this freshness window. Default: 15 minutes.',
 							value: advancedForm.cacheFreshTtlMinutes,
@@ -6476,7 +6565,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							min: 1,
 							key: 'fresh-ttl',
 						}),
-						h(NumberField, {
+						h(NumberRow, {
 							label: 'Max stale window (minutes)',
 							description: 'After freshness expires, UltraCache may still serve the stale file until this limit while it refreshes in the background. Default: 720 minutes (12 hours).',
 							value: advancedForm.cacheMaxStaleMinutes,
@@ -6484,6 +6573,28 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							disabled: busy || !settings.staleWhileRevalidateEnabled,
 							min: 1,
 							key: 'max-stale',
+						}),
+						h(NumberRow, {
+							label: 'CSS bundle cleanup grace window (hours)',
+							description: 'How long orphan-like CSS bundle files stay protected before cleanup may delete them. This helps stale HTML from Varnish, browser cache, or page cache keep valid CSS references. Default: 48 hours. Range: 1–168.',
+							value: advancedForm.cssBundleCleanupGraceHours,
+							onChange: (value) => updateAdvancedField('cssBundleCleanupGraceHours', value),
+							disabled: busy,
+							min: 1,
+							max: 168,
+							step: 1,
+							key: 'css-cleanup-grace-hours',
+						}),
+						h(NumberRow, {
+							label: 'CSS bundle cleanup delete limit',
+							description: 'Maximum orphan-like CSS bundle files to delete per cleanup run. Lower values are safer on shared hosting; higher values clear test/build leftovers faster. Default: 60. Range: 5–500.',
+							value: advancedForm.cssBundleCleanupDeleteLimit,
+							onChange: (value) => updateAdvancedField('cssBundleCleanupDeleteLimit', value),
+							disabled: busy,
+							min: 5,
+							max: 500,
+							step: 1,
+							key: 'css-cleanup-delete-limit',
 						}),
 					]),
 					h('div', { className: 'mt-4 flex justify-end' }, [

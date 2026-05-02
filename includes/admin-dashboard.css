@@ -786,6 +786,33 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	border-color: rgba(71, 207, 255, 0.5);
 }
 
+
+#uc-dashboard .uc-number-row {
+	border: 0;
+}
+
+#uc-dashboard .uc-number-row-input {
+	width: 128px;
+	max-width: 128px;
+	flex: 0 0 128px;
+	text-align: right;
+	padding: 10px 12px;
+}
+
+@media (max-width: 640px) {
+	#uc-dashboard .uc-number-row {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	#uc-dashboard .uc-number-row-input {
+		width: 100%;
+		max-width: 100%;
+		flex: 0 0 auto;
+		text-align: left;
+	}
+}
+
 #uc-dashboard .uc-select-wrap {
 	position: relative;
 }

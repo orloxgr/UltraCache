@@ -1,0 +1,1450 @@
+<?php
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
+    trait Ultra_Cache_WP_Settings_Trait
+    {
+        public static function get_dashboard_defaults()
+        {
+            ucwp_request_profile_checkpoint('sanitize_settings_before_compression_support');
+            $compression_support = self::get_compression_support_status();
+            ucwp_request_profile_checkpoint('sanitize_settings_after_compression_support', array('brotli' => !empty($compression_support['brotli']) ? 'true' : 'false', 'gzip' => !empty($compression_support['gzip']) ? 'true' : 'false'));
+            ucwp_request_profile_checkpoint('sanitize_settings_before_frontend_compression_cached');
+            $frontend_compression = self::get_frontend_compression_probe_status(false);
+            ucwp_request_profile_checkpoint('sanitize_settings_after_frontend_compression_cached', array('brotli' => !empty($frontend_compression['brotli']) ? 'true' : 'false', 'gzip' => !empty($frontend_compression['gzip']) ? 'true' : 'false', 'broken_brotli' => !empty($frontend_compression['brokenBrotli']) ? 'true' : 'false', 'broken_gzip' => !empty($frontend_compression['brokenGzip']) ? 'true' : 'false'));
+            ucwp_request_profile_checkpoint('sanitize_settings_before_media_support');
+            $media_support = self::get_media_support_status();
+            ucwp_request_profile_checkpoint('sanitize_settings_after_media_support', array('supported' => !empty($media_support['supported']) ? 'true' : 'false'));
+            $crawl_scope_summary = self::get_crawl_scope_summary();
+            $default_scheduled_warm_limit = max(1, (int) ($crawl_scope_summary['defaultScheduledWarmLimit'] ?? 0));
+
+            return array(
+                'pageCacheEnabled'           => false,
+                'objectCacheEnabled'         => false,
+                'objectCacheBackend'         => 'redis',
+                'objectCacheFallbackBackend' => 'apcu',
+                'redisHost'                  => '127.0.0.1',
+                'redisPort'                  => 6379,
+                'redisPassword'              => '',
+                'redisDatabase'              => 0,
+                'redisPrefix'                => '',
+                'redisUseTls'                => false,
+                'redisPersistent'            => false,
+                'redisConnectTimeoutMs'      => 200,
+                'redisReadTimeoutMs'         => 200,
+                'brotliEnabled'              => false,
+                'gzipEnabled'                => false,
+                'cacheStatsEnabled'          => false,
+                'mediaOptimizationEnabled'     => false,
+                'mediaGenerateOnUploadEnabled' => false,
+                'mediaGenerateOnDemandEnabled' => false,
+                'mediaOutputMode'            => 'auto',
+                'deferJsEnabled'             => false,
+                'deferAllJsEnabled'          => false,
+                'deferJsForceList'           => '',
+                'deferJsExcludeList'         => '',
+                'delaySafeThirdPartyJsEnabled'   => false,
+                'lazyMailerliteNonceEnabled' => true,
+                'delaySafeThirdPartyJsPatterns' => implode("\n", self::get_default_safe_third_party_delay_patterns()),
+                'delayFunctionalThirdPartyJsEnabled' => false,
+                'delayFunctionalThirdPartyJsPatterns' => implode("\n", self::get_default_functional_third_party_delay_patterns()),
+                'delayThirdPartyJsExcludeList' => '',
+                'asyncExternalScriptsEnabled'=> false,
+                'homepageCssBundleEnabled'   => false,
+                'homepageCssBundleInlineEnabled' => false,
+                'leftoverCssBundleEnabled'   => false,
+                'homepageCssBundleExcludeList' => '',
+                'homepageCssBundleMode'      => 'safe',
+                'delayIconFontsEnabled'      => false,
+                'delayIconFontsAutoDetectEnabled' => true,
+                'delayIconFontsList'         => implode("\n", self::get_default_delay_icon_font_patterns()),
+                'delayIconFontsExcludeList'  => implode("\n", self::get_default_delay_icon_font_exclude_patterns()),
+                'cssBundleScope'            => 'homepage',
+                'pageCssBundleOnEntryEnabled' => false,
+                'frontendSafeModeEnabled'    => false,
+                'sliderSafeModeEnabled'       => false,
+                'clsDimensionsEnabled'       => false,
+                'asyncCssEnabled'            => false,
+                'asyncCssExcludeList'        => '',
+                'aggressiveAsyncCssEnabled'  => false,
+                'aggressiveAsyncCssExcludeList' => '',
+                'delayNonCriticalJsEnabled'  => false,
+                'delayNonCriticalJsExcludeList' => '',
+                'lcpImagePriorityEnabled'    => false,
+                'lcpBoundaryDeferEnabled'    => false,
+                'lcpImagePriorityOverride'   => '',
+                'manualLcpHeroSelector'      => '',
+                'mainThreadReliefEnabled'    => false,
+                'criticalRequestChainReliefEnabled' => false,
+                'criticalResourcePreloadList' => '',
+                'criticalFetchPreloadList'    => '',
+                'criticalRequestChainDelayList' => '',
+                'assetChainCleanupEnabled'    => false,
+                'assetCleanupWooProductAssetsEnabled' => false,
+                'assetCleanupProductFilterAssetsEnabled' => false,
+                'assetCleanupWooBlocksCssEnabled' => false,
+                'assetCleanupExcludeList'     => "elementor\nbricks\noxygen\nwpbakery\nvc_\nrevslider\nsr7\najaxsearch\nfibosearch\n.dgwt-wcas\naws-container\ncart\ncheckout\naccount",
+                'googleFontsSwapEnabled'     => false,
+                'googleFontsLocalOptimizationEnabled' => false,
+                'googleFontsAdditionalScanUrls' => '',
+                'selfHostedFontCssOptimizationEnabled' => false,
+                'selfHostedFontRuntimeRewriteEnabled' => false,
+                'speculationRulesEnabled'    => false,
+                'browserCacheRulesEnabled'   => false,
+                'varnishCliEnabled'          => false,
+                'varnishCliMode'             => 'http',
+                'varnishCliServers'          => self::get_default_varnish_http_endpoint(),
+                'varnishCliKey'              => '',
+                'varnishCliTimeoutSeconds'   => 2,
+                'varnishCliMethod'           => 'BAN',
+                'varnishCliDebug'            => false,
+                'preRenderOnSave'            => false,
+                'woocommerceSafeModeEnabled' => false,
+                'cacheCleanupEnabled'        => false,
+                'apcuFlushOnScheduledCleanup'=> false,
+                'cacheCleanupIntervalHours'  => 24,
+                'cssBundleCleanupGraceHours' => 48,
+                'cssBundleCleanupDeleteLimit' => 60,
+                'cronWarmEnabled'            => false,
+                'cronWarmStartAfterCleanup'  => false,
+                'cronWarmStartAfterManualPurge' => false,
+                'cronWarmPagesPerMinute'     => 2,
+                'scheduledWarmLimit'         => $default_scheduled_warm_limit,
+                'staleWhileRevalidateEnabled'=> false,
+                'cacheFreshTtlMinutes'       => 15,
+                'cacheMaxStaleMinutes'       => 720,
+                'cacheExceptionPaths'        => implode("\n", self::get_default_excluded_paths()),
+                'cacheExceptionQueryArgs'    => implode("\n", self::get_default_excluded_query_args()),
+                'cacheQueryStringsEnabled'   => false,
+                'cacheQueryStringAllowlist'  => '',
+            );
+        }
+
+        private static function get_default_excluded_paths()
+        {
+            return array(
+                '/cart/',
+                '/checkout/',
+                '/my-account/',
+                '/wp-admin/',
+                '/wp-login.php',
+                '/wc-api/',
+                '/wp-json/',
+            );
+        }
+
+        private static function get_default_excluded_query_args()
+        {
+            return array(
+                'preview',
+                'customize_changeset_uuid',
+                'customize_autosaved',
+                'elementor-preview',
+                'vc_editable',
+                'et_fb',
+                'add-to-cart',
+                'wc-ajax',
+                'remove_item',
+                'undo_item',
+                'apply_coupon',
+                'remove_coupon',
+                'order_again',
+                '_wpnonce',
+                '_ajax_nonce',
+                'nonce',
+                'security',
+                'token',
+                'auth',
+                'auth_token',
+                'access_token',
+                'key',
+                'order_key',
+                'password',
+                'pass',
+                'pwd',
+                'redirect_to',
+                'customer-logout',
+                'logout',
+                'pay_for_order',
+                'cancel_order',
+                'download_file',
+            );
+        }
+
+        private static function get_default_delay_icon_font_patterns()
+        {
+            return array(
+                'fa-solid-900',
+                'fa-regular',
+                'fa-brands',
+                'fontawesome',
+                'font awesome',
+                'eicons',
+                'dashicons',
+                'bokifa-icon',
+                'icomoon',
+                'flaticon',
+                'themify',
+                'simple-line-icons',
+                'linearicons',
+                'material-icons',
+                'materialicons',
+                'ionicons',
+            );
+        }
+
+        private static function get_default_delay_icon_font_exclude_patterns()
+        {
+            return array(
+                'manrope',
+                'fraunces',
+                'roboto',
+                'open-sans',
+                'inter',
+                'lato',
+                'montserrat',
+                'poppins',
+                'source-sans',
+                'noto',
+                '2920108',
+                'google-fonts',
+                'body',
+                'heading',
+            );
+        }
+
+        private static function get_default_js_delay_defer_exclusion_patterns()
+        {
+            return array(
+                'revslider',
+                'sr7',
+                'tptools',
+                'elementor-frontend',
+                'swiper',
+                'slick',
+                'splide',
+                'owl.carousel',
+                'smartslider',
+                'n2-ss',
+                'html_types/image',
+                'html_types/color',
+                'html_types/label',
+                'official-mailerlite-sign-up-forms/assets/js/localization/validation-messages.js',
+                'validation-messages.js',
+            );
+        }
+
+        private static function get_defer_all_js_legacy_conservative_exclusion_patterns()
+        {
+            return array(
+                'official-mailerlite-sign-up-forms/assets/js/localization/validation-messages.js',
+                'revslider',
+                'sliderrevolution',
+                'slider-revolution',
+                'revolution',
+                'sr7',
+                'rs6',
+                'rs7',
+                'tptools',
+                'tp-tools',
+                'rs-module',
+                'wp-block-themepunch-revslider',
+                'swiper',
+                'swiper-bundle',
+                'slick',
+                'splide',
+                'owl.carousel',
+                'smartslider',
+                'smart-slider',
+                'n2-ss',
+                'elementor',
+                'elementor-frontend',
+                'frontend-modules',
+                'webpack.runtime',
+                'webpack-pro.runtime',
+                'pro-elements-handlers',
+                'smartmenus',
+                'html_types/image',
+                'html_types/color',
+                'html_types/label',
+                'html_types/slide',
+                'html_types/slider',
+                'product-ajax-search',
+                'search-popup',
+                'nav-mobile',
+                'megamenu',
+                'header-cart',
+                'cart-canvas',
+                'off-canvas',
+                'woocommerce-products-filter',
+                'woof_',
+                'contact-form-7',
+                'author-arc',
+                'typewriting-author-arc/assets/js/form-handler.js',
+                'mailerlite',
+                'mailchimp',
+                'mc4wp',
+                'complianz',
+                'cmplz',
+                'cky-',
+            );
+        }
+
+        private static function strip_defer_all_js_legacy_conservative_exclusions($value)
+        {
+            $normalized = self::normalize_textarea_setting($value);
+            if ('' === $normalized) {
+                return '';
+            }
+
+            $legacy = array();
+            foreach (self::get_defer_all_js_legacy_conservative_exclusion_patterns() as $pattern) {
+                $pattern = strtolower(trim((string) $pattern));
+                if ('' !== $pattern) {
+                    $legacy[$pattern] = true;
+                }
+            }
+
+            $kept = array();
+            foreach (preg_split('/\r\n|\r|\n/', $normalized) as $line) {
+                $line = trim((string) $line);
+                if ('' === $line) {
+                    continue;
+                }
+                if (isset($legacy[strtolower($line)])) {
+                    continue;
+                }
+                $kept[] = $line;
+            }
+
+            return implode("\n", array_values(array_unique($kept)));
+        }
+
+        private static function get_default_safe_third_party_delay_patterns()
+        {
+            return array(
+                'googletagmanager.com',
+                'google-analytics.com',
+                'gtag/js',
+                'gtm.js',
+                'googlesitekit-events-provider',
+                'google-site-kit/dist/assets/js',
+                'connect.facebook.net',
+                'fbevents.js',
+                'fbq',
+                'analytics.tiktok.com',
+                'snap.licdn.com',
+                'insight.min.js',
+                'bat.bing.com',
+                'clarity.ms',
+                'static.hotjar.com',
+                'script.hotjar.com',
+                's.pinimg.com',
+                'pintrk',
+                'doubleclick.net',
+                'googleadservices.com',
+                'taboola',
+                'outbrain',
+                'yahoo',
+                'yimg.com',
+            );
+        }
+
+        private static function get_default_functional_third_party_delay_patterns()
+        {
+            return array(
+                'recaptcha',
+                'hcaptcha',
+                'google.com/recaptcha',
+                'gstatic.com/recaptcha',
+                'maps.googleapis.com',
+                'maps.gstatic.com',
+                'complianz',
+                'cmplz',
+
+                'cookieyes',
+                'cky-',
+                'intercom',
+                'crisp.chat',
+                'tawk.to',
+                'zendesk',
+                'calendly',
+                'typeform',
+                'jotform',
+            );
+        }
+
+        public static function get_crawl_scope_summary()
+        {
+            $fallback = array(
+                'baseUrlCount' => 1,
+                'menuUrlCount' => 0,
+                'seedUrlCount' => 1,
+                'postUrlCount' => 0,
+                'termUrlCount' => 0,
+                'contentUrlCount' => 0,
+                'estimatedTotal' => 1,
+                'maxUrls' => 5000,
+                'defaultScheduledWarmLimit' => 1,
+            );
+
+            if (!function_exists('home_url')) {
+                return $fallback;
+            }
+
+            $engine = self::get_engine_instance();
+            if ($engine && method_exists($engine, 'get_crawl_scope_summary')) {
+                $summary = $engine->get_crawl_scope_summary();
+                if (is_array($summary)) {
+                    return array_merge($fallback, $summary);
+                }
+            }
+
+            return $fallback;
+        }
+
+        private static function normalize_textarea_setting($value)
+        {
+            if (is_array($value)) {
+                $value = implode("\n", array_map('strval', $value));
+            }
+
+            $value = str_replace(array("\r\n", "\r"), "\n", (string) $value);
+            $lines = array_filter(array_map('trim', explode("\n", $value)), static function ($line) {
+                return '' !== $line;
+            });
+
+            return implode("\n", array_values(array_unique($lines)));
+        }
+
+        private static function merge_textarea_settings($first, $second)
+        {
+            $lines = array_merge(self::parse_textarea_setting($first), self::parse_textarea_setting($second));
+            return self::normalize_textarea_setting($lines);
+        }
+
+        private static function normalize_multiline_setting_with_callback($value, callable $callback, $limit = 200)
+        {
+            $lines = self::parse_textarea_setting($value);
+            $normalized = array();
+
+            foreach ($lines as $line) {
+                $sanitized = call_user_func($callback, $line);
+                if (!is_string($sanitized) || '' === $sanitized) {
+                    continue;
+                }
+
+                $normalized[$sanitized] = $sanitized;
+                if (count($normalized) >= max(1, absint($limit))) {
+                    break;
+                }
+            }
+
+            return implode("\n", array_values($normalized));
+        }
+
+        private static function get_reserved_setting_keys()
+        {
+            return array(
+                '__proto__',
+                'constructor',
+                'prototype',
+            );
+        }
+
+        private static function sanitize_setting_key_line($value)
+        {
+            $value = strtolower(trim((string) $value));
+            if ('' === $value) {
+                return '';
+            }
+
+            if (!preg_match('/^[a-z0-9_-]{1,64}$/', $value)) {
+                return '';
+            }
+
+            if (in_array($value, self::get_reserved_setting_keys(), true)) {
+                return '';
+            }
+
+            return $value;
+        }
+
+        private static function sanitize_setting_key_list($value, $limit = 200)
+        {
+            return self::normalize_multiline_setting_with_callback($value, array(__CLASS__, 'sanitize_setting_key_line'), $limit);
+        }
+
+        private static function sanitize_excluded_path_line($value)
+        {
+            $rule = html_entity_decode(trim((string) $value), ENT_QUOTES, 'UTF-8');
+            if ('' === $rule) {
+                return '';
+            }
+
+            $rule = str_replace('\\', '/', $rule);
+            if (preg_match('#^[a-z][a-z0-9+.-]*://#i', $rule)) {
+                return '';
+            }
+
+            if (false !== strpos($rule, '?') || false !== strpos($rule, '#')) {
+                return '';
+            }
+
+            if (preg_match('/[[:cntrl:]\s]/u', $rule)) {
+                return '';
+            }
+
+            if ('/' !== substr($rule, 0, 1)) {
+                return '';
+            }
+
+            if ('/' === $rule) {
+                return '';
+            }
+
+            if (false !== strpos($rule, '//')) {
+                return '';
+            }
+
+            $wildcard = false;
+            if (substr($rule, -2) === '/*') {
+                $wildcard = true;
+                $rule = substr($rule, 0, -2);
+            } elseif (false !== strpos($rule, '*')) {
+                return '';
+            }
+
+            if ('' === $rule || '/' === $rule) {
+                return '';
+            }
+
+            foreach (explode('/', trim($rule, '/')) as $segment) {
+                if ('' === $segment || '.' === $segment || '..' === $segment) {
+                    return '';
+                }
+            }
+
+            if ($wildcard) {
+                $rule = rtrim($rule, '/') . '/*';
+            }
+
+            return $rule;
+        }
+
+        private static function sanitize_excluded_paths_setting($value, $limit = 200)
+        {
+            return self::normalize_multiline_setting_with_callback($value, array(__CLASS__, 'sanitize_excluded_path_line'), $limit);
+        }
+
+        private static function sanitize_bounded_integer_setting($value, $default, $min, $max)
+        {
+            $default = (int) $default;
+            $min = (int) $min;
+            $max = (int) $max;
+
+            if ($min > $max) {
+                $swap = $min;
+                $min = $max;
+                $max = $swap;
+            }
+
+            if ($default < $min || $default > $max) {
+                $default = max($min, min($max, $default));
+            }
+
+            if (is_string($value)) {
+                $value = trim($value);
+                if ('' === $value || !preg_match('/^\d+$/', $value)) {
+                    return $default;
+                }
+                $value = (int) $value;
+            } elseif (is_int($value)) {
+                $value = (int) $value;
+            } else {
+                return $default;
+            }
+
+            if ($value < $min || $value > $max) {
+                return $default;
+            }
+
+            return $value;
+        }
+
+        private static function parse_textarea_setting($value)
+        {
+            $normalized = self::normalize_textarea_setting($value);
+            if ('' === $normalized) {
+                return array();
+            }
+
+            return array_values(array_unique(array_filter(array_map('trim', explode("\n", $normalized)))));
+        }
+
+
+        private static function sanitize_object_cache_backend($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('redis', 'apcu', 'disk'), true) ? $value : 'redis';
+        }
+
+        private static function sanitize_object_cache_fallback_backend($value)
+        {
+            $value = strtolower(trim((string) $value));
+            if ('none' === $value || 'runtime' === $value || '' === $value) {
+                return 'none';
+            }
+            return in_array($value, array('apcu', 'disk'), true) ? $value : 'apcu';
+        }
+
+        private static function sanitize_homepage_css_bundle_mode($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('safe', 'aggressive', 'full'), true) ? $value : 'safe';
+        }
+
+        private static function sanitize_css_bundle_scope($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('homepage', 'shared', 'per-page'), true) ? $value : 'homepage';
+        }
+
+        private static function sanitize_redis_host($value)
+        {
+            $value = trim((string) $value);
+            if ('' === $value) {
+                return '127.0.0.1';
+            }
+
+            $value = preg_replace('/[\r\n\t\0\x0B]+/', '', $value);
+            $value = trim((string) $value);
+            if ('' === $value) {
+                return '127.0.0.1';
+            }
+
+            if (strlen($value) > 255) {
+                $value = substr($value, 0, 255);
+            }
+
+            return $value;
+        }
+
+        private static function sanitize_redis_database($value)
+        {
+            return self::sanitize_bounded_integer_setting($value, 0, 0, 15);
+        }
+
+        private static function sanitize_redis_prefix($value)
+        {
+            $value = trim((string) $value);
+            if ('' === $value) {
+                return '';
+            }
+
+            $value = preg_replace('/[^A-Za-z0-9:_\-]/', '', $value);
+            $value = trim((string) $value, ':');
+
+            return '' === $value ? '' : $value . ':';
+        }
+
+        private static function get_redis_support_status()
+        {
+            $available = class_exists('Redis') || extension_loaded('redis');
+            $message = '';
+
+            if (!$available) {
+                $message = self::maybe_translate('PHP Redis extension is not loaded on this server.');
+            }
+
+            return array(
+                'available' => $available,
+                'message'   => $message,
+            );
+        }
+
+        private static function sanitize_varnish_mode($value)
+        {
+            return ('admin' === strtolower(trim((string) $value))) ? 'admin' : 'http';
+        }
+
+        private static function get_default_varnish_http_endpoint()
+        {
+            return '127.0.0.1:82';
+        }
+
+        private static function get_default_varnish_admin_endpoint()
+        {
+            return '127.0.0.1:6082';
+        }
+
+        private static function get_varnish_http_allowed_ports()
+        {
+            $ports = apply_filters('ucwp_varnish_http_endpoint_ports', array(82, 6081));
+            if (!is_array($ports)) {
+                $ports = array(82, 6081);
+            }
+
+            $ports = array_values(array_unique(array_filter(array_map('intval', $ports))));
+            return !empty($ports) ? $ports : array(82, 6081);
+        }
+
+        private static function normalize_varnish_compare_host($host)
+        {
+            $host = strtolower(trim((string) $host));
+            $host = trim($host, "[] \t\n\r\0\x0B.");
+            if (0 === strpos($host, 'www.')) {
+                $host = substr($host, 4);
+            }
+            return $host;
+        }
+
+        private static function get_varnish_site_host_candidates()
+        {
+            $hosts = array();
+            $home_host = wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ($home_host) {
+                $hosts[] = self::normalize_varnish_compare_host($home_host);
+            }
+
+            foreach (array('HTTP_HOST', 'SERVER_NAME', 'SERVER_ADDR', 'LOCAL_ADDR') as $key) {
+                if (!empty($_SERVER[$key]) && is_scalar($_SERVER[$key])) {
+                    $hosts[] = self::normalize_varnish_compare_host((string) wp_unslash($_SERVER[$key]));
+                }
+            }
+
+            $expanded = array();
+            foreach ($hosts as $host) {
+                if ('' === $host) {
+                    continue;
+                }
+                $expanded[] = $host;
+                $expanded[] = 'www.' . $host;
+            }
+
+            return array_values(array_unique(array_filter($expanded)));
+        }
+
+        private static function get_varnish_http_endpoint_block_message($host, $port)
+        {
+            $host = self::normalize_varnish_compare_host($host);
+            $port = (int) $port;
+
+            if ('' === $host || $port <= 0) {
+                return self::maybe_translate('Invalid Varnish HTTP endpoint. Use host:port, for example 127.0.0.1:82.');
+            }
+
+            $allowed_ports = self::get_varnish_http_allowed_ports();
+            if (!in_array($port, $allowed_ports, true)) {
+                return self::maybe_translate_sprintf('Blocked unsafe Varnish HTTP endpoint %1$s:%2$d. HTTP mode may only target a Varnish listener on port %3$s. Do not use the public WordPress frontend on ports 80/443; use 127.0.0.1:82 for HTTP mode or Admin mode 127.0.0.1:6082.', $host, $port, implode('/', $allowed_ports));
+            }
+
+            if (in_array($host, self::get_varnish_site_host_candidates(), true) && in_array($port, array(80, 443, 8443), true)) {
+                return self::maybe_translate_sprintf('Blocked unsafe Varnish endpoint %1$s:%2$d because it points to the public WordPress frontend. Use 127.0.0.1:82 for HTTP mode or Admin mode 127.0.0.1:6082.', $host, $port);
+            }
+
+            return '';
+        }
+
+        private static function validate_varnish_http_endpoint($terminal)
+        {
+            $terminal = trim((string) $terminal);
+            if ('' === $terminal) {
+                return array('valid' => false, 'message' => self::maybe_translate('Empty Varnish HTTP endpoint. Use 127.0.0.1:82.'));
+            }
+
+            list($host, $port) = self::parse_varnish_terminal($terminal);
+            $message = self::get_varnish_http_endpoint_block_message($host, $port);
+            if ('' !== $message) {
+                return array('valid' => false, 'message' => $message, 'host' => $host, 'port' => $port);
+            }
+
+            if (!ucwp_is_allowed_socket_target($host, $port)) {
+                return array('valid' => false, 'message' => self::maybe_translate_sprintf('Varnish HTTP endpoint %1$s:%2$d is not allowed by the socket target allowlist.', $host, $port), 'host' => $host, 'port' => $port);
+            }
+
+            return array('valid' => true, 'message' => '', 'host' => $host, 'port' => $port);
+        }
+
+        private static function get_varnish_endpoint_diagnostics($servers, $mode = 'http')
+        {
+            $mode = self::sanitize_varnish_mode($mode);
+            $servers = self::sanitize_varnish_servers_string($servers, $mode);
+            $items = array_values(array_filter(array_map('trim', preg_split('/\s+/', (string) $servers))));
+            $messages = array();
+            $unsafe = false;
+
+            if ('http' === $mode) {
+                foreach ($items as $server) {
+                    $check = self::validate_varnish_http_endpoint($server);
+                    if (empty($check['valid'])) {
+                        $unsafe = true;
+                        $messages[] = (string) ($check['message'] ?? 'Invalid or unsafe Varnish HTTP endpoint.');
+                    }
+                }
+            }
+
+            $messages = array_values(array_unique(array_filter($messages)));
+
+            return array(
+                'unsafe'       => $unsafe,
+                'messages'     => $messages,
+                'allowedPorts' => self::get_varnish_http_allowed_ports(),
+            );
+        }
+
+        private static function validate_varnish_settings(array $settings)
+        {
+            if (empty($settings['varnishCliEnabled'])) {
+                return true;
+            }
+
+            $mode = self::sanitize_varnish_mode($settings['varnishCliMode'] ?? 'http');
+            if ('http' !== $mode) {
+                return true;
+            }
+
+            $diagnostics = self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'] ?? '', $mode);
+            if (!empty($diagnostics['unsafe'])) {
+                $message = !empty($diagnostics['messages'][0]) ? (string) $diagnostics['messages'][0] : self::maybe_translate('Unsafe Varnish HTTP endpoint blocked.');
+                return new WP_Error('ucwp_unsafe_varnish_http_endpoint', $message);
+            }
+
+            return true;
+        }
+
+        private static function get_legacy_cache_conflict_status()
+        {
+            $option_names = array(
+                'purge_varnish_action',
+                'purge_varnish_expire',
+                'varnish_bantype',
+                'varnish_control_key',
+                'varnish_control_terminal',
+                'varnish_socket_timeout',
+                'varnish_version',
+                'vhp_varnish_debug',
+                'w3x_varnish_cli_secret',
+                'w3x_varnish_cli_timeout_ms',
+                'w3x_varnish_http_servers',
+                'w3tc_state',
+            );
+
+            $found_options = array();
+            foreach ($option_names as $option_name) {
+                if (false !== get_option($option_name, false)) {
+                    $found_options[] = $option_name;
+                }
+            }
+
+            $found_plugins = array();
+            if (defined('WP_PLUGIN_DIR')) {
+                foreach (array('w3-total-cache', 'w3tc-varnish-cli-helper') as $plugin_dir) {
+                    if (file_exists(trailingslashit(WP_PLUGIN_DIR) . $plugin_dir)) {
+                        $found_plugins[] = $plugin_dir;
+                    }
+                }
+            }
+
+            return array(
+                'detected' => !empty($found_options) || !empty($found_plugins),
+                'options'  => $found_options,
+                'plugins'  => $found_plugins,
+                'message'  => (!empty($found_options) || !empty($found_plugins)) ? self::maybe_translate('Old W3 Total Cache / Varnish helper leftovers detected. Remove them before enabling Varnish or Object Cache to avoid purge loops or Redis auth conflicts.') : '',
+            );
+        }
+
+        private static function sanitize_varnish_servers_string($value, $mode = 'http')
+        {
+            $mode = self::sanitize_varnish_mode($mode);
+
+            if (is_array($value)) {
+                $value = implode("
+", array_map('strval', $value));
+            }
+
+            $value = str_replace(array("
+", "
+", ",", ";", "	"), array("
+", "
+", "
+", "
+", "
+"), (string) $value);
+            $servers = preg_split('/\s+/', $value);
+            if (!is_array($servers)) {
+                return '';
+            }
+
+            $normalized = array();
+            foreach ($servers as $server) {
+                $server = trim((string) $server);
+                if ('' === $server) {
+                    continue;
+                }
+
+                $server = preg_replace('#^[a-z]+://#i', '', $server);
+                $server = preg_replace('#/.*$#', '', $server);
+                $server = preg_replace('/[^A-Za-z0-9\.\-:\[\]]/', '', $server);
+                if ('' === $server) {
+                    continue;
+                }
+
+                $normalized[] = $server;
+            }
+
+            if (empty($normalized)) {
+                $normalized[] = ('admin' === $mode) ? self::get_default_varnish_admin_endpoint() : self::get_default_varnish_http_endpoint();
+            }
+
+            return implode("
+", array_values(array_unique($normalized)));
+        }
+
+
+        private static function sanitize_media_output_mode($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('auto', 'avif', 'webp'), true) ? $value : 'auto';
+        }
+
+        private static function normalize_boolean_setting_value($value, $default = false)
+        {
+            if (is_bool($value)) {
+                return $value;
+            }
+
+            if (is_int($value) || is_float($value)) {
+                return 0 !== (int) $value;
+            }
+
+            if (is_string($value)) {
+                $normalized = strtolower(trim($value));
+                if ('' === $normalized) {
+                    return (bool) $default;
+                }
+
+                if (in_array($normalized, array('1', 'true', 'yes', 'on', 'enabled'), true)) {
+                    return true;
+                }
+
+                if (in_array($normalized, array('0', 'false', 'no', 'off', 'disabled'), true)) {
+                    return false;
+                }
+            }
+
+            if (null === $value) {
+                return (bool) $default;
+            }
+
+            return !empty($value);
+        }
+
+        public static function sanitize_dashboard_settings(array $settings)
+        {
+            $raw_settings = $settings;
+            $defaults = self::get_dashboard_defaults();
+            $settings = wp_parse_args($settings, $defaults);
+
+            if (array_key_exists('cronWarmPagesPerMinute', $raw_settings)) {
+                $settings['cronWarmPagesPerMinute'] = $raw_settings['cronWarmPagesPerMinute'];
+            }
+
+            if (array_key_exists('scheduledWarmLimit', $raw_settings)) {
+                $settings['scheduledWarmLimit'] = $raw_settings['scheduledWarmLimit'];
+            }
+
+            if (array_key_exists('cssBundleCleanupGraceHours', $raw_settings)) {
+                $settings['cssBundleCleanupGraceHours'] = $raw_settings['cssBundleCleanupGraceHours'];
+            }
+
+            if (array_key_exists('cssBundleCleanupDeleteLimit', $raw_settings)) {
+                $settings['cssBundleCleanupDeleteLimit'] = $raw_settings['cssBundleCleanupDeleteLimit'];
+            }
+
+            $boolean_keys = array(
+                'pageCacheEnabled',
+                'objectCacheEnabled',
+                'brotliEnabled',
+                'gzipEnabled',
+                'cacheStatsEnabled',
+                'mediaOptimizationEnabled',
+                'mediaGenerateOnUploadEnabled',
+                'mediaGenerateOnDemandEnabled',
+                'deferJsEnabled',
+                'deferAllJsEnabled',
+                'delaySafeThirdPartyJsEnabled',
+                'lazyMailerliteNonceEnabled',
+                'delayFunctionalThirdPartyJsEnabled',
+                'asyncExternalScriptsEnabled',
+                'homepageCssBundleEnabled',
+                'homepageCssBundleInlineEnabled',
+                'leftoverCssBundleEnabled',
+                'delayIconFontsEnabled',
+                'delayIconFontsAutoDetectEnabled',
+                'pageCssBundleOnEntryEnabled',
+                'frontendSafeModeEnabled',
+                'sliderSafeModeEnabled',
+                'clsDimensionsEnabled',
+                'asyncCssEnabled',
+                'aggressiveAsyncCssEnabled',
+                'delayNonCriticalJsEnabled',
+                'lcpImagePriorityEnabled',
+                'lcpBoundaryDeferEnabled',
+                'mainThreadReliefEnabled',
+                'criticalRequestChainReliefEnabled',
+                'assetChainCleanupEnabled',
+                'assetCleanupWooProductAssetsEnabled',
+                'assetCleanupProductFilterAssetsEnabled',
+                'assetCleanupWooBlocksCssEnabled',
+                'googleFontsSwapEnabled',
+                'googleFontsLocalOptimizationEnabled',
+                'selfHostedFontCssOptimizationEnabled',
+                'selfHostedFontRuntimeRewriteEnabled',
+                'speculationRulesEnabled',
+                'browserCacheRulesEnabled',
+                'varnishCliEnabled',
+                'varnishCliDebug',
+                'preRenderOnSave',
+                'woocommerceSafeModeEnabled',
+                'cacheCleanupEnabled',
+                'apcuFlushOnScheduledCleanup',
+                'cronWarmEnabled',
+                'cronWarmStartAfterCleanup',
+                'cronWarmStartAfterManualPurge',
+                'staleWhileRevalidateEnabled',
+                'cacheQueryStringsEnabled',
+                'redisUseTls',
+                'redisPersistent',
+            );
+
+            foreach ($boolean_keys as $key) {
+                $default = array_key_exists($key, $defaults) ? $defaults[$key] : false;
+                $settings[$key] = self::normalize_boolean_setting_value($settings[$key], $default);
+            }
+
+            // Defer and Delay controls are intentionally independent. Delay third-party and
+            // delay non-critical/local scripts must not silently enable each other or enable
+            // native defer, because that makes frontend regressions hard to isolate.
+
+            $settings['cacheCleanupIntervalHours'] = max(1, min(720, absint($settings['cacheCleanupIntervalHours'])));
+            $settings['cssBundleCleanupGraceHours'] = self::sanitize_bounded_integer_setting($settings['cssBundleCleanupGraceHours'], $defaults['cssBundleCleanupGraceHours'], 1, 168);
+            $settings['cssBundleCleanupDeleteLimit'] = self::sanitize_bounded_integer_setting($settings['cssBundleCleanupDeleteLimit'], $defaults['cssBundleCleanupDeleteLimit'], 5, 500);
+            $settings['cronWarmPagesPerMinute']    = max(0, min(600, absint($settings['cronWarmPagesPerMinute'])));
+            $settings['scheduledWarmLimit']        = max(0, min(5000, absint($settings['scheduledWarmLimit'])));
+            $settings['varnishCliTimeoutSeconds']  = max(1, min(30, absint($settings['varnishCliTimeoutSeconds'])));
+            $settings['cacheFreshTtlMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1, 1440);
+            $settings['cacheMaxStaleMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], (int) $settings['cacheFreshTtlMinutes'], 10080);
+            $settings['cacheExceptionPaths']       = self::sanitize_excluded_paths_setting($settings['cacheExceptionPaths']);
+            $settings['cacheExceptionQueryArgs']   = self::sanitize_setting_key_list($settings['cacheExceptionQueryArgs']);
+            $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
+            $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
+            $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
+            $old_default_js_exclusions = self::normalize_textarea_setting(self::get_default_js_delay_defer_exclusion_patterns());
+            if ($old_default_js_exclusions === $settings['deferJsExcludeList']) {
+                $settings['deferJsExcludeList'] = '';
+            }
+            // Manual JS Delay / Defer Exclusions must be durable. Do not strip
+            // lines while Defer all JS is enabled: this field is the user's final
+            // escape hatch for aggressive defer regressions such as inline globals.
+            $settings['deferJsExcludeList'] = self::normalize_textarea_setting($settings['deferJsExcludeList']);
+            $settings['delayNonCriticalJsExcludeList'] = '';
+            $settings['delaySafeThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delaySafeThirdPartyJsPatterns']);
+            $settings['delayFunctionalThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delayFunctionalThirdPartyJsPatterns']);
+            $settings['delayThirdPartyJsExcludeList'] = self::normalize_textarea_setting($settings['delayThirdPartyJsExcludeList']);
+            $settings['homepageCssBundleExcludeList'] = self::normalize_textarea_setting($settings['homepageCssBundleExcludeList']);
+            $settings['delayIconFontsList'] = self::normalize_textarea_setting($settings['delayIconFontsList']);
+            $settings['delayIconFontsExcludeList'] = self::normalize_textarea_setting($settings['delayIconFontsExcludeList']);
+            $settings['homepageCssBundleMode'] = self::sanitize_homepage_css_bundle_mode($settings['homepageCssBundleMode']);
+            $settings['cssBundleScope'] = self::sanitize_css_bundle_scope($settings['cssBundleScope'] ?? 'homepage');
+            $settings['asyncCssExcludeList']       = self::normalize_textarea_setting($settings['asyncCssExcludeList']);
+            $settings['aggressiveAsyncCssExcludeList'] = self::normalize_textarea_setting($settings['aggressiveAsyncCssExcludeList']);
+            $settings['delayNonCriticalJsExcludeList'] = self::normalize_textarea_setting($settings['delayNonCriticalJsExcludeList']);
+            $settings['assetCleanupExcludeList'] = self::normalize_textarea_setting($settings['assetCleanupExcludeList']);
+            $settings['googleFontsAdditionalScanUrls'] = self::normalize_textarea_setting($settings['googleFontsAdditionalScanUrls']);
+            $settings['lcpImagePriorityOverride'] = self::normalize_textarea_setting($settings['lcpImagePriorityOverride']);
+            $settings['manualLcpHeroSelector'] = self::normalize_textarea_setting($settings['manualLcpHeroSelector']);
+            $settings['criticalResourcePreloadList'] = self::normalize_textarea_setting($settings['criticalResourcePreloadList']);
+            $settings['criticalFetchPreloadList'] = self::normalize_textarea_setting($settings['criticalFetchPreloadList']);
+            $settings['criticalRequestChainDelayList'] = self::normalize_textarea_setting($settings['criticalRequestChainDelayList']);
+            $settings['mediaOutputMode']           = self::sanitize_media_output_mode($settings['mediaOutputMode']);
+            $settings['objectCacheBackend']        = self::sanitize_object_cache_backend($settings['objectCacheBackend']);
+            $settings['objectCacheFallbackBackend'] = self::sanitize_object_cache_fallback_backend($settings['objectCacheFallbackBackend'] ?? 'apcu');
+            $settings['redisHost']                 = self::sanitize_redis_host($settings['redisHost']);
+            $settings['redisPort']                 = self::sanitize_bounded_integer_setting($settings['redisPort'], $defaults['redisPort'], 1, 65535);
+            $settings['redisPassword']             = trim((string) $settings['redisPassword']);
+            $settings['redisDatabase']             = self::sanitize_redis_database($settings['redisDatabase']);
+            $settings['redisPrefix']               = self::sanitize_redis_prefix($settings['redisPrefix']);
+            $settings['redisUseTls']               = !empty($settings['redisUseTls']);
+            $settings['redisPersistent']           = !empty($settings['redisPersistent']);
+            $settings['redisConnectTimeoutMs']     = self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], $defaults['redisConnectTimeoutMs'], 50, 5000);
+            $settings['redisReadTimeoutMs']        = self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], $defaults['redisReadTimeoutMs'], 50, 5000);
+            $settings['varnishCliMode']            = self::sanitize_varnish_mode($settings['varnishCliMode']);
+            $settings['varnishCliServers']         = self::sanitize_varnish_servers_string($settings['varnishCliServers'], $settings['varnishCliMode']);
+            $settings['varnishCliKey']             = trim((string) $settings['varnishCliKey']);
+            $settings['varnishCliMethod']          = ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN';
+
+            // LCP Boundary Defer stays unavailable in broad Frontend Safe Mode, but it remains
+            // user-controllable with Slider/Hero Safe Mode. Slider/Hero mode now uses the same
+            // conservative boundary deferral path while keeping slider/runtime assets protected.
+            if (!empty($settings['frontendSafeModeEnabled'])) {
+                $settings['lcpBoundaryDeferEnabled'] = false;
+            }
+
+            $compression_support = self::get_compression_support_status();
+            if (empty($compression_support['brotli'])) {
+                $settings['brotliEnabled'] = false;
+            }
+            if (empty($compression_support['gzip'])) {
+                $settings['gzipEnabled'] = false;
+            }
+
+            $frontend_compression = self::get_frontend_compression_probe_status(false);
+            if (!empty($frontend_compression['brotli']) || !empty($frontend_compression['brokenBrotli'])) {
+                $settings['brotliEnabled'] = false;
+            }
+            if (!empty($frontend_compression['gzip']) || !empty($frontend_compression['brokenGzip'])) {
+                $settings['gzipEnabled'] = false;
+            }
+
+            $live_support_checks = self::should_use_live_settings_support_checks();
+            ucwp_request_profile_checkpoint(
+                $live_support_checks ? 'sanitize_settings_before_object_cache_support_live' : 'sanitize_settings_before_object_cache_support_cached'
+            );
+            $object_cache_support = self::get_object_cache_support_status($live_support_checks);
+            ucwp_request_profile_checkpoint(
+                $live_support_checks ? 'sanitize_settings_after_object_cache_support_live' : 'sanitize_settings_after_object_cache_support_cached',
+                array(
+                    'available' => !empty($object_cache_support['available']) ? 'true' : 'false',
+                    'source' => isset($object_cache_support['source']) ? (string) $object_cache_support['source'] : '',
+                )
+            );
+            if (empty($object_cache_support['available'])) {
+                $settings['objectCacheEnabled'] = false;
+            }
+
+            $media_support = self::get_media_support_status();
+            if (empty($media_support['supported'])) {
+                $settings['mediaOptimizationEnabled'] = false;
+                $settings['mediaGenerateOnUploadEnabled'] = false;
+                $settings['mediaGenerateOnDemandEnabled'] = false;
+            }
+
+            ucwp_request_profile_checkpoint('sanitize_settings_before_varnish_support');
+            $varnish_support = self::get_varnish_support_status();
+            ucwp_request_profile_checkpoint('sanitize_settings_after_varnish_support', array('available' => !empty($varnish_support['available']) ? 'true' : 'false'));
+            if (empty($varnish_support['available'])) {
+                $settings['varnishCliEnabled'] = false;
+            }
+
+            $settings['cronWarmStartAfterCleanup'] = !empty($settings['cronWarmStartAfterCleanup']);
+            $settings['cronWarmStartAfterManualPurge'] = !empty($settings['cronWarmStartAfterManualPurge']);
+
+            // Keep the public settings payload canonical. Stored options may still contain
+            // old keys from previous local builds, but they must not leak back to CLI, REST,
+            // exports, or runtime settings after sanitization.
+            $settings = array_intersect_key($settings, $defaults);
+
+            return $settings;
+        }
+
+        public static function reset_settings_cache()
+        {
+            self::$dashboard_settings_cache = null;
+            self::$settings_cache = null;
+            delete_transient('ucwp_frontend_compression_probe_v1');
+            delete_transient('ucwp_object_cache_support_status_v1');
+            ucwp_reset_loopback_ssl_status();
+
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_settings_cache')) {
+                Ultra_Cache_Object_Cache_Manager::reset_settings_cache();
+            }
+        }
+
+        public static function get_dashboard_settings()
+        {
+            ucwp_request_profile_checkpoint('dashboard_settings_start');
+            if (null !== self::$dashboard_settings_cache) {
+                ucwp_request_profile_checkpoint('dashboard_settings_cache_hit');
+                return self::$dashboard_settings_cache;
+            }
+
+            ucwp_request_profile_checkpoint('dashboard_settings_before_get_option');
+            $saved = get_option(UCWP_SETTINGS_KEY, array());
+            ucwp_request_profile_checkpoint('dashboard_settings_after_get_option', array(
+                'raw_is_array' => is_array($saved) ? 'true' : 'false',
+                'raw_count' => is_array($saved) ? count($saved) : 0,
+            ));
+            $raw_saved = is_array($saved) ? $saved : array();
+            ucwp_request_profile_checkpoint('dashboard_settings_before_sanitize');
+            $sanitized = self::sanitize_dashboard_settings($raw_saved);
+            self::migrate_stored_redis_secret_to_runtime_file($raw_saved, $sanitized);
+            self::migrate_stored_varnish_secret_to_runtime_file($raw_saved, $sanitized);
+            $runtime_redis_password = self::get_runtime_redis_password();
+            if ('' !== $runtime_redis_password) {
+                $sanitized['redisPassword'] = $runtime_redis_password;
+            }
+            $runtime_varnish_secret = self::get_runtime_varnish_admin_secret();
+            if ('' !== $runtime_varnish_secret) {
+                $sanitized['varnishCliKey'] = $runtime_varnish_secret;
+            }
+            ucwp_request_profile_checkpoint('dashboard_settings_after_sanitize', array(
+                'sanitized_count' => is_array($sanitized) ? count($sanitized) : 0,
+            ));
+
+            // This private build does not need a backward-compatibility layer. Keep the
+            // stored option canonical so invalid combinations from previous local builds
+            // do not remain visible in direct option reads, CLI checks, or diagnostics.
+            // Redis and Varnish admin secrets are intentionally not persisted in wp_options;
+            // hydrated server-side settings read them from the off-docroot runtime secrets file.
+            $canonical_for_storage = $sanitized;
+            $canonical_for_storage['redisPassword'] = '';
+            $canonical_for_storage['varnishCliKey'] = '';
+            ucwp_request_profile_checkpoint('dashboard_settings_before_canonical_compare');
+            if (!is_array($saved) || wp_json_encode($raw_saved) !== wp_json_encode($canonical_for_storage)) {
+                ucwp_request_profile_checkpoint('dashboard_settings_before_update_option');
+                update_option(UCWP_SETTINGS_KEY, $canonical_for_storage, false);
+                ucwp_request_profile_checkpoint('dashboard_settings_after_update_option');
+            }
+            ucwp_request_profile_checkpoint('dashboard_settings_after_canonical_compare');
+
+            self::$dashboard_settings_cache = $sanitized;
+
+            ucwp_request_profile_checkpoint('dashboard_settings_end');
+            return self::$dashboard_settings_cache;
+        }
+
+        private static function get_secret_setting_keys()
+        {
+            return array(
+                'redisPassword',
+                'varnishCliKey',
+            );
+        }
+
+        private static function get_secret_configuration_flag_map()
+        {
+            return array(
+                'redisPassword' => 'redisPasswordConfigured',
+                'varnishCliKey' => 'varnishCliKeyConfigured',
+            );
+        }
+
+        private static function merge_protected_dashboard_settings(array $incoming, array $existing)
+        {
+            $merged = $incoming;
+            $flag_map = self::get_secret_configuration_flag_map();
+
+            foreach (self::get_secret_setting_keys() as $key) {
+                $clear_flag = 'clear' . ucfirst($key);
+                $should_clear = !empty($incoming[$clear_flag]);
+
+                if ($should_clear) {
+                    $merged[$key] = '';
+                    continue;
+                }
+
+                if (!array_key_exists($key, $incoming)) {
+                    if (array_key_exists($key, $existing)) {
+                        $merged[$key] = $existing[$key];
+                    }
+                    continue;
+                }
+
+                if ('' === trim((string) $incoming[$key]) && array_key_exists($key, $existing) && '' !== trim((string) $existing[$key])) {
+                    $merged[$key] = $existing[$key];
+                }
+            }
+
+            return $merged;
+        }
+
+        public static function get_dashboard_settings_for_client()
+        {
+            $settings = self::get_dashboard_settings();
+            $flag_map = self::get_secret_configuration_flag_map();
+
+            foreach (self::get_secret_setting_keys() as $key) {
+                $flag = isset($flag_map[$key]) ? $flag_map[$key] : '';
+                if ('' !== $flag) {
+                    $settings[$flag] = ('' !== trim((string) ($settings[$key] ?? '')));
+                }
+                $settings[$key] = '';
+            }
+
+            return $settings;
+        }
+
+        public static function get_dashboard_defaults_for_client()
+        {
+            $settings = self::sanitize_dashboard_settings(self::get_dashboard_defaults());
+            $flag_map = self::get_secret_configuration_flag_map();
+
+            foreach (self::get_secret_setting_keys() as $key) {
+                $flag = isset($flag_map[$key]) ? $flag_map[$key] : '';
+                if ('' !== $flag) {
+                    $settings[$flag] = false;
+                }
+                $settings[$key] = '';
+            }
+
+            return $settings;
+        }
+
+        public static function get_settings()
+        {
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_start');
+            if (null !== self::$settings_cache) {
+                ucwp_request_profile_settings_checkpoint('wp_get_settings_cache_hit');
+                return self::$settings_cache;
+            }
+
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_before_dashboard_settings');
+            $ui = self::get_dashboard_settings();
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_after_dashboard_settings', array(
+                'dashboard_settings_count' => is_array($ui) ? count($ui) : 0,
+            ));
+
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_before_runtime_textareas');
+            $excluded_paths = self::parse_textarea_setting($ui['cacheExceptionPaths']);
+            if (empty($excluded_paths)) {
+                $excluded_paths = self::get_default_excluded_paths();
+            }
+
+            $excluded_query_args = self::parse_textarea_setting($ui['cacheExceptionQueryArgs']);
+            if (empty($excluded_query_args)) {
+                $excluded_query_args = self::get_default_excluded_query_args();
+            }
+
+            $query_allowlist = self::parse_textarea_setting(self::sanitize_setting_key_list($ui['cacheQueryStringAllowlist']));
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_after_runtime_textareas', array(
+                'excluded_paths_count' => count($excluded_paths),
+                'excluded_query_args_count' => count($excluded_query_args),
+                'query_allowlist_count' => count($query_allowlist),
+            ));
+            $defer_js_enabled = !empty($ui['deferJsEnabled']);
+            $defer_all_js_enabled = $defer_js_enabled && !empty($ui['deferAllJsEnabled']);
+            $delay_safe_third_party_js_enabled = !empty($ui['delaySafeThirdPartyJsEnabled']);
+            $delay_functional_third_party_js_enabled = !empty($ui['delayFunctionalThirdPartyJsEnabled']);
+            $delay_non_critical_js_enabled = !empty($ui['delayNonCriticalJsEnabled']);
+            $defer_stage_aggressive = $delay_non_critical_js_enabled;
+            $defer_stage_balanced = $delay_safe_third_party_js_enabled || $delay_functional_third_party_js_enabled || $defer_stage_aggressive;
+            $defer_stage_safe = $defer_js_enabled || $defer_stage_balanced;
+
+            self::$settings_cache = array(
+                'enabled'                      => !empty($ui['pageCacheEnabled']),
+                'object_cache_enabled'         => !empty($ui['objectCacheEnabled']),
+                'object_cache_backend'         => self::sanitize_object_cache_backend($ui['objectCacheBackend']),
+                'object_cache_fallback_backend'=> self::sanitize_object_cache_fallback_backend($ui['objectCacheFallbackBackend'] ?? 'apcu'),
+                'redis_host'                   => self::sanitize_redis_host($ui['redisHost']),
+                'redis_port'                   => self::sanitize_bounded_integer_setting($ui['redisPort'], 6379, 1, 65535),
+                'redis_password'               => trim((string) $ui['redisPassword']),
+                'redis_database'               => self::sanitize_redis_database($ui['redisDatabase']),
+                'redis_prefix'                 => self::sanitize_redis_prefix($ui['redisPrefix']),
+                'redis_use_tls'                => !empty($ui['redisUseTls']),
+                'redis_persistent'             => !empty($ui['redisPersistent']),
+                'redis_connect_timeout_ms'     => self::sanitize_bounded_integer_setting($ui['redisConnectTimeoutMs'], 200, 50, 5000),
+                'redis_read_timeout_ms'        => self::sanitize_bounded_integer_setting($ui['redisReadTimeoutMs'], 200, 50, 5000),
+                'cache_logged_in_users'        => false,
+                'cache_query_strings'          => !empty($ui['cacheQueryStringsEnabled']),
+                'cache_query_allowlist'        => $query_allowlist,
+                'gzip_enabled'                 => !empty($ui['gzipEnabled']),
+                'brotli_enabled'               => !empty($ui['brotliEnabled']),
+                'cache_stats_enabled'          => !empty($ui['cacheStatsEnabled']),
+                'preload_on_save'              => !empty($ui['preRenderOnSave']),
+                'defer_js'                     => $defer_js_enabled,
+                'defer_all_js'                 => $defer_all_js_enabled,
+                'defer_stage_safe'             => $defer_stage_safe,
+                'defer_stage_balanced'         => $defer_stage_balanced,
+                'defer_stage_aggressive'       => $defer_stage_aggressive,
+                'defer_js_force_list'          => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsForceList'])),
+                'defer_js_exclude_list'        => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
+                'delay_safe_third_party_js'         => $delay_safe_third_party_js_enabled,
+                'lazy_mailerlite_nonce'        => !empty($ui['lazyMailerliteNonceEnabled']),
+                'delay_safe_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delaySafeThirdPartyJsPatterns'])),
+                'delay_functional_third_party_js' => $delay_functional_third_party_js_enabled,
+                'delay_functional_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayFunctionalThirdPartyJsPatterns'])),
+                'delay_third_party_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayThirdPartyJsExcludeList'])),
+                'async_external_scripts'       => !empty($ui['asyncExternalScriptsEnabled']),
+                'homepage_css_bundle'         => !empty($ui['homepageCssBundleEnabled']),
+                'homepage_css_bundle_inline'  => !empty($ui['homepageCssBundleInlineEnabled']),
+                'leftover_css_bundle'       => !empty($ui['leftoverCssBundleEnabled']),
+                'homepage_css_bundle_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['homepageCssBundleExcludeList'])),
+                'delay_icon_fonts'            => !empty($ui['delayIconFontsEnabled']),
+                'delay_icon_fonts_auto_detect' => !empty($ui['delayIconFontsAutoDetectEnabled']),
+                'delay_icon_fonts_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsList'])),
+                'delay_icon_fonts_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsExcludeList'])),
+                'homepage_css_bundle_mode'    => self::sanitize_homepage_css_bundle_mode($ui['homepageCssBundleMode']),
+                'css_bundle_scope'            => self::sanitize_css_bundle_scope($ui['cssBundleScope'] ?? 'homepage'),
+                'page_css_bundle_on_entry'    => !empty($ui['pageCssBundleOnEntryEnabled']),
+                'frontend_safe_mode'          => !empty($ui['frontendSafeModeEnabled']),
+                'slider_safe_mode'            => !empty($ui['sliderSafeModeEnabled']),
+                'cls_dimensions'               => !empty($ui['clsDimensionsEnabled']),
+                'async_css'                    => !empty($ui['asyncCssEnabled']),
+                'async_css_exclude_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['asyncCssExcludeList'])),
+                'aggressive_async_css'         => !empty($ui['aggressiveAsyncCssEnabled']),
+                'aggressive_async_css_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['aggressiveAsyncCssExcludeList'])),
+                'delay_non_critical_js'        => $delay_non_critical_js_enabled,
+                'delay_non_critical_js_aggressive' => $defer_stage_aggressive,
+                'delay_non_critical_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
+                'lcp_image_priority'           => !empty($ui['lcpImagePriorityEnabled']),
+                'lcp_boundary_defer'           => !empty($ui['lcpBoundaryDeferEnabled']),
+                'lcp_image_priority_override_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['lcpImagePriorityOverride'])),
+                'manual_lcp_hero_selector_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['manualLcpHeroSelector'] ?? '')),
+                'main_thread_relief'          => !empty($ui['mainThreadReliefEnabled']),
+                'critical_request_chain_relief' => !empty($ui['criticalRequestChainReliefEnabled']),
+                'critical_resource_preload_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalResourcePreloadList'])),
+                'critical_fetch_preload_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalFetchPreloadList'])),
+                'critical_request_chain_delay_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalRequestChainDelayList'])),
+                'asset_chain_cleanup'          => !empty($ui['assetChainCleanupEnabled']),
+                'asset_cleanup_woo_product_assets' => !empty($ui['assetCleanupWooProductAssetsEnabled']),
+                'asset_cleanup_product_filter_assets' => !empty($ui['assetCleanupProductFilterAssetsEnabled']),
+                'asset_cleanup_woo_blocks_css' => !empty($ui['assetCleanupWooBlocksCssEnabled']),
+                'asset_cleanup_exclude_list'   => self::parse_textarea_setting(self::normalize_textarea_setting($ui['assetCleanupExcludeList'])),
+                'google_fonts_swap'            => !empty($ui['googleFontsSwapEnabled']),
+                'google_fonts_local_optimization' => !empty($ui['googleFontsLocalOptimizationEnabled']),
+                'google_fonts_additional_scan_urls' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['googleFontsAdditionalScanUrls'] ?? '')),
+                'self_hosted_font_css_optimization' => !empty($ui['selfHostedFontCssOptimizationEnabled']),
+                'self_hosted_font_runtime_rewrite' => !empty($ui['selfHostedFontRuntimeRewriteEnabled']),
+                'speculation_rules_enabled'    => !empty($ui['speculationRulesEnabled']),
+                'browser_cache_rules'          => !empty($ui['browserCacheRulesEnabled']),
+                'varnish_cli_enabled'          => !empty($ui['varnishCliEnabled']),
+                'varnish_cli_mode'             => self::sanitize_varnish_mode($ui['varnishCliMode']),
+                'varnish_cli_servers'          => self::sanitize_varnish_servers_string($ui['varnishCliServers'], self::sanitize_varnish_mode($ui['varnishCliMode'])),
+                'varnish_cli_key'              => trim((string) $ui['varnishCliKey']),
+                'varnish_cli_timeout_seconds'  => max(1, min(30, absint($ui['varnishCliTimeoutSeconds']))),
+                'varnish_cli_method'           => ('PURGE' === strtoupper(trim((string) $ui['varnishCliMethod']))) ? 'PURGE' : 'BAN',
+                'varnish_cli_debug'            => !empty($ui['varnishCliDebug']),
+                'media_optimization_enabled'   => !empty($ui['mediaOptimizationEnabled']),
+                'media_generate_on_upload'     => !empty($ui['mediaGenerateOnUploadEnabled']),
+                'media_generate_on_demand'     => !empty($ui['mediaGenerateOnDemandEnabled']),
+                'media_output_mode'            => self::sanitize_media_output_mode($ui['mediaOutputMode']),
+                'woo_safe_mode'                => !empty($ui['woocommerceSafeModeEnabled']),
+                'cache_cleanup_enabled'        => !empty($ui['cacheCleanupEnabled']),
+                'apcu_flush_on_scheduled_cleanup' => !empty($ui['apcuFlushOnScheduledCleanup']),
+                'cache_cleanup_interval_hours' => max(1, absint($ui['cacheCleanupIntervalHours'])),
+                'css_bundle_cleanup_grace_seconds' => HOUR_IN_SECONDS * self::sanitize_bounded_integer_setting($ui['cssBundleCleanupGraceHours'] ?? 48, 48, 1, 168),
+                'css_bundle_cleanup_delete_limit' => self::sanitize_bounded_integer_setting($ui['cssBundleCleanupDeleteLimit'] ?? 60, 60, 5, 500),
+                'cron_warm_enabled'            => !empty($ui['cronWarmEnabled']),
+                'cron_warm_start_after_cleanup'=> !empty($ui['cronWarmStartAfterCleanup']),
+                'cron_warm_start_after_manual_purge'=> !empty($ui['cronWarmStartAfterManualPurge']),
+                'cron_warm_pages_per_minute'   => max(0, absint($ui['cronWarmPagesPerMinute'])),
+                'scheduled_warm_limit'         => max(0, absint($ui['scheduledWarmLimit'])),
+                'stale_while_revalidate_enabled' => !empty($ui['staleWhileRevalidateEnabled']),
+                'cache_fresh_ttl_minutes'      => max(1, absint($ui['cacheFreshTtlMinutes'])),
+                'cache_max_stale_minutes'      => max(absint($ui['cacheFreshTtlMinutes']), absint($ui['cacheMaxStaleMinutes'])),
+                'excluded_paths'               => $excluded_paths,
+                'excluded_query_args'          => $excluded_query_args,
+            );
+
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_after_runtime_map', array(
+                'settings_count' => count(self::$settings_cache),
+            ));
+            return self::$settings_cache;
+        }
+
+
+    }
+}

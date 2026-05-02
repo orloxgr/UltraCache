@@ -1,569 +1,188 @@
 === UltraCache ===
 Contributors: orloxgr
-Tags: cache, performance, redis, varnish, webp, apcu
+Tags: cache, performance, redis, varnish, webp, avif, apcu
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.56.141
+Stable tag: 2.56.171
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
-Static HTML page caching, cache warming, Redis/APCu object caching, Varnish-aware purging, AVIF/WebP optimization, CSS bundle generation, and operator-friendly diagnostics.
+UltraCache helps WordPress sites serve pages faster with full-page cache, object cache support, cache warm-up, media optimization, CSS/font optimization, Varnish-aware purge tools, and clear diagnostics.
 
 == Description ==
 
-UltraCache is a production-oriented performance plugin for WordPress sites that want practical caching controls, fast warm-up tools, Redis/APCu object caching, optional Varnish integration, media conversion, CSS bundle generation, and a diagnostics-heavy admin dashboard.
+UltraCache is a WordPress performance plugin for site owners and operators who want practical caching controls without hiding what the plugin is doing.
 
-= Varnish Support and object-cache compatibility =
+It can cache public HTML pages, warm important URLs, connect to object-cache backends, help localize fonts, generate AVIF/WebP images, build CSS bundles, and show diagnostics for the cache stack. The goal is to make a WordPress site faster while keeping the risky parts visible and controllable.
 
-* **Varnish Support:** optional. HTTP mode targets a local Varnish listener, for example `127.0.0.1:82`, and blocks public frontend endpoints such as `domain.com:443`. Admin mode should use localhost/private endpoints only, for example `127.0.0.1:6082`. Do not expose the Varnish admin port publicly.
-* **Redis Object Cache:** recommended production backend when the PHP Redis extension and Redis service are available.
-* **APCu Object Cache:** safe local fallback for single-server sites. APCu is cleared on PHP-FPM restart.
-* **Disk Object Cache:** advanced/debug only. It is not recommended for production and is not used automatically as a fallback.
+= What UltraCache helps with =
 
-= Recommended backend strategy =
+* Serve anonymous public pages from static HTML cache.
+* Reduce repeat WordPress/PHP work with object cache support.
+* Warm homepage, menu URLs, and full-site HTML cache.
+* Generate AVIF/WebP variants when the server image stack supports them.
+* Optimize Google Fonts and self-hosted font CSS.
+* Build CSS bundles and show what was bundled, skipped, or unresolved.
+* Add LCP image priority hints and slider/hero support.
+* Delay/defer eligible JavaScript with visible exclusion controls.
+* Integrate with Varnish purge workflows when a site is behind Varnish.
+* Show diagnostics for page cache, object cache, storage, Varnish, OPcache/APCu, media conversion, CSS bundles, and request chains.
 
-Object cache preference:
+= Supported caching and performance technologies =
 
-1. Redis
-2. APCu
-3. Runtime-only fallback
-4. Disk only when explicitly selected for advanced/debug testing
-
-Analytics hit backend preference:
-
-1. APCu
-2. Redis
-3. Disabled when neither APCu nor Redis is available
-
-= Main capabilities =
-
-* Full-page HTML caching through a managed `advanced-cache.php` drop-in
-* Stale-while-revalidate cache delivery
-* Homepage, menu, and full-site warm-up tools
-* Homepage/shared/per-page CSS bundle generation with Safe, Aggressive, and Full CSS Bundle modes
-* Redis-backed object cache management
-* APCu object-cache fallback for single-server setups
-* Optional Varnish-aware purge workflows
-* Media Optimization master switch with Auto / AVIF / WebP output policy
-* Optional Google Fonts localization
-* Gzip and Brotli sidecars when supported
-* WooCommerce-safe bypass logic
-* OPcache/APCu diagnostics cards
-* WP-CLI support for operators
+* **HTML page cache:** managed through `advanced-cache.php` and files under `wp-content/cache/ultracache/`.
+* **Redis object cache:** recommended persistent object-cache backend when the PHP Redis extension and Redis service are available.
+* **APCu object cache:** local single-server fallback when Redis is unavailable.
+* **Runtime-only object cache:** safe fallback when persistent object cache is unavailable.
+* **Disk object cache:** explicit advanced/debug option only; not recommended as the default production backend.
+* **Varnish:** optional HTTP endpoint or admin-secret integration for testing and purging reverse-proxy cache.
+* **OPcache:** diagnostics and visibility for the PHP opcode cache; UltraCache does not replace PHP OPcache.
+* **Server compression:** detects server gzip/Brotli behavior and avoids unnecessary duplicate compression where applicable.
+* **AVIF/WebP:** media conversion depends on Imagick/GD codec support on the server.
+* **Google Fonts/local fonts:** local Google Fonts cache and self-hosted font CSS optimization tools.
 
 == Installation ==
 
-1. Upload the plugin to the `/wp-content/plugins/` directory.
-2. Activate **UltraCache** through the Plugins screen in WordPress.
-3. Open the **UltraCache** dashboard in wp-admin.
-4. Review Diagnostics before enabling caching features.
-5. Enable page cache first, then test purge and warm-up flows.
-6. Enable Redis/APCu, media conversion, CSS bundles, and advanced optimizations only after validation.
+1. Upload the plugin folder to `/wp-content/plugins/` or install the ZIP from the WordPress admin.
+2. Activate **UltraCache** from the Plugins screen.
+3. Open the **UltraCache** dashboard.
+4. Review Diagnostics before enabling heavy features.
+5. Enable features gradually and test the frontend after each important change.
+
+== Quick Start Guide ==
+
+= 1. Start with a safe profile =
+
+1. Open UltraCache in wp-admin.
+2. Choose a safe/baseline profile.
+3. Enable **Page Cache**.
+4. Save settings.
+5. Purge all cache.
+6. Warm the homepage or menu cache.
+7. Visit the homepage twice as a logged-out visitor and confirm that cache headers can show a HIT.
+
+= 2. Configure object cache =
+
+1. Open the Object Cache section.
+2. Prefer Redis if available.
+3. Enter Redis host, port, password/database/TLS/persistent settings when needed.
+4. Test the connection.
+5. If Redis is not available, use APCu when supported.
+6. Use Disk only for advanced/debug testing.
+
+= 3. Check the profiler and diagnostics =
+
+Use Speed Diagnostics / profiler tools when a page is slow on MISS/STORE or when HTML rewrites appear expensive. Review server timing, STORE profile timing, frontend rewrite stages, CSS Bundle Summary, object-cache backend truth, Varnish/reverse-proxy status, storage diagnostics, and media queue health.
+
+= 4. Tune CSS safely =
+
+1. Start with Safe CSS Bundle mode.
+2. Warm the homepage with CSS bundle generation.
+3. Review CSS Bundle Summary.
+4. Add exclusions for stylesheets that break layout or should not be bundled.
+5. Test homepage, product pages, cart, checkout, search, menu, sliders, fonts, and mobile layout.
+6. Use more aggressive CSS options only after visual testing.
+
+= 5. Tune JavaScript safely =
+
+1. Use visible JS Delay / Defer Exclusions for scripts that must keep their order.
+2. Do not blindly defer jQuery, WooCommerce core dependencies, Elementor runtime, or active above-the-fold slider scripts.
+3. Check the browser Console after every JS defer/delay change.
+4. Keep site-specific safeguards visible and editable.
+
+= 6. Optimize media and fonts =
+
+1. Enable Media Optimization only when AVIF/WebP support is confirmed.
+2. Run or resume batch conversion from the AVIF/WebP Batch Conversion box.
+3. Use Local Google Fonts Optimization for remote `fonts.googleapis.com` stylesheets.
+4. Use Self-hosted Font CSS Optimization for existing local/theme/Elementor font CSS.
+5. Rebuild Google Fonts cache after changing scan URLs.
+
+== WP-CLI Commands ==
+
+Use WP-CLI as the site owner, not with `--allow-root`, when possible.
+
+* `wp ultracache cleanup` - run scheduled cleanup.
+* `wp ultracache cron_warm` - inspect or process the cron warm queue.
+* `wp ultracache css_diagnostics` - show CSS bundle/request-chain diagnostics.
+* `wp ultracache flush_object_cache` - flush the managed object cache.
+* `wp ultracache google_fonts_rebuild` - rebuild the local Google Fonts cache.
+* `wp ultracache inspect` - inspect cacheability for a local URL.
+* `wp ultracache media` - manage AVIF/WebP media conversion queue.
+* `wp ultracache purge` - purge full cache or a local URL.
+* `wp ultracache self_test` - run internal smoke/self checks.
+* `wp ultracache settings` - read or update dashboard settings.
+* `wp ultracache stats` - read or reset cache statistics.
+* `wp ultracache status` - show cache/drop-in/storage status.
+* `wp ultracache store_profile` - show or clear the last STORE profile.
+* `wp ultracache varnish` - test or trigger Varnish helpers.
+* `wp ultracache warm` - warm cache URLs.
+* `wp ultracache warm_frontpage_html` - warm homepage HTML cache.
+* `wp ultracache warm_frontpage_html_css` - warm homepage HTML cache plus CSS bundle.
+* `wp ultracache warm_html_all` - warm full-site HTML cache.
+* `wp ultracache warm_html_all_css` - warm full-site HTML cache plus CSS bundles.
+
+Common examples:
+
+`wp ultracache status --format=json`
+`wp ultracache status --section=storage --format=json`
+`wp ultracache purge --all`
+`wp ultracache purge --cache-url=https://example.com/`
+`wp ultracache warm_frontpage_html_css`
+`wp ultracache media status --media-format=best --format=json`
+`wp ultracache media process --media-format=best --limit=5 --time-budget=20 --format=json`
+`wp ultracache google_fonts_rebuild --clear`
+`wp ultracache flush_object_cache`
+`wp ultracache store_profile show --format=json`
 
 == Frequently Asked Questions ==
 
 = What should I enable first? =
 
-Enable Page Cache first, save settings, purge all cache, warm the homepage/menu cache, then check the homepage twice and confirm the second public anonymous request can return a cache HIT.
+Enable Page Cache first. Save settings, purge all cache, warm the homepage/menu cache, then check the homepage twice as a logged-out visitor.
 
 = Does UltraCache support Varnish? =
 
-Yes. UltraCache includes optional Varnish-aware test and purge workflows. Varnish Admin mode should remain local/private only.
+Yes. Varnish support is optional. Use local/private endpoints only. Do not expose the Varnish admin port publicly.
 
 = Does UltraCache support Redis and APCu? =
 
-Yes. Redis is the recommended production object-cache backend. APCu is a safe local fallback for single-server sites. If neither Redis nor APCu is usable, UltraCache falls back to runtime-only object-cache behavior.
+Yes. Redis is the preferred persistent object-cache backend. APCu is a local single-server fallback. If neither is available, UltraCache falls back safely to runtime-only object-cache behavior.
 
 = Should I use Disk Object Cache? =
 
-Only for advanced/debug testing. It is not recommended for production because it can create many small files and increase filesystem I/O.
+Only for explicit advanced/debug testing. Disk object cache can create many small files and is not recommended as the normal production backend.
 
-= How does Media Optimization work now? =
+= Does UltraCache replace OPcache? =
 
-Media Optimization is the master switch. Output Policy controls Auto / AVIF / WebP behavior. Actual AVIF/WebP generation depends on server Imagick/GD codec support.
+No. OPcache is a PHP runtime feature. UltraCache can show diagnostics related to OPcache, but it does not replace or manage PHP OPcache itself.
 
-= How should I handle theme-specific JavaScript errors? =
+= Why do I still see MISS/STORE after a purge? =
 
-Do not hard-code theme-specific protections into the plugin. Add theme/custom script handles, filenames, or globals to **JS Delay / Defer Exclusions** manually when browser Console shows a dependency-order issue.
+A manual purge removes fresh cache. The next uncached anonymous request may have to render and store a new page unless warm-up has already rebuilt that URL.
 
-= What changed in the HTML rewrite refactor? =
+= How do I fix layout or JavaScript breakage? =
 
-UltraCache now prefers WordPress `WP_HTML_Tag_Processor` for many tag/attribute rewrites while keeping legacy fallbacks and safety wrappers. If a rewrite returns suspicious output, UltraCache keeps the original HTML for that response.
+Disable the last risky optimization, confirm the issue disappears, then add visible exclusions for the specific CSS or JS file/handle/global that needs protection.
 
 == Post-update checklist ==
 
 1. Save UltraCache settings once.
 2. Purge all cache.
 3. Warm the homepage/menu cache.
-4. Visit the homepage twice and confirm cache headers.
-5. Check browser Console for JavaScript errors.
-6. Check browser Network for local `/wp-content/` or `/wp-includes/` assets returning 404/403/500.
-7. Test homepage, product page, cart, checkout, search, menu, sliders, fonts, and mobile layout.
-8. Review Diagnostics for page cache, object cache backend, analytics backend, OPcache/APCu cards, CSS Bundle Summary, and generated drop-in versions.
+4. Visit important pages as a logged-out user.
+5. Check cache headers.
+6. Check browser Console for JavaScript errors.
+7. Check browser Network for missing local assets.
+8. Test homepage, product page, cart, checkout, search, menu, sliders, fonts, and mobile layout.
+9. Review Diagnostics for page cache, object cache, Varnish, storage, media queue, CSS Bundle Summary, and generated drop-in versions.
 
 == Changelog ==
 
-= 2.56.141 =
-* Release candidate cleanup: bumped metadata/readme version and removed stray control characters from Varnish/server cache detection regular expressions. No runtime feature behavior changes.
-
-= 2.56.140 =
-* Public release audit fixes: moved conversion support details into the AVIF/WebP Batch Conversion box, hardened media queue REST args, removed REST media format aliasing, added local URL guard to Inspect URL, and added destructive filesystem allowed-root guards.
-
-= 2.56.139 =
-* UI polish: keep Warm Cache action buttons in a single vertical column.
-* UI polish: add spacing between media conversion operation counters.
-
-= 2.56.138 =
-* Moved AVIF/WebP batch conversion into its own dashboard box below Media Optimization.
-* Added visible buttons for Start/Resume Conversion, Rebuild Media Queue, Verify/Repair Queue, Retry Failed, and Clear Completed Queue Rows.
-* Moved media conversion live progress/logs into the Batch Conversion box only; cache warm-up UI is unchanged.
-* Added media-only operation copy and counters for attachments checked, image units checked, AVIF generated, WebP generated, already optimized, and failed.
-* Added REST endpoints for media queue status, rebuild, process, repair, retry failed, and clear completed.
-
-= 2.56.137 =
-* Media queue UX/state safety: Start/Resume now preflights complete queues and reports already-optimized media instead of starting unnecessary batches.
-* Added optimized-storage missing detection that requeues completed media rows for repair if AVIF/WebP output folders were removed.
-* Limited media queue rebuilds now preserve existing completed queue state and report limited_sample mode.
-* Hotfix: cleaned the media conversion WP-CLI contract so --format controls output only and --media-format controls image targets.
-* Fixed media conversion dashboard progress so attachment progress cannot exceed the queue total while image units are tracked separately.
-* Improved media queue building and pause display copy so queue-building state is explicit.
-
-= 2.56.135 =
-* Added a persistent media conversion queue table for resumable AVIF/WebP processing.
-* Media conversion now processes pending queue items instead of re-scanning the full library for every run.
-* Added queue status, rebuild, process, retry-failed, and clear-completed support to the WP-CLI media command.
-* Admin media diagnostics now show conversion queue pending/done/failed/skipped counts.
-
-= 2.56.134 =
-* Polishes cache storage diagnostics so CSS bundle file counts use recognized bundle files instead of double-counting delayed-font CSS files.
-* Shows capped storage scans as minimum values in the dashboard, including AVIF/WebP counts such as 8,000+.
-* Clarifies WP-CLI cleanup reporting with recognized CSS bundle before/after counts, old orphan-like files eligible for cleanup, and recent orphan-like files protected by grace.
-
-= 2.56.132 =
-* Fixes a WP-CLI scheduled cleanup fatal by declaring the static warm-suppression flag used while cleanup purges cache.
-
-= 2.56.131 =
-* Fixes Consolidate Remaining CSS so the leftover CSS bundle pass follows the independent `leftoverCssBundleEnabled` setting in safe/aggressive/full CSS bundle modes instead of only running when the main bundle mode is aggressive; leftover-generated files now use a semantic `bundle-leftover-*` filename prefix.
-
-= 2.56.130 =
-* UI polish pass: move Font Pipeline Diagnostics into Advanced Diagnostics, simplify CSS Bundle Summary, remove duplicate Speed Diagnostics CSS source list, add feature request support link, and compact Media Batch support info.
-
-= 2.56.129 =
-* Security/cache correctness audit pass: secret redaction, hard sensitive-query cache bypass floor, and diagnostics.
-
-= 2.56.128 =
-* Varnish/Reverse Proxy UI clarity build. Clarifies HTTP endpoint vs admin-secret modes, improves status diagnostics, dynamic effective purge method labels, and secret-safe admin status display.
-
-= 2.56.127g =
-* Makes CLS image-dimension optimization use the faster img-only regex path by default to reduce STORE rewrite cost.
-* Adds per-request CLS image dimension resolution caching for repeated image URLs.
-* Keeps the precise WP_HTML_Tag_Processor path available behind the ucwp_cls_dimensions_use_html_tag_processor filter.
-
-= 2.56.127e =
-* Adds Frontend Rewrite Stage Breakdown to Speed Diagnostics so slow HTML rewrite stages are visible.
-* Fixes CSS duplicate diagnostics so single non-blocking delayed-font links no longer count as duplicates.
-* Clarifies that profiler sub-stage timings are diagnostic and may not add up exactly due nested wrappers.
-
-= 2.56.127d =
-* Deepened the Speed Diagnostics UltraCache overhead probe for template_redirect and buffering setup timings.
-* Ignored noscript stylesheet fallbacks in critical-path duplicate/mixed CSS diagnostics to avoid false blocking reports.
-* Add Speed Diagnostics UltraCache overhead probe for maybe_start_buffering sub-steps.
-* Add duplicate/mixed-status CSS link diagnostics for delayed-font and bundle links.
-
-= 2.56.127b =
-* Fixes Speed Diagnostics timing breakdown collection behind Varnish/reverse proxies by adding cache-key-stripped query flags in addition to diagnostic headers.
-* Adds query-based profiler bypass validation so dashboard profiler requests reach WordPress even when proxy/header behavior is noisy.
-* Keeps profiler query args out of UltraCache page cache keys and cacheability checks.
-
-= 2.56.127a =
-* Renames the admin Performance Profiler UI to Speed Diagnostics with clearer user-facing button labels.
-* Saves the timing breakdown immediately for profiler-triggered STORE requests while keeping normal visitor store bookkeeping deferred.
-* Replaces the technical missing STORE profile message with a clearer timing-breakdown diagnostic message.
-
-= 2.56.127 =
-* Polishes object-cache visibility without changing the object-cache engine/drop-in behavior.
-* Reports the real fallback backend dynamically in stats instead of assuming APCu.
-* Adds fallback message metadata to object-cache stats for clearer Redis → APCu/runtime reporting.
-* Makes APCu warnings less alarming when APCu is used only for analytics/shared-memory and not as the active object-cache backend.
-
-= 2.56.122 =
-* Makes CSS bundles proxy-stale-safe by preserving css-bundles during purge and using cleanup grace for old bundles.
-* Treats main CSS bundles and delayed-font companion CSS files as a lifecycle pair.
-* Adds cached HTML validation for missing css-bundle references and resets cron warm-up queue after cache flush.
-
-= 2.56.121 =
-* Regression fix: restores the dependency-aware ordered delayed-loader path for same-host scripts instead of forcing native defer for every local asset.
-* Prevents grouped inline-before / inline-after configs from running out of order for integrations such as Complianz, Google Site Kit, WooCommerce and similar scripts.
-* Keeps JS Delay / Defer Exclusions and hard dependency blockers as the final priority.
-* Normalizes delayed script URLs to absolute public URLs while preserving the original source for diagnostics.
-
-= 2.56.116 =
-* Tightens Defer all JS into a truly aggressive mode by removing legacy conservative JS Delay / Defer exclusions when the switch is enabled.
-* Keeps only the absolute dependency floor out of Defer all JS, such as jQuery and core WP globals/dependencies.
-* Stops generic inline data/localization from automatically blocking Defer all JS so WooCommerce/theme scripts can be deferred when the aggressive switch is explicitly enabled.
-
-= 2.56.115 =
-* Adds a new Defer all JS toggle under Frontend JS & Request Chains for aggressive native defer on eligible scripts.
-* Keeps only an absolute dependency floor out of Defer all JS, including jQuery, inline-coupled scripts, and core WP globals that commonly break when moved.
-* Renames the shared visible exclusions panel to JS Delay / Defer Exclusions and applies it across defer, delay, LCP boundary defer, and related JS optimizations.
-
-= 2.56.114 =
-* Adds a visible Lazy MailerLite nonce refresh toggle in Frontend JS & Request Chains.
-* Prevents MailerLite ml_create_nonce admin-ajax calls from running on page load by returning a local temporary success response.
-* Refreshes the real MailerLite nonce on first form interaction or immediately before submit, then continues the normal MailerLite submit flow.
-= 2.56.112 =
-* Allows Advanced Runtime Font CSS Rewrite to run during slider/hero safe mode while still respecting broad Frontend Safe Mode.
-* Preserves current-request original-to-optimized font CSS mappings so the runtime MutationObserver can be injected even after server-side font links have already been rewritten.
-* Adds data-ucwp-font-css-map-source diagnostics to show whether the runtime map came from cache, current request, HTML links, or bundle manifest.
-
-= 2.56.110 =
-* Adds Delay icon font-face blocks, an opt-in CSS bundle feature that moves matched icon-font @font-face blocks into a delayed non-render-blocking font stylesheet.
-* Adds visible/editable Delay These Fonts / Patterns and Never Delay These Fonts / Patterns fields, plus a broad icon-font auto detector.
-* Adds delayed font diagnostics to CSS Bundle Summary and last CSS bundle warm reporting.
-
-= 2.56.109 =
-* Adds Full CSS Bundle as a normal CSS Bundle Mode alongside Safe and Aggressive. Full mode consolidates all eligible local stylesheet links into the generated bundle while preserving non-all media rules with @media wrappers.
-* Replaces the two CSS bundle mode toggles with a single CSS Bundle Mode selector: Safe, Aggressive, and Full CSS Bundle.
-* Reworked the SR7 LCP runtime helper to use the warmed/static LCP preload URL instead of repeated visible-area scans. This keeps the SR7 background LCP marker while avoiding interval-based layout measurements that showed up as forced reflow in Lighthouse/PageSpeed.
-* Keeps the 2.56.106 SR7 module-background preload mapping fix intact, including generated `/revslider/o/` to real media-library source resolution.
-
-= 2.56.105 =
-* Adds debug attributes to LCP preload links so diagnostics can distinguish the plugin preload winner from the browser actual LCP request.
-* Tightens the SR7 runtime helper so the scoped winner is re-evaluated repeatedly while SR7 paints module backgrounds and slider layers.
-* Prefers scoped visible SR7 module backgrounds over decorative/generated RevSlider image-list assets when marking runtime LCP candidates.
-* Keeps CSS bundle, warmup, purge, and defer/delay behavior unchanged.
-
-= 2.56.100 =
-* Refines SR7/Revolution Slider LCP detection so static/shared slide backgrounds are preferred over decorative rotating slide layers.
-* Adds static-slide aware SR7 LCP diagnostics via data-ucwp-sr7-role, data-ucwp-lcp-reason, and data-ucwp-lcp-score markers.
-* Uses the SR7 module/container visual boundary for static-slide LCP candidates instead of the DOM-last static slide node.
-* Keeps CSS bundle, safe/functional third-party delay, and runtime dependency guards unchanged.
-
-= 2.56.98 =
-* Uses delaySafeThirdPartyJsEnabled as the clean safe-third-party delay switch; the old generic third-party switch is no longer used.
-* Adds delayed inline companion handling so matching WordPress before/extra/after inline script blocks execute with their delayed external script in DOM order.
-* Updates the delayed script loader to execute delayed inline script markers as well as delayed external scripts.
-* Keeps the 2.56.97 safe/functional pattern engine and LCP Boundary Defer semantics intact while fixing functional-delay runtime dependency ordering.
-
-= 2.56.97 =
-* Renames the third-party delay UI to Delay safe third-party JS and adds Delay functional third-party JS for visible widgets such as consent/cookie scripts, captcha, maps, chat, booking, embedded forms, and reviews.
-* Adds visible/editable safe third-party patterns, functional third-party patterns, and third-party delay exclusions with Populate Defaults support.
-* Replaces the targeted gtag-only delay pass with a general pattern-based third-party delay engine and marks delayed tags with category reasons such as safe-third-party, functional-third-party, and lcp-boundary.
-* Corrects LCP Boundary Defer behavior so it uses the detected LCP image position as the HTML boundary and delays eligible local scripts printed after that image.
-
-= 2.56.96 =
-* Adds a targeted HTML delay pass for external Google gtag.js loader scripts when Delay Third-party JS is enabled.
-* Preserves visible user JS Delay / Defer Exclusions while bypassing generic inline-segment blocking only for queue-safe analytics loaders.
-* Marks delayed analytics loader tags with data-ucwp-delay-reason for clearer diagnostics.
-
-= 2.56.95 =
-* Changes safe page CSS bundle application from duplicate injection to manifest-based conservative replacement, removing only bundled source stylesheet links while leaving unmatched/excluded/runtime links intact.
-* Gives safe CSS bundles real request-reduction behavior without switching to the broader aggressive eligibility rules.
-
-= 2.56.94 =
-* Treats frontpage HTML + CSS warm as verified when the loopback HTTP client times out but post-warm cache inspection confirms cached HTML exists and contains the CSS bundle.
-* Keeps the timeout visible in the command message while avoiding a false error exit for verified cache writes.
-* Adds a warmVerifiedAfterTimeout result flag for diagnostics and REST consumers.
-
-= 2.56.93 =
-* Allows safe CSS bundle injection to run on Slider Safe Mode pages instead of building orphaned bundles that never appear in cached HTML.
-* Adds final warm verification to frontpage CSS bundle builds, including bundle bytes, cached HTML bundle refs, and stylesheet link counts.
-* Reports a warning/error-style result when a CSS bundle is built but the final cached HTML warm fails or does not contain the bundle reference.
-
-= 2.56.92 =
-* Adds Async Remaining CSS decision diagnostics to STORE/CSS diagnostics so applied, skipped, and unresolved stylesheet decisions show explicit reasons.
-* Runs Async CSS after font CSS optimization so excluded local stylesheets can still receive font-display rewrites before async eligibility is evaluated.
-* Keeps CSS Bundle Exclusions outside generated CSS bundles while still allowing eligible excluded local stylesheets to pass through self-hosted font CSS optimization.
-* Allows Async Remaining CSS and Aggressive Async CSS to run even when slider-safe mode is enabled; CSS Bundle Exclusions no longer suppress those passes.
-* Fixes font-display injection so minified @font-face blocks receive a valid semicolon before `font-display: swap`.
-
-= 2.56.89 =
-* Changes CSS diagnostics source actions from copy-only to Append exclusion line inside the visible CSS Bundle Exclusions editor.
-* Deduplicates appended CSS exclusion lines against the current textarea draft and marks covered suggestions as Already in exclusions.
-* Clarifies that CSS Bundle Exclusions keep matching stylesheets outside generated bundles and loaded normally as original stylesheet links.
-* Keeps CSS exclusion actions manual: diagnostics do not automatically save or apply exclusions until the user saves the editor.
-* Preserves the 2.56.88 Advanced Settings layout with CSS Bundle Exclusions and JS Delay / Defer Exclusions at the bottom of Advanced Settings & Exclusions.
-
-= 2.56.84 =
-* Polishes JS Delay Scan results into live-count sections: Missing recommended, Already listed recommended, and Review-only detected.
-* Recomputes missing/already-listed counts from the current JS Delay / Defer Exclusions textarea so the header and append button cannot show stale missing values after populate/append/manual edits.
-* Renames the append action to Append Missing Recommended and only enables it when appendable scan results are missing from the visible textarea.
-* Shows Missing, Already listed, Recommended, Detected, and Review-only counters so users can see exactly where missing exclusions are.
-
-
-= 2.56.80 =
-* Adds a full-width JS Delay / Defer Exclusions panel with Populate Defaults, Scan Latest Profile, Append New Suggestions, and Save controls.
-* Adds JS Delay Safety Scan diagnostics to STORE profiles for inline handler/global dependency breaks caused by delayed scripts, with high-confidence suggested visible exclusions and duplicate-safe appending.
-
-= 2.56.77 =
-* Refines Fix sliders / hero sections asset protection so generic words like `slider`, `carousel`, `slideshow`, and `hero` are no longer used for URL/handle protection. This avoids false-positive protection for non-hero assets such as product-filter range sliders while keeping broad generic terms for markup detection only.
-
-= 2.56.76 =
-* Adds Critical Request Chain diagnostics to the Performance Profiler, showing render-blocking CSS/JS candidates, delayed/protected script status, protection reasons, origins, locations, and suggested next actions without changing runtime loading behavior.
-
-= 2.56.75 =
-* Adds visible suggested CSS Bundle Exclusion lines for top CSS bundle sources in the Performance Profiler source list.
-* Adds copy-to-clipboard controls for suggested exclusion lines so operators can move heavy sources to the editable CSS Bundle Exclusions field after visual testing. Runtime CSS loading behavior is unchanged.
-
-= 2.56.74 =
-* Adds CSS bundle critical-path diagnostics to the Performance Profiler summary, including bundle bytes, source stylesheet bytes, largest source, top CSS source contributors, and render-blocking stylesheet counts.
-* Adds large CSS bundle warnings when the generated bundle crosses diagnostic thresholds. Runtime CSS loading behavior is unchanged.
-
-= 2.56.73 =
-* Replaces site-specific placeholder examples in Advanced Settings textareas with generic plugin-safe examples.
-* Updates Manual LCP Hero / Slider selector copy so placeholders do not reference the development/test site. Runtime behavior is unchanged.
-
-= 2.56.72 =
-* Maps selected local LCP preload candidates to existing one-to-one UltraCache AVIF/WebP equivalents when media optimization is enabled, so preload targets match optimized runtime image rewrites.
-* Keeps same-origin optimized image preloads free of `crossorigin` and emits the matching image MIME `type` hint.
-
-= 2.56.71 =
-* Adds a generic LCP candidate scoring engine inside the visible Manual LCP Hero / Slider selector scope, covering img/srcset, SR7 attributes, inline `background-image`, and shorthand `background: url(...)` sources.
-* Prefers rendered high-confidence hero/background URLs, including actual AVIF/WebP URLs present in the HTML, instead of relying on the first marked SR7 image only.
-* Removes `crossorigin` from same-origin image preloads and adds image MIME `type` hints so CSS background preloads can be reused by the browser without credentials-mode mismatch warnings.
-
-= 2.56.70 =
-* Adds a visible Manual LCP Hero / Slider selector field for high-confidence hero/slider targeting, accepting generic entries like `#main-hero`, `homepage-slider`, or `.hero-slider`.
-* Uses a found manual hero/slider selector as the preferred SR7 LCP preload scope so the first marked candidate in that block drives the preload target.
-* Keeps SR7 runtime LCP priority, slider-aware Boundary Defer, protected slider script exclusions, and HTTPS-safe local Google Fonts URLs unchanged.
-
-= 2.56.68 =
-* Normalizes UltraCache local Google Fonts URLs inside generated CSS to root-relative `/wp-content/cache/ultracache/google-fonts/...` paths so HTTPS pages do not request blocked `http://` font assets.
-* Rewrites existing local Google Fonts CSS cache files when reused, so old cached `http://` font URLs are corrected without deleting the downloaded font binaries.
-
-= 2.56.67 =
-* Keeps SR7/Revolution/Swiper/Slick runtime assets protected while boundary defer remains slider-aware and conservative.
-* Updates admin copy to explain that Fix sliders / hero sections is a protection layer, not a replacement for LCP Image Priority.
-
-= 2.56.66 =
-* Adds an admin beforeunload guard while queued settings, save requests, dashboard actions, or long admin processes are still running.
-* Keeps queued/running dashboard action toasts persistent until success or error replaces the same notice.
-* Improves critical cache setting save UX so cache-impacting toggles stay visibly queued/saving and dashboard actions wait for the save to finish.
-
-= 2.56.65 =
-* Removes stray Google Fonts preconnect/dns-prefetch hints after CSS Aggressive Bundling folds the original Google Fonts stylesheet into the generated external bundle.
-* Keeps the 2.56.64 aggressive fallback cleanup intact: no per-original noscript fallback links are restored.
-
-= 2.56.64 =
-* Stops CSS Aggressive Bundling from adding per-original noscript fallback links after replacing matched local stylesheets with the generated bundle.
-* Adds Performance Profiler CSS output diagnostics for final HTML size, inline CSS bytes, fallback link/marker counts, and noscript count.
-* Adds a visible profiler warning when Inline CSS Bundling creates large cached HTML, without silently overriding the user's inline setting.
-
-= 2.56.63 =
-* Corrects the saved Performance Profiler summary mode so callback profiler results show as callback in the last-profile endpoint and UI instead of looking like compact-only profiles.
-* Improves the profiler help text to explain when the tool is useful and what question each run type answers.
-* Shows up to 12 plugin/theme/core timing groups and improves mobile wrapping for profiler action buttons.
-
-= 2.56.62 =
-* Converts the wp-admin Performance Profiler into a collapsed accordion to keep the dashboard cleaner.
-* Improves the profiler helper copy so it explains when the tool is useful instead of describing internal mechanics.
-* Adds a Plugin / Theme Time Summary that aggregates callback profiler time by plugin, theme, and WordPress core.
-* Adds dedicated spacing for the profiler action buttons so the controls no longer appear stuck together.
-
-= 2.56.61 =
-* Adds a manual wp-admin Performance Profiler card with Compact STORE, Verbose STORE, and Callback Profiler buttons.
-* Runs profiler requests only through explicit admin actions with capability/nonce-protected REST calls; no persistent frontend profiling is enabled.
-* Adds summary-first profiler output in the dashboard plus an on-demand JSON download/clear workflow.
-
-= 2.56.60 =
-* Makes the default STORE profile compact by recording only key lifecycle/rewrite checkpoints; full checkpoint output is available only with X-UltraCache-Store-Profile-Verbose: 1 or ?ucwp_store_profile_verbose=1.
-* Removes automatic hook_summary expansion from normal STORE profiles; hook callback summaries are now verbose-only.
-* Keeps manual callback profiling separate and explicit via the existing callback profiler trigger, without leaking into normal STORE/HIT requests.
-
-= 2.56.59 =
-* Cleans up the temporary wide init/debug profiler checkpoints from the STORE profiler while keeping the manual callback profiler available only when explicitly requested.
-* Limits the diagnostic X-Ultra-Cache-Source header to explicit debug requests via X-UltraCache-Debug: 1, reducing normal production header noise.
-* Keeps the 2.56.58 runtime-config resync after full purge so advanced-cache HIT delivery remains active immediately after purging.
-
-= 2.56.58 =
-* Rebuilds the runtime-config sidecar immediately after full purge so the next anonymous HIT can be served by the advanced-cache drop-in instead of falling back to the later WordPress engine early-hit path.
-* Adds an explicit X-Ultra-Cache-Source response header for advanced-cache vs WP-engine HIT diagnostics.
-
-= 2.56.57 =
-* Makes deep callback profiling fully manual/opt-in via X-UltraCache-Callback-Profile: 1 or ?ucwp_callback_profile=1, and only when STORE profiling is also enabled.
-* Avoids registering diagnostic lifecycle/callback wrappers on normal frontend requests, protecting regular STORE/HIT performance.
-* Treats profiler query args as diagnostic-only so they do not force query-arg cache bypass in WordPress cacheability checks.
-
-= 2.56.56 =
-* Moves object-cache support checks in frontend settings sanitization to cached/read-only mode while preserving live checks in privileged/save flows.
-* Enriches guarded profiler slow-callback checkpoints with callback, origin/plugin, file, hook, and priority fields.
-- 2.56.55: Adds guarded callback timing profiler for wp_enqueue_scripts, template_redirect, loader filters, srcset, and shutdown; repetitive settings checkpoints are verbose-only.
-- 2.56.54: Skips live frontend compression loopback probes during normal settings/default sanitization; cached/browser diagnostics remain available.
-- 2.56.53: Adds an opt-in early buffer/cacheability micro-profiler around maybe_start_buffering(), should_bypass_cache(), settings loading, and support-probe sanitization to isolate the remaining pre-early-HIT STORE delay.
-- 2.56.40: Hardens the 2.56.39 Google Fonts admin-scan workflow by making legacy live-build queues/events cleanup-only, keeping frontend missing-font handling read-only, and preserving the page-cache stampede lock behavior.
-- 2.56.39: Adds page-cache stampede protection for cold concurrent requests, keeps Google Fonts rebuilding manual/admin-controlled without frontend live builds, and avoids leaving server-cron-only Google Fonts rebuild events after settings save.
-- 2.56.38: Moves Local Google Fonts Optimization to a controlled admin/save/manual-rebuild scan pipeline, stops frontend Google Fonts build/queue behavior, adds Additional URLs for scanning, and preserves the Google Fonts cache during Flush All Cache.
-- 2.56.36: Keeps the 2.56.35 canonical Google Fonts fix, but frontend/loopback requests now only reuse existing local font CSS and queue missing fonts for WP-CLI/server cron without synchronous downloads.
-- 2.56.34: Coalesced Google Fonts background builds into a single queue/runner and made the runtime self-hosted font CSS map non-blocking on frontend requests.
-
-= 2.56.55 =
-
-* Added guarded callback timing summaries to STORE profile diagnostics for wp_enqueue_scripts, template_redirect, style/script loader filters, wp_calculate_image_srcset, and shutdown.
-* Made repetitive settings getter checkpoints opt-in via ucwp_store_profile_verbose_settings=1, keeping normal diagnostic JSON smaller.
-
-= 2.56.54 =
-
-* Skips live frontend compression loopback probes during normal settings/default sanitization; cached/browser diagnostics remain available.
-
-= 2.56.53 =
-
-* Added opt-in early buffer/cacheability micro-profiling, limited to profiled requests, to isolate the remaining maybe_start_buffering → early_hit_check delay.
-* Added checkpoints around should_bypass_cache(), engine settings loading, dashboard settings sanitization, and heavy support probes while preserving frontend behavior.
-* Kept the opt-in STORE and deep request lifecycle profiler for rewrite-stage bytes/timings plus checkpoints across plugin load, dependencies, plugins_loaded priorities, setup_theme, after_setup_theme, init, wp_loaded, template_redirect, wp_head, output callback, cache write, and shutdown.
-* STORE profiler can be triggered with the X-UltraCache-Store-Profile: 1 request header or ?ucwp_store_profile=1; the diagnostic query arg is stripped from the cache key.
-* Added wp ultracache store_profile show --format=json and wp ultracache store_profile clear.
-* Added CSS bundle diagnostics for user-controlled Inline CSS Bundling, including more robust inline style byte scanning, external bundle links, fallback counts, and manifest bundle file size.
-* Added Populate Defaults buttons for visible safeguard/exclusion lists without forcing a full settings reset.
-* Preserved the 2.56.43 Google Fonts architecture: no frontend live builds, no legacy queue recreation, no google-fonts-pending, and purge-all still preserves local Google Fonts cache.
-
-= 2.56.40 =
-* Frontend Google Fonts rewriting is read-only when local files are missing: it keeps the original Google Fonts URL and never creates legacy live-build queue data.
-* Kept the validated 2.56.39 page-cache stampede lock behavior and the controlled dashboard/WP-CLI rebuild workflow.
-
-= 2.56.39 =
-* Added cold page-cache generation stampede protection so concurrent first hits wait for the first generated HTML cache instead of all rendering/storing independently.
-* Settings save no longer depends on WP-Cron for Google Fonts cache rebuild; dashboard button/WP-CLI remain the controlled build paths.
-
-= 2.56.38 =
-* Local Google Fonts Optimization no longer discovers, queues, downloads, or builds Google Fonts assets from live frontend requests. Frontend HTML only rewrites Google Fonts links when the local CSS file already exists; otherwise it keeps the original Google Fonts URL intact.
-* Enabling Local Google Fonts Optimization queues a homepage scan through the admin/server-cron path, not through the frontend request path.
-* Added Advanced Settings & Exclusions -> Additional URLs for Google Fonts scanning with Save Google Fonts URLs and Rebuild Google Fonts Cache controls.
-* Rebuild Google Fonts Cache scans the homepage plus configured local URLs, clears/rebuilds only the Google Fonts cache, and downloads the discovered CSS/WOFF assets under wp-content/cache/ultracache/google-fonts/.
-* Flush All Cache now preserves wp-content/cache/ultracache/google-fonts/ so local font files are not thrown away during normal page-cache purges.
-
-= 2.56.36 =
-
-* Kept the 2.56.35 canonical Google Fonts URL/hash behavior.
-* Frontend and internal loopback requests now only reuse already-built local Google Fonts CSS; missing font CSS is queued for the real cron/WP-CLI runner instead of being downloaded during the page request.
-* Added a short schedule lock so cold concurrency does not create duplicate Google Fonts build events.
-* Left original Google Fonts URLs as fallback until the local files exist, so CSS integrity is preserved.
-
-* Fixed the protocol-relative Google Fonts root cause where //fonts.googleapis.com/... and https://fonts.googleapis.com/... were treated as different hashes.
-* Prevented google-fonts-pending from blocking page-cache storage; local font generation now stays best-effort and the frontend keeps the valid Google Fonts fallback.
-* Kept the 2.56.34 baseline behavior and did not carry over the later experimental frontend CSS branches.
-
-= 2.56.34 =
-* Coalesced Google Fonts background builds into a single queue/runner.
-* Made the runtime self-hosted font CSS map non-blocking on frontend requests.
-
-= 2.56.28 =
-* Added single-flight transient locks for Google Fonts CSS and font binary localization to prevent frontend PHP-FPM worker floods during cold cache generation.
-* Google Fonts remote requests now use shorter timeouts and fall back to the original Google URLs while another request is already building the local cache.
-* Replaced the cron warm-up schedule scan with wp_next_scheduled() to avoid walking the full WP-Cron array on dashboard/settings loads.
-
-= 2.56.27 =
-* Added hard single-flight locks for heavy dashboard actions and CSS/frontpage bundle generation.
-* Stale dashboard action jobs are now failed automatically instead of blocking future actions.
-* Internal loopback requests now carry UltraCache headers so on-entry CSS generation does not recursively amplify PHP workers.
-* Pruned dashboard action queue storage to avoid stale running jobs and oversized options.
-
-= 2.56.26 =
-* Linked the Diagnostics and Activity Summary accordions so opening or closing either card toggles both together.
-* Added the missing .text-right utility rule so status pills and right-aligned diagnostic text render correctly.
-
-= 2.56.25 =
-* Added the Query-string args whitelist Populate action for WooCommerce/taxonomy query keys.
-
-= 2.56.24 =
-* Stabilized page-cache variant creation: query-string HTML cache variants now require an explicit allowlist.
-* Added a safety cap for same-path/same-bucket HTML variants to prevent runaway homepage cache files.
-* Fixed Diagnostics and Activity Summary visibility so they remain visible when Cache Stats is disabled.
-
-= 2.56.23 =
-* Changed performance profile patches so no profile enables background/scheduled warm-up.
-* Aggressive profile now keeps cronWarmEnabled, cronWarmStartAfterCleanup, and cronWarmStartAfterManualPurge disabled.
-* Manual warm-up buttons remain unchanged.
-
-= 2.56.21 =
-* Blocked unsafe Varnish HTTP endpoints that point to the public WordPress frontend, especially domain.com:80, domain.com:443, and unsupported HTTP-mode ports.
-* Changed the Varnish HTTP default endpoint to 127.0.0.1:82; Admin mode remains 127.0.0.1:6082.
-* Added runtime guards so Varnish Test, Flush All, and URL purge refuse unsafe HTTP endpoints even if old options or imports contain them.
-* Added diagnostics for old W3 Total Cache / Varnish helper leftovers before enabling Varnish or Object Cache.
-
-= 2.56.19 =
-* Consolidated version reporting to a single UCWP_VERSION source and removed the private hotfix bundle duplicate.
-* Removed legacy REST namespace registration so only ultracache/v1 is exposed.
-* Removed old runtime secret path fallback loading and kept only the per-site secret file outside the webroot.
-* Removed the old WP_CACHE marker normalization path; the current managed block is the only supported marker.
-
-= 2.56.18 =
-* Simplified Varnish HTTP endpoint handling to the current host:port-only model.
-* Removed the legacy Varnish endpoint remap that silently changed old Varnish listener ports to the detected frontend endpoint.
-* Added an admin-mode fallback endpoint of 127.0.0.1:6082 when admin mode is selected and the endpoints field is empty.
-
-= 2.56.17 =
-* Clarified the Varnish HTTP UI: endpoints are documented as host:port only, and PURGE no longer claims an automatic BAN fallback.
-* Aligned the advanced-cache fallback defaults with the dashboard defaults for Woo safe mode and stale-while-revalidate.
-* Fixed the runtime defer_stage_safe mapping so the computed safe-stage flag is written to config.
-
-= 2.56.15 =
-* Fixed a dashboard crash in Advanced Diagnostics caused by an undefined objectFallbackActive variable.
-* Canonicalized saved dashboard settings on load so invalid previous combinations like Slider Safe Mode + LCP Boundary Defer are written back as valid settings.
-* Restricted data-ucwp-sr7-lcp to SR7/RevSlider image candidates instead of allowing normal site images, such as the logo, to receive SR7-specific markers.
-* Added generic data-ucwp-lcp markers for non-slider LCP image candidates.
-
-= 2.56.09 =
-* Hoisted CSS @import rules to the top of generated page CSS bundles so browser import ordering remains valid.
-* Preserved one CSS @charset rule at the top of the bundle when source stylesheets include one.
-* Rewrote relative @import URLs and normal url(...) references against their original stylesheet URL before bundling.
-* Added an HTML Content-Type guard before warm_url writes static HTML cache files or scans HTML for CSS bundling.
-* Reduced per-page CSS bundle warmups from warm -> bundle -> warm to bundle -> warm, avoiding the extra final loopback pass.
-
-= 2.56.07 =
-* Updated Warm Cache button labels to reflect the selected CSS Bundling Scope: Homepage CSS Bundle, Shared CSS Bundles, or Separate CSS Bundles.
-* Menu/full-site CSS warm actions now do what their labels say: homepage/shared scopes build the homepage/shared CSS bundle once, while per-page scope builds separate CSS bundles per warmed URL.
-* Kept HTML-only warm buttons separate from CSS bundle warm buttons.
-
-= 2.56.06 =
-* Scoped the WordPress admin #wpcontent padding-left override to the UltraCache dashboard only.
-* Removed the default WordPress left gutter from the UltraCache full-background admin UI without affecting other wp-admin pages.
-
-= 2.56.05 =
-* Added an Advanced Settings master switch: LCP Optimization.
-* Gated LCP Image Priority, manual LCP image URL, and LCP Boundary Defer behind the new master switch while keeping backward compatibility for existing enabled installs.
-* Added SR7/Revolution Slider generated-image discovery for hashed /revslider/o/ assets, preferring existing UltraCache AVIF/WebP cache variants and using the detected SR7 module boundary for LCP Boundary Defer.
-* Kept LCP Boundary Defer conservative: core/plugin protections, dependencies, sliders, WooCommerce, Elementor, and manual exclusions stay protected.
-
-= 2.56.02 =
-* WP-CLI: `wp ultracache purge --all` is now accepted as an explicit full-cache purge alias for `wp ultracache purge`.
-
-= 2.55.81 =
-* Changed analytics hits to APCu -> Redis -> disabled.
-* Changed object cache strategy to Redis -> APCu -> runtime-only, with Disk only as explicit advanced/debug mode.
-
+Release notes are maintained in `changelog.txt`.
 
 == Upgrade Notice ==
 
-= 2.56.36 =
-
-* Kept the 2.56.35 canonical Google Fonts URL/hash behavior.
-* Frontend and internal loopback requests now only reuse already-built local Google Fonts CSS; missing font CSS is queued for the real cron/WP-CLI runner instead of being downloaded during the page request.
-* Added a short schedule lock so cold concurrency does not create duplicate Google Fonts build events.
-* Left original Google Fonts URLs as fallback until the local files exist, so CSS integrity is preserved.
-
-Fixes protocol-relative Google Fonts hash mismatches and stops pending local font builds from blocking page-cache storage.
-
-= 2.56.27 =
-Heavy dashboard actions and CSS/frontpage bundle generation are now single-flight locked to prevent PHP worker floods from stale or parallel dashboard jobs.
-
-= 2.56.26 =
-Diagnostics and Activity Summary accordions now toggle together, and the missing text-right utility is available for right-aligned status text.
-
-= 2.56.23 =
-Performance profiles no longer enable background/scheduled warm-up. Manual warm-up buttons remain unchanged.
-
-= 2.56.21 =
-Varnish self-endpoint guard workflow build. Public frontend endpoints are blocked for Varnish HTTP purge.
-
-= 2.56.18 =
-Varnish endpoint simplification workflow build. HTTP mode is host:port only; admin mode defaults to 127.0.0.1:6082 if blank.
-
-= 2.56.17 =
-Varnish UI truthfulness and low-risk runtime fallback cleanup workflow build.
-
-= 2.56.09 =
-CSS bundling correctness build. Hoists @import/@charset correctly, adds HTML Content-Type warm guards, and reduces duplicate per-page CSS warm loopbacks.
-
-= 2.56.07 =
-Varnish admin/BAN diagnostics and object cache backend truth reporting build.
+= 2.56.150 =
+Generic Font Display Optimization using the existing font-display switch. See `changelog.txt` for release notes.
