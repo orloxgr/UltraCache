@@ -569,8 +569,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 return $refs;
             }
 
-            preg_match_all('#(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css#i', $html, $absolute_matches);
-            preg_match_all('#/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css#i', $html, $path_matches);
+            preg_match_all('~(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css~i', $html, $absolute_matches);
+            preg_match_all('~/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css~i', $html, $path_matches);
 
             $matches = array_merge(
                 isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),

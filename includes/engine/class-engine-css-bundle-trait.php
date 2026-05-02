@@ -205,8 +205,8 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 return $refs;
             }
 
-            preg_match_all('#(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css#i', $html, $absolute_matches);
-            preg_match_all('#/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css#i', $html, $path_matches);
+            preg_match_all('~(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css~i', $html, $absolute_matches);
+            preg_match_all('~/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css~i', $html, $path_matches);
 
             $matches = array_merge(
                 isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
