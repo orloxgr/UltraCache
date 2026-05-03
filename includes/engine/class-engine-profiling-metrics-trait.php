@@ -484,6 +484,77 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         return $this->get_store_profile_dir() . 'store-profile-last.json';
     }
 
+    private function get_store_profile_run_id()
+    {
+        $run_id = sanitize_key((string) ucwp_query_value('ucwp_profile_run'));
+        if ('' === $run_id) {
+            $run_id = sanitize_key((string) ucwp_server_value('HTTP_X_ULTRACACHE_PROFILE_RUN'));
+        }
+
+        return '' !== $run_id ? substr($run_id, 0, 64) : '';
+    }
+
+    private function get_store_profile_run_file($run_id)
+    {
+        $run_id = sanitize_key((string) $run_id);
+        if ('' === $run_id) {
+            return '';
+        }
+
+        return $this->get_store_profile_dir() . 'store-profile-' . substr($run_id, 0, 64) . '.json';
+    }
+
+    private function write_store_profile_json($context = 'store_profile_write')
+    {
+        if (empty($this->store_profile) || !is_array($this->store_profile)) {
+            return false;
+        }
+
+        $dir = $this->get_store_profile_dir();
+        if (!is_dir($dir)) {
+            ucwp_safe_mkdir($dir, 0755, true, (string) $context . '_mkdir');
+        }
+
+        if (!is_dir($dir) || !ucwp_path_is_writable($dir)) {
+            ucwp_debug_log('store profile write failed', array('context' => (string) $context, 'reason' => 'diagnostics-dir-not-writable', 'dir' => $dir));
+            return false;
+        }
+
+        $json = wp_json_encode($this->store_profile, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($json) || '' === $json) {
+            ucwp_debug_log('store profile write failed', array('context' => (string) $context, 'reason' => 'json-encode-failed'));
+            return false;
+        }
+
+        $last_ok = false !== ucwp_safe_file_put_contents($this->get_store_profile_last_file(), $json, LOCK_EX, (string) $context . '_last');
+        $run_ok = true;
+        $run_id = isset($this->store_profile['profile_run_id']) ? sanitize_key((string) $this->store_profile['profile_run_id']) : '';
+        if ('' !== $run_id) {
+            $run_file = $this->get_store_profile_run_file($run_id);
+            if ('' !== $run_file) {
+                $run_ok = false !== ucwp_safe_file_put_contents($run_file, $json, LOCK_EX, (string) $context . '_run');
+            }
+        }
+
+        if (!$last_ok || !$run_ok) {
+            ucwp_debug_log('store profile write failed', array('context' => (string) $context, 'last_ok' => $last_ok ? 'yes' : 'no', 'run_ok' => $run_ok ? 'yes' : 'no'));
+        }
+
+        return $last_ok && $run_ok;
+    }
+
+    public function get_store_profile_by_run_id($run_id)
+    {
+        $file = $this->get_store_profile_run_file($run_id);
+        if ('' === $file || !is_readable($file)) {
+            return array();
+        }
+
+        $json = ucwp_safe_file_get_contents($file);
+        $data = json_decode((string) $json, true);
+        return is_array($data) ? $data : array();
+    }
+
     public function get_last_store_profile()
     {
         $file = $this->get_store_profile_last_file();
@@ -518,6 +589,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'label' => 'UCWP STORE PROFILE',
             'version' => defined('UCWP_VERSION') ? UCWP_VERSION : '',
             'request_id' => $request_id,
+            'profile_run_id' => $this->get_store_profile_run_id(),
             'url' => $this->get_current_request_url(),
             'bucket' => $this->get_request_image_bucket(),
             'started_at_utc' => gmdate('c'),
@@ -929,17 +1001,8 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'callback_timing_summary' => $this->get_store_profile_callback_timing_summary(),
         );
 
-        $dir = $this->get_store_profile_dir();
-        if (!is_dir($dir)) {
-            ucwp_safe_mkdir($dir, 0755, true);
-        }
-
-        if (is_dir($dir) && is_writable($dir)) {
-            $json = wp_json_encode($this->store_profile, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            if (is_string($json) && '' !== $json) {
-                ucwp_safe_file_put_contents($this->get_store_profile_last_file(), $json, LOCK_EX, 'store_profile_shutdown_write');
-                $this->store_profile_shutdown_written = true;
-            }
+        if ($this->write_store_profile_json('store_profile_shutdown_write')) {
+            $this->store_profile_shutdown_written = true;
         }
     }
 
@@ -995,21 +1058,14 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $this->store_profile['largest_positive_delta'] = $largest_delta;
         $this->store_profile['slowest_stage'] = $slowest;
 
-        $dir = $this->get_store_profile_dir();
-        if (!is_dir($dir)) {
-            ucwp_safe_mkdir($dir, 0755, true);
-        }
-
-        if (is_dir($dir) && is_writable($dir)) {
-            $json = wp_json_encode($this->store_profile, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            if (is_string($json) && '' !== $json) {
-                ucwp_safe_file_put_contents($this->get_store_profile_last_file(), $json, LOCK_EX, 'store_profile_write');
-            }
-        }
+        $this->write_store_profile_json('store_profile_write');
 
         if (!headers_sent()) {
             header('X-Ultra-Cache-Store-Profile: saved');
             header('X-Ultra-Cache-Store-Profile-Id: ' . substr((string) ($this->store_profile['request_id'] ?? ''), 0, 40));
+            if (!empty($this->store_profile['profile_run_id'])) {
+                header('X-Ultra-Cache-Store-Profile-Run: ' . substr((string) $this->store_profile['profile_run_id'], 0, 64));
+            }
             header('X-Ultra-Cache-Store-Profile-Slowest: ' . substr((string) $slowest['stage'] . ':' . (string) $slowest['duration_ms'] . 'ms', 0, 120));
             header('X-Ultra-Cache-Store-Profile-Largest-Delta: ' . substr((string) $largest_delta['stage'] . ':' . (string) $largest_delta['delta_bytes'] . 'b', 0, 120));
         }

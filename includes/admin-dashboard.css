@@ -1458,17 +1458,20 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	}
 }
 
-/* UltraCache UI polish: keep warm cache actions vertical and space media counters. */
+/* UltraCache UI polish: keep warm cache actions vertical without forcing full-width buttons. */
 .uc-warm-cache-actions {
 	display: flex !important;
 	flex-direction: column !important;
+	align-items: flex-start !important;
 	gap: 12px !important;
 }
 
 .uc-warm-cache-actions > .uc-btn,
 .uc-warm-cache-actions > button {
-	width: 100% !important;
+	width: auto !important;
+	max-width: 100% !important;
 	flex: 0 0 auto !important;
+	align-self: flex-start !important;
 }
 
 .uc-media-operation-counters {
@@ -1481,4 +1484,36 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 .uc-media-operation-counters > span {
 	display: inline-flex !important;
 	white-space: nowrap !important;
+}
+
+/* 2.56.234: compact, wrapping JS scan/exclusion actions. */
+.uc-js-scan-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	padding: 5px 0;
+	max-width: 100%;
+}
+.uc-js-scan-actions > .uc-btn,
+.uc-js-scan-actions > button {
+	width: auto !important;
+	max-width: 100% !important;
+	min-width: 0 !important;
+	flex: 0 1 auto !important;
+	white-space: nowrap !important;
+}
+.uc-js-runtime-scan-status {
+	max-width: 100%;
+	overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+	.uc-js-scan-actions {
+		align-items: flex-start;
+	}
+	.uc-js-scan-actions > .uc-btn,
+	.uc-js-scan-actions > button {
+		white-space: normal;
+	}
 }

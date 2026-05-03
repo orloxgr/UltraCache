@@ -3,9 +3,9 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.56.209
+ * Version: 2.56.238
  * Author: Byron Iniotakis
- * Requires at least: 6.4
+ * Requires at least: 6.9
  * Requires PHP: 7.4
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.209');
+    define('UCWP_VERSION', '2.56.238');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -849,35 +849,6 @@ if (!class_exists('Ultra_Cache_WP')) {
             return self::write_runtime_secret_array($runtime);
         }
 
-        private static function migrate_stored_redis_secret_to_runtime_file(array $raw_saved, array $sanitized)
-        {
-            $stored_secret = isset($raw_saved['redisPassword']) ? trim((string) $raw_saved['redisPassword']) : '';
-            if ('' === $stored_secret) {
-                return false;
-            }
-
-            $runtime_secret = self::get_runtime_redis_password();
-            if ('' !== $runtime_secret) {
-                return false;
-            }
-
-            return self::set_runtime_redis_password($stored_secret);
-        }
-
-        private static function migrate_stored_varnish_secret_to_runtime_file(array $raw_saved, array $sanitized)
-        {
-            $stored_secret = isset($raw_saved['varnishCliKey']) ? trim((string) $raw_saved['varnishCliKey']) : '';
-            if ('' === $stored_secret) {
-                return false;
-            }
-
-            $runtime_secret = self::get_runtime_varnish_admin_secret();
-            if ('' !== $runtime_secret) {
-                return false;
-            }
-
-            return self::set_runtime_varnish_admin_secret($stored_secret);
-        }
         private static function ensure_runtime_config_protection_files()
         {
             $runtime_dir = dirname(self::get_runtime_config_path());
@@ -943,7 +914,7 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             return self::normalize_runtime_config(array(
                 'excluded_paths'                  => $settings['excluded_paths'],
-                'excluded_query_args'             => $settings['excluded_query_args'],
+                'excluded_query_args'             => array_values(array_unique(array_merge((array) $settings['excluded_query_args'], array('ucwp_runtime_js_scan', 'ucwp_runtime_js_scan_id', 'ucwp_runtime_js_scan_nonce')))),
                 'cache_query_strings'             => !empty($settings['cache_query_strings']),
                 'cache_query_allowlist'           => !empty($settings['cache_query_allowlist']) ? self::parse_textarea_setting(self::sanitize_setting_key_list((array) $settings['cache_query_allowlist'])) : array(),
                 'woo_safe_mode'                   => !empty($settings['woo_safe_mode']),
@@ -953,6 +924,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'object_cache_fallback_backend'   => self::sanitize_object_cache_fallback_backend($settings['object_cache_fallback_backend'] ?? 'apcu'),
                 'redis_host'                      => (string) ($settings['redis_host'] ?? '127.0.0.1'),
                 'redis_port'                      => max(1, absint($settings['redis_port'] ?? 6379)),
+                'redis_username'                  => sanitize_text_field((string) ($settings['redis_username'] ?? '')),
                 'redis_password'                  => (string) ($settings['redis_password'] ?? ''),
                 'redis_database'                  => max(0, absint($settings['redis_database'] ?? 0)),
                 'redis_prefix'                    => preg_replace('/[^A-Za-z0-9:_\\-]/', '', (string) ($settings['redis_prefix'] ?? '')),
@@ -1066,7 +1038,12 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return true;
             }
 
-            return $loaded !== self::build_runtime_config();
+            $expected = self::build_runtime_config();
+            foreach (array('revalidate_secret', 'redis_password', 'varnish_admin_secret') as $secret_key) {
+                unset($loaded[$secret_key], $expected[$secret_key]);
+            }
+
+            return $loaded !== $expected;
         }
 
         private static function normalize_runtime_config(array $runtime)
@@ -1087,6 +1064,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'object_cache_fallback_backend'  => self::sanitize_object_cache_fallback_backend($runtime['object_cache_fallback_backend'] ?? 'apcu'),
                 'redis_host'                     => trim((string) ($runtime['redis_host'] ?? '127.0.0.1')) ?: '127.0.0.1',
                 'redis_port'                     => max(1, min(65535, absint($runtime['redis_port'] ?? 6379))),
+                'redis_username'                 => sanitize_text_field((string) ($runtime['redis_username'] ?? '')),
                 'redis_password'                 => (string) ($runtime['redis_password'] ?? ''),
                 'redis_database'                 => max(0, absint($runtime['redis_database'] ?? 0)),
                 'redis_prefix'                   => preg_replace('/[^A-Za-z0-9:_\\-]/', '', (string) ($runtime['redis_prefix'] ?? '')),
@@ -1113,16 +1091,15 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             self::ensure_directories();
 
+            // Runtime config sync must never create or update the off-docroot
+            // runtime secrets file. Redis/Varnish secrets are written only by
+            // explicit admin saves through set_runtime_*(). Drop-ins only read
+            // the secret file when it already exists.
             $runtime         = self::build_runtime_config();
             $config_target   = self::get_runtime_config_path();
             $config_contents = self::render_runtime_config_json($runtime);
-            $secret_target   = self::get_runtime_secret_path();
-            $secret_contents = self::render_runtime_secret_php($runtime);
 
-            $secret_written = self::write_file_atomically($secret_target, $secret_contents, 'sync_runtime_config secret');
-            $config_written = self::write_file_atomically($config_target, $config_contents, 'sync_runtime_config');
-
-            return $secret_written && $config_written;
+            return self::write_file_atomically($config_target, $config_contents, 'sync_runtime_config');
         }
 
         private static function get_cache_cleanup_schedule_name($hours)
@@ -1909,35 +1886,33 @@ private static function delete_plugin_options_and_transients()
         );
 
         foreach ($patterns as $pattern) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Full plugin-data delete intentionally removes UltraCache-owned options.
             $wpdb->query(
                 $wpdb->prepare(
-                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                    'DELETE FROM %i WHERE option_name LIKE %s',
+                    $wpdb->options,
                     $pattern
                 )
             );
         }
 
-        $wpdb->query("DROP TABLE IF EXISTS {$wpdb->prefix}ucwp_media_queue");
+        $media_queue_table = $wpdb->prefix . 'ucwp_media_queue';
+        if (preg_match('/^[A-Za-z0-9_]+$/', $media_queue_table)) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Full plugin-data delete intentionally drops UltraCache's private media queue table.
+            $wpdb->query($wpdb->prepare('DROP TABLE IF EXISTS %i', $media_queue_table));
+        }
 
         if (is_multisite()) {
-            $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
-                    'ucwp_%'
-                )
-            );
-            $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
-                    '_site_transient_ucwp_%'
-                )
-            );
-            $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
-                    '_site_transient_timeout_ucwp_%'
-                )
-            );
+            foreach (array('ucwp_%', '_site_transient_ucwp_%', '_site_transient_timeout_ucwp_%') as $site_pattern) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Full plugin-data delete intentionally removes UltraCache-owned site metadata.
+                $wpdb->query(
+                    $wpdb->prepare(
+                        'DELETE FROM %i WHERE meta_key LIKE %s',
+                        $wpdb->sitemeta,
+                        $site_pattern
+                    )
+                );
+            }
         }
     }
 }
@@ -2033,10 +2008,20 @@ public static function delete_all_plugin_data_and_deactivate()
             if (is_wp_error($varnish_validation)) {
                 return $varnish_validation;
             }
-            $redis_password_for_runtime = trim((string) ($current_settings['redisPassword'] ?? ''));
-            $varnish_admin_secret_for_runtime = trim((string) ($current_settings['varnishCliKey'] ?? ''));
-            self::set_runtime_redis_password($redis_password_for_runtime);
-            self::set_runtime_varnish_admin_secret($varnish_admin_secret_for_runtime);
+            // Only explicit non-empty admin inputs write runtime secrets.
+            // Hydrated existing secrets in $previous_settings / $current_settings must
+            // not cause a write when the UI leaves secret fields blank.
+            $redis_password_for_runtime = array_key_exists('redisPassword', $settings) ? trim((string) $settings['redisPassword']) : '';
+            $varnish_admin_secret_for_runtime = array_key_exists('varnishCliKey', $settings) ? trim((string) $settings['varnishCliKey']) : '';
+
+            if ('' !== $redis_password_for_runtime && !self::set_runtime_redis_password($redis_password_for_runtime)) {
+                return new WP_Error('ucwp_redis_secret_save_failed', self::maybe_translate('Redis password could not be saved to the UltraCache runtime secrets file. Check filesystem permissions.'));
+            }
+
+            if ('' !== $varnish_admin_secret_for_runtime && !self::set_runtime_varnish_admin_secret($varnish_admin_secret_for_runtime)) {
+                return new WP_Error('ucwp_varnish_secret_save_failed', self::maybe_translate('Varnish admin secret could not be saved to the UltraCache runtime secrets file. Check filesystem permissions.'));
+            }
+
             $current_settings['redisPassword'] = '';
             $current_settings['varnishCliKey'] = '';
             update_option(UCWP_SETTINGS_KEY, $current_settings);
@@ -2717,6 +2702,7 @@ public static function delete_all_plugin_data_and_deactivate()
             $requests = $hits + $misses;
             $hit_rate = $requests > 0 ? round(($hits / $requests) * 100, 2) : 0.0;
             $last_restart = (int) ($status['last_restart_time'] ?? 0);
+            $last_flush = (int) get_option('ucwp_opcache_last_flush_at', 0);
 
             return array(
                 'available'                 => true,
@@ -2743,6 +2729,8 @@ public static function delete_all_plugin_data_and_deactivate()
                 'manualRestarts'            => (int) ($statistics['manual_restarts'] ?? 0),
                 'lastRestartTime'           => $last_restart,
                 'lastRestartTimeHuman'      => $last_restart > 0 ? gmdate('Y-m-d H:i:s', $last_restart) . ' UTC' : 'Never',
+                'lastFlushTime'             => $last_flush,
+                'lastFlushTimeHuman'        => $last_flush > 0 ? gmdate('Y-m-d H:i:s', $last_flush) . ' UTC' : 'Never',
                 'restartPending'            => !empty($status['restart_pending']),
             );
         }
@@ -2757,9 +2745,13 @@ public static function delete_all_plugin_data_and_deactivate()
             }
 
             $success = (bool) @opcache_reset();
+            if ($success) {
+                update_option('ucwp_opcache_last_flush_at', time(), false);
+            }
             $response = array(
                 'success' => $success,
                 'message' => $success ? 'OPcache flushed successfully.' : 'OPcache flush failed.',
+                'opcache' => self::get_opcache_status_summary(),
             );
 
             if (method_exists(__CLASS__, 'get_engine_stats')) {

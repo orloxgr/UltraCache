@@ -349,6 +349,7 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'cacheQueryStringAllowlist',
                 'googleFontsAdditionalScanUrls',
                 'redisHost',
+                'redisUsername',
                 'redisPassword',
                 'redisPrefix',
             );

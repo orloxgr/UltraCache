@@ -55,6 +55,7 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			if ($this->media_queue_table_exists()) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache removes rows from its own custom media queue table; queue state must be database-truth and not object-cached.
 				$wpdb->delete($table, array('attachment_id' => $attachment_id), array('%d'));
 			}
 		}

@@ -2,9 +2,9 @@
 
 UltraCache is a WordPress performance plugin for site owners and operators who want practical caching controls, visible safeguards, cache warm-up, object cache support, media optimization, CSS/font optimization, Varnish-aware purge tools, and diagnostics that explain what is happening.
 
-Current version: **2.56.209**
+Current version: **2.56.238**
 
-2.56.209 fixes cache conflict warning logic: disabled cache plugins no longer keep warnings visible after conflicting drop-ins are removed; only real non-UltraCache drop-ins or active cache plugins are reported.
+2.56.238 makes the browser Runtime Scan collector survive the final JS optimization pipeline by injecting it after the unified finalizer and preventing UltraCache from delaying its own diagnostic collector. This fixes scans that visibly counted down but returned zero captured errors.
 
 Release notes are maintained in [`changelog.txt`](changelog.txt).
 
@@ -107,13 +107,37 @@ Experimental or advanced controls include Combine safe deferred JS, Full CSS Bun
 
 UltraCache keeps safety lists visible in Advanced Settings & Exclusions so site owners can review and edit exclusions instead of relying on hidden hard-coded site rules.
 
-## Privacy and external services
+## External services
 
-UltraCache stores generated cache files on the local WordPress installation under `wp-content/cache/ultracache/` and optimized image variants under `wp-content/uploads/uc-images/`.
+UltraCache stores generated cache files locally under `wp-content/cache/ultracache/` and optimized image variants under `wp-content/uploads/uc-images/`. The basic page cache, object cache, media conversion queue, CSS/JS optimization, Varnish integration, and diagnostics do not require an external SaaS account.
 
-Local Google Fonts Optimization may make outbound requests to Google Fonts CSS/font URLs only when an administrator builds or rebuilds the local Google Fonts cache. The frontend then uses the local cached copies when the feature is enabled and built successfully.
+### Google Fonts
 
-Varnish integration is optional. If configured, UltraCache may send local/private purge or test requests to the Varnish endpoint selected by the site administrator. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
+When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request Google Fonts CSS and font files from `fonts.googleapis.com` and `fonts.gstatic.com` while building or rebuilding the local Google Fonts cache. This downloads CSS/font files and stores local copies under `wp-content/cache/ultracache/google-fonts/`.
+
+Requests are made only from the WordPress server during an administrator-initiated build/rebuild, cache warm process, or Google Fonts cache refresh that needs the local font cache. UltraCache does not require a Google account or API key.
+
+Data sent: the requested Google Fonts CSS/font URL and normal HTTP request data such as the server IP address, user agent, and request headers.
+
+Service provider: Google Fonts / Google LLC.
+Google Fonts Privacy FAQ: https://developers.google.com/fonts/faq/privacy
+Google Terms of Service: https://policies.google.com/terms
+
+### Existing third-party scripts on the site
+
+UltraCache may detect URLs or inline code from services such as Google Tag Manager, Google Analytics, Facebook/Meta Pixel, Google Maps, reCAPTCHA, hCaptcha, Hotjar, Microsoft Clarity, Stripe, PayPal, and similar services when analyzing the site's existing frontend HTML for delay/defer exclusions, cache safety rules, or diagnostics. UltraCache does not add these services to the site and does not send data to them by itself.
+
+### Varnish
+
+Varnish integration is optional and administrator-configured. If configured, UltraCache may send local/private purge or test requests to the Varnish endpoint selected by the site administrator. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
+
+### Support and donation links
+
+The UltraCache dashboard includes optional support/donation links. Clicking a PayPal support button opens PayPal in the administrator's browser. UltraCache does not send site visitor data to PayPal. If an administrator clicks a PayPal link, PayPal receives the normal browser request data for that visit.
+
+Service provider: PayPal.
+PayPal Privacy Statement: https://www.paypal.com/privacy
+PayPal User Agreement: https://www.paypal.com/legalhub/useragreement-full
 
 ## WP-CLI commands
 

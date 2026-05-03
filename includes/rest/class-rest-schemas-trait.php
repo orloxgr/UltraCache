@@ -197,6 +197,7 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'objectCacheFallbackBackend'           => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_object_cache_fallback_backend_param'), 'validate_callback' => array($this, 'validate_object_cache_fallback_backend_param')),
                 'redisHost'                            => array('type' => 'string', 'required' => false),
                 'redisPort'                            => array('type' => 'integer', 'required' => false),
+                'redisUsername'                        => array('type' => 'string', 'required' => false),
                 'redisPassword'                        => array('type' => 'string', 'required' => false),
                 'redisDatabase'                        => array('type' => 'integer', 'required' => false),
                 'redisPrefix'                          => array('type' => 'string', 'required' => false),
@@ -299,6 +300,7 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
             return array(
                 'redisHost'             => array('type' => 'string', 'required' => false),
                 'redisPort'             => array('type' => 'integer', 'required' => false),
+                'redisUsername'         => array('type' => 'string', 'required' => false),
                 'redisPassword'         => array('type' => 'string', 'required' => false),
                 'redisPasswordConfigured' => array('type' => 'boolean', 'required' => false),
                 'redisDatabase'         => array('type' => 'integer', 'required' => false),

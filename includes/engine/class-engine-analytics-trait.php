@@ -107,8 +107,14 @@ trait Ultra_Cache_Engine_Analytics_Trait
                     @$client->setOption(Redis::OPT_READ_TIMEOUT, $read_timeout);
                 }
 
+                $username = isset($settings['redisUsername']) ? trim((string) $settings['redisUsername']) : '';
                 $password = isset($settings['redisPassword']) ? (string) $settings['redisPassword'] : '';
-                if ('' !== $password && !@$client->auth($password)) {
+                if ('' !== $password) {
+                    $authenticated = '' !== $username ? @$client->auth(array($username, $password)) : @$client->auth($password);
+                    if (!$authenticated) {
+                        return null;
+                    }
+                } elseif ('' !== $username) {
                     return null;
                 }
 
@@ -293,6 +299,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 return array();
             }
 
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Atomic file-buffer lock requires native fopen/flock semantics and is path-guarded to UltraCache cache storage.
             $handle = @fopen($file, 'c+');
             if (!$handle) {
                 return array();
@@ -306,6 +313,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 rewind($handle);
                 @flock($handle, LOCK_UN);
             }
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock handle acquired above.
             fclose($handle);
 
             if (!is_string($raw) || '' === trim($raw)) {

@@ -321,20 +321,10 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     ucwp_safe_mkdir($dir, 0755, true, 'google-fonts-cache-dir');
                 } elseif (function_exists('wp_mkdir_p')) {
                     wp_mkdir_p($dir);
-                } else {
-                    @mkdir($dir, 0755, true);
                 }
             }
 
-            if (!is_dir($dir)) {
-                return false;
-            }
-
-            if (!is_writable($dir)) {
-                @chmod($dir, 0755);
-            }
-
-            if (!is_writable($dir)) {
+            if (!is_dir($dir) || !ucwp_path_is_writable($dir)) {
                 return false;
             }
 
@@ -843,6 +833,9 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 }
 
                 $localized_css = $this->build_local_google_fonts_css($css, $normalized_url, $hash);
+                if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                    $localized_css = ucwp_strip_source_mapping_url_comments($localized_css);
+                }
                 if ('' === trim($localized_css)) {
                     return '';
                 }
@@ -1153,6 +1146,9 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $normalized = $this->normalize_google_fonts_cache_urls_in_css($css);
+            if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                $normalized = ucwp_strip_source_mapping_url_comments($normalized);
+            }
             if (!is_string($normalized) || $normalized === $css) {
                 return false;
             }
@@ -1480,6 +1476,10 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return array();
             }
 
+            if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                $optimized_css = trim(ucwp_strip_source_mapping_url_comments($optimized_css));
+            }
+
             $hash = md5($source_url . '|' . md5($optimized_css));
             $active_css_is_mixed = !empty($preserve_mixed_css_for_delayed_icon_fonts);
             $asset_dir_slug = $active_css_is_mixed ? 'optimized-css' : 'font-css';
@@ -1532,6 +1532,10 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             if ('' !== trim($delayed_font_css)) {
                 $delayed_font_content = trim($delayed_font_css) . "
 ";
+                if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                    $delayed_font_content = trim(ucwp_strip_source_mapping_url_comments($delayed_font_content)) . "
+";
+                }
                 if (false !== stripos($delayed_font_content, '.ttf')) {
                     // 2.56.197: delayed standalone font-css output must get the
                     // same local TTF -> WOFF2/WOFF sibling cleanup as the render path.
@@ -2796,6 +2800,9 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 }
             }
             $content = trim($content);
+            if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                $content = trim(ucwp_strip_source_mapping_url_comments($content));
+            }
             if ('' === $content) {
                 return array();
             }

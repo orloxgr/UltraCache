@@ -469,6 +469,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 			$result = false;
 			$gd_error = '';
 
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- Scoped handler captures GD/Imagick encoder warnings and is restored immediately.
 			set_error_handler(static function($severity, $message) use (&$gd_error) {
 				$gd_error = (string) $message;
 				return true;
@@ -666,6 +667,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 			}
 
 			$php_error = '';
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- Scoped handler captures GD/Imagick encoder warnings and is restored immediately.
 			set_error_handler(static function($severity, $message) use (&$php_error) {
 				$php_error = (string) $message;
 				return true;
@@ -804,6 +806,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 			$result = false;
 
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- Scoped handler captures GD/Imagick encoder warnings and is restored immediately.
 			set_error_handler(static function($severity, $message) use (&$gd_error) {
 				$gd_error = (string) $message;
 				return true;

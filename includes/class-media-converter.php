@@ -74,6 +74,18 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		private $media_generation_context = 'frontend';
 
 		/**
+		 * Explicit Accept header context for full-document media rewrites.
+		 *
+		 * Warm/CLI storage writes run in a parent PHP process that does not inherit
+		 * the loopback request's HTTP_ACCEPT header. Keep the selected image bucket
+		 * explicit and scoped so final AVIF/WebP reconciliation uses the same
+		 * context as the warmed cache file without mutating global $_SERVER state.
+		 *
+		 * @var string|null
+		 */
+		private $media_rewrite_accept_context = null;
+
+		/**
 		 * Background conversion queue option name.
 		 */
 		const BACKGROUND_QUEUE_OPTION = 'ucwp_media_conversion_queue';

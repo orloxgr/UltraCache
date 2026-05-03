@@ -291,10 +291,17 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             );
         }
 
-        private function apply_frontend_performance_optimizations($html)
+        private function apply_frontend_performance_optimizations($html, array $context = array())
         {
             if (!is_string($html) || '' === $html) {
                 return $html;
+            }
+
+            $target_url = '';
+            if (!empty($context['url'])) {
+                $target_url = esc_url_raw((string) $context['url']);
+            } elseif (!empty($context['request_url'])) {
+                $target_url = esc_url_raw((string) $context['request_url']);
             }
 
             $html = $this->normalize_protocol_relative_urls_in_html($html);
@@ -356,7 +363,8 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
 
 
                 if ('' !== $bundle_mode && !empty($settings['page_css_bundle_on_entry']) && !$this->is_ultracache_internal_loopback_request()) {
-                    if ('per-page' === $bundle_scope || ('homepage' === $bundle_scope && $this->is_frontpage_request_url()) || ('shared' === $bundle_scope && $this->is_frontpage_request_url())) {
+                    $is_frontpage_context = '' !== $target_url ? $this->is_frontpage_request_url($target_url) : $this->is_frontpage_request_url();
+                    if ('per-page' === $bundle_scope || ('homepage' === $bundle_scope && $is_frontpage_context) || ('shared' === $bundle_scope && $is_frontpage_context)) {
                         $this->profile_store_event('build_page_css_bundle_on_entry', $html, function ($html) use ($settings) {
                             $this->maybe_build_page_css_bundle_on_entry($html, $settings);
                             return true;
@@ -365,8 +373,10 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 }
 
                 if ('' !== $bundle_mode) {
+                    $bundle_entry_url = '' !== $target_url ? $target_url : $this->get_current_request_url();
                     if ('homepage' === $bundle_scope) {
-                        if ($this->is_frontpage_request_url()) {
+                        $is_frontpage_context = '' !== $target_url ? $this->is_frontpage_request_url($target_url) : $this->is_frontpage_request_url();
+                        if ($is_frontpage_context) {
                             $html = $this->apply_html_rewrite_safely($html, 'replace-homepage-css-bundle', function ($html) {
                                 return $this->maybe_replace_page_stylesheet_links_with_bundle($html, home_url('/'));
                             });
@@ -376,8 +386,8 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                             return $this->maybe_replace_page_stylesheet_links_with_bundle($html, home_url('/'));
                         });
                     } else {
-                        $html = $this->apply_html_rewrite_safely($html, 'replace-page-css-bundle', function ($html) {
-                            return $this->maybe_replace_page_stylesheet_links_with_bundle($html);
+                        $html = $this->apply_html_rewrite_safely($html, 'replace-page-css-bundle', function ($html) use ($bundle_entry_url) {
+                            return $this->maybe_replace_page_stylesheet_links_with_bundle($html, $bundle_entry_url);
                         });
                     }
                 }
@@ -952,7 +962,7 @@ JS;
 
         private function current_request_matches_asset_cleanup_exclusion(array $settings = array())
         {
-            $request_uri = isset($_SERVER['REQUEST_URI']) ? strtolower((string) wp_unslash($_SERVER['REQUEST_URI'])) : '';
+            $request_uri = function_exists('ucwp_server_value') ? strtolower(sanitize_text_field(ucwp_server_value('REQUEST_URI'))) : '';
             if ('' === $request_uri) {
                 return false;
             }

@@ -40,6 +40,12 @@ if (!class_exists('Ultra_Cache_Engine')) {
         /** @var bool */
         private $buffering = false;
 
+        /** @var bool */
+        private $template_enhancement_buffer_required = false;
+
+        /** @var bool */
+        private $template_enhancement_buffer_started = false;
+
         /** @var string */
         private $last_bypass_reason = '';
 
@@ -89,6 +95,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('wp_loaded', array($this, 'profile_wp_loaded_checkpoint'), 0);
             add_action('template_redirect', array($this, 'profile_template_redirect_checkpoint'), -1000);
             add_action('template_redirect', array($this, 'maybe_start_buffering'), 0);
+            add_filter('wp_should_output_buffer_template_for_enhancement', array($this, 'should_force_template_enhancement_output_buffer'), PHP_INT_MAX);
+            add_action('wp_template_enhancement_output_buffer_started', array($this, 'template_enhancement_output_buffer_started_checkpoint'), 0);
             add_action('save_post', array($this, 'handle_post_update'), 20);
             add_action('delete_post', array($this, 'handle_post_deletion'), 20);
             add_action('trashed_post', array($this, 'handle_post_deletion'), 20);
@@ -110,6 +118,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('update_option_page_for_posts', array($this, 'handle_front_page_option_change'), 20, 2);
             add_action('update_option_posts_per_page', array($this, 'handle_front_page_option_change'), 20, 2);
             add_action('update_option_permalink_structure', array($this, 'handle_global_frontend_change'), 20, 2);
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'inject_runtime_js_scan_collector_into_output'), PHP_INT_MAX);
+            add_action('wp_head', array($this, 'print_runtime_js_scan_collector'), 0);
             add_action('wp_head', array($this, 'print_delayed_script_loader'), 1);
             add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_start_checkpoint'), -1000);
             add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_end_checkpoint'), PHP_INT_MAX);
@@ -161,8 +171,30 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $this->send_debug_headers('MISS');
             $this->profile_request_checkpoint('send_debug_headers_end');
             $this->buffering = true;
+            $this->template_enhancement_buffer_required = true;
             $this->profile_request_checkpoint('buffer_start');
-            ob_start(array($this, 'cache_output_callback'));
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'cache_output_callback'), 100);
+        }
+
+        public function should_force_template_enhancement_output_buffer($should_buffer)
+        {
+            if (method_exists($this, 'is_runtime_js_scan_request') && $this->is_runtime_js_scan_request()) {
+                $this->profile_request_checkpoint('runtime_js_scan_template_buffer_forced');
+                return true;
+            }
+
+            if ($this->template_enhancement_buffer_required) {
+                $this->profile_request_checkpoint('template_enhancement_buffer_forced');
+                return true;
+            }
+
+            return (bool) $should_buffer;
+        }
+
+        public function template_enhancement_output_buffer_started_checkpoint()
+        {
+            $this->template_enhancement_buffer_started = true;
+            $this->profile_request_checkpoint('template_enhancement_buffer_started');
         }
 
         private function maybe_acquire_page_generation_lock()
@@ -218,8 +250,12 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         public function cache_output_callback($html)
         {
-            $this->profile_request_checkpoint('cache_output_callback_start', array('html_bytes' => is_string($html) ? strlen($html) : 0));
+            $this->profile_request_checkpoint('cache_output_callback_start', array(
+                'html_bytes' => is_string($html) ? strlen($html) : 0,
+                'buffer_started' => $this->template_enhancement_buffer_started ? 'yes' : 'no',
+            ));
             $this->buffering = false;
+            $this->template_enhancement_buffer_required = false;
 
             if (!is_string($html) || '' === $html) {
                 $this->release_page_generation_lock();
@@ -228,17 +264,18 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
             $this->start_store_profile($html);
 
-            $html = $this->profile_store_stage('frontend_performance_optimizations_total', $html, function ($html) {
-                return $this->apply_frontend_performance_optimizations($html);
-            });
-            $html = $this->profile_store_stage('final_google_fonts_rewrite_before_skip_check', $html, function ($html) {
-                return $this->apply_final_google_fonts_rewrite_before_cache_store($html);
-            });
+            $current_request_url = $this->get_current_request_url();
+            $html = $this->process_final_html_for_cache_storage($html, true, array(
+                'accept'      => ucwp_server_value('HTTP_ACCEPT'),
+                'source'      => 'store',
+                'url'         => $current_request_url,
+                'request_url' => $current_request_url,
+            ));
             $skip_reason = $this->get_skip_store_reason($html);
             if ('' !== $skip_reason) {
                 $this->record_analytics_store_skip($skip_reason);
                 if ($this->is_internal_revalidate_request()) {
-                    $this->clear_revalidate_lock($this->get_current_request_url());
+                    $this->clear_revalidate_lock($current_request_url);
                 }
                 $this->send_debug_headers('SKIP', $skip_reason);
                 $this->finalize_store_profile('SKIP', $skip_reason, '');
@@ -246,7 +283,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return $html;
             }
 
-            $url = $this->get_current_request_url();
+            $url = $current_request_url;
             $file_path = $this->get_cache_path($url);
             if (empty($file_path)) {
                 $this->send_debug_headers('SKIP', 'empty-cache-path');
@@ -304,6 +341,178 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $this->release_page_generation_lock();
 
             return $html;
+        }
+
+        /**
+         * Apply the final frontend rewrite pipeline before any HTML is stored in
+         * UltraCache page-cache files. This method is shared by normal STORE
+         * requests and explicit warm/loopback writes so CSS bundle, font, image,
+         * JS, and LCP rewrites cannot diverge between browser output and cached
+         * HTML.
+         *
+         * @param string $html    Full frontend HTML.
+         * @param bool   $profile Whether to record the outer store-profile stages.
+         * @param array  $context Optional finalizer context, including explicit Accept header and target URL for warmed buckets.
+         * @return string
+         */
+        private function process_final_html_for_cache_storage($html, $profile = true, array $context = array())
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            if ($profile) {
+                $html = $this->profile_store_stage('frontend_performance_optimizations_total', $html, function ($html) use ($context) {
+                    return $this->apply_frontend_performance_optimizations($html, $context);
+                });
+                $html = $this->profile_store_stage('final_google_fonts_rewrite_before_skip_check', $html, function ($html) {
+                    return $this->apply_final_google_fonts_rewrite_before_cache_store($html);
+                });
+                $html = $this->profile_store_stage('final-media-url-reconciliation', $html, function ($html) use ($context) {
+                    return $this->apply_final_media_html_rewrite($html, $context);
+                });
+                $html = $this->profile_store_stage('final-generated-asset-root-relative-urls', $html, function ($html) use ($context) {
+                    return $this->normalize_generated_asset_urls_to_root_relative($html, $context);
+                });
+
+                return is_string($html) ? $html : '';
+            }
+
+            $html = $this->apply_frontend_performance_optimizations($html, $context);
+            $html = $this->apply_final_google_fonts_rewrite_before_cache_store($html);
+            $html = $this->apply_final_media_html_rewrite($html, $context);
+            $html = $this->normalize_generated_asset_urls_to_root_relative($html, $context);
+
+            return is_string($html) ? $html : '';
+        }
+
+        /**
+         * Convert same-site UltraCache-owned generated asset URLs to root-relative
+         * URLs before cached HTML is stored. WP-CLI/loopback warm contexts can make
+         * WordPress URL helpers emit http:// URLs even for HTTPS pages; root-relative
+         * asset paths avoid mixed-content breakage without forcing a scheme or
+         * touching third-party/theme/plugin assets.
+         *
+         * @param string $html    Full frontend HTML.
+         * @param array  $context Finalizer context, optionally containing url/request_url.
+         * @return string
+         */
+        private function normalize_generated_asset_urls_to_root_relative($html, array $context = array())
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            $roots = array(
+                (string) wp_parse_url(content_url('cache/ultracache/'), PHP_URL_PATH),
+                (string) wp_parse_url(content_url('uploads/uc-images/'), PHP_URL_PATH),
+                '/wp-content/cache/ultracache/',
+                '/wp-content/uploads/uc-images/',
+            );
+            $roots = array_values(array_unique(array_filter(array_map(static function ($root) {
+                $root = '/' . ltrim((string) $root, '/');
+                return '/' === $root ? '' : rtrim($root, '/') . '/';
+            }, $roots))));
+
+            if (empty($roots)) {
+                return $html;
+            }
+
+            $root_found = false;
+            foreach ($roots as $root) {
+                if (false !== stripos($html, $root)) {
+                    $root_found = true;
+                    break;
+                }
+            }
+            if (!$root_found) {
+                return $html;
+            }
+
+            $host_candidates = array(
+                home_url('/'),
+                site_url('/'),
+                content_url('/'),
+            );
+
+            if (!empty($context['url'])) {
+                $host_candidates[] = (string) $context['url'];
+            }
+            if (!empty($context['request_url'])) {
+                $host_candidates[] = (string) $context['request_url'];
+            }
+
+            $hosts = array();
+            foreach ($host_candidates as $candidate) {
+                $host = wp_parse_url((string) $candidate, PHP_URL_HOST);
+                if (is_string($host) && '' !== $host) {
+                    $hosts[] = strtolower($host);
+                }
+            }
+            $hosts = array_values(array_unique($hosts));
+
+            if (empty($hosts)) {
+                return $html;
+            }
+
+            $rewritten = preg_replace_callback('~\\bhttps?://([^/\\s"\'<>),]+)(/[^\\s"\'<>),]*)?~i', function ($matches) use ($hosts, $roots) {
+                $url = isset($matches[0]) ? (string) $matches[0] : '';
+                $host = isset($matches[1]) ? strtolower((string) $matches[1]) : '';
+
+                if ('' === $url || '' === $host || !in_array($host, $hosts, true)) {
+                    return $url;
+                }
+
+                $path = wp_parse_url($url, PHP_URL_PATH);
+                if (!is_string($path) || '' === $path) {
+                    return $url;
+                }
+
+                foreach ($roots as $root) {
+                    if (0 === strpos($path, $root)) {
+                        $relative = wp_make_link_relative($url);
+                        return is_string($relative) && '' !== $relative ? $relative : $url;
+                    }
+                }
+
+                return $url;
+            }, $html);
+
+            return is_string($rewritten) ? $rewritten : $html;
+        }
+
+        /**
+         * Run the media converter's final full-document image URL reconciliation
+         * after earlier final-output stages have injected generated CSS and font
+         * assets, but before root-relative generated asset URL normalization.
+         *
+         * @param string $html    Full frontend HTML.
+         * @param array  $context Finalizer context, including explicit Accept header.
+         * @return string
+         */
+        private function apply_final_media_html_rewrite($html, array $context = array())
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            if (!class_exists('Ultra_Cache_Media_Converter') || !method_exists('Ultra_Cache_Media_Converter', 'get_instance')) {
+                return $html;
+            }
+
+            $converter = Ultra_Cache_Media_Converter::get_instance();
+            if (!is_object($converter) || !method_exists($converter, 'rewrite_html_image_urls')) {
+                return $html;
+            }
+
+            $accept_header = isset($context['accept']) ? (string) $context['accept'] : '';
+            if ('' !== $accept_header && method_exists($converter, 'rewrite_html_image_urls_with_accept')) {
+                $rewritten = $converter->rewrite_html_image_urls_with_accept($html, $accept_header);
+            } else {
+                $rewritten = $converter->rewrite_html_image_urls($html);
+            }
+
+            return is_string($rewritten) && '' !== $rewritten ? $rewritten : $html;
         }
 
 

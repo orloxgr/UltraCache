@@ -2042,8 +2042,10 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             }
 
             $value = '';
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only server diagnostic shown only to administrators.
             $result = $wpdb->get_var("SHOW VARIABLES LIKE 'query_cache_size'", 1);
             if (null === $result || false === $result || '' === $result) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only server diagnostic shown only to administrators.
                 $result = $wpdb->get_var("SELECT @@query_cache_size");
             }
             if (null === $result || false === $result) {
@@ -2059,8 +2061,10 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 return '';
             }
 
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only server diagnostic shown only to administrators.
             $result = $wpdb->get_var("SHOW VARIABLES LIKE 'max_allowed_packet'", 1);
             if (null === $result || false === $result || '' === $result) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only server diagnostic shown only to administrators.
                 $result = $wpdb->get_var("SELECT @@max_allowed_packet");
             }
             if (null === $result || false === $result) {

@@ -9,6 +9,7 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Media_Queue_Trait
 {
+	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- UltraCache uses a private custom media conversion queue table with validated table identifiers.
 
 		private function get_media_queue_table_name() {
 			global $wpdb;
@@ -642,4 +643,6 @@ trait Ultra_Cache_Media_Queue_Trait
 			$count = $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE format = %s AND status IN ('done','skipped')", $format));
 			return array_merge(array('success' => true, 'cleared' => is_numeric($count) ? (int) $count : 0), $this->get_media_queue_status($format));
 		}
+
+	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter
 }

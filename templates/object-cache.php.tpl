@@ -122,6 +122,7 @@ if (!class_exists('WP_Object_Cache')) {
 		private $apcu_prefix = '';
 		private $redis_host = __UCWP_REDIS_HOST__;
 		private $redis_port = __UCWP_REDIS_PORT__;
+		private $redis_username = __UCWP_REDIS_USERNAME__;
 		private $redis_password = __UCWP_REDIS_PASSWORD__;
 		private $redis_secret_config = __UCWP_REDIS_SECRET_CONFIG__;
 		private $redis_database = __UCWP_REDIS_DATABASE__;
@@ -309,14 +310,20 @@ if (!class_exists('WP_Object_Cache')) {
 
 				if ('' !== (string) $this->redis_password) {
 					$authed = $this->with_redis_error_handler(function () use ($redis) {
+						if ('' !== trim((string) $this->redis_username)) {
+							return $redis->auth(array((string) $this->redis_username, (string) $this->redis_password));
+						}
 						return $redis->auth($this->redis_password);
 					}, false);
 					if (!$authed) {
 						if ('' === $this->redis_error) {
-							$this->redis_error = 'Redis authentication failed.';
+							$this->redis_error = '' !== trim((string) $this->redis_username) ? 'Redis ACL authentication failed.' : 'Redis authentication failed.';
 						}
 						return false;
 					}
+				} elseif ('' !== trim((string) $this->redis_username)) {
+					$this->redis_error = 'Redis username was provided without a password.';
+					return false;
 				}
 
 				if ((int) $this->redis_database > 0) {

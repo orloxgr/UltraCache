@@ -273,25 +273,6 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			return array();
 		}
 
-		private static function render_runtime_secret_php(array $runtime) {
-			$runtime = self::normalize_runtime_secret_array($runtime);
-			$secret = isset($runtime['revalidate_secret']) ? (string) $runtime['revalidate_secret'] : '';
-			$redis_password = isset($runtime['redis_password']) ? (string) $runtime['redis_password'] : '';
-			$varnish_admin_secret = isset($runtime['varnish_admin_secret']) ? (string) $runtime['varnish_admin_secret'] : '';
-			return "<?php\n/** UltraCache managed runtime secrets. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn array(\n    'revalidate_secret' => " . ucwp_php_string_literal($secret) . ",\n    'redis_password' => " . ucwp_php_string_literal($redis_password) . ",\n    'varnish_admin_secret' => " . ucwp_php_string_literal($varnish_admin_secret) . ",\n);\n";
-		}
-
-		private static function write_runtime_secret_array(array $runtime) {
-			$path = self::get_runtime_secret_path();
-			$payload = self::render_runtime_secret_php($runtime);
-			$result = ucwp_safe_file_put_contents($path, $payload, LOCK_EX, 'object_cache_runtime_secret_write');
-			if (false === $result) {
-				return false;
-			}
-			self::apply_restrictive_file_permissions($path, 0600);
-			return true;
-		}
-
 		private static function remove_legacy_redis_secret_config() {
 			$legacy = self::get_legacy_redis_secret_config_path();
 			if (file_exists($legacy)) {
@@ -316,6 +297,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				}
 			}
 
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- Best-effort permission normalization after WP_Filesystem-generated drop-in write.
 			@chmod($path, $mode);
 			clearstatcache(true, $path);
 			$perms = (is_file($path) && is_readable($path)) ? fileperms($path) : false;
@@ -323,14 +305,10 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		private static function maybe_sync_redis_secret_config(array $settings) {
-			$password = isset($settings['redis_password']) ? (string) $settings['redis_password'] : '';
-			$runtime = self::load_runtime_secret_file();
-			$runtime['redis_password'] = trim((string) $password);
-
-			if (!self::write_runtime_secret_array($runtime)) {
-				return false;
-			}
-
+			// Drop-in lifecycle must never create or update the runtime secrets file.
+			// The object-cache.php drop-in receives only the path to the off-docroot
+			// secrets file and reads it at runtime when it already exists.
+			// Redis/Varnish secrets are written only by explicit admin saves.
 			self::remove_legacy_redis_secret_config();
 			return true;
 		}
@@ -358,6 +336,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'__UCWP_REDIS_SECRET_CONFIG__' => ucwp_php_string_literal(self::get_redis_secret_config_path()),
 				'__UCWP_REDIS_HOST__'       => ucwp_php_string_literal((string) ($settings['redis_host'] ?? '127.0.0.1')),
 				'__UCWP_REDIS_PORT__'       => (string) max(1, absint($settings['redis_port'] ?? 6379)),
+				'__UCWP_REDIS_USERNAME__'   => ucwp_php_string_literal((string) ($settings['redis_username'] ?? '')),
 				'__UCWP_REDIS_PASSWORD__'   => ucwp_php_string_literal(''),
 				'__UCWP_REDIS_DATABASE__'   => (string) max(0, absint($settings['redis_database'] ?? 0)),
 				'__UCWP_REDIS_PREFIX__'     => ucwp_php_string_literal(self::get_redis_prefix($settings)),
@@ -474,6 +453,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				$settings = array_merge($settings, array_filter(array(
 					'redis_host' => isset($override['redisHost']) ? (string) $override['redisHost'] : (isset($override['redis_host']) ? (string) $override['redis_host'] : null),
 					'redis_port' => isset($override['redisPort']) ? absint($override['redisPort']) : (isset($override['redis_port']) ? absint($override['redis_port']) : null),
+					'redis_username' => isset($override['redisUsername']) ? sanitize_text_field((string) $override['redisUsername']) : (isset($override['redis_username']) ? sanitize_text_field((string) $override['redis_username']) : null),
 					'redis_password' => array_key_exists('redisPassword', $override) ? (string) $override['redisPassword'] : (array_key_exists('redis_password', $override) ? (string) $override['redis_password'] : null),
 					'redis_database' => isset($override['redisDatabase']) ? absint($override['redisDatabase']) : (isset($override['redis_database']) ? absint($override['redis_database']) : null),
 					'redis_prefix' => isset($override['redisPrefix']) ? (string) $override['redisPrefix'] : (isset($override['redis_prefix']) ? (string) $override['redis_prefix'] : null),
@@ -496,6 +476,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'persistent' => !empty($settings['redis_persistent']),
 				'connectTimeoutMs' => max(50, absint($settings['redis_connect_timeout_ms'] ?? 200)),
 				'readTimeoutMs' => max(50, absint($settings['redis_read_timeout_ms'] ?? 200)),
+				'usernameConfigured' => '' !== trim((string) ($settings['redis_username'] ?? '')),
 				'message' => '',
 			);
 
@@ -529,6 +510,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				$settings = array_merge($settings, array_filter(array(
 					'redis_host' => isset($override['redisHost']) ? (string) $override['redisHost'] : (isset($override['redis_host']) ? (string) $override['redis_host'] : null),
 					'redis_port' => isset($override['redisPort']) ? absint($override['redisPort']) : (isset($override['redis_port']) ? absint($override['redis_port']) : null),
+					'redis_username' => isset($override['redisUsername']) ? sanitize_text_field((string) $override['redisUsername']) : (isset($override['redis_username']) ? sanitize_text_field((string) $override['redis_username']) : null),
 					'redis_password' => array_key_exists('redisPassword', $override) ? (string) $override['redisPassword'] : (array_key_exists('redis_password', $override) ? (string) $override['redis_password'] : null),
 					'redis_database' => isset($override['redisDatabase']) ? absint($override['redisDatabase']) : (isset($override['redis_database']) ? absint($override['redis_database']) : null),
 					'redis_prefix' => isset($override['redisPrefix']) ? (string) $override['redisPrefix'] : (isset($override['redis_prefix']) ? (string) $override['redis_prefix'] : null),
@@ -1243,6 +1225,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'cache_stats_enabled'  => !empty($saved['cacheStatsEnabled']),
 				'redis_host'           => !empty($saved['redisHost']) ? (string) $saved['redisHost'] : '127.0.0.1',
 				'redis_port'           => isset($saved['redisPort']) ? absint($saved['redisPort']) : 6379,
+				'redis_username'       => isset($saved['redisUsername']) ? sanitize_text_field((string) $saved['redisUsername']) : '',
 				'redis_password'       => '' !== trim((string) $runtime_redis_password) ? (string) $runtime_redis_password : (isset($saved['redisPassword']) ? (string) $saved['redisPassword'] : ''),
 				'redis_database'       => isset($saved['redisDatabase']) ? absint($saved['redisDatabase']) : 0,
 				'redis_prefix'         => isset($saved['redisPrefix']) ? trim((string) $saved['redisPrefix']) : '',
@@ -1310,6 +1293,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				$host = 'tls://' . ltrim($host, '/');
 			}
 			$port = max(1, absint($settings['redis_port'] ?? 6379));
+			$username = isset($settings['redis_username']) ? trim((string) $settings['redis_username']) : '';
 			$password = isset($settings['redis_password']) ? (string) $settings['redis_password'] : '';
 			$database = max(0, absint($settings['redis_database'] ?? 0));
 			$persistent = !empty($settings['redis_persistent']);
@@ -1349,15 +1333,21 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 					}, true);
 				}
 				if ('' !== $password) {
-					$authed = self::with_redis_error_handler_static(function () use ($redis, $password) {
+					$authed = self::with_redis_error_handler_static(function () use ($redis, $username, $password) {
+						if ('' !== $username) {
+							return $redis->auth(array($username, $password));
+						}
 						return $redis->auth($password);
 					}, false);
 					if (!$authed) {
 						if ('' === self::$redis_last_error) {
-							self::$redis_last_error = 'Redis authentication failed.';
+							self::$redis_last_error = '' !== $username ? 'Redis ACL authentication failed.' : 'Redis authentication failed.';
 						}
 						return null;
 					}
+				} elseif ('' !== $username) {
+					self::$redis_last_error = 'Redis username was provided without a password.';
+					return null;
 				}
 				if ($database > 0) {
 					$selected = self::with_redis_error_handler_static(function () use ($redis, $database) {

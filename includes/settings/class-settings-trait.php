@@ -27,6 +27,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'objectCacheFallbackBackend' => 'apcu',
                 'redisHost'                  => '127.0.0.1',
                 'redisPort'                  => 6379,
+                'redisUsername'              => '',
                 'redisPassword'              => '',
                 'redisDatabase'              => 0,
                 'redisPrefix'                => '',
@@ -173,6 +174,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'pay_for_order',
                 'cancel_order',
                 'download_file',
+                'ucwp_runtime_js_scan',
+                'ucwp_runtime_js_scan_id',
+                'ucwp_runtime_js_scan_nonce',
             );
         }
 
@@ -261,22 +265,51 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
 
         private static function get_default_js_delay_defer_exclusion_patterns()
         {
+            // Populate Defaults should expose only the dependency floor that may
+            // need to stay blocking when Defer all JS is enabled. Slider/theme
+            // protections are not hidden; the admin UI appends slider defaults
+            // only when Fix sliders / hero sections is enabled.
+            return array(
+                'jquery',
+                'jquery-core',
+                'jquery-migrate',
+                '/wp-includes/js/',
+                'wp-hooks',
+                'wp-i18n',
+                'wp-util',
+                'wp-api',
+                'api-fetch',
+                'underscore',
+                'backbone',
+                'heartbeat',
+                'wp-dom-ready',
+                'wp-a11y',
+                'wp-components',
+                'wp-element',
+                'wp-data',
+                'wp-compose',
+                'jquery-js-after',
+                'wp-i18n-js-after',
+                'wp-api-fetch-js-after',
+                'js-translations',
+                '-js-translations',
+            );
+        }
+
+        private static function get_default_slider_js_delay_defer_exclusion_patterns()
+        {
             return array(
                 'revslider',
+                'sliderrevolution',
+                'slider-revolution',
                 'sr7',
                 'tptools',
-                'elementor-frontend',
+                'tp-tools',
+                'rs-module',
+                'wp-block-themepunch-revslider',
                 'swiper',
+                'swiper-bundle',
                 'slick',
-                'splide',
-                'owl.carousel',
-                'smartslider',
-                'n2-ss',
-                'html_types/image',
-                'html_types/color',
-                'html_types/label',
-                'official-mailerlite-sign-up-forms/assets/js/localization/validation-messages.js',
-                'validation-messages.js',
             );
         }
 
@@ -676,6 +709,22 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             return $value;
         }
 
+        private static function sanitize_redis_username($value)
+        {
+            $value = trim((string) $value);
+            if ('' === $value) {
+                return '';
+            }
+
+            $value = preg_replace('/[\r\n\t\0\x0B]+/', '', $value);
+            $value = trim((string) $value);
+            if (strlen($value) > 128) {
+                $value = substr($value, 0, 128);
+            }
+
+            return sanitize_text_field($value);
+        }
+
         private static function sanitize_redis_database($value)
         {
             return self::sanitize_bounded_integer_setting($value, 0, 0, 15);
@@ -754,8 +803,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             }
 
             foreach (array('HTTP_HOST', 'SERVER_NAME', 'SERVER_ADDR', 'LOCAL_ADDR') as $key) {
-                if (!empty($_SERVER[$key]) && is_scalar($_SERVER[$key])) {
-                    $hosts[] = self::normalize_varnish_compare_host((string) wp_unslash($_SERVER[$key]));
+                $server_value = function_exists('ucwp_server_value') ? ucwp_server_value($key) : '';
+                if ('' !== $server_value) {
+                    $hosts[] = self::normalize_varnish_compare_host(sanitize_text_field($server_value));
                 }
             }
 
@@ -1350,13 +1400,10 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
             $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
             $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
-            $old_default_js_exclusions = self::normalize_textarea_setting(self::get_default_js_delay_defer_exclusion_patterns());
-            if ($old_default_js_exclusions === $settings['deferJsExcludeList']) {
-                $settings['deferJsExcludeList'] = '';
-            }
-            // Manual JS Delay / Defer Exclusions must be durable. Do not strip
-            // lines while Defer all JS is enabled: this field is the user's final
-            // escape hatch for aggressive defer regressions such as inline globals.
+            // Defer all JS is intentionally aggressive/manual. An empty visible
+            // JS Delay / Defer Exclusions list must stay empty: the plugin should
+            // defer every eligible script, let the user see breakage, then let the
+            // scan/Populate Defaults help them add visible exclusions.
             $settings['deferJsExcludeList'] = self::normalize_textarea_setting($settings['deferJsExcludeList']);
             $settings['jsBundleIncludeList'] = self::normalize_textarea_setting($settings['jsBundleIncludeList']);
             $settings['jsBundleExcludeList'] = self::normalize_textarea_setting($settings['jsBundleExcludeList']);
@@ -1384,6 +1431,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['objectCacheFallbackBackend'] = self::sanitize_object_cache_fallback_backend($settings['objectCacheFallbackBackend'] ?? 'apcu');
             $settings['redisHost']                 = self::sanitize_redis_host($settings['redisHost']);
             $settings['redisPort']                 = self::sanitize_bounded_integer_setting($settings['redisPort'], $defaults['redisPort'], 1, 65535);
+            $settings['redisUsername']             = self::sanitize_redis_username($settings['redisUsername'] ?? '');
             $settings['redisPassword']             = trim((string) $settings['redisPassword']);
             $settings['redisDatabase']             = self::sanitize_redis_database($settings['redisDatabase']);
             $settings['redisPrefix']               = self::sanitize_redis_prefix($settings['redisPrefix']);
@@ -1490,8 +1538,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $raw_saved = is_array($saved) ? $saved : array();
             ucwp_request_profile_checkpoint('dashboard_settings_before_sanitize');
             $sanitized = self::sanitize_dashboard_settings($raw_saved);
-            self::migrate_stored_redis_secret_to_runtime_file($raw_saved, $sanitized);
-            self::migrate_stored_varnish_secret_to_runtime_file($raw_saved, $sanitized);
+            // Dashboard reads must never create or migrate runtime secret files.
+            // Secrets are written only by explicit non-empty admin save inputs.
             $runtime_redis_password = self::get_runtime_redis_password();
             if ('' !== $runtime_redis_password) {
                 $sanitized['redisPassword'] = $runtime_redis_password;
@@ -1650,6 +1698,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'object_cache_fallback_backend'=> self::sanitize_object_cache_fallback_backend($ui['objectCacheFallbackBackend'] ?? 'apcu'),
                 'redis_host'                   => self::sanitize_redis_host($ui['redisHost']),
                 'redis_port'                   => self::sanitize_bounded_integer_setting($ui['redisPort'], 6379, 1, 65535),
+                'redis_username'               => self::sanitize_redis_username($ui['redisUsername'] ?? ''),
                 'redis_password'               => trim((string) $ui['redisPassword']),
                 'redis_database'               => self::sanitize_redis_database($ui['redisDatabase']),
                 'redis_prefix'                 => self::sanitize_redis_prefix($ui['redisPrefix']),

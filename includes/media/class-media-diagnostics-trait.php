@@ -89,7 +89,9 @@ trait Ultra_Cache_Media_Diagnostics_Trait
 				return 'WP_Image_Editor_GD';
 			}
 
-			$editors = apply_filters('wp_image_editors', array('WP_Image_Editor_Imagick', 'WP_Image_Editor_GD'));
+			$editors = apply_filters(
+				// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core WordPress filter name.
+				'wp_image_editors', array('WP_Image_Editor_Imagick', 'WP_Image_Editor_GD'));
 			if (!is_array($editors)) {
 				return '';
 			}

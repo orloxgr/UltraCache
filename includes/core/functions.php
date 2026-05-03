@@ -1023,6 +1023,34 @@ if (!function_exists('ucwp_safe_fsockopen')) {
     }
 }
 
+if (!function_exists('ucwp_strip_source_mapping_url_comments')) {
+    /**
+     * Remove source map reference comments from generated assets.
+     *
+     * Production-generated UltraCache CSS/JS does not ship matching .map files.
+     * Keeping sourceMappingURL comments causes browsers/devtools to request missing
+     * .map files and can trigger noisy 404 burst firewall alerts during testing.
+     */
+    function ucwp_strip_source_mapping_url_comments($contents)
+    {
+        $contents = (string) $contents;
+        if ('' === $contents || false === stripos($contents, 'sourceMappingURL')) {
+            return $contents;
+        }
+
+        // CSS-style block source-map comments: /*# sourceMappingURL=file.css.map */
+        $contents = (string) preg_replace('/\/\*[#@]\s*sourceMappingURL\s*=\s*[\s\S]*?\*\//i', '', $contents);
+
+        // JS-style line source-map comments: //# sourceMappingURL=file.js.map
+        $contents = (string) preg_replace('/^[ \t]*\/\/[#@]\s*sourceMappingURL\s*=.*(?:\r?\n|$)/mi', '', $contents);
+
+        // Also catch inline JS source-map comments after a statement terminator.
+        $contents = (string) preg_replace('/([;{}])\s*\/\/[#@]\s*sourceMappingURL\s*=[^\r\n]*/i', '$1', $contents);
+
+        return $contents;
+    }
+}
+
 if (!function_exists('ucwp_safe_file_put_contents')) {
     function ucwp_safe_file_put_contents($path, $contents, $flags = 0, $context = '')
     {
@@ -1044,16 +1072,11 @@ if (!function_exists('ucwp_safe_file_put_contents')) {
                 ucwp_safe_mkdir($dir, 0755, true, $context . ' parent mkdir');
             } elseif (function_exists('wp_mkdir_p')) {
                 wp_mkdir_p($dir);
-            } else {
-                @mkdir($dir, 0755, true);
             }
         }
 
-        if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !is_writable($dir))) {
-            if (is_dir($dir)) {
-                @chmod($dir, 0755);
-            }
-            if (!is_dir($dir) || !is_writable($dir)) {
+        if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !ucwp_path_is_writable($dir))) {
+            if (!is_dir($dir) || !ucwp_path_is_writable($dir)) {
                 ucwp_debug_log('file_put_contents failed', array('path' => $path, 'context' => $context, 'reason' => 'parent-not-writable'));
                 return false;
             }
@@ -1300,6 +1323,7 @@ if (!function_exists('ucwp_safe_rename')) {
             return $already_moved;
         }
 
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- Prefer native atomic rename for path-guarded generated cache files, then fall back to WP_Filesystem.
         if (@rename($from, $to)) {
             clearstatcache(true, $from);
             clearstatcache(true, $to);
@@ -1414,12 +1438,14 @@ if (!function_exists('ucwp_native_delete_directory')) {
                 if (!ucwp_native_delete_directory($path)) {
                     return false;
                 }
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- Path-guarded recursive cleanup fallback after WP_Filesystem deletion.
             } elseif (file_exists($path) && !@unlink($path)) {
                 return false;
             }
         }
 
         clearstatcache(true, $dir);
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Path-guarded recursive cleanup fallback after WP_Filesystem deletion.
         return @rmdir($dir) || !file_exists($dir);
     }
 }

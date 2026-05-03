@@ -112,7 +112,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $add('Page lock cache path', 'page_generation_lock_before_cache_path', 'page_generation_lock_after_cache_path', 'Maps current URL to cache file for the lock.');
             $add('Analytics MISS record', 'record_analytics_miss_start', 'record_analytics_miss_end', 'Records WordPress-level MISS analytics before starting output buffering.');
             $add('MISS debug headers', 'send_debug_headers_start', 'send_debug_headers_end', 'Sends UltraCache MISS/debug headers before output buffering.');
-            $add('Buffer start tail', 'send_debug_headers_end', 'buffer_start', 'Final tail before ob_start cache output buffering.');
+            $add('Buffer start tail', 'send_debug_headers_end', 'buffer_start', 'Final tail before template enhancement output buffering.');
             }
 
             $add('should_bypass_cache total', 'should_bypass_start', 'should_bypass_return', 'Cacheability decision time. If high, inspect the sub-steps below.');
@@ -624,6 +624,48 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             ), 200);
         }
 
+        private function get_performance_profile_for_run($engine, $run_id)
+        {
+            $run_id = sanitize_key((string) $run_id);
+            if ('' !== $run_id && method_exists($engine, 'get_store_profile_by_run_id')) {
+                $profile = $engine->get_store_profile_by_run_id($run_id);
+                if (is_array($profile) && !empty($profile)) {
+                    return $profile;
+                }
+            }
+
+            $profile = $engine->get_last_store_profile();
+            if (!is_array($profile) || empty($profile)) {
+                return array();
+            }
+
+            if ('' !== $run_id && !empty($profile['profile_run_id']) && sanitize_key((string) $profile['profile_run_id']) !== $run_id) {
+                return array();
+            }
+
+            return $profile;
+        }
+
+        private function wait_for_performance_profile_for_run($engine, $run_id, $attempts = 8, $delay_microseconds = 250000)
+        {
+            $attempts = max(1, (int) $attempts);
+            $delay_microseconds = max(50000, (int) $delay_microseconds);
+
+            for ($i = 0; $i < $attempts; $i++) {
+                clearstatcache();
+                $profile = $this->get_performance_profile_for_run($engine, $run_id);
+                if (is_array($profile) && !empty($profile)) {
+                    return $profile;
+                }
+
+                if ($i + 1 < $attempts) {
+                    usleep($delay_microseconds);
+                }
+            }
+
+            return array();
+        }
+
         private function run_performance_profile_job(array $params)
         {
             $mode = $this->normalize_performance_profile_mode($params['mode'] ?? 'compact');
@@ -636,13 +678,15 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 $engine->clear_last_store_profile();
             }
 
+            $run_id = substr(md5((string) microtime(true) . wp_rand()), 0, 12);
             $headers = array(
                 'X-UltraCache-Store-Profile'  => '1',
                 'X-UltraCache-Debug'          => '1',
                 'X-UltraCache-Profile-Bypass' => '1',
+                'X-UltraCache-Profile-Run'    => $run_id,
                 'X-UltraCache-Token'          => wp_hash('ucwp-revalidate-v1'),
-                'Cache-Control'                     => 'no-cache, no-store, max-age=0',
-                'Pragma'                            => 'no-cache',
+                'Cache-Control'               => 'no-cache, no-store, max-age=0',
+                'Pragma'                      => 'no-cache',
             );
             if ('verbose' === $mode) {
                 $headers['X-UltraCache-Store-Profile-Verbose'] = '1';
@@ -667,7 +711,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $profile_query_args = array(
                 'ucwp_store_profile'  => '1',
                 'ucwp_profile_bypass' => '1',
-                'ucwp_profile_run'    => substr(md5((string) microtime(true) . wp_rand()), 0, 12),
+                'ucwp_profile_run'    => $run_id,
                 'ucwp_rt'             => wp_hash('ucwp-revalidate-v1'),
             );
             if ('verbose' === $mode) {
@@ -701,14 +745,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $profile_header = (string) wp_remote_retrieve_header($response, 'x-ultra-cache-store-profile');
             $body = wp_remote_retrieve_body($response);
 
-            $profile = $engine->get_last_store_profile();
-            if ((!is_array($profile) || empty($profile)) && 'STORE' === strtoupper((string) $cache_status)) {
-                // Some stacks finish the profiler response before late shutdown writes
-                // become visible to this REST request. Give the timing breakdown one
-                // brief chance to appear without adding delay to normal visitors.
-                usleep(250000);
-                $profile = $engine->get_last_store_profile();
-            }
+            $profile = $this->wait_for_performance_profile_for_run($engine, $run_id, 8, 250000);
 
             if (!is_array($profile) || empty($profile)) {
                 return array(
@@ -722,6 +759,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         'cacheStatus' => $cache_status,
                         'cacheSource' => $cache_source,
                         'profileHeader' => $profile_header,
+                        'profileRunId' => $run_id,
                         'bodyBytes' => is_string($body) ? strlen($body) : 0,
                     ),
                 );
@@ -736,6 +774,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $summary['cacheStatus'] = $cache_status;
             $summary['cacheSource'] = $cache_source;
             $summary['profileHeader'] = $profile_header;
+            $summary['profileRunId'] = $run_id;
             $summary['bodyBytes'] = is_string($body) ? strlen($body) : 0;
             $summary['cacheBypassedForDiagnostic'] = true;
 
@@ -745,6 +784,288 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'performanceProfile' => $summary,
             );
         }
+
+        private function get_runtime_js_scan_transient_key($scan_id)
+        {
+            $scan_id = sanitize_key((string) $scan_id);
+            return 'ucwp_runtime_js_scan_' . $scan_id;
+        }
+
+        private function get_runtime_js_scan_current_exclusions()
+        {
+            $value = '';
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
+                $settings = Ultra_Cache_WP::get_dashboard_settings_for_client();
+                if (is_array($settings) && isset($settings['deferJsExcludeList'])) {
+                    $value = (string) $settings['deferJsExcludeList'];
+                }
+            }
+            if ('' === $value) {
+                $raw = get_option(UCWP_SETTINGS_KEY, array());
+                if (is_array($raw) && isset($raw['deferJsExcludeList'])) {
+                    $value = (string) $raw['deferJsExcludeList'];
+                }
+            }
+            $lines = preg_split('/\r\n|\r|\n/', (string) $value);
+            $out = array();
+            foreach ((array) $lines as $line) {
+                $line = trim((string) $line);
+                if ('' !== $line) {
+                    $out[] = strtolower($line);
+                }
+            }
+            return array_values(array_unique($out));
+        }
+
+        private function runtime_js_scan_exclusion_already_matches($suggestion, array $exclusions)
+        {
+            $suggestion = strtolower(trim((string) $suggestion));
+            if ('' === $suggestion) {
+                return false;
+            }
+            foreach ($exclusions as $line) {
+                $line = strtolower(trim((string) $line));
+                if ('' === $line) {
+                    continue;
+                }
+                if ($line === $suggestion || false !== strpos($suggestion, $line) || false !== strpos($line, $suggestion)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private function runtime_js_scan_add_suggestion(&$suggestions, &$seen, $suggested_exclusion, $symbol, $source, $message, $reason, array $exclusions, $confidence = 'high')
+        {
+            $suggested_exclusion = trim((string) $suggested_exclusion);
+            if ('' === $suggested_exclusion) {
+                return;
+            }
+            $key = strtolower($suggested_exclusion . '|' . (string) $source . '|' . (string) $symbol);
+            if (isset($seen[$key])) {
+                return;
+            }
+            $seen[$key] = true;
+            $suggestions[] = array(
+                'symbol'             => (string) $symbol,
+                'source'             => 'browser-runtime-error',
+                'category'           => 'browser-runtime-error',
+                'categoryLabel'      => 'Browser runtime errors',
+                'sample'             => substr((string) $message, 0, 500),
+                'definingScriptUrl'  => (string) $source,
+                'definingHandle'     => '',
+                'suggestedExclusion' => $suggested_exclusion,
+                'confidence'         => (string) $confidence,
+                'reason'             => (string) $reason,
+                'alreadyExcluded'    => $this->runtime_js_scan_exclusion_already_matches($suggested_exclusion, $exclusions),
+                'appendable'         => true,
+            );
+        }
+
+        private function runtime_js_scan_basename_from_source($source)
+        {
+            $source = trim((string) $source);
+            if ('' === $source) {
+                return '';
+            }
+            $path = (string) wp_parse_url($source, PHP_URL_PATH);
+            if ('' === $path) {
+                $path = preg_replace('/[?#].*$/', '', $source);
+            }
+            $base = basename($path);
+            return sanitize_text_field($base);
+        }
+
+        private function build_runtime_js_scan_suggestions(array $errors)
+        {
+            $exclusions = $this->get_runtime_js_scan_current_exclusions();
+            $suggestions = array();
+            $seen = array();
+
+            foreach ($errors as $error) {
+                if (!is_array($error)) {
+                    continue;
+                }
+                $message = isset($error['message']) ? sanitize_text_field((string) $error['message']) : '';
+                $source = isset($error['source']) ? esc_url_raw((string) $error['source']) : '';
+                $detail = isset($error['detail']) ? sanitize_text_field((string) $error['detail']) : '';
+                $text = strtolower($message . ' ' . $source . ' ' . $detail);
+                $source_base = $this->runtime_js_scan_basename_from_source($source);
+
+                if (false !== strpos($text, 'jquery is not defined') || preg_match('/\$ is not defined/', $text)) {
+                    $reason = 'Browser runtime error says jQuery was not available when an inline block or script executed. Add jQuery to the visible JS Delay / Defer Exclusions list, then scan again.';
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'jquery', 'jQuery', $source, $message, $reason, $exclusions);
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'jquery-core', 'jQuery', $source, $message, $reason, $exclusions);
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'jquery-migrate', 'jQuery', $source, $message, $reason, $exclusions, 'recommended');
+                    if ('' !== $source_base && 'jquery.min.js' !== strtolower($source_base) && 'jquery-migrate.min.js' !== strtolower($source_base)) {
+                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'jQuery dependent script', $source, $message, 'This script failed while jQuery was unavailable. Excluding jQuery is usually the primary fix; excluding the failing script is an alternate targeted fix.', $exclusions, 'recommended');
+                    }
+                    continue;
+                }
+
+                if (false !== strpos($text, 'wp is not defined')) {
+                    $reason = 'Browser runtime error says the WordPress wp global was not available. This usually means wp-i18n/wp-hooks/wp-api-fetch or a translation block executed before its dependency.';
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-i18n', 'wp global', $source, $message, $reason, $exclusions);
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-hooks', 'wp global', $source, $message, $reason, $exclusions);
+                    if (false !== strpos($text, 'api-fetch')) {
+                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-api-fetch', 'wp.apiFetch', $source, $message, $reason, $exclusions);
+                    }
+                    if (false !== strpos($text, 'contact-form-7')) {
+                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'contact-form-7', 'Contact Form 7 translations', $source, $message, 'Contact Form 7 translation/config inline block failed because wp was unavailable. Exclude wp-i18n/wp-hooks and optionally contact-form-7.', $exclusions, 'recommended');
+                    }
+                    if ('' !== $source_base) {
+                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'wp dependent script', $source, $message, 'This source emitted a wp-global error. Exclude the relevant wp-* dependency first; this source is shown as an alternate targeted exclusion.', $exclusions, 'recommended');
+                    }
+                    continue;
+                }
+
+                if (false !== strpos($text, ' is not a function') || false !== strpos($text, 'c is not a function')) {
+                    if (preg_match('/jquery|sticky|plainoverlay|icheck|magnific|flexslider|zoom|smartmenus|tooltipster|tabs?/i', $source . ' ' . $message)) {
+                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'jquery', 'jQuery plugin dependency', $source, $message, 'A jQuery plugin/function failed at runtime. Keep jQuery available before this plugin, or exclude the failing plugin from Defer all JS.', $exclusions);
+                        if ('' !== $source_base) {
+                            $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'failing jQuery plugin', $source, $message, 'This jQuery plugin failed at runtime. Add it to exclusions if excluding jQuery alone does not resolve the error.', $exclusions, 'recommended');
+                        }
+                    }
+                    continue;
+                }
+
+                if ('' !== $source_base && preg_match('/\.js$/i', $source_base)) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'runtime error source', $source, $message, 'This script produced a browser runtime error during the Defer all JS scan. Review it and add this filename to exclusions if the error is caused by defer order.', $exclusions, 'review');
+                }
+            }
+
+            $missing = 0;
+            foreach ($suggestions as $suggestion) {
+                if (empty($suggestion['alreadyExcluded'])) {
+                    $missing++;
+                }
+            }
+
+            return array(
+                'available'              => true,
+                'source'                 => 'browser-runtime',
+                'suggestion_count'       => count($suggestions),
+                'missing_count'          => (int) $missing,
+                'already_excluded_count' => count($suggestions) - (int) $missing,
+                'suggestions'            => $suggestions,
+            );
+        }
+
+        private function normalize_runtime_js_scan_report_payload($payload)
+        {
+            $payload = is_array($payload) ? $payload : array();
+            $scan_id = isset($payload['scanId']) ? sanitize_key((string) $payload['scanId']) : '';
+            $errors = array();
+            foreach ((array) ($payload['errors'] ?? array()) as $error) {
+                if (!is_array($error)) {
+                    continue;
+                }
+                $errors[] = array(
+                    'kind'    => isset($error['kind']) ? sanitize_text_field((string) $error['kind']) : '',
+                    'message' => isset($error['message']) ? sanitize_text_field((string) $error['message']) : '',
+                    'source'  => isset($error['source']) ? esc_url_raw((string) $error['source']) : '',
+                    'line'    => isset($error['line']) ? (int) $error['line'] : 0,
+                    'column'  => isset($error['column']) ? (int) $error['column'] : 0,
+                    'detail'  => isset($error['detail']) ? sanitize_textarea_field((string) $error['detail']) : '',
+                    'atMs'    => isset($error['atMs']) ? (int) $error['atMs'] : 0,
+                );
+                if (count($errors) >= 80) {
+                    break;
+                }
+            }
+
+            return array(
+                'scanId'    => $scan_id,
+                'url'       => isset($payload['url']) ? esc_url_raw((string) $payload['url']) : '',
+                'completed' => !empty($payload['completed']),
+                'errors'    => $errors,
+                'userAgent' => isset($payload['userAgent']) ? sanitize_text_field((string) $payload['userAgent']) : '',
+                'elapsedMs' => isset($payload['elapsedMs']) ? (int) $payload['elapsedMs'] : 0,
+            );
+        }
+
+        public function save_runtime_js_scan_report(WP_REST_Request $request)
+        {
+            $payload = $this->normalize_runtime_js_scan_report_payload($request->get_json_params());
+            $scan_id = (string) $payload['scanId'];
+            if ('' === $scan_id) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Missing runtime JS scan id.'), 400);
+            }
+
+            $existing = get_transient($this->get_runtime_js_scan_transient_key($scan_id));
+            $existing = is_array($existing) ? $existing : array();
+            $merged_errors = array();
+            foreach (array_merge((array) ($existing['errors'] ?? array()), (array) $payload['errors']) as $error) {
+                if (!is_array($error)) {
+                    continue;
+                }
+                $dedupe_key = md5((string) ($error['kind'] ?? '') . '|' . (string) ($error['message'] ?? '') . '|' . (string) ($error['source'] ?? '') . '|' . (string) ($error['line'] ?? ''));
+                $merged_errors[$dedupe_key] = $error;
+            }
+            $errors = array_values($merged_errors);
+            if (count($errors) > 80) {
+                $errors = array_slice($errors, -80);
+            }
+
+            $report = array(
+                'scanId'     => $scan_id,
+                'url'        => !empty($payload['url']) ? $payload['url'] : (string) ($existing['url'] ?? ''),
+                'startedAt'  => isset($existing['startedAt']) ? (int) $existing['startedAt'] : time(),
+                'updatedAt'  => time(),
+                'completed'  => !empty($payload['completed']) || !empty($existing['completed']),
+                'errors'     => $errors,
+                'errorCount' => count($errors),
+                'userAgent'  => !empty($payload['userAgent']) ? $payload['userAgent'] : (string) ($existing['userAgent'] ?? ''),
+                'elapsedMs'  => max((int) ($existing['elapsedMs'] ?? 0), (int) $payload['elapsedMs']),
+            );
+            $report['jsDelaySafetyScan'] = $this->summarize_runtime_js_scan_for_dashboard($report);
+            set_transient($this->get_runtime_js_scan_transient_key($scan_id), $report, 10 * MINUTE_IN_SECONDS);
+
+            return new WP_REST_Response(array('success' => true, 'runtimeJsScan' => $report), 200);
+        }
+
+        private function summarize_runtime_js_scan_for_dashboard(array $report)
+        {
+            $scan = $this->build_runtime_js_scan_suggestions((array) ($report['errors'] ?? array()));
+            return array(
+                'available'            => true,
+                'source'               => 'browser-runtime',
+                'runtimeErrorCount'    => isset($report['errors']) && is_array($report['errors']) ? count($report['errors']) : 0,
+                'suggestionCount'      => isset($scan['suggestion_count']) ? (int) $scan['suggestion_count'] : 0,
+                'missingCount'         => isset($scan['missing_count']) ? (int) $scan['missing_count'] : 0,
+                'alreadyExcludedCount' => isset($scan['already_excluded_count']) ? (int) $scan['already_excluded_count'] : 0,
+                'suggestions'          => isset($scan['suggestions']) && is_array($scan['suggestions']) ? array_slice($scan['suggestions'], 0, 80) : array(),
+                'errors'               => isset($report['errors']) && is_array($report['errors']) ? array_slice($report['errors'], 0, 40) : array(),
+                'scannedUrl'           => isset($report['url']) ? (string) $report['url'] : '',
+                'completed'            => !empty($report['completed']),
+            );
+        }
+
+        public function get_runtime_js_scan_report(WP_REST_Request $request)
+        {
+            $scan_id = sanitize_key((string) $request->get_param('scanId'));
+            if ('' === $scan_id) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Missing runtime JS scan id.'), 400);
+            }
+
+            $report = get_transient($this->get_runtime_js_scan_transient_key($scan_id));
+            if (!is_array($report)) {
+                return new WP_REST_Response(array(
+                    'success' => true,
+                    'runtimeJsScan' => array(
+                        'scanId' => $scan_id,
+                        'available' => false,
+                        'completed' => false,
+                        'errorCount' => 0,
+                        'jsDelaySafetyScan' => array('available' => false, 'suggestions' => array(), 'suggestionCount' => 0, 'missingCount' => 0),
+                    ),
+                ), 200);
+            }
+            $report['jsDelaySafetyScan'] = $this->summarize_runtime_js_scan_for_dashboard($report);
+
+            return new WP_REST_Response(array('success' => true, 'runtimeJsScan' => $report), 200);
+        }
+
 
     }
 }

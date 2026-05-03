@@ -576,7 +576,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 $this->write_frontpage_css_manifest($manifest);
                 $this->cleanup_orphan_frontpage_css_bundles($manifest);
 
-                $warm_result = $skip_final_warm ? array('success' => true, 'skipped' => true, 'message' => 'Final HTML warm skipped because the caller will warm the page after the CSS bundle is available.') : $this->warm_url($frontpage_url);
+                $warm_result = $skip_final_warm ? array('success' => true, 'skipped' => true, 'message' => 'Final HTML warm skipped because the caller will warm the page after the CSS bundle is available.') : $this->warm_url($frontpage_url, array('force_refresh' => true));
                 $verification = $skip_final_warm ? array(
                     'checked' => false,
                     'cachedHtmlAvailable' => false,
@@ -1170,8 +1170,12 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             }
 
             $href = esc_url($url);
-            return '<link rel="stylesheet" id="' . esc_attr($id) . '" href="' . $href . '" media="print" onload="this.media=&quot;all&quot;" data-ucwp-delayed-icon-fonts="1" />'
-                . '<noscript><link rel="stylesheet" href="' . $href . '" data-ucwp-delayed-icon-fonts-noscript="1" /></noscript>'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+            // phpcs:disable WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Final HTML rewrite emits generated delayed-font stylesheet links after WordPress enqueue has already completed.
+            $markup = '<link rel="stylesheet" id="' . esc_attr($id) . '" href="' . $href . '" media="print" onload="this.media=&quot;all&quot;" data-ucwp-delayed-icon-fonts="1" />'
+                . '<noscript><link rel="stylesheet" href="' . $href . '" data-ucwp-delayed-icon-fonts-noscript="1" /></noscript>';
+            // phpcs:enable WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+
+            return $markup;
         }
 
         private function build_frontpage_css_bundle_file($page_url, array $assets, $mode = 'safe')
@@ -1295,6 +1299,10 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $mode = in_array((string) $mode, array('safe', 'aggressive', 'full', 'leftover'), true) ? (string) $mode : 'safe';
             $bundle_content = trim($bundle_prelude . trim($bundle_body)) . "
 ";
+            if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                $bundle_content = trim(ucwp_strip_source_mapping_url_comments($bundle_content)) . "
+";
+            }
             $content_hash = md5($bundle_content);
             $signature = md5($mode . '|' . implode('||', $signature_parts) . '|' . $content_hash);
             $filename = 'bundle-' . $mode . '-' . $signature . '.css';
@@ -1308,6 +1316,9 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $delayed_font_bytes = 0;
             if ('' !== trim($delayed_font_css)) {
                 $delayed_font_content = trim($delayed_font_css) . "\n";
+                if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                    $delayed_font_content = trim(ucwp_strip_source_mapping_url_comments($delayed_font_content)) . "\n";
+                }
                 if (false !== stripos($delayed_font_content, '.ttf')) {
                     $delayed_font_content = $this->rewrite_font_face_ttf_sources_to_preferred_formats($delayed_font_content, home_url('/'));
                     $delayed_font_content = trim((string) $delayed_font_content) . "\n";
@@ -1488,7 +1499,9 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 return false;
             }
 
-            if (!empty($_SERVER['REQUEST_METHOD']) && 'GET' !== strtoupper((string) $_SERVER['REQUEST_METHOD'])) {
+            $request_method = function_exists('ucwp_server_value') ? ucwp_server_value('REQUEST_METHOD') : '';
+            $request_method = strtoupper(sanitize_text_field($request_method));
+            if ('' !== $request_method && 'GET' !== $request_method) {
                 return false;
             }
 
@@ -2013,6 +2026,10 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             }
 
             $replacement = '<link rel="stylesheet" id="ucwp-leftover-css-bundle" href="' . esc_url($bundle_url) . '" data-ucwp-leftover-css-bundle="1" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+            $delayed_font_markup = $this->build_delayed_icon_fonts_stylesheet_markup($bundle, 'ucwp-leftover-delayed-icon-fonts');
+            if ('' !== $delayed_font_markup) {
+                $replacement .= "\n" . $delayed_font_markup;
+            }
             $rebuilt = '';
             $cursor = 0;
             $inserted = false;

@@ -483,6 +483,17 @@ if ($is_profile_bypass_request) {
     return;
 }
 
+
+$force_refresh_header = strtolower((string) ucwp_server_var('HTTP_X_ULTRACACHE_FORCE_REFRESH', ''));
+$internal_header = (string) ucwp_server_var('HTTP_X_ULTRACACHE_INTERNAL_REQUEST', '');
+$warm_header = (string) ucwp_server_var('HTTP_X_ULTRACACHE_WARM', '');
+if (('1' === $force_refresh_header || 'true' === $force_refresh_header) && ('1' === $internal_header || '1' === $warm_header)) {
+    if (!headers_sent()) {
+        header('X-Ultra-Cache-Force-Refresh: advanced-cache');
+    }
+    return;
+}
+
 $ucwp_analytics_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/analytics.json';
 $ucwp_analytics_hit_buffer_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/analytics-hit-buffer.log';
 $ucwp_analytics_apcu_prefix = 'ucwp_analytics_hit_buffer_' . md5((string) WP_CONTENT_DIR) . '_';

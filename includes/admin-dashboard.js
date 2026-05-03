@@ -38,7 +38,8 @@
 		beer: 'https://www.paypal.com/ncp/payment/G5RNTC3UF58VU',
 		meal: 'https://www.paypal.com/ncp/payment/4NP9RNUYRFRFA',
 		hire: 'mailto:byron@iniotakis.com?subject=Hire%20me%20for%20WordPress%20work',
-		feature: 'mailto:byron@iniotakis.com?subject=UltraCache%20feature%20proposal',
+		feature: 'mailto:byron@iniotakis.com?subject=UltraCache%20feature%20request',
+		bug: 'mailto:byron@iniotakis.com?subject=UltraCache%20bug%20report',
 	};
 	const IMPORT_EXPORT_SETTING_KEYS = [
 		'pageCacheEnabled',
@@ -47,6 +48,7 @@
 		'objectCacheFallbackBackend',
 		'redisHost',
 		'redisPort',
+		'redisUsername',
 		'redisDatabase',
 		'redisPrefix',
 		'redisUseTls',
@@ -749,6 +751,8 @@
 			remove_conflicting_cache_dropins: { path: 'cache-conflicts/remove-dropins', method: 'POST' },
 			performance_profile_last: { path: 'performance-profile/last', method: 'GET' },
 			performance_profile_clear: { path: 'performance-profile/clear', method: 'POST' },
+			runtime_js_scan_report: { path: 'runtime-js-scan/report', method: 'GET' },
+			runtime_js_scan_submit: { path: 'runtime-js-scan/report', method: 'POST' },
 			cron_warm_start: { path: 'cron-warm/start', method: 'POST' },
 			cron_warm_stop: { path: 'cron-warm/stop', method: 'POST' },
 			cron_warm_tick: { path: 'cron-warm/tick', method: 'POST' },
@@ -827,7 +831,9 @@
 				(data && data.message) ||
 				(data && data.data && data.data.message) ||
 				('HTTP ' + response.status);
-			throw new Error(message);
+			const error = new Error(message);
+			error.data = data;
+			throw error;
 		}
 
 		if (data && data.success === false) {
@@ -835,7 +841,9 @@
 				(data.data && data.data.message) ||
 				data.message ||
 				'Request failed.';
-			throw new Error(message);
+			const error = new Error(message);
+			error.data = data;
+			throw error;
 		}
 
 		return data;
@@ -1060,6 +1068,27 @@
 	}
 
 
+
+	function SupportActionLinks({ compact, onHireClick }) {
+		const items = [
+			{ key: 'hire', label: 'Hire me', href: SUPPORT_LINKS.hire, onClick: onHireClick },
+			{ key: 'feature', label: 'Feature request', href: SUPPORT_LINKS.feature },
+			{ key: 'bug', label: 'Bug report', href: SUPPORT_LINKS.bug },
+		];
+
+		return h('div', { className: classNames('uc-support-links', 'uc-support-links--actions', compact ? 'uc-support-links--compact' : '') },
+			items.map((item) => h('a', {
+				key: item.key,
+				className: classNames('uc-support-link', 'uc-support-link--hire'),
+				href: item.href,
+				onClick: item.key === 'hire' && typeof item.onClick === 'function' ? item.onClick : undefined,
+			}, [
+				h('span', { className: 'uc-support-link__label', key: 'label' }, item.label),
+				h('span', { className: 'uc-support-link__amount', key: 'amount' }, 'Email'),
+			]))
+		);
+	}
+
 	function SupportLinks({ compact, onHireClick }) {
 		const items = [
 			{ key: 'coffee', label: 'Buy me a coffee', amount: '€5', href: SUPPORT_LINKS.coffee, kind: 'paypal' },
@@ -1112,20 +1141,10 @@
 					h('div', { className: 'uc-support-inline__support-group', key: 'support-group' }, [
 						h('div', { className: 'uc-support-inline__group-label' }, 'Support this plugin'),
 						h(SupportLinks, { key: 'paypal-links' }),
-						h('div', { className: 'uc-support-inline__need-support', key: 'need-support' }, [
-							h('div', { className: 'uc-support-inline__group-label', key: 'need-label' }, 'Need Support?'),
-							h('a', {
-							href: SUPPORT_LINKS.hire,
-							className: 'uc-support-inline__hire-link',
-							onClick: typeof onHireClick === 'function' ? onHireClick : undefined,
-							key: 'hire-link',
-						}, 'Hire me'),
-							h('a', {
-							href: SUPPORT_LINKS.feature,
-							className: 'uc-support-inline__hire-link',
-							key: 'feature-link',
-						}, 'Propose a new feature'),
-						]),
+							h('div', { className: 'uc-support-inline__need-support', key: 'need-support' }, [
+								h('div', { className: 'uc-support-inline__group-label', key: 'need-label' }, 'Need Support?'),
+								h(SupportActionLinks, { key: 'support-actions', onHireClick }),
+							]),
 					]),
 				]),
 		]);
@@ -1178,21 +1197,11 @@
 				h('p', { className: 'uc-support-modal__text', id: descriptionId, key: 'text' }, 'If UltraCache saves you time, you can support future updates or contact Byron directly for paid help.'),
 				h('div', { className: 'uc-support-modal__section-label', key: 'support-label' }, 'Support this plugin'),
 				h(SupportLinks, { compact: isMobile, onHireClick, key: 'links' }),
-				h('div', { className: 'uc-support-modal__need-support', key: 'need-support' }, [
-					h('div', { className: 'uc-support-modal__section-label', key: 'need-label' }, 'Need Support?'),
-					h('a', {
-					href: SUPPORT_LINKS.hire,
-					className: 'uc-support-modal__hire-link',
-					onClick: typeof onHireClick === 'function' ? onHireClick : undefined,
-					key: 'hire-link',
-				}, 'Hire me'),
-				h('a', {
-				href: SUPPORT_LINKS.feature,
-				className: 'uc-support-modal__hire-link',
-				key: 'feature-link',
-			}, 'Propose a new feature'),
-		]),
-			]),
+					h('div', { className: 'uc-support-modal__need-support', key: 'need-support' }, [
+						h('div', { className: 'uc-support-modal__section-label', key: 'need-label' }, 'Need Support?'),
+						h(SupportActionLinks, { compact: isMobile, onHireClick, key: 'support-actions' }),
+					]),
+				]),
 		]);
 	}
 
@@ -1381,7 +1390,7 @@
 		]);
 	}
 
-	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onLoadLatestProfileScan }) {
+	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onRuntimeScan, onLoadLatestProfileScan }) {
 		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
 		const [draft, setDraft] = useState(value || "");
 		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
@@ -1389,6 +1398,8 @@
 		const [populateBusy, setPopulateBusy] = useState(false);
 		const [scanBusy, setScanBusy] = useState(false);
 		const [debugScanBusy, setDebugScanBusy] = useState(false);
+		const [runtimeScanBusy, setRuntimeScanBusy] = useState(false);
+		const [runtimeScanStatus, setRuntimeScanStatus] = useState('');
 
 		useEffect(() => {
 			setDraft(value || '');
@@ -1568,6 +1579,25 @@
 			}
 		}
 
+
+		async function handleRuntimeScan() {
+			if (disabled || runtimeScanBusy || typeof onRuntimeScan !== 'function') {
+				return;
+			}
+			setRuntimeScanBusy(true);
+			setRuntimeScanStatus('Opening diagnostic page…');
+			try {
+				const result = await onRuntimeScan(scanUrl, function(statusText) {
+					setRuntimeScanStatus(String(statusText || ''));
+				});
+				if (result && typeof result === 'object') {
+					setScan(result);
+				}
+			} finally {
+				setRuntimeScanBusy(false);
+			}
+		}
+
 		async function handleDebugLoadLatestProfileScan() {
 			if (disabled || debugScanBusy || typeof onLoadLatestProfileScan !== 'function') {
 				return;
@@ -1612,15 +1642,17 @@
 					placeholder: defaultScanUrl || 'https://example.com/page/',
 					onChange: (e) => setScanUrl(e.target.value),
 				}),
-				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Scan a same-site page. UltraCache profiles that exact URL and shows live missing exclusions based on the textarea above; nothing is applied automatically.'),
+				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Scan a same-site page. UltraCache profiles the final HTML and shows missing visible exclusions, including inline dependency blocks such as jquery-js-after, wp-i18n-js-after, wp-api-fetch-js-after, and *-js-translations. Nothing is applied automatically.'),
 			]),
-			h('div', { className: 'mt-3 mb-3 flex flex-wrap items-center gap-2', style: { justifyContent: 'space-evenly', padding: '5px 0' } }, [
+			h('div', { className: 'uc-js-scan-actions mt-3 mb-3' }, [
 				h(Button, { key: 'defaults', onClick: handlePopulateDefaults, disabled: !!disabled || populateBusy }, populateBusy ? 'Populating…' : 'Populate Defaults'),
-				h(Button, { key: 'scan', onClick: handleScan, disabled: !!disabled || scanBusy }, scanBusy ? 'Scanning…' : 'Run JS Delay / Defer Scan'),
-				h(Button, { key: 'debug-scan', onClick: handleDebugLoadLatestProfileScan, disabled: !!disabled || debugScanBusy }, debugScanBusy ? 'Loading…' : 'Debug: Latest Profile'),
-				h(Button, { key: 'append', onClick: handleAppendSuggestions, disabled: !!disabled || !liveMissingCount }, 'Append Missing Recommended' + (liveMissingCount ? ' (' + liveMissingCount + ')' : '')),
-				h(Button, { key: 'save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, 'Save Exclusions'),
+				h(Button, { key: 'scan', onClick: handleScan, disabled: !!disabled || scanBusy }, scanBusy ? 'Scanning…' : 'JS Delay / Defer Scan'),
+				h(Button, { key: 'runtime-scan', onClick: handleRuntimeScan, disabled: !!disabled || runtimeScanBusy }, runtimeScanBusy ? 'Runtime scanning…' : 'Runtime Scan'),
+				h(Button, { key: 'debug-scan', onClick: handleDebugLoadLatestProfileScan, disabled: !!disabled || debugScanBusy }, debugScanBusy ? 'Loading…' : 'Debug Profile'),
+				h(Button, { key: 'append', onClick: handleAppendSuggestions, disabled: !!disabled || !liveMissingCount }, 'Append Missing' + (liveMissingCount ? ' (' + liveMissingCount + ')' : '')),
+				h(Button, { key: 'save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, 'Save'),
 			]),
+			runtimeScanStatus ? h('div', { className: 'uc-js-runtime-scan-status mt-1 mb-2 text-[11px] text-sky-300' }, runtimeScanStatus) : null,
 			scan ? h('div', { className: 'mt-3 mb-2 text-xs bg-black/20 rounded-xl px-3 py-3', style: { padding: '5px' } }, [
 				h('div', { className: 'flex flex-wrap items-center justify-between gap-3 mb-2' }, [
 					h('span', { className: 'text-zinc-300 font-bold' }, 'JS Delay / Defer Safety Scan'),
@@ -1636,7 +1668,7 @@
 				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing recommended exclusions. The visible JS Delay / Defer Exclusions list already covers the appendable scan results.', 'missing-recommended', 'These are the only lines Append Missing Recommended will add.'),
 				renderSuggestionSection('Already listed recommended', liveAlreadyListedCount, alreadyListedAppendableSuggestions, 'No recommended exclusions are already listed yet.', 'already-listed-recommended', 'Grouped and collapsed by default. These scan matches are already covered by your textarea, including broad fragments that cover variant paths.', { grouped: true, collapsed: true }),
 				renderSuggestionSection('Review-only detected', reviewOnlyCount, reviewOnlySuggestions, 'No review-only candidates were detected.', 'review-only-detected', 'Grouped and collapsed by default. Review-only items are shown for awareness and are not appended automatically.', { grouped: true, collapsed: true }),
-			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, 'Enter a same-site URL, then click Run JS Delay / Defer Scan. Debug: Latest Profile loads the last WP-CLI/advanced profile only.'),
+			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, 'Enter a same-site URL. JS Delay / Defer Scan reads final HTML; Runtime Scan opens the page in your browser, captures console/runtime errors, and turns them into suggested exclusions. Debug Profile loads the last WP-CLI/advanced profile only.'),
 		]);
 	}
 
@@ -1844,7 +1876,7 @@
 	}
 
 
-	function TextRow({ label, description, value, onChange, disabled, placeholder, type, className }) {
+	function TextRow({ label, description, value, onChange, disabled, placeholder, type, className, autoComplete, inputMode }) {
 		return h('div', { className: classNames('uc-number-row flex items-center justify-between gap-4 py-4', className || '') }, [
 			h('div', { key: 'left', className: 'min-w-0 pr-4' }, [
 				label ? h('div', { className: 'text-sm font-medium text-white' }, label) : null,
@@ -1857,6 +1889,8 @@
 				value: value || '',
 				disabled: !!disabled,
 				placeholder: placeholder || '',
+				autoComplete: autoComplete || undefined,
+				inputMode: inputMode || undefined,
 				onChange: (e) => onChange(e.target.value),
 			}),
 		]);
@@ -3015,6 +3049,7 @@
 			['Cached keys', typeof opcache.cachedKeys !== 'undefined' ? (formatNumber(opcache.cachedKeys) + (opcache.maxCachedKeys ? ' / ' + formatNumber(opcache.maxCachedKeys) : '')) : '—'],
 			['Hit rate', typeof opcache.hitRate !== 'undefined' ? formatPercent(opcache.hitRate) : '—'],
 			['Last restart', opcache.lastRestartTimeHuman || 'Never'],
+			['Last flush', opcache.lastFlushTimeHuman || 'Never'],
 		];
 
 		return h(Card, {
@@ -3169,26 +3204,29 @@
 				}),
 			]),
 			backend === 'disk' ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, 'Disk object cache is advanced/debug only and is not recommended for production. It can create many small files and may be slower than leaving persistent object cache disabled.') : null,
-			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
-				h('div', { className: 'uc-field-wrap' }, [
-					h('label', { className: 'uc-field-label' }, 'Object Cache Fallback'),
-					h('div', { className: 'text-xs text-zinc-500 mb-2' }, 'Used only when the selected backend cannot connect or is unavailable. Runtime-only cache is always the final emergency fallback.'),
-					h('div', { className: 'text-xs text-zinc-400 mb-2' }, 'Selected: ' + ('none' === fallbackPolicy ? 'None / runtime-only' : backendLabel(fallbackPolicy)) + '. Active fallback: ' + fallbackStatusText + '.'),
-					'disk' === fallbackPolicy ? h('div', { className: 'text-xs text-amber-300 mb-2' }, 'Disk fallback is advanced/debug only and may add filesystem I/O.') : null,
-					h('div', { className: 'uc-select-wrap' }, [
-						h('select', {
-							className: 'uc-field-input uc-field-select',
-							value: fallbackPolicy,
-							disabled: !!busy,
-							onChange: (e) => onFieldChange('objectCacheFallbackBackend', e.target.value),
-						}, [
-							h('option', { value: 'none', key: 'none' }, 'None / runtime-only'),
-							h('option', { value: 'apcu', key: 'apcu' }, 'APCu'),
-							h('option', { value: 'disk', key: 'disk' }, 'Disk (advanced/debug)'),
-						]),
-						h('span', { className: 'uc-select-icon', 'aria-hidden': true }, '▾'),
-					]),
+			h('div', { className: 'mt-4 flex items-center justify-between gap-4 py-4 border-t border-white/5' }, [
+				h('div', { className: 'min-w-0 pr-4' }, [
+					h('div', { className: 'uc-field-label' }, 'Object Cache Fallback'),
+					h('div', { className: 'text-xs text-zinc-500 mt-1' }, 'Used only when the selected backend cannot connect or is unavailable. Runtime-only cache is always the final emergency fallback.'),
+					h('div', { className: 'text-xs text-zinc-400 mt-1' }, 'Selected: ' + ('none' === fallbackPolicy ? 'None / runtime-only' : backendLabel(fallbackPolicy)) + '. Active fallback: ' + fallbackStatusText + '.'),
+					'disk' === fallbackPolicy ? h('div', { className: 'text-xs text-amber-300 mt-1' }, 'Disk fallback is advanced/debug only and may add filesystem I/O.') : null,
 				]),
+				h('div', { className: 'uc-select-wrap shrink-0 w-56 max-w-full' }, [
+					h('select', {
+						className: 'uc-field-input uc-field-select',
+						value: fallbackPolicy,
+						disabled: !!busy,
+						onChange: (e) => onFieldChange('objectCacheFallbackBackend', e.target.value),
+					}, [
+						h('option', { value: 'none', key: 'none' }, 'None / runtime-only'),
+						h('option', { value: 'apcu', key: 'apcu' }, 'APCu'),
+						h('option', { value: 'disk', key: 'disk' }, 'Disk (advanced/debug)'),
+					]),
+					h('span', { className: 'uc-select-icon', 'aria-hidden': true }, '▾'),
+				]),
+			]),
+			fallbackActive ? h('div', { className: 'mt-4 text-xs text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded-xl px-3 py-2' }, fallbackMessage) : null,
+			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(TextRow, {
 					label: 'Redis host',
 					description: 'Common default: 127.0.0.1',
@@ -3198,9 +3236,6 @@
 					placeholder: '127.0.0.1',
 					key: 'redis-host',
 				}),
-			]),
-			fallbackActive ? h('div', { className: 'mt-4 text-xs text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded-xl px-3 py-2' }, fallbackMessage) : null,
-			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(NumberRow, {
 					label: 'Redis port',
 					description: 'Common default: 6379',
@@ -3212,6 +3247,16 @@
 					key: 'redis-port',
 				}),
 				h(TextRow, {
+					label: 'Redis username',
+					description: 'Optional. Required only for Redis ACL users. Leave empty for password-only Redis.',
+					value: form.redisUsername || '',
+					onChange: (value) => onFieldChange('redisUsername', value),
+					disabled: busy,
+					placeholder: 'optional',
+					autoComplete: 'off',
+					key: 'redis-username',
+				}),
+				h(TextRow, {
 					label: 'Redis password',
 					description: form.redisPasswordConfigured ? 'A saved Redis password already exists. Leave blank to keep it, or enter a new one to replace it.' : 'Leave empty when the server does not require auth.',
 					value: form.redisPassword || '',
@@ -3219,6 +3264,7 @@
 					disabled: busy,
 					placeholder: 'optional',
 					type: 'password',
+					autoComplete: 'new-password',
 					key: 'redis-password',
 				}),
 				h(NumberRow, {
@@ -3629,6 +3675,7 @@
 			objectCacheFallbackBackend: initialSettings.objectCacheFallbackBackend || 'apcu',
 			redisHost: initialSettings.redisHost || '127.0.0.1',
 			redisPort: initialSettings.redisPort || 6379,
+			redisUsername: initialSettings.redisUsername || '',
 			redisPassword: initialSettings.redisPassword || '',
 			redisDatabase: typeof initialSettings.redisDatabase === 'undefined' ? 0 : initialSettings.redisDatabase,
 			redisPrefix: initialSettings.redisPrefix || '',
@@ -3936,6 +3983,7 @@
 				objectCacheFallbackBackend: settings.objectCacheFallbackBackend || 'apcu',
 				redisHost: settings.redisHost || '127.0.0.1',
 				redisPort: settings.redisPort || 6379,
+				redisUsername: settings.redisUsername || '',
 				redisPassword: settings.redisPassword || '',
 				redisDatabase: typeof settings.redisDatabase === 'undefined' ? 0 : settings.redisDatabase,
 				redisPrefix: settings.redisPrefix || '',
@@ -3950,6 +3998,7 @@
 			settings.objectCacheFallbackBackend,
 			settings.redisHost,
 			settings.redisPort,
+			settings.redisUsername,
 			settings.redisPassword,
 			settings.redisDatabase,
 			settings.redisPrefix,
@@ -4122,27 +4171,42 @@
 		}
 
 		async function testRedisConnection() {
-			if (asyncActions.redis_test) {
+			if (asyncActions.redis_test || busy) {
 				return;
 			}
 
-			const payload = Object.assign({}, redisForm || {});
+			try {
+				await syncQueuedSettingsBeforeAction();
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Could not save queued settings before testing Redis.' });
+				return;
+			}
+
+			const payload = Object.assign({}, redisForm || {}, {
+				redisPasswordConfigured: !!((settingsRef.current || {}).redisPasswordConfigured || (redisForm || {}).redisPasswordConfigured),
+			});
 			const passwordValue = String(payload.redisPassword || '').trim();
 			if (!passwordValue) {
 				delete payload.redisPassword;
 			}
 
-			await queueDashboardAction('redis_test', payload, {
-				queued: 'Redis connection test processing via dashboard…',
-				success: 'Redis connection test finished.',
-				failed: 'Redis connection test failed.',
-			}, 'redis_test', (result) => {
-				setDiagnostics((current) => Object.assign({}, current || {}, {
-					objectCache: Object.assign({}, (current && current.objectCache) || {}, {
-						redis: Object.assign({}, (((current && current.objectCache) || {}).redis) || {}, result || {}),
-					}),
-				}));
-			});
+			setAsyncActionState('redis_test', true, 'Testing…');
+			try {
+				const response = await apiRequest('redis_test', payload);
+				applyDashboardPayload(response || {});
+				mergeRedisTestResult(response || {});
+				pushToast({ type: 'success', text: response && response.message ? response.message : 'Redis connection test finished.' });
+			} catch (error) {
+				const payloadFromError = error && error.data && typeof error.data === 'object' ? error.data : {};
+				applyDashboardPayload(payloadFromError);
+				mergeRedisTestResult(payloadFromError);
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Redis connection test failed.' });
+			} finally {
+				try {
+					await refreshStats();
+				} catch (error) {}
+				setAsyncActionState('redis_test', false);
+			}
 		}
 
 		async function flushObjectCache() {
@@ -4239,11 +4303,34 @@
 			}
 		}
 		async function runVarnishTest() {
-			await queueDashboardAction('varnish_test', {}, {
-				queued: 'Varnish test processing via dashboard…',
-				success: 'Varnish test completed.',
-				failed: 'Varnish test failed.',
-			}, 'varnish_test');
+			if (asyncActions.varnish_test || busy) {
+				return;
+			}
+
+			try {
+				await syncQueuedSettingsBeforeAction();
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Could not save queued settings before testing Varnish.' });
+				return;
+			}
+
+			setAsyncActionState('varnish_test', true, 'Testing…');
+			try {
+				const response = await apiRequest('varnish_test', {});
+				applyDashboardPayload(response || {});
+				mergeVarnishTestResult(response || {});
+				pushToast({ type: 'success', text: response && response.message ? response.message : 'Varnish test completed.' });
+			} catch (error) {
+				const payloadFromError = error && error.data && typeof error.data === 'object' ? error.data : {};
+				applyDashboardPayload(payloadFromError);
+				mergeVarnishTestResult(payloadFromError);
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Varnish test failed.' });
+			} finally {
+				try {
+					await refreshStats();
+				} catch (error) {}
+				setAsyncActionState('varnish_test', false);
+			}
 		}
 
 		async function runVarnishFlushAll() {
@@ -4256,11 +4343,40 @@
 
 
 		async function flushOpcache() {
-			await queueDashboardAction('opcache_flush', {}, {
-				queued: 'OPcache flush processing via dashboard…',
-				success: 'OPcache flush finished.',
-				failed: 'OPcache flush failed.',
-			}, 'opcache_flush');
+			try {
+				await syncQueuedSettingsBeforeAction();
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Could not save queued settings before flushing OPcache.' });
+				return;
+			}
+
+			setAsyncActionState('opcache_flush', true, 'Flushing…');
+			pushToast({ id: 'ucwp-action-opcache_flush', type: 'info', text: 'Flushing OPcache…', persistent: true });
+			try {
+				const response = await apiRequest('opcache_flush', {});
+				applyDashboardPayload(response || {});
+				if (response && response.opcache) {
+					setStats((current) => Object.assign({}, current || {}, { opcache: response.opcache }));
+				}
+				try {
+					await refreshStats();
+				} catch (error) {}
+				setTimeout(function(){ refreshStats().catch(function(){}); }, 1200);
+				pushToast({ id: 'ucwp-action-opcache_flush', type: response && response.success === false ? 'error' : 'success', text: response && response.message ? response.message : 'OPcache flush finished.' });
+			} catch (error) {
+				const payloadFromError = error && error.data && typeof error.data === 'object' ? error.data : {};
+				applyDashboardPayload(payloadFromError);
+				if (payloadFromError && payloadFromError.opcache) {
+					setStats((current) => Object.assign({}, current || {}, { opcache: payloadFromError.opcache }));
+				}
+				try {
+					await refreshStats();
+				} catch (refreshError) {}
+				setTimeout(function(){ refreshStats().catch(function(){}); }, 1200);
+				pushToast({ id: 'ucwp-action-opcache_flush', type: 'error', text: error && error.message ? error.message : 'OPcache flush failed.' });
+			} finally {
+				setAsyncActionState('opcache_flush', false);
+			}
 		}
 
 		async function flushApcu() {
@@ -4369,6 +4485,34 @@
 			if (responseSettings) {
 				applyServerSettings(responseSettings);
 			}
+		}
+
+		function mergeRedisTestResult(result) {
+			if (!result || typeof result !== 'object') {
+				return;
+			}
+
+			setDiagnostics((current) => {
+				const next = Object.assign({}, current || {});
+				const objectCache = Object.assign({}, next.objectCache || {});
+				objectCache.redis = Object.assign({}, objectCache.redis || {}, result || {});
+				next.objectCache = objectCache;
+				return next;
+			});
+		}
+
+		function mergeVarnishTestResult(result) {
+			if (!result || typeof result !== 'object') {
+				return;
+			}
+
+			setDiagnostics((current) => {
+				const next = Object.assign({}, current || {});
+				const varnish = Object.assign({}, next.varnish || {});
+				varnish.last = Object.assign({}, varnish.last || {}, result || {});
+				next.varnish = varnish;
+				return next;
+			});
 		}
 
 		function applyMediaQueueStatus(payload) {
@@ -4954,6 +5098,12 @@
 			if (!defaults.trim() && Object.prototype.hasOwnProperty.call(defaultsPayload, 'deferJsExcludeList')) {
 				defaults = String(defaultsPayload.deferJsExcludeList || '');
 			}
+			if (!!settings.sliderSafeModeEnabled && ucwp && typeof ucwp.jsDelayDeferSliderExclusions !== 'undefined') {
+				const sliderDefaults = String(ucwp.jsDelayDeferSliderExclusions || '');
+				if (sliderDefaults.trim()) {
+					defaults = defaults.trim() ? (defaults + '\n' + sliderDefaults) : sliderDefaults;
+				}
+			}
 			if (!defaults.trim()) {
 				pushToast({ type: 'warning', text: 'No recommended JS Delay / Defer defaults are defined.' });
 				return String(currentDraft || '');
@@ -5025,6 +5175,144 @@
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to load JS Delay Safety Scan.' });
 				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0 };
 			}
+		}
+
+
+		function buildRuntimeJsScanUrl(url, scanId) {
+			let target = String(url || '').trim() || ((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/');
+			let parsed;
+			try {
+				parsed = new URL(target, window.location.origin);
+			} catch (error) {
+				parsed = new URL((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/', window.location.origin);
+			}
+			parsed.searchParams.set('ucwp_runtime_js_scan', '1');
+			parsed.searchParams.set('ucwp_runtime_js_scan_id', scanId);
+			parsed.searchParams.set('ucwp_runtime_js_scan_nonce', ucwp.runtimeJsScanNonce || '');
+			parsed.searchParams.set('ucwp_rt', String(Date.now()));
+			return parsed.toString();
+		}
+
+		function normalizeRuntimeJsScanResult(report, scanUrl) {
+			const scan = report && report.jsDelaySafetyScan ? report.jsDelaySafetyScan : null;
+			if (!scan || !scan.available) {
+				return {
+					available: false,
+					source: 'browser-runtime',
+					suggestions: [],
+					suggestionCount: 0,
+					missingCount: 0,
+					runtimeErrorCount: report && report.errorCount ? report.errorCount : 0,
+					scannedUrl: scanUrl,
+				};
+			}
+			return Object.assign({}, scan, {
+				available: true,
+				source: 'browser-runtime',
+				scannedUrl: scan.scannedUrl || (report && report.url) || scanUrl,
+				scannedAt: new Date().toISOString(),
+			});
+		}
+
+
+		function readPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl) {
+			try {
+				if (!popup || popup.closed || !popup.__ucwpRuntimeJsScan) {
+					return null;
+				}
+				const state = popup.__ucwpRuntimeJsScan;
+				const errors = Array.isArray(state.errors) ? state.errors.slice(0, 120) : [];
+				return {
+					scanId,
+					url: String((popup.location && popup.location.href) || scanUrl || ''),
+					completed: false,
+					errors,
+					userAgent: String((popup.navigator && popup.navigator.userAgent) || ''),
+					elapsedMs: state.injectedAt ? Math.max(0, Date.now() - Number(state.injectedAt || 0)) : 0,
+					debug: Object.assign({}, state.debug || {}, { directHarvest: true, sentCount: state.sentCount || 0 }),
+				};
+			} catch (error) {
+				return null;
+			}
+		}
+
+		async function submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, completed) {
+			const snapshot = readPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl);
+			if (!snapshot) {
+				return null;
+			}
+			snapshot.completed = !!completed;
+			try {
+				const response = await apiRequest('runtime_js_scan_submit', snapshot);
+				return response && response.runtimeJsScan ? response.runtimeJsScan : null;
+			} catch (error) {
+				return null;
+			}
+		}
+
+		async function runBrowserRuntimeJsScanForUrl(url, onStatus) {
+			function setRuntimeStatus(message) {
+				if (typeof onStatus === 'function') {
+					onStatus(message);
+				}
+			}
+			const scanUrl = String(url || '').trim() || ((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/');
+			const scanId = 'rt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+			const runtimeUrl = buildRuntimeJsScanUrl(scanUrl, scanId);
+			setRuntimeStatus('Opening diagnostic page…');
+			const popup = window.open(runtimeUrl, 'ucwpRuntimeJsScan', 'width=1280,height=900');
+			if (!popup) {
+				setRuntimeStatus('Popup was blocked. Allow popups for this admin page and try again. Diagnostic URL: ' + runtimeUrl);
+				pushToast({ type: 'error', text: 'Browser blocked the runtime scan window. Allow popups for this admin page and try again.' });
+				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl, debugUrl: runtimeUrl };
+			}
+
+			try { popup.focus(); } catch (error) {}
+			setRuntimeStatus('Diagnostic page opened. Waiting for browser errors…');
+			pushToast({ type: 'info', text: 'Runtime Scan opened the page. Keep it open for a few seconds.' });
+			let latestReport = null;
+			for (let i = 0; i < 18; i++) {
+				setRuntimeStatus('Waiting for runtime scan report… ' + (i + 1) + '/18');
+				await sleep(i < 2 ? 900 : 1200);
+				const directReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, false);
+				if (directReport && Number(directReport.errorCount || 0) > 0) {
+					latestReport = directReport;
+				}
+				try {
+					const response = await apiRequest('runtime_js_scan_report', { scanId });
+					const fetchedReport = response && response.runtimeJsScan ? response.runtimeJsScan : null;
+					if (fetchedReport) {
+						if (!latestReport || Number(fetchedReport.errorCount || 0) >= Number(latestReport.errorCount || 0)) {
+							latestReport = fetchedReport;
+						}
+						if (latestReport && latestReport.completed && Number(latestReport.errorCount || 0) > 0) {
+							break;
+						}
+					}
+				} catch (error) {}
+			}
+			const finalDirectReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, true);
+			if (finalDirectReport && (!latestReport || Number(finalDirectReport.errorCount || 0) >= Number(latestReport.errorCount || 0))) {
+				latestReport = finalDirectReport;
+			}
+
+			if (!latestReport) {
+				setRuntimeStatus('No runtime report returned. The diagnostic page may have been served from cache or blocked.');
+				pushToast({ type: 'warning', text: 'Runtime scan did not return a report. Check that the diagnostic page opened and that cache bypass is active.' });
+				return { available: false, source: 'browser-runtime', suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl };
+			}
+
+			const result = normalizeRuntimeJsScanResult(latestReport, scanUrl);
+			const missingCount = Number(result.missingCount || 0);
+			const runtimeErrorCount = Number(result.runtimeErrorCount || latestReport.errorCount || 0);
+			if (runtimeErrorCount > 0) {
+				setRuntimeStatus('Runtime scan captured ' + runtimeErrorCount + ' browser error(s).');
+				pushToast({ type: missingCount ? 'warning' : 'info', text: 'Runtime scan captured ' + runtimeErrorCount + ' browser error(s)' + (missingCount ? ' and found ' + missingCount + ' missing exclusion suggestion(s).' : '.') });
+			} else {
+				setRuntimeStatus('Runtime scan completed with no browser JS errors captured.');
+				pushToast({ type: 'success', text: 'Runtime scan completed with no browser JS errors captured.' });
+			}
+			return result;
 		}
 
 
@@ -6170,7 +6458,7 @@ h(ToggleRow, {
 								}),
 h(ToggleRow, {
 									label: 'Defer all JS',
-									description: 'Aggressive manual mode. When Enable Defer JS is on, UltraCache adds native defer to every eligible frontend script except truly core dependency scripts such as jQuery and core WP globals/dependencies. Manual JS Delay / Defer Exclusions are preserved and always win over this aggressive mode.',
+									description: 'Aggressive manual mode. When Enable Defer JS is on, UltraCache adds native defer to every eligible frontend script. If JS Delay / Defer Exclusions is empty, UltraCache really defers everything eligible. Populate Defaults is optional and only adds visible recommendations; scan suggestions help you build exclusions after testing.',
 									checked: !!settings.deferAllJsEnabled,
 									onChange: (value) => updateSetting('deferAllJsEnabled', value),
 									disabled: busy || !settings.deferJsEnabled,
@@ -6684,9 +6972,10 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											value: settings.deferJsExcludeList || '',
 											onSave: (value) => updateSetting('deferJsExcludeList', value),
 											disabled: busy,
-											placeholder: 'jquery-dependent-widget\ncheckout\ncart\nrevslider\nsr7\ntptools\ncritical-menu',
+											placeholder: 'jquery\njquery-migrate\n/wp-includes/js/\nwp-util\nunderscore\ncart\ncheckout',
 											onPopulateDefaults: populateDeferDelayExclusionDefaults,
 											onScan: runJsDelaySafetyScanForUrl,
+											onRuntimeScan: runBrowserRuntimeJsScanForUrl,
 											onLoadLatestProfileScan: loadLatestJsDelaySafetyScan,
 											key: 'defer-stages-exclude-list-final',
 										}),

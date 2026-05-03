@@ -1,10 +1,10 @@
 === UltraCache ===
 Contributors: orloxgr
-Tags: cache, performance, redis, varnish, webp, avif, apcu
-Requires at least: 6.4
+Tags: cache, performance, redis, varnish, webp
+Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.56.209
+Stable tag: 2.56.238
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -107,13 +107,37 @@ Experimental or advanced controls include Combine safe deferred JS, Full CSS Bun
 
 UltraCache keeps safety lists visible in Advanced Settings & Exclusions so site owners can review and edit exclusions instead of relying on hidden hard-coded site rules.
 
-== Privacy and External Services ==
+== External Services ==
 
-UltraCache stores generated cache files on the local WordPress installation under `wp-content/cache/ultracache/` and optimized image variants under `wp-content/uploads/uc-images/`.
+UltraCache stores generated cache files on the local WordPress installation under `wp-content/cache/ultracache/` and optimized image variants under `wp-content/uploads/uc-images/`. The basic page cache, object cache, media conversion queue, CSS/JS optimization, Varnish integration, and diagnostics do not require an external SaaS account.
 
-Local Google Fonts Optimization may make outbound requests to Google Fonts CSS/font URLs only when an administrator builds or rebuilds the local Google Fonts cache. The frontend then uses the local cached copies when the feature is enabled and built successfully.
+= Google Fonts =
 
-Varnish integration is optional. If configured, UltraCache may send local/private purge or test requests to the Varnish endpoint selected by the site administrator. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
+When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request Google Fonts CSS and font files from `fonts.googleapis.com` and `fonts.gstatic.com` while building or rebuilding the local Google Fonts cache. This is used to download the CSS/font files and store local copies under `wp-content/cache/ultracache/google-fonts/`.
+
+These requests are made only from the WordPress server during an administrator-initiated build/rebuild, cache warm process, or Google Fonts cache refresh that needs the local font cache. UltraCache does not require a Google account or API key.
+
+Data sent: the requested Google Fonts CSS/font URL and normal HTTP request data such as the server IP address, user agent, and request headers.
+
+Service provider: Google Fonts / Google LLC.
+Google Fonts Privacy FAQ: https://developers.google.com/fonts/faq/privacy
+Google Terms of Service: https://policies.google.com/terms
+
+= Existing third-party scripts on the site =
+
+UltraCache may detect URLs or inline code from services such as Google Tag Manager, Google Analytics, Facebook/Meta Pixel, Google Maps, reCAPTCHA, hCaptcha, Hotjar, Microsoft Clarity, Stripe, PayPal, and similar services when analyzing the site's existing frontend HTML for delay/defer exclusions, cache safety rules, or diagnostics. UltraCache does not add these services to the site and does not send data to them by itself.
+
+= Varnish =
+
+Varnish integration is optional and administrator-configured. If configured, UltraCache may send local/private purge or test requests to the Varnish endpoint selected by the site administrator. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
+
+= Support and donation links =
+
+The UltraCache dashboard includes optional support/donation links. Clicking a PayPal support button opens PayPal in the administrator's browser. UltraCache does not send site visitor data to PayPal. If an administrator clicks a PayPal link, PayPal receives the normal browser request data for that visit.
+
+Service provider: PayPal.
+PayPal Privacy Statement: https://www.paypal.com/privacy
+PayPal User Agreement: https://www.paypal.com/legalhub/useragreement-full
 
 == WP-CLI Commands ==
 
@@ -197,9 +221,24 @@ Disable the last risky optimization, confirm the issue disappears, then add visi
 
 == Changelog ==
 
+= 2.56.238 =
+* Injects the browser Runtime Scan collector after the unified final output pipeline, so UltraCache does not defer/delay its own collector.
+* Protects the Runtime Scan collector from inline JS delay handling and keeps the native template enhancement buffer forced only for scan requests.
+
+= 2.56.231 =
+* Corrects Defer all JS manual mode so an empty JS Delay / Defer Exclusions list stays empty and all eligible scripts are deferred.
+* Keeps WordPress/core dependency protections as visible Populate Defaults recommendations instead of automatic hidden or forced exclusions.
+* Keeps inline after/translations dependency detection in JS Delay / Defer Scan so users can identify and append exclusions iteratively.
+
 Release notes are maintained in `changelog.txt`.
 
 == Upgrade Notice ==
 
-= 2.56.209 =
-Fixes cache conflict warning logic so disabled cache plugins do not keep warnings visible after non-UltraCache drop-ins are removed. See `changelog.txt` for release notes.
+= 2.56.228 =
+* Restores Speed Diagnostics, JS Delay / Defer Scan, and CSS Diagnostics timing-profile persistence after the unified final output pipeline rewrite.
+
+= 2.56.223 =
+* Restored one final output pipeline so media rewrites, CSS bundles, delayed icon-font companion CSS, and cached HTML storage stay in sync.
+
+= 2.56.218 =
+Fixes CSS bundle warm storage, shows OPcache last flush status, and disables Redis field autocomplete.

@@ -197,6 +197,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             }
 
             $file = $this->get_runtime_lock_file($name);
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Runtime lock requires native fopen/flock semantics and is limited to UltraCache cache storage.
             $handle = @fopen($file, 'c+');
             if (!$handle) {
                 return false;
@@ -205,13 +206,16 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             if (!@flock($handle, LOCK_EX | LOCK_NB)) {
                 $mtime = @filemtime($file);
                 if ($mtime && (time() - (int) $mtime) > max(30, (int) $ttl)) {
+                    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_touch -- Refreshes only a path-guarded UltraCache runtime lock file.
                     @touch($file);
                 }
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle.
                 @fclose($handle);
                 return false;
             }
 
             @ftruncate($handle, 0);
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Writes only to a path-guarded UltraCache runtime lock file.
             @fwrite($handle, (string) time());
             @fflush($handle);
             $this->runtime_locks[$name] = $handle;
@@ -227,6 +231,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
             $handle = $this->runtime_locks[$name];
             @flock($handle, LOCK_UN);
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle.
             @fclose($handle);
             unset($this->runtime_locks[$name]);
         }
@@ -253,6 +258,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
         {
             $args = is_array($args) ? $args : array();
             $ignore_runtime_bypass = !empty($args['ignore_runtime_bypass']);
+            $force_refresh = !empty($args['force_refresh']);
             $url = esc_url_raw((string) $url);
             if (!$this->is_cacheable_local_url($url)) {
                 $result = array(
@@ -292,6 +298,15 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 $buckets = $bucket_priority;
             }
 
+            if ($force_refresh) {
+                foreach ($buckets as $bucket) {
+                    $existing_cache_file = $this->get_cache_path($url, $bucket);
+                    if ('' !== (string) $existing_cache_file) {
+                        $this->delete_cache_variants($existing_cache_file);
+                    }
+                }
+            }
+
             $settings_for_warm = $this->get_settings();
             $css_bundle_requested = !empty($args['build_css_bundle']);
             $css_bundle_auto_warm = !$css_bundle_requested
@@ -317,6 +332,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             $last_error = '';
 
             foreach ($buckets as $bucket) {
+                $accept_header = $this->get_accept_header_for_bucket($bucket);
                 $response = ucwp_safe_loopback_remote_request(
                     $url,
                     array(
@@ -327,9 +343,12 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                         'user-agent'  => 'Mozilla/5.0 (compatible; UltraCache-Warm/' . UCWP_VERSION . '; +https://wordpress.org)',
                         'headers'     => array_filter(
                             array(
-                                'Accept'                          => $this->get_accept_header_for_bucket($bucket),
+                                'Accept'                          => $accept_header,
                                 'X-UltraCache-Warm'               => '1',
                                 'X-UltraCache-Internal-Request'   => '1',
+                                'X-UltraCache-Force-Refresh'      => $force_refresh ? '1' : '',
+                                'Cache-Control'                   => $force_refresh ? 'no-cache, no-store, must-revalidate, max-age=0' : '',
+                                'Pragma'                          => $force_refresh ? 'no-cache' : '',
                             )
                         ),
                     ),
@@ -351,6 +370,19 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 if (!$this->is_html_loopback_response($response, $html)) {
                     $last_error = 'Remote page did not return an HTML Content-Type.';
                     continue;
+                }
+
+                if (method_exists($this, 'process_final_html_for_cache_storage')) {
+                    $processed_html = $this->process_final_html_for_cache_storage($html, false, array(
+                        'accept'      => $accept_header,
+                        'bucket'      => (string) $bucket,
+                        'source'      => 'warm_url',
+                        'url'         => $url,
+                        'request_url' => $url,
+                    ));
+                    if (is_string($processed_html) && '' !== $processed_html) {
+                        $html = $processed_html;
+                    }
                 }
 
                 $file_path = $this->get_cache_path($url, $bucket);

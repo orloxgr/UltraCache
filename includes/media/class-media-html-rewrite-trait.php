@@ -78,8 +78,13 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				return;
 			}
 
-			ob_start(array($this, 'final_html_rewrite_callback'));
-			$this->final_buffering = true;
+			// UltraCache 2.56.219: final full-page media rewriting is now part of the
+			// engine-owned unified final output pipeline. Keeping a separate template
+			// enhancement callback here made final HTML transforms diverge between
+			// browser output, warm output, and cached storage. Content/image filters
+			// above still run normally; the full HTML pass is called explicitly by the
+			// engine finalizer.
+			return;
 		}
 
 		public function final_html_rewrite_callback($html) {
@@ -88,6 +93,30 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			}
 
 			return $this->rewrite_html_image_urls($html);
+		}
+
+		/**
+		 * Rewrite full-document image URLs using an explicit, scoped Accept header.
+		 *
+		 * This is used by warm/cache-storage paths where the cache bucket is known
+		 * from the loopback request, but the current PHP process does not have the
+		 * same HTTP_ACCEPT value as the browser/loopback request.
+		 *
+		 * @param string $html          Full frontend HTML.
+		 * @param string $accept_header HTTP Accept header for the target cache bucket.
+		 * @return string
+		 */
+		public function rewrite_html_image_urls_with_accept($html, $accept_header) {
+			$previous_accept = $this->media_rewrite_accept_context;
+			$this->media_rewrite_accept_context = is_string($accept_header) ? $accept_header : '';
+
+			try {
+				$rewritten = $this->rewrite_html_image_urls($html);
+			} finally {
+				$this->media_rewrite_accept_context = $previous_accept;
+			}
+
+			return is_string($rewritten) ? $rewritten : $html;
 		}
 
 		public function rewrite_html_image_urls($html) {
@@ -183,6 +212,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 					}
 
 					$replacement = $this->get_best_url_from_public_url($current);
+					$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
 					if ($replacement && $replacement !== $current) {
 						$processor->set_attribute($attribute, $replacement);
 					}
@@ -207,6 +237,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 					}
 
 					$replacement = $this->get_best_url_from_public_url($current);
+					$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
 					if ($replacement && $replacement !== $current) {
 						$processor->set_attribute($attribute, $replacement);
 					}
@@ -227,6 +258,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 						$content = $processor->get_attribute('content');
 						if (is_string($content) && '' !== $content) {
 							$replacement = $this->get_best_url_from_public_url($content);
+							$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
 							if ($replacement && $replacement !== $content) {
 								$processor->set_attribute('content', $replacement);
 							}
@@ -238,6 +270,58 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			return $processor->get_updated_html();
 		}
 
+
+		private function sanitize_rewritten_public_url_raw($url) {
+			$url = trim((string) $url);
+			if ('' === $url) {
+				return '';
+			}
+
+			$url = html_entity_decode(str_replace('\/', '/', $url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+			$url = trim($url);
+			if ('' === $url || false === strpos($url, '/uc-images/')) {
+				return '';
+			}
+
+			$url = esc_url_raw($url);
+			if ('' === $url || false === strpos($url, '/uc-images/')) {
+				return '';
+			}
+
+			if (preg_match("/[\x00-\x1F\x7F\s<>\"']/", $url)) {
+				return '';
+			}
+
+			return $url;
+		}
+
+		private function escape_rewritten_public_url_for_html_attribute($url) {
+			$url = $this->sanitize_rewritten_public_url_raw($url);
+			return '' !== $url ? esc_url($url) : '';
+		}
+
+		private function escape_rewritten_public_url_for_css_url($url) {
+			$url = $this->sanitize_rewritten_public_url_raw($url);
+			if ('' === $url || preg_match("/[\x00-\x1F\x7F\s()\"']/", $url)) {
+				return '';
+			}
+
+			return $url;
+		}
+
+		private function sanitize_srcset_descriptor($descriptor) {
+			$descriptor = trim((string) $descriptor);
+			if ('' === $descriptor) {
+				return '';
+			}
+
+			if (preg_match('/^(?:[1-9][0-9]*w|(?:[0-9]+(?:\.[0-9]+)?)x)$/', $descriptor)) {
+				return $descriptor;
+			}
+
+			return '';
+		}
+
 		private function rewrite_html_image_urls_with_regex($html) {
 			$single_url_attributes = array('src', 'data-src', 'data-lazy-src', 'href', 'data-href', 'data-lg-src', 'data-mfp-src');
 			foreach ($single_url_attributes as $attribute) {
@@ -246,7 +330,8 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 					$pattern,
 					function ($matches) {
 						$replacement = $this->get_best_url_from_public_url($matches[2]);
-						return $matches[1] . ($replacement ? $replacement : $matches[2]) . $matches[3];
+						$replacement = $this->escape_rewritten_public_url_for_html_attribute($replacement);
+						return $matches[1] . ($replacement ? $replacement : esc_attr($matches[2])) . $matches[3];
 					},
 					$html
 				);
@@ -258,7 +343,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				$html    = preg_replace_callback(
 					$pattern,
 					function ($matches) {
-						return $matches[1] . $this->rewrite_srcset_string($matches[2]) . $matches[3];
+						return $matches[1] . esc_attr($this->rewrite_srcset_string($matches[2])) . $matches[3];
 					},
 					$html
 				);
@@ -268,7 +353,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				"/(style=[\"'])(.*?)([\"'])/is",
 				function ($matches) {
 					$style = $this->rewrite_inline_style_urls($matches[2]);
-					return $matches[1] . $style . $matches[3];
+					return $matches[1] . esc_attr($style) . $matches[3];
 				},
 				$html
 			);
@@ -280,7 +365,8 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 					$pattern,
 					function ($matches) {
 						$replacement = $this->get_best_url_from_public_url($matches[2]);
-						return $matches[1] . ($replacement ? $replacement : $matches[2]) . $matches[3];
+						$replacement = $this->escape_rewritten_public_url_for_html_attribute($replacement);
+						return $matches[1] . ($replacement ? $replacement : esc_attr($matches[2])) . $matches[3];
 					},
 					$html
 				);
@@ -296,7 +382,8 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 					$pattern,
 					function ($matches) {
 						$replacement = $this->get_best_url_from_public_url($matches[2]);
-						return $matches[1] . ($replacement ? $replacement : $matches[2]) . $matches[3];
+						$replacement = $this->escape_rewritten_public_url_for_html_attribute($replacement);
+						return $matches[1] . ($replacement ? $replacement : esc_attr($matches[2])) . $matches[3];
 					},
 					$html
 				);
@@ -374,6 +461,11 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				return $original_match;
 			}
 
+			$replacement = $this->escape_rewritten_public_url_for_css_url($replacement);
+			if (!$replacement) {
+				return $original_match;
+			}
+
 			if ($had_escaped_slashes) {
 				$replacement = str_replace('/', '\/', $replacement);
 			}
@@ -397,7 +489,9 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				$url      = isset($segments[0]) ? $segments[0] : '';
 				$descriptor = isset($segments[1]) ? $segments[1] : '';
 				$replacement = $this->get_best_url_from_public_url($url);
-				$parts[$index] = $replacement ? trim($replacement . ' ' . $descriptor) : $part;
+				$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
+				$descriptor = $this->sanitize_srcset_descriptor($descriptor);
+				$parts[$index] = $replacement ? trim($replacement . ('' !== $descriptor ? ' ' . $descriptor : '')) : $part;
 			}
 
 			return implode(', ', $parts);
@@ -413,7 +507,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			$source_url = html_entity_decode(str_replace('\/', '/', $source_url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 			$source_url = trim($source_url);
 			$optimized_url = html_entity_decode(str_replace('\/', '/', $optimized_url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-			$optimized_url = trim($optimized_url);
+			$optimized_url = $this->sanitize_rewritten_public_url_raw($optimized_url);
 			if ('' === $source_url || '' === $optimized_url || false === strpos($optimized_url, '/uc-images/')) {
 				return;
 			}
@@ -492,7 +586,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			$map = array();
 			foreach ($this->optimized_image_url_rewrite_map as $from => $to) {
 				$from = (string) $from;
-				$to = (string) $to;
+				$to = $this->sanitize_rewritten_public_url_raw($to);
 				if ('' === $from || '' === $to || $from === $to) {
 					continue;
 				}
@@ -613,7 +707,12 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
                 return $current;
             }
 
-            return $slash_escaped ? str_replace('/', '\\/', $replacement) : $replacement;
+            $replacement = $this->sanitize_rewritten_public_url_raw($replacement);
+	            if (!$replacement) {
+	                return $current;
+	            }
+
+	            return $slash_escaped ? str_replace('/', '\/', $replacement) : $replacement;
         }
 
 		private function rewrite_html_upload_urls_globally($html) {
@@ -642,6 +741,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 					}
 
 					$replacement = $this->get_best_url_from_public_url($current);
+					$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
 					return $replacement ? $replacement : $current;
 				},
 				$html
@@ -672,7 +772,9 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				return false;
 			}
 
-			$accept = ucwp_server_value('HTTP_ACCEPT');
+			$accept = null !== $this->media_rewrite_accept_context
+				? (string) $this->media_rewrite_accept_context
+				: ucwp_server_value('HTTP_ACCEPT');
 			if ('' === $accept) {
 				return false;
 			}
@@ -880,17 +982,20 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				}
 			}
 
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Atomic on-demand image conversion lock requires native exclusive create semantics.
 			$handle = @fopen($lock_file, 'x');
 			if (!is_resource($handle)) {
 				return false;
 			}
 
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Writes only to a path-guarded UltraCache lock file.
 			@fwrite($handle, json_encode(array(
 				'pid' => function_exists('getmypid') ? (int) getmypid() : 0,
 				'time' => time(),
 				'format' => strtolower((string) $format),
 				'source' => $source_real,
 			)) . "\n");
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle.
 			@fclose($handle);
 
 			return $lock_file;

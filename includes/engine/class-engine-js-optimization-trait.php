@@ -848,6 +848,98 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             return $suggestions;
         }
 
+        private function collect_js_inline_dependency_defer_recommendations($html, array $settings = array())
+        {
+            $html = is_string($html) ? $html : (string) $html;
+            $suggestions = array();
+            $seen = array();
+
+            if ('' === $html || false === stripos($html, '<script')) {
+                return $suggestions;
+            }
+
+            if (!preg_match_all('/<script\b(?![^>]*\bsrc\s*=)([^>]*)>(.*?)<\/script>/is', $html, $scripts, PREG_SET_ORDER)) {
+                return $suggestions;
+            }
+
+            foreach ($scripts as $script) {
+                $attrs = isset($script[1]) ? (string) $script[1] : '';
+                $code = isset($script[2]) ? (string) $script[2] : '';
+                $id = (string) $this->extract_attribute_from_html_tag('<script ' . $attrs . '>', 'id');
+                $id_lc = strtolower(trim($id));
+                $code_lc = strtolower($code);
+                $sample = trim((string) preg_replace('/\s+/', ' ', wp_strip_all_tags($code)));
+                $sample = function_exists('mb_substr') ? mb_substr($sample, 0, 220) : substr($sample, 0, 220);
+
+                if ('' === $id_lc && '' === trim($code)) {
+                    continue;
+                }
+
+                $recommendations = array();
+
+                if (false !== strpos($id_lc, 'jquery-js-after') || false !== strpos($code_lc, 'jquery') || false !== strpos($code, '$(')) {
+                    $recommendations[] = array(
+                        'symbol' => 'jQuery',
+                        'suggestedExclusion' => 'jquery',
+                        'reason' => 'Inline script block ' . ('' !== $id ? $id : '(no id)') . ' references jQuery. Keep the jQuery handle in the visible JS Delay / Defer Exclusions list unless the inline block is also moved into a delayed/replayed execution group.',
+                    );
+                }
+
+                if (false !== strpos($id_lc, 'wp-i18n-js-after') || false !== strpos($id_lc, 'js-translations') || false !== strpos($code_lc, 'wp.i18n') || false !== strpos($code_lc, 'setlocaledata')) {
+                    $recommendations[] = array(
+                        'symbol' => 'wp.i18n',
+                        'suggestedExclusion' => 'wp-i18n',
+                        'reason' => 'Inline WordPress translations/i18n block ' . ('' !== $id ? $id : '(no id)') . ' references wp.i18n. Keep wp-i18n and its core dependency chain visible/excluded before using Defer all JS.',
+                    );
+                }
+
+                if (false !== strpos($id_lc, 'wp-api-fetch-js-after') || false !== strpos($code_lc, 'wp.apifetch') || false !== strpos($code_lc, 'api-fetch')) {
+                    $recommendations[] = array(
+                        'symbol' => 'wp.apiFetch',
+                        'suggestedExclusion' => 'wp-api-fetch',
+                        'reason' => 'Inline wp-api-fetch configuration block ' . ('' !== $id ? $id : '(no id)') . ' references wp.apiFetch. Keep wp-api-fetch/core WP globals visible/excluded unless the inline block is also deferred with its dependency group.',
+                    );
+                }
+
+                if (false !== strpos($code_lc, 'wp.hooks')) {
+                    $recommendations[] = array(
+                        'symbol' => 'wp.hooks',
+                        'suggestedExclusion' => 'wp-hooks',
+                        'reason' => 'Inline script block ' . ('' !== $id ? $id : '(no id)') . ' references wp.hooks. Keep wp-hooks visible/excluded for Defer all JS safety.',
+                    );
+                }
+
+                foreach ($recommendations as $recommendation) {
+                    $suggestion = trim((string) ($recommendation['suggestedExclusion'] ?? ''));
+                    if ('' === $suggestion) {
+                        continue;
+                    }
+                    $key = strtolower((string) ($recommendation['symbol'] ?? '') . '|' . $suggestion . '|' . $id_lc);
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $suggestions[] = array(
+                        'symbol' => (string) ($recommendation['symbol'] ?? 'inline dependency'),
+                        'source' => 'inline-script-dependency-group',
+                        'sample' => $sample,
+                        'definingScriptUrl' => '',
+                        'definingHandle' => '',
+                        'suggestedExclusion' => $suggestion,
+                        'confidence' => 'high',
+                        'reason' => (string) ($recommendation['reason'] ?? 'Inline script depends on a global that may not exist if its external handle is deferred.'),
+                        'alreadyExcluded' => (bool) $this->delay_safety_exclusion_already_matches($suggestion, $settings),
+                    );
+
+                    if (count($suggestions) >= 30) {
+                        return $suggestions;
+                    }
+                }
+            }
+
+            return $suggestions;
+        }
+
         private function collect_store_profile_js_delay_safety_scan($html)
         {
             $html = is_string($html) ? $html : (string) $html;
@@ -890,6 +982,24 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     if (count($suggestions) >= 20) {
                         break 2;
                     }
+                }
+            }
+
+            foreach ($this->collect_js_inline_dependency_defer_recommendations($html, $settings) as $inline_dependency_suggestion) {
+                if (!is_array($inline_dependency_suggestion)) {
+                    continue;
+                }
+                $symbol = (string) ($inline_dependency_suggestion['symbol'] ?? 'inline-dependency');
+                $suggestion = (string) ($inline_dependency_suggestion['suggestedExclusion'] ?? '');
+                $source = (string) ($inline_dependency_suggestion['source'] ?? 'inline-script-dependency-group');
+                $key = strtolower($symbol . '|' . $source . '|' . $suggestion);
+                if ('' === trim($suggestion) || isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $suggestions[] = $inline_dependency_suggestion;
+                if (count($suggestions) >= 40) {
+                    break;
                 }
             }
 
@@ -943,6 +1053,160 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             );
         }
 
+
+        private function get_runtime_js_scan_request_data()
+        {
+            if (is_admin() || empty($_GET['ucwp_runtime_js_scan']) || empty($_GET['ucwp_runtime_js_scan_id']) || empty($_GET['ucwp_runtime_js_scan_nonce'])) {
+                return false;
+            }
+
+            if (!is_user_logged_in() || !current_user_can('manage_options')) {
+                return false;
+            }
+
+            $nonce = sanitize_text_field(wp_unslash($_GET['ucwp_runtime_js_scan_nonce']));
+            if (!wp_verify_nonce($nonce, 'ucwp_runtime_js_scan')) {
+                return false;
+            }
+
+            $scan_id = sanitize_key(wp_unslash($_GET['ucwp_runtime_js_scan_id']));
+            if ('' === $scan_id || strlen($scan_id) > 64) {
+                return false;
+            }
+
+            return array(
+                'scan_id'    => $scan_id,
+                'endpoint'   => esc_url_raw(rest_url('ultracache/v1/runtime-js-scan/report')),
+                'rest_nonce' => wp_create_nonce('wp_rest'),
+            );
+        }
+
+        public function is_runtime_js_scan_request()
+        {
+            return false !== $this->get_runtime_js_scan_request_data();
+        }
+
+        private function build_runtime_js_scan_collector_script(array $data)
+        {
+            $scan_id = isset($data['scan_id']) ? (string) $data['scan_id'] : '';
+            $endpoint = isset($data['endpoint']) ? (string) $data['endpoint'] : '';
+            $rest_nonce = isset($data['rest_nonce']) ? (string) $data['rest_nonce'] : '';
+            if ('' === $scan_id || '' === $endpoint || '' === $rest_nonce) {
+                return '';
+            }
+
+            $scan_id_json = wp_json_encode($scan_id);
+            $endpoint_json = wp_json_encode($endpoint);
+            $rest_nonce_json = wp_json_encode($rest_nonce);
+
+            return '<script id="ucwp-runtime-js-scan-collector" data-ucwp-runtime-scan="early">' . "\n" .
+                "(function(){\n" .
+                "\t'use strict';\n" .
+                "\tvar scanId = " . $scan_id_json . ";\n" .
+                "\tvar endpoint = " . $endpoint_json . ";\n" .
+                "\tvar restNonce = " . $rest_nonce_json . ";\n" .
+                "\tvar startedAt = Date.now();\n" .
+                "\tvar errors = [];\n" .
+                "\tvar sentCount = 0;\n" .
+                "\tvar maxErrors = 120;\n" .
+                "\tvar originalOnError = window.onerror;\n" .
+                "\tvar originalOnUnhandledRejection = window.onunhandledrejection;\n" .
+                "\twindow.__ucwpRuntimeJsScan = window.__ucwpRuntimeJsScan || { injectedAt: startedAt, errors: errors, sentCount: 0, debug: { installed: true, source: 'head-final-output', onerror: false, eventError: false, consoleError: false, directHarvest: false } };\n" .
+                "\tfunction asText(value){\n" .
+                "\t\ttry {\n" .
+                "\t\t\tif (value instanceof Error) { return value.name + ': ' + value.message; }\n" .
+                "\t\t\tif (typeof value === 'string') { return value; }\n" .
+                "\t\t\treturn JSON.stringify(value);\n" .
+                "\t\t} catch (e) { return String(value); }\n" .
+                "\t}\n" .
+                "\tfunction trimText(value, max){ value = String(value || ''); max = max || 800; return value.length > max ? value.slice(0, max) : value; }\n" .
+                "\tfunction addError(kind, message, source, line, column, detail){\n" .
+                "\t\tvar item = { kind: trimText(kind, 40), message: trimText(message, 1000), source: trimText(source, 1000), line: Number(line || 0), column: Number(column || 0), detail: trimText(detail, 1000), atMs: Date.now() - startedAt };\n" .
+                "\t\terrors.push(item);\n" .
+                "\t\twindow.__ucwpRuntimeJsScan.errors = errors;\n" .
+                "\t\tif (errors.length > maxErrors) { errors = errors.slice(errors.length - maxErrors); window.__ucwpRuntimeJsScan.errors = errors; }\n" .
+                "\t\tsend(false);\n" .
+                "\t}\n" .
+                "\tfunction send(completed){\n" .
+                "\t\tif (!endpoint || !scanId || !window.fetch) { return; }\n" .
+                "\t\tvar payload = { scanId: scanId, url: String(window.location.href || ''), completed: !!completed, errors: errors, userAgent: String(window.navigator && window.navigator.userAgent ? window.navigator.userAgent : ''), sentCount: ++sentCount, elapsedMs: Date.now() - startedAt, debug: window.__ucwpRuntimeJsScan && window.__ucwpRuntimeJsScan.debug ? window.__ucwpRuntimeJsScan.debug : {} };\n" .
+                "\t\twindow.__ucwpRuntimeJsScan.sentCount = sentCount;\n" .
+                "\t\twindow.__ucwpRuntimeJsScan.lastPayload = payload;\n" .
+                "\t\ttry { window.fetch(endpoint, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': restNonce }, body: JSON.stringify(payload), keepalive: !!completed }).catch(function(){}); } catch (e) {}\n" .
+                "\t}\n" .
+                "\twindow.__ucwpRuntimeJsScan.flush = send;\n" .
+                "\twindow.onerror = function(message, source, line, column, error){\n" .
+                "\t\ttry { window.__ucwpRuntimeJsScan.debug.onerror = true; addError('window-onerror', message || 'Script error', source || '', line || 0, column || 0, error && error.stack ? error.stack : asText(error || message)); } catch (e) {}\n" .
+                "\t\tif (typeof originalOnError === 'function') { return originalOnError.apply(this, arguments); }\n" .
+                "\t\treturn false;\n" .
+                "\t};\n" .
+                "\twindow.addEventListener('error', function(event){\n" .
+                "\t\tif (!event) { return; }\n" .
+                "\t\twindow.__ucwpRuntimeJsScan.debug.eventError = true;\n" .
+                "\t\tvar detail = event.error ? asText(event.error && event.error.stack ? event.error.stack : event.error) : '';\n" .
+                "\t\taddError('error', event.message || 'Script error', event.filename || '', event.lineno || 0, event.colno || 0, detail);\n" .
+                "\t}, true);\n" .
+                "\twindow.onunhandledrejection = function(event){\n" .
+                "\t\ttry { var reason = event && event.reason ? event.reason : ''; addError('window-unhandledrejection', asText(reason), '', 0, 0, reason && reason.stack ? reason.stack : ''); } catch (e) {}\n" .
+                "\t\tif (typeof originalOnUnhandledRejection === 'function') { return originalOnUnhandledRejection.apply(this, arguments); }\n" .
+                "\t};\n" .
+                "\twindow.addEventListener('unhandledrejection', function(event){ var reason = event && event.reason ? event.reason : ''; addError('unhandledrejection', asText(reason), '', 0, 0, reason && reason.stack ? reason.stack : ''); }, true);\n" .
+                "\tif (window.console && typeof window.console.error === 'function' && !window.console.__ucwpRuntimeScanWrapped) {\n" .
+                "\t\tvar originalError = window.console.error;\n" .
+                "\t\twindow.console.error = function(){\n" .
+                "\t\t\ttry { window.__ucwpRuntimeJsScan.debug.consoleError = true; var parts = []; for (var i = 0; i < arguments.length; i++) { parts.push(asText(arguments[i])); } addError('console-error', parts.join(' '), '', 0, 0, ''); } catch (e) {}\n" .
+                "\t\t\treturn originalError.apply(window.console, arguments);\n" .
+                "\t\t};\n" .
+                "\t\twindow.console.__ucwpRuntimeScanWrapped = true;\n" .
+                "\t}\n" .
+                "\tsend(false);\n" .
+                "\tvar tick = 0;\n" .
+                "\tvar timer = setInterval(function(){ tick++; send(false); if (tick >= 12) { clearInterval(timer); } }, 1000);\n" .
+                "\twindow.addEventListener('load', function(){ setTimeout(function(){ send(true); }, 4500); }, false);\n" .
+                "\tsetTimeout(function(){ send(true); }, 12000);\n" .
+                "})();\n" .
+                '</script>';
+        }
+
+        public function inject_runtime_js_scan_collector_into_output($html)
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            $data = $this->get_runtime_js_scan_request_data();
+            if (false === $data) {
+                return $html;
+            }
+
+            $collector = $this->build_runtime_js_scan_collector_script($data);
+            if ('' === $collector) {
+                return $html;
+            }
+
+            $html = preg_replace('#<script\s+id=["\']ucwp-runtime-js-scan-collector["\'][\s\S]*?</script>\s*#i', '', $html);
+            if (!is_string($html)) {
+                return $collector;
+            }
+
+            if (preg_match('#<head\b[^>]*>#i', $html, $match, PREG_OFFSET_CAPTURE)) {
+                $insert_at = (int) $match[0][1] + strlen($match[0][0]);
+                return substr($html, 0, $insert_at) . "\n" . $collector . "\n" . substr($html, $insert_at);
+            }
+
+            return $collector . "\n" . $html;
+        }
+
+        public function print_runtime_js_scan_collector()
+        {
+            $data = $this->get_runtime_js_scan_request_data();
+            if (false === $data) {
+                return;
+            }
+
+            echo $this->build_runtime_js_scan_collector_script($data); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Script is generated from sanitized IDs, REST URL, and nonces via wp_json_encode.
+        }
+
         public function defer_scripts($tag, $handle, $src)
         {
             $settings = $this->get_settings();
@@ -953,7 +1217,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             $defer_stage = $this->get_defer_stage_level($settings);
             $defer_all_js = !empty($settings['defer_js']) && !empty($settings['defer_all_js']);
 
-            if (0 < $defer_stage && $this->is_script_absolute_defer_blocking($handle, $src, $tag, $settings)) {
+            if (!$defer_all_js && 0 < $defer_stage && $this->is_script_absolute_defer_blocking($handle, $src, $tag, $settings)) {
                 return $this->strip_native_loading_attributes_from_script_tag($tag);
             }
 
@@ -1005,8 +1269,11 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
         private function should_keep_script_blocking_for_defer_all($handle, $src, $tag = '', array $settings = array())
         {
-            return $this->is_script_absolute_defer_blocking($handle, $src, $tag, $settings)
-                || $this->is_script_user_defer_excluded($handle, $src, $settings);
+            // Defer all JS is intentionally literal/aggressive: the only scripts
+            // kept blocking are those matching the visible JS Delay / Defer
+            // Exclusions field. WordPress/core/slider protections belong in that
+            // editable list via Populate Defaults, not in hidden runtime rules.
+            return $this->is_script_user_defer_excluded($handle, $src, $settings);
         }
 
         private function should_native_defer_all_local_script($src, array $settings = array())
@@ -1029,7 +1296,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             }
 
             $that = $this;
-            $rewritten = preg_replace_callback('/<script\b[^>]*\bsrc\s*=\s*(["\'])(.*?)\1[^>]*>\s*<\/script>/is', static function ($matches) use ($that, $settings) {
+            $rewritten = preg_replace_callback('/<script\b[^>]*\bsrc\s*=\s*(["\'])(.*?)\1[^>]*>/i', static function ($matches) use ($that, $settings) {
                 $tag = isset($matches[0]) ? (string) $matches[0] : '';
                 if ('' === $tag) {
                     return $tag;
@@ -1273,7 +1540,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 'enabled' => !empty($settings['js_bundle']),
                 'deferJsEnabled' => !empty($settings['defer_js']),
                 'timestamp' => time(),
-                'lastRunHuman' => function_exists('wp_date') ? wp_date('Y-m-d H:i:s') : date('Y-m-d H:i:s'),
+                'lastRunHuman' => function_exists('wp_date') ? wp_date('Y-m-d H:i:s') : gmdate('Y-m-d H:i:s'),
                 'scriptsScanned' => 0,
                 'deferredScripts' => 0,
                 'eligibleScripts' => 0,
@@ -1296,7 +1563,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
         {
             $diagnostics['timestamp'] = isset($diagnostics['timestamp']) ? (int) $diagnostics['timestamp'] : time();
             if (empty($diagnostics['lastRunHuman'])) {
-                $diagnostics['lastRunHuman'] = function_exists('wp_date') ? wp_date('Y-m-d H:i:s', (int) $diagnostics['timestamp']) : date('Y-m-d H:i:s', (int) $diagnostics['timestamp']);
+                $diagnostics['lastRunHuman'] = function_exists('wp_date') ? wp_date('Y-m-d H:i:s', (int) $diagnostics['timestamp']) : gmdate('Y-m-d H:i:s', (int) $diagnostics['timestamp']);
             }
             if (empty($diagnostics['message'])) {
                 $diagnostics['message'] = 'JS bundle diagnostics were recorded.';
@@ -1481,7 +1748,10 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     $raw = @file_get_contents($file);
                     $content = is_string($raw) ? $raw : '';
                 }
-                if ('' === $content) {
+                if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                    $content = ucwp_strip_source_mapping_url_comments($content);
+                }
+                if ('' === trim($content)) {
                     return array();
                 }
                 $sources[] = $src;
@@ -1494,12 +1764,15 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             }
 
             $payload = "/* UltraCache generated safe deferred JS bundle. Sources: " . count($parts) . " */\n" . implode("\n", $parts) . "\n";
+            if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                $payload = trim(ucwp_strip_source_mapping_url_comments($payload)) . "\n";
+            }
             $hash = md5(implode('|', $sources) . '|' . md5($payload));
             $dir = trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/js-bundles';
             if (!is_dir($dir) && function_exists('wp_mkdir_p')) {
                 wp_mkdir_p($dir);
             }
-            if (!is_dir($dir) || !is_writable($dir)) {
+            if (!is_dir($dir) || !ucwp_path_is_writable($dir)) {
                 return array();
             }
 
@@ -2869,6 +3142,10 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return false;
             }
 
+            if (false !== stripos($tag, 'id="ucwp-runtime-js-scan-collector"') || false !== stripos($tag, "id='ucwp-runtime-js-scan-collector'") || false !== stripos($tag, '__ucwpRuntimeJsScan')) {
+                return false;
+            }
+
             if (false !== stripos($tag, ' src=') || false !== stripos($tag, ' data-ucwp-src=') || false !== stripos($tag, 'text/ucwp-delayed-js')) {
                 return false;
             }
@@ -3249,7 +3526,9 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             $loader = <<<'UCWP_DELAY_LOADER'
 <script id="ucwp-delayed-loader">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var relief=__UCWP_RELIEF__;var timeoutMs=8000;var regularAutoDone=false;var safeAutoDone=false;var allDone=false;function qa(){return Array.prototype.slice.call(document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src],script[type="text/ucwp-delayed-js"][data-ucwp-inline="1"]'));}function c(n,a){var v=n.getAttribute('data-ucwp-'+a);return v||'';}function isSafe(n){return c(n,'delay-reason')==='safe-third-party';}function q(mode){return qa().filter(function(n){if(!n||n.getAttribute('data-ucwp-loading')==='1'){return false;}if(mode==='safe'){return isSafe(n);}if(mode==='regular'){return !isSafe(n);}return true;});}function decodeAttrs(node){var raw=c(node,'attrs');var attrs={};if(raw){try{attrs=JSON.parse(atob(raw))||{};}catch(e){attrs={};}}['id','crossorigin','referrerpolicy','integrity','nonce'].forEach(function(attr){var val=c(node,attr);if(val&&!attrs[attr]){attrs[attr]=val;}});return attrs;}function applyAttrs(s,node){var attrs=decodeAttrs(node);Object.keys(attrs).forEach(function(attr){var val=attrs[attr];if(!attr||attr==='src'||attr==='async'||attr==='defer'||attr==='data-wp-strategy'||val===null||typeof val==='undefined'){return;}try{s.setAttribute(attr,String(val));}catch(e){}});}function idle(cb){if(!relief){cb();return;}if('requestIdleCallback' in window){window.requestIdleCallback(cb,{timeout:1500});return;}setTimeout(cb,80);}function wait(ms,cb){if(!relief||ms<=0){cb();return;}setTimeout(cb,ms);}function insertAndRemove(node,s){if(node.parentNode){node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);}else{document.head.appendChild(s);}}function loadOne(node,done){if(!node||node.getAttribute('data-ucwp-loading')==='1'){done();return;}node.setAttribute('data-ucwp-loading','1');var isInline=node.getAttribute('data-ucwp-inline')==='1';var src=node.getAttribute('data-ucwp-src');var s=document.createElement('script');applyAttrs(s,node);s.async=false;if(isInline){try{s.text=node.textContent||'';}catch(e){s.text='';}insertAndRemove(node,s);done();return;}if(!src){done();return;}var finished=false;function finish(){if(finished){return;}finished=true;done();}s.onload=finish;s.onerror=finish;setTimeout(finish,timeoutMs);s.src=src;insertAndRemove(node,s);}function load(list,i){if(i>=list.length){return;}idle(function(){loadOne(list[i],function(){wait(relief?120:0,function(){load(list,i+1);});});});}function run(mode){var list=q(mode);if(!list.length){return;}load(list,0);}function triggerAll(){if(allDone){return;}allDone=true;regularAutoDone=true;safeAutoDone=true;run('all');}function triggerRegular(){if(allDone||regularAutoDone){return;}regularAutoDone=true;run('regular');}function triggerSafe(){if(allDone||safeAutoDone){return;}safeAutoDone=true;run('safe');}['scroll','mousemove','touchstart','keydown','click','pointerdown'].forEach(function(evt){window.addEventListener(evt,triggerAll,{passive:true,once:true});});window.addEventListener('load',function(){setTimeout(triggerRegular,relief?2500:2000);setTimeout(triggerSafe,relief?25000:22000);},{once:true});setTimeout(triggerRegular,relief?7000:6000);setTimeout(triggerSafe,relief?30000:26000);}());</script>
 UCWP_DELAY_LOADER;
-            echo str_replace('__UCWP_RELIEF__', $main_thread_relief, $loader) . "\n";
+            $loader = str_replace('__UCWP_RELIEF__', $main_thread_relief, $loader);
+            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Static inline loader script with a validated numeric placeholder.
+            echo $loader . "\n";
         }
 
         private function delay_third_party_analytics_scripts_in_html($html, array $settings = array())

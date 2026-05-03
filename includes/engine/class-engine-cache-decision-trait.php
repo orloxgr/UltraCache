@@ -40,6 +40,9 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 'pay_for_order',
                 'cancel_order',
                 'download_file',
+                'ucwp_runtime_js_scan',
+                'ucwp_runtime_js_scan_id',
+                'ucwp_runtime_js_scan_nonce',
             );
         }
 
@@ -838,7 +841,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             $query = '';
             if (!empty($parts['query'])) {
                 parse_str((string) $parts['query'], $query_vars);
-                unset($query_vars['ucwp_revalidate'], $query_vars['ucwp_rt'], $query_vars['ucwp_store_profile'], $query_vars['ucwp_callback_profile'], $query_vars['ucwp_store_profile_verbose'], $query_vars['ucwp_store_profile_verbose_settings'], $query_vars['ucwp_profile_bypass'], $query_vars['ucwp_profile_run']);
+                unset($query_vars['ucwp_revalidate'], $query_vars['ucwp_rt'], $query_vars['ucwp_store_profile'], $query_vars['ucwp_callback_profile'], $query_vars['ucwp_store_profile_verbose'], $query_vars['ucwp_store_profile_verbose_settings'], $query_vars['ucwp_profile_bypass'], $query_vars['ucwp_profile_run'], $query_vars['ucwp_runtime_js_scan'], $query_vars['ucwp_runtime_js_scan_id'], $query_vars['ucwp_runtime_js_scan_nonce']);
                 if (!empty($query_vars)) {
                     ksort($query_vars);
                     $query = http_build_query($query_vars);
