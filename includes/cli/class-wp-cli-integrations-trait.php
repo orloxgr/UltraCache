@@ -240,7 +240,7 @@ if (!trait_exists('UCWP_CLI_Integrations_Trait')) {
                 }
 
                 $started = microtime(true);
-                $response = wp_remote_get($url, array(
+                $response = ucwp_safe_loopback_remote_request($url, array(
                     'timeout'     => 90,
                     'redirection' => 3,
                     'headers'     => array(

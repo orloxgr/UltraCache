@@ -4,11 +4,11 @@ Tags: cache, performance, redis, varnish, webp, avif, apcu
 Requires at least: 6.4
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.56.202
+Stable tag: 2.56.209
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
-UltraCache helps WordPress sites serve pages faster with full-page cache, object cache support, cache warm-up, media optimization, CSS/font optimization, Varnish-aware purge tools, and clear diagnostics.
+WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
 
 == Description ==
 
@@ -99,6 +99,22 @@ Use Speed Diagnostics / profiler tools when a page is slow on MISS/STORE or when
 4. Use Self-hosted Font CSS Optimization for existing local/theme/Elementor font CSS.
 5. Rebuild Google Fonts cache after changing scan URLs.
 
+== Public Defaults and Experimental Features ==
+
+UltraCache is designed to start conservatively. Riskier optimization controls are intentionally off by default or marked as advanced/experimental in the dashboard.
+
+Experimental or advanced controls include Combine safe deferred JS, Full CSS Bundle, Aggressive CSS Bundle mode, Aggressive Async CSS, and Advanced Runtime Font CSS Rewrite. Enable these only after testing important pages, cart/checkout/account flows, sliders, forms, menus, fonts, and browser Console output.
+
+UltraCache keeps safety lists visible in Advanced Settings & Exclusions so site owners can review and edit exclusions instead of relying on hidden hard-coded site rules.
+
+== Privacy and External Services ==
+
+UltraCache stores generated cache files on the local WordPress installation under `wp-content/cache/ultracache/` and optimized image variants under `wp-content/uploads/uc-images/`.
+
+Local Google Fonts Optimization may make outbound requests to Google Fonts CSS/font URLs only when an administrator builds or rebuilds the local Google Fonts cache. The frontend then uses the local cached copies when the feature is enabled and built successfully.
+
+Varnish integration is optional. If configured, UltraCache may send local/private purge or test requests to the Varnish endpoint selected by the site administrator. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
+
 == WP-CLI Commands ==
 
 Use WP-CLI as the site owner, not with `--allow-root`, when possible.
@@ -130,8 +146,9 @@ Common examples:
 `wp ultracache purge --all`
 `wp ultracache purge --cache-url=https://example.com/`
 `wp ultracache warm_frontpage_html_css`
-`wp ultracache media status --media-format=best --format=json`
-`wp ultracache media process --media-format=best --limit=5 --time-budget=20 --format=json`
+`wp ultracache media status --media-format=both --format=json`
+`wp ultracache media rebuild --media-format=both --format=json`
+`wp ultracache media process --media-format=both --format=json`
 `wp ultracache google_fonts_rebuild --clear`
 `wp ultracache flush_object_cache`
 `wp ultracache store_profile show --format=json`
@@ -184,5 +201,5 @@ Release notes are maintained in `changelog.txt`.
 
 == Upgrade Notice ==
 
-= 2.56.150 =
-Generic Font Display Optimization using the existing font-display switch. See `changelog.txt` for release notes.
+= 2.56.209 =
+Fixes cache conflict warning logic so disabled cache plugins do not keep warnings visible after non-UltraCache drop-ins are removed. See `changelog.txt` for release notes.

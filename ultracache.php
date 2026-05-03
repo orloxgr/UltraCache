@@ -2,9 +2,11 @@
 /**
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
- * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.202
+ * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
+ * Version: 2.56.209
  * Author: Byron Iniotakis
+ * Requires at least: 6.4
+ * Requires PHP: 7.4
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  * Text Domain: ultracache
@@ -16,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.202');
+    define('UCWP_VERSION', '2.56.209');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);

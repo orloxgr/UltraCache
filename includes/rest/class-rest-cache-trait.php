@@ -226,6 +226,17 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         }
 
 
+        public function remove_conflicting_cache_dropins()
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'remove_conflicting_cache_dropins')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Cache helper cleanup is not available.'), 500);
+            }
+
+            $result = Ultra_Cache_WP::remove_conflicting_cache_dropins();
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+        }
+
+
         public function object_cache_full_count()
         {
             $stats = $this->resolve_engine_stats(true);

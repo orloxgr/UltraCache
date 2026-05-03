@@ -859,6 +859,153 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             return true;
         }
 
+        private static function get_known_cache_plugin_signatures()
+        {
+            return array(
+                'w3-total-cache' => array('label' => 'W3 Total Cache', 'markers' => array('W3 Total Cache', 'W3TC', 'w3-total-cache', 'w3tc_')),
+                'wp-rocket' => array('label' => 'WP Rocket', 'markers' => array('WP Rocket', 'WP_ROCKET', 'rocket_clean_domain', 'wp-rocket')),
+                'wp-super-cache' => array('label' => 'WP Super Cache', 'markers' => array('WP Super Cache', 'WPCACHEHOME', 'wp-cache-phase1', 'wp-super-cache')),
+                'litespeed-cache' => array('label' => 'LiteSpeed Cache', 'markers' => array('LiteSpeed Cache', 'LSCWP', 'litespeed-cache', 'LiteSpeed_Cache')),
+                'sg-cachepress' => array('label' => 'SiteGround Optimizer', 'markers' => array('SiteGround Optimizer', 'SG Optimizer', 'sg-cachepress', 'SiteGround_Optimizer')),
+                'wp-fastest-cache' => array('label' => 'WP Fastest Cache', 'markers' => array('WP Fastest Cache', 'WpFastestCache', 'wp-fastest-cache')),
+                'breeze' => array('label' => 'Breeze', 'markers' => array('Breeze', 'BREEZE', 'breeze-cache')),
+                'redis-cache' => array('label' => 'Redis Object Cache', 'markers' => array('Redis Object Cache', 'Redis_Object_Cache', 'redis-cache', 'Rhubarb\\RedisCache')),
+                'docket-cache' => array('label' => 'Docket Cache', 'markers' => array('Docket Cache', 'DocketCache', 'docket-cache')),
+                'object-cache-pro' => array('label' => 'Object Cache Pro', 'markers' => array('Object Cache Pro', 'objectcache.pro', 'ObjectCachePro')),
+                'memcached' => array('label' => 'Memcached Object Cache', 'markers' => array('Memcached', 'Memcache', 'memcached', 'memcache')),
+                'powered-cache' => array('label' => 'Powered Cache', 'markers' => array('Powered Cache', 'powered-cache')),
+                'cache-enabler' => array('label' => 'Cache Enabler', 'markers' => array('Cache Enabler', 'cache-enabler')),
+                'autoptimize' => array('label' => 'Autoptimize', 'markers' => array('Autoptimize', 'autoptimize')),
+            );
+        }
+
+        private static function detect_cache_dropin_owner($contents)
+        {
+            $contents = (string) $contents;
+            if ('' === $contents) {
+                return 'Unknown';
+            }
+
+            foreach (self::get_known_cache_plugin_signatures() as $signature) {
+                $label = (string) ($signature['label'] ?? 'Unknown');
+                $markers = isset($signature['markers']) && is_array($signature['markers']) ? $signature['markers'] : array();
+                foreach ($markers as $marker) {
+                    if ('' !== (string) $marker && false !== stripos($contents, (string) $marker)) {
+                        return $label;
+                    }
+                }
+            }
+
+            return 'Unknown';
+        }
+
+        private static function get_cache_dropin_conflict_status()
+        {
+            $dropins = array();
+            $detected = false;
+
+            if (!defined('WP_CONTENT_DIR')) {
+                return array(
+                    'detected' => false,
+                    'dropins' => array(),
+                    'message' => '',
+                );
+            }
+
+            $targets = array(
+                'advanced-cache.php' => self::maybe_translate('Page cache drop-in'),
+                'object-cache.php' => self::maybe_translate('Object cache drop-in'),
+            );
+
+            foreach ($targets as $basename => $label) {
+                $path = trailingslashit(WP_CONTENT_DIR) . $basename;
+                $exists = file_exists($path);
+                $contents = $exists ? (string) ucwp_safe_file_get_contents($path, 'cache drop-in conflict detection', true) : '';
+                $managed = $exists && false !== strpos($contents, 'UltraCache');
+                $owner = $exists ? self::detect_cache_dropin_owner($contents) : '';
+                $is_conflict = $exists && !$managed;
+
+                if ($is_conflict) {
+                    $detected = true;
+                }
+
+                $dropins[] = array(
+                    'file' => $basename,
+                    'label' => (string) $label,
+                    'path' => $path,
+                    'exists' => (bool) $exists,
+                    'managed' => (bool) $managed,
+                    'owner' => $exists ? $owner : '',
+                    'removable' => (bool) $is_conflict,
+                    'size' => $exists ? (int) max(0, (int) ucwp_safe_filesize($path, 'cache drop-in conflict size')) : 0,
+                    'modified' => $exists ? (int) max(0, (int) ucwp_safe_filemtime($path, 'cache drop-in conflict mtime')) : 0,
+                );
+            }
+
+            return array(
+                'detected' => (bool) $detected,
+                'dropins' => $dropins,
+                'message' => $detected ? self::maybe_translate('Conflicting WordPress cache drop-ins detected. UltraCache can back them up and remove them if you choose.') : '',
+            );
+        }
+
+        private static function get_active_cache_plugin_conflict_status()
+        {
+            $known = array(
+                'w3-total-cache' => 'W3 Total Cache',
+                'wp-rocket' => 'WP Rocket',
+                'wp-super-cache' => 'WP Super Cache',
+                'litespeed-cache' => 'LiteSpeed Cache',
+                'sg-cachepress' => 'SiteGround Optimizer',
+                'wp-fastest-cache' => 'WP Fastest Cache',
+                'breeze' => 'Breeze',
+                'redis-cache' => 'Redis Object Cache',
+                'docket-cache' => 'Docket Cache',
+                'object-cache-pro' => 'Object Cache Pro',
+                'memcached' => 'Memcached Object Cache',
+                'powered-cache' => 'Powered Cache',
+                'cache-enabler' => 'Cache Enabler',
+                'comet-cache' => 'Comet Cache',
+                'hummingbird-performance' => 'Hummingbird',
+                'nitropack' => 'NitroPack',
+                'autoptimize' => 'Autoptimize',
+                'wp-optimize' => 'WP-Optimize',
+            );
+
+            $active = array();
+            $site_plugins = get_option('active_plugins', array());
+            if (is_array($site_plugins)) {
+                $active = array_merge($active, $site_plugins);
+            }
+
+            if (is_multisite()) {
+                $network_plugins = get_site_option('active_sitewide_plugins', array());
+                if (is_array($network_plugins)) {
+                    $active = array_merge($active, array_keys($network_plugins));
+                }
+            }
+
+            $items = array();
+            foreach (array_unique(array_filter(array_map('strval', $active))) as $plugin_file) {
+                $slug = strtolower(trim(strtok($plugin_file, '/')));
+                if ('' === $slug || 'ultracache' === $slug || !isset($known[$slug])) {
+                    continue;
+                }
+
+                $items[] = array(
+                    'slug' => $slug,
+                    'name' => $known[$slug],
+                    'pluginFile' => $plugin_file,
+                );
+            }
+
+            return array(
+                'detected' => !empty($items),
+                'items' => array_values($items),
+                'message' => !empty($items) ? self::maybe_translate('Potential cache plugin conflict detected. Running multiple cache/performance plugins together can cause stale pages, purge loops, or object cache conflicts.') : '',
+            );
+        }
+
         private static function get_legacy_cache_conflict_status()
         {
             $option_names = array(
@@ -892,11 +1039,127 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 }
             }
 
+            $dropin_conflicts = self::get_cache_dropin_conflict_status();
+            $active_cache_plugins = self::get_active_cache_plugin_conflict_status();
+
+            /*
+             * Disabled/installed cache plugins and legacy options are advisory diagnostics only.
+             * They must not create dashboard warnings unless an active cache plugin is detected
+             * or a non-UltraCache WordPress drop-in is actually present/removable.
+             */
+            $detected = !empty($dropin_conflicts['detected']) || !empty($active_cache_plugins['detected']);
+
             return array(
-                'detected' => !empty($found_options) || !empty($found_plugins),
+                'detected' => (bool) $detected,
                 'options'  => $found_options,
                 'plugins'  => $found_plugins,
-                'message'  => (!empty($found_options) || !empty($found_plugins)) ? self::maybe_translate('Old W3 Total Cache / Varnish helper leftovers detected. Remove them before enabling Varnish or Object Cache to avoid purge loops or Redis auth conflicts.') : '',
+                'dropins'  => isset($dropin_conflicts['dropins']) && is_array($dropin_conflicts['dropins']) ? $dropin_conflicts['dropins'] : array(),
+                'dropinConflictsDetected' => !empty($dropin_conflicts['detected']),
+                'activeCachePlugins' => isset($active_cache_plugins['items']) && is_array($active_cache_plugins['items']) ? $active_cache_plugins['items'] : array(),
+                'activeCachePluginsDetected' => !empty($active_cache_plugins['detected']),
+                'message'  => $detected ? self::maybe_translate('Cache helper or active cache plugin conflicts detected. Review the details before enabling UltraCache Varnish or Object Cache.') : '',
+            );
+        }
+
+        public static function remove_conflicting_cache_dropins()
+        {
+            if (!defined('WP_CONTENT_DIR')) {
+                return array(
+                    'success' => false,
+                    'message' => self::maybe_translate('WP_CONTENT_DIR is unavailable.'),
+                    'removed' => array(),
+                    'failed' => array(),
+                    'backups' => array(),
+                );
+            }
+
+            $status = self::get_cache_dropin_conflict_status();
+            $dropins = isset($status['dropins']) && is_array($status['dropins']) ? $status['dropins'] : array();
+            $timestamp = gmdate('Ymd-His');
+            $backup_dir = trailingslashit(UCWP_CACHE_DIR) . 'backups/dropins/';
+            $removed = array();
+            $failed = array();
+            $backups = array();
+
+            foreach ($dropins as $dropin) {
+                if (empty($dropin['removable']) || empty($dropin['file'])) {
+                    continue;
+                }
+
+                $basename = basename((string) $dropin['file']);
+                if (!in_array($basename, array('advanced-cache.php', 'object-cache.php'), true)) {
+                    continue;
+                }
+
+                $path = trailingslashit(WP_CONTENT_DIR) . $basename;
+                if (!file_exists($path)) {
+                    continue;
+                }
+
+                $contents = (string) ucwp_safe_file_get_contents($path, 'remove conflicting cache drop-in verify', true);
+                if (false !== strpos($contents, 'UltraCache')) {
+                    $failed[] = array(
+                        'file' => $basename,
+                        'owner' => 'UltraCache',
+                        'message' => self::maybe_translate('Skipped UltraCache-managed drop-in.'),
+                    );
+                    continue;
+                }
+
+                if (!ucwp_safe_mkdir($backup_dir, 0755, true, 'cache drop-in conflict backup mkdir')) {
+                    $failed[] = array(
+                        'file' => $basename,
+                        'owner' => self::detect_cache_dropin_owner($contents),
+                        'message' => self::maybe_translate('Could not create backup directory.'),
+                    );
+                    continue;
+                }
+
+                $backup_file = $backup_dir . $timestamp . '-' . $basename;
+                if (!ucwp_safe_copy($path, $backup_file, 'cache drop-in conflict backup copy')) {
+                    $failed[] = array(
+                        'file' => $basename,
+                        'owner' => self::detect_cache_dropin_owner($contents),
+                        'message' => self::maybe_translate('Could not back up drop-in.'),
+                    );
+                    continue;
+                }
+
+                if (!ucwp_safe_unlink($path, 'cache drop-in conflict remove')) {
+                    $failed[] = array(
+                        'file' => $basename,
+                        'owner' => self::detect_cache_dropin_owner($contents),
+                        'backup' => $backup_file,
+                        'message' => self::maybe_translate('Backup created, but removal failed.'),
+                    );
+                    continue;
+                }
+
+                $removed[] = array(
+                    'file' => $basename,
+                    'owner' => self::detect_cache_dropin_owner($contents),
+                    'backup' => $backup_file,
+                );
+                $backups[] = $backup_file;
+            }
+
+            $success = empty($failed);
+            if (empty($removed) && empty($failed)) {
+                $message = self::maybe_translate('No conflicting cache helpers were found.');
+            } elseif ($success) {
+                $message = self::maybe_translate_sprintf('Removed %d conflicting cache helper(s).', count($removed));
+            } else {
+                $message = self::maybe_translate_sprintf('Removed %d cache helper(s); %d failed.', count($removed), count($failed));
+            }
+
+            return array(
+                'success' => (bool) $success,
+                'message' => $message,
+                'removed' => $removed,
+                'failed' => $failed,
+                'backups' => $backups,
+                'diagnostics' => self::get_dashboard_diagnostics(),
+                'stats' => self::get_engine_stats(),
             );
         }
 

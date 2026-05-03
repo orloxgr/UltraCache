@@ -178,27 +178,27 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: 'All Off', description: 'Disable page cache, object cache, media, CSS, JS, fonts, prefetch, warmup, and scheduled jobs. Best for first install or troubleshooting.', patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, jsBundleEnabled: false, jsBundleIncludeList: '', delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
+			deferJsEnabled: false, jsBundleEnabled: false, jsBundleIncludeList: '', delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
-			homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: true, cssBundleScope: 'homepage', mediaOutputMode: 'auto',
+			homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: false, cssBundleScope: 'homepage', mediaOutputMode: 'auto',
 		} },
-		safe: { label: 'Safe', description: 'Enables page caching, WooCommerce-safe bypasses, browser cache headers, save-time warmup, and stale protection. No JS/CSS/media rewrites.', patch: {
-			pageCacheEnabled: true, objectCacheEnabled: false, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', deferJsEnabled: false, jsBundleEnabled: false, jsBundleIncludeList: '', delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false, cssBundleScope: 'homepage',
+		safe: { label: 'Safe', description: 'Recommended public-safe preset. Enables page cache, WooCommerce-safe bypasses, browser cache headers, stale protection, and safe form compatibility helpers. No CSS/JS/media rewrites or automations.', patch: {
+			pageCacheEnabled: true, objectCacheEnabled: false, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: false, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, cacheCleanupEnabled: false, pageCssBundleOnEntryEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', deferJsEnabled: false, jsBundleEnabled: false, jsBundleIncludeList: '', delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false, cssBundleScope: 'homepage',
 		} },
-		balanced: { label: 'Balanced', description: 'Adds object cache, media optimization, Safe CLS/LCP image hints, conservative JS defer, safe CSS bundling, and font-display improvements.', patch: {
-			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
-			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: true, cssBundleScope: 'homepage', pageCssBundleOnEntryEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
-			speculationRulesEnabled: false, cronWarmEnabled: false, cacheCleanupEnabled: false, cacheQueryStringsEnabled: false,
+		balanced: { label: 'Balanced', description: 'Adds object cache, media optimization, CLS/LCP image hints, conservative JS defer, safe homepage CSS bundling, and font-display improvements. No automations. Test visually after applying.', patch: {
+			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: false, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, deferJsEnabled: true, delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
+			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: false, cssBundleScope: 'homepage', pageCssBundleOnEntryEnabled: false, asyncCssEnabled: false, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
+			speculationRulesEnabled: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, cacheCleanupEnabled: false, cacheQueryStringsEnabled: false,
 		} },
-		aggressive: { label: 'Aggressive', description: 'Balanced plus delayed third-party JS, main-thread relief, aggressive CSS bundling, manual CSS bundle warm actions, speculation prefetch, cron HTML warmup, and scheduled cleanup.', patch: {
-			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: true, mediaGenerateOnDemandEnabled: true, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, lcpBoundaryDeferEnabled: true, deferJsEnabled: true, delaySafeThirdPartyJsEnabled: true, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
-			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: true, leftoverCssBundleEnabled: false, homepageCssBundleMode: 'aggressive', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: true, cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: true, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
-			speculationRulesEnabled: true, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, cacheCleanupEnabled: true, cacheQueryStringsEnabled: false,
+		aggressive: { label: 'Aggressive', description: 'Balanced plus delayed third-party JS, main-thread relief, aggressive/shared CSS bundling, async CSS, speculation prefetch, and stronger frontend optimizations. No automations or inline CSS bundling. Requires visual testing.', patch: {
+			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: false, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
+			mediaOptimizationEnabled: true, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false, mediaOutputMode: 'auto', clsDimensionsEnabled: true, lcpImagePriorityEnabled: true, lcpBoundaryDeferEnabled: true, deferJsEnabled: true, delaySafeThirdPartyJsEnabled: true, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, mainThreadReliefEnabled: true, criticalRequestChainReliefEnabled: true,
+			homepageCssBundleEnabled: true, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, homepageCssBundleMode: 'aggressive', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: false, cssBundleScope: 'shared', pageCssBundleOnEntryEnabled: false, asyncCssEnabled: true, googleFontsSwapEnabled: true, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: true, selfHostedFontRuntimeRewriteEnabled: false,
+			speculationRulesEnabled: true, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, cacheCleanupEnabled: false, cacheQueryStringsEnabled: false,
 		} },
 	};
 
@@ -337,6 +337,29 @@
 		}
 		try {
 			storage.setItem(getSystemNoticeStorageKey(id), String(Date.now()));
+		} catch (error) {}
+	}
+
+
+	function getPersistentDismissalStorageKey(id) {
+		return 'ucwp-dismissed-notice:' + String(id || 'notice');
+	}
+
+	function isPersistentNoticeDismissed(id) {
+		const storage = getLocalStorageSafe();
+		if (!storage) {
+			return false;
+		}
+		return storage.getItem(getPersistentDismissalStorageKey(id)) === '1';
+	}
+
+	function dismissPersistentNotice(id) {
+		const storage = getLocalStorageSafe();
+		if (!storage) {
+			return;
+		}
+		try {
+			storage.setItem(getPersistentDismissalStorageKey(id), '1');
 		} catch (error) {}
 	}
 
@@ -723,6 +746,7 @@
 			apcu_flush: { path: 'apcu/flush', method: 'POST' },
 			redis_test: { path: 'object-cache/redis-test', method: 'POST' },
 			object_cache_flush: { path: 'object-cache/flush', method: 'POST' },
+			remove_conflicting_cache_dropins: { path: 'cache-conflicts/remove-dropins', method: 'POST' },
 			performance_profile_last: { path: 'performance-profile/last', method: 'GET' },
 			performance_profile_clear: { path: 'performance-profile/clear', method: 'POST' },
 			cron_warm_start: { path: 'cron-warm/start', method: 'POST' },
@@ -1007,10 +1031,21 @@
 		return h('div', { className: 'uc-toast-viewport' },
 			toasts.map((toast) => {
 				const tone = toast && toast.type ? toast.type : 'info';
+				const actions = toast && Array.isArray(toast.actions) ? toast.actions : [];
 				return h('div', { className: classNames('uc-toast', 'uc-toast--' + tone), key: toast.id || toast.text }, [
 					h('div', { className: 'uc-toast__body', key: 'body' }, [
 						toast.title ? h('div', { className: 'uc-toast__title', key: 'title' }, toast.title) : null,
 						h('div', { className: 'uc-toast__text', key: 'text' }, toast.text || ''),
+						actions.length ? h('div', { className: 'uc-toast__actions', key: 'actions' }, actions.map((action, index) => h('button', {
+							type: 'button',
+							className: classNames('uc-toast__action', action && action.variant === 'danger' ? 'uc-toast__action--danger' : ''),
+							onClick: () => {
+								if (action && typeof action.onClick === 'function') {
+									action.onClick(toast);
+								}
+							},
+							key: 'action-' + index,
+						}, action && action.label ? action.label : 'Action'))) : null,
 					]),
 					h('button', {
 						type: 'button',
@@ -2792,7 +2827,30 @@
 	}
 
 
-	function VarnishCard({ form, diagnostics, busy, onFieldChange, onSave, onTest, onFlushAll }) {
+	function CacheHelperConflictNotice({ diagnostics, busy, onRemove, onRecheck }) {
+		const legacyConflicts = diagnostics && diagnostics.legacyCacheConflicts ? diagnostics.legacyCacheConflicts : {};
+		const dropins = Array.isArray(legacyConflicts.dropins) ? legacyConflicts.dropins.filter((item) => item && item.exists && !item.managed) : [];
+		const removableDropins = dropins.filter((item) => item && item.removable);
+
+		if (!dropins.length) {
+			return null;
+		}
+
+		return h('div', { id: 'ucwp-cache-conflict-review', className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-3' }, [
+			h('div', { className: 'font-bold text-amber-200 mb-2', key: 'title' }, 'Conflicting WordPress cache helpers detected'),
+			h('div', { className: 'space-y-1 mb-2', key: 'dropins' }, dropins.map((item) => h('div', { key: 'dropin-' + item.file }, [
+				h('span', { className: 'font-mono text-amber-100' }, item.file || 'drop-in'),
+				h('span', {}, ' — owner: ' + (item.owner || 'Unknown') + (item.removable ? ' · removable' : '')),
+			]))),
+			h('div', { className: 'text-amber-100/90', key: 'message' }, 'UltraCache can back up and remove these conflicting WordPress drop-ins. It will not delete plugin folders or settings from other plugins.'),
+			h('div', { className: 'flex flex-wrap gap-3 mt-3', key: 'actions' }, [
+				removableDropins.length ? h(Button, { onClick: onRemove, disabled: busy, variant: 'danger', key: 'remove' }, busy ? 'Working…' : 'Remove conflicting cache helpers') : null,
+				h(Button, { onClick: onRecheck, disabled: busy, variant: 'light', key: 'recheck' }, busy ? 'Working…' : 'Re-check'),
+			]),
+		]);
+	}
+
+	function VarnishCard({ form, diagnostics, busy, onFieldChange, onSave, onTest, onFlushAll, onRemoveConflictingDropins, onRecheckConflicts }) {
 		const varnish = diagnostics.varnish || {};
 		const last = varnish.last || {};
 		const supportMessage = varnish.message || '';
@@ -2828,7 +2886,7 @@
 			
 			!isAdminMode && endpointWarningMessages.length ? h('div', { className: 'space-y-2 mt-4' }, endpointWarningMessages.map((message, index) => h('div', { className: 'text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2', key: 'varnish-endpoint-warning-' + index }, message))) : null,
 			formHasUnsafeEndpoint ? h('div', { className: 'mt-4 text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2' }, 'This unsaved HTTP endpoint is unsafe or unsupported. HTTP mode only allows local Varnish listener ports 82 or 6081. Do not use the public WordPress frontend on :80 or :443.') : null,
-			legacyConflicts.detected ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, (legacyConflicts.message || 'Old W3 Total Cache / Varnish helper leftovers detected.') + ((legacyConflicts.options || []).length ? ' Options: ' + legacyConflicts.options.join(', ') + '.' : '') + ((legacyConflicts.plugins || []).length ? ' Plugins: ' + legacyConflicts.plugins.join(', ') + '.' : '')) : null,
+			h(CacheHelperConflictNotice, { diagnostics, busy, onRemove: onRemoveConflictingDropins, onRecheck: onRecheckConflicts }),
 			h('div', { className: 'mt-4 text-xs text-zinc-400 bg-zinc-900/60 rounded-xl px-3 py-2' }, isAdminMode ? 'Current mode: admin-secret. HTTP endpoint tests are not used, but HTTP mode remains available for other servers that expose a local Varnish frontend purge listener.' : 'Current mode: HTTP endpoint. Admin-secret mode remains available for hosts that expose the Varnish admin socket and shared secret.'),
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(SelectField, {
@@ -3039,7 +3097,7 @@
 		]);
 	}
 
-	function RedisCard({ form, diagnostics, busy, objectCacheEnabled, onObjectCacheEnabledChange, onFieldChange, onSave, onTest, onFlush }) {
+	function RedisCard({ form, diagnostics, busy, objectCacheEnabled, onObjectCacheEnabledChange, onFieldChange, onSave, onTest, onFlush, onRemoveConflictingDropins, onRecheckConflicts }) {
 		const objectCache = diagnostics.objectCache || {};
 		const redis = objectCache.redis || {};
 		const legacyConflicts = diagnostics.legacyCacheConflicts || {};
@@ -3083,7 +3141,7 @@
 				disabled: busy,
 				key: 'object-cache-enabled',
 			}),
-			legacyConflicts.detected ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, (legacyConflicts.message || 'Old W3 Total Cache / Varnish helper leftovers detected.') + ((legacyConflicts.options || []).length ? ' Options: ' + legacyConflicts.options.join(', ') + '.' : '') + ((legacyConflicts.plugins || []).length ? ' Plugins: ' + legacyConflicts.plugins.join(', ') + '.' : '')) : null,
+			h(CacheHelperConflictNotice, { diagnostics, busy, onRemove: onRemoveConflictingDropins, onRecheck: onRecheckConflicts }),
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4 mt-4' }, [
 				h(ToggleField, {
 					label: 'Use Redis',
@@ -3708,6 +3766,35 @@
 		}, [diagnostics && diagnostics.reverseProxy ? diagnostics.reverseProxy.detected : false, diagnostics && diagnostics.reverseProxy ? diagnostics.reverseProxy.message : '', pushToast, dismissToast]);
 
 		useEffect(() => {
+			const conflicts = diagnostics && diagnostics.legacyCacheConflicts ? diagnostics.legacyCacheConflicts : {};
+			const activePlugins = Array.isArray(conflicts.activeCachePlugins) ? conflicts.activeCachePlugins : [];
+			if (!activePlugins.length) {
+				dismissToast('cache-plugin-conflict');
+				return;
+			}
+
+			const slugs = activePlugins.map((item) => item && item.slug ? String(item.slug) : '').filter(Boolean).sort();
+			const noticeKey = 'cache-plugin-conflict:' + slugs.join(',');
+			if (isPersistentNoticeDismissed(noticeKey)) {
+				return;
+			}
+
+			const pluginNames = activePlugins.map((item) => item && item.name ? item.name : (item && item.slug ? item.slug : 'Unknown')).join(', ');
+			pushToast({
+				id: 'cache-plugin-conflict',
+				type: 'warning',
+				title: 'Potential cache plugin conflict',
+				text: (conflicts.message || 'Another cache/performance plugin is active and may conflict with UltraCache.') + ' Detected: ' + pluginNames + '.',
+				persistent: true,
+				actions: [
+					{ label: 'Review', onClick: () => scrollToCacheConflictReview() },
+					{ label: 'Dismiss', onClick: () => { markSystemNoticeShown(noticeKey); dismissToast('cache-plugin-conflict'); } },
+					{ label: 'Don’t show again', onClick: () => { dismissPersistentNotice(noticeKey); dismissToast('cache-plugin-conflict'); } },
+				],
+			});
+		}, [diagnostics && diagnostics.legacyCacheConflicts ? JSON.stringify(diagnostics.legacyCacheConflicts.activeCachePlugins || []) : '', pushToast, dismissToast]);
+
+		useEffect(() => {
 			const handleResize = () => setIsMobile(isMobileViewport());
 			handleResize();
 			window.addEventListener('resize', handleResize);
@@ -4064,6 +4151,53 @@
 				success: 'Object cache flush finished.',
 				failed: 'Object cache flush failed.',
 			}, 'object_cache_flush');
+		}
+
+		function scrollToCacheConflictReview() {
+			try {
+				const element = document.getElementById('ucwp-cache-conflict-review');
+				if (element && typeof element.scrollIntoView === 'function') {
+					element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+				}
+			} catch (error) {}
+		}
+
+		async function recheckCacheConflicts() {
+			try {
+				await refreshStats();
+				pushToast({ type: 'info', text: 'Cache conflict diagnostics refreshed.' });
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Cache conflict re-check failed.' });
+			}
+		}
+
+		async function removeConflictingCacheDropins() {
+			if (busy) {
+				return;
+			}
+
+			const confirmed = window.confirm('UltraCache will back up and remove the detected advanced-cache.php/object-cache.php files that are not managed by UltraCache. Plugin folders and settings from other plugins will not be deleted. Continue?');
+			if (!confirmed) {
+				pushToast({ type: 'info', text: 'Cache helper removal cancelled.' });
+				return;
+			}
+
+			setBusy(true);
+			try {
+				const response = await apiRequest('remove_conflicting_cache_dropins', {});
+				if (response && response.stats) {
+					setStats(response.stats);
+				}
+				if (response && response.diagnostics) {
+					setDiagnostics(response.diagnostics);
+				}
+				await refreshStats();
+				pushToast({ type: 'success', text: response && response.message ? response.message : 'Conflicting cache helpers removed.' });
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to remove conflicting cache helpers.' });
+			} finally {
+				setBusy(false);
+			}
 		}
 
 		async function runFullObjectCount() {
@@ -6118,7 +6252,7 @@ h(
 					[
 						h(ToggleRow, {
 							label: 'CSS Bundling',
-                                description: 'Create local UltraCache CSS bundles for eligible stylesheet links. Choose the scope and mode below: Safe, Aggressive, or Full CSS Bundle.',
+                                description: 'Create local UltraCache CSS bundles for eligible stylesheet links. Safe mode is the public default. Aggressive and Full CSS Bundle are experimental and should be enabled only after visual testing.',
 							checked: settings.homepageCssBundleEnabled,
 							onChange: (value) => updateSetting('homepageCssBundleEnabled', value),
 							disabled: busy,
@@ -6138,7 +6272,7 @@ h(
 						})),
 	h('div', { className: 'uc-css-bundle-mode-field', key: 'css-bundle-mode-wrap' }, h(SelectField, {
 								label: 'CSS Bundle Mode',
-								description: 'Choose how broadly UltraCache combines eligible local stylesheet links. Full CSS Bundle consolidates all eligible local CSS, while still respecting visible CSS Bundle Exclusions and unreadable/non-local safeguards.',
+								description: 'Choose how broadly UltraCache combines eligible local stylesheet links. Safe is recommended for public defaults; Aggressive and Full CSS Bundle are experimental and can increase blocking CSS or break layouts on some themes.',
 								value: settings.homepageCssBundleMode || 'safe',
 								onChange: (value) => updateSetting('homepageCssBundleMode', value),
 								disabled: busy || !settings.homepageCssBundleEnabled,
@@ -6237,7 +6371,7 @@ h(ToggleRow, {
 						}),
 h(ToggleRow, {
 							label: 'Advanced Runtime Font CSS Rewrite',
-							description: 'Advanced opt-in. Uses a MutationObserver to rewrite late-injected local font stylesheet links. Native DOM prototype monkey-patching has been removed from the default path.',
+							description: 'Advanced opt-in / experimental. Uses a MutationObserver to rewrite late-injected local font stylesheet links. Keep off unless a site specifically needs runtime font-link rewriting.',
 							checked: settings.selfHostedFontRuntimeRewriteEnabled,
 							onChange: (value) => updateSetting('selfHostedFontRuntimeRewriteEnabled', value),
 							disabled: busy || !settings.selfHostedFontCssOptimizationEnabled,
@@ -6568,7 +6702,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 								])
 			]),
 
-			h(RedisCard, { form: redisForm, diagnostics, busy: busy || !!asyncActions.redis_test || !!asyncActions.object_cache_flush, objectCacheEnabled: settings.objectCacheEnabled, onObjectCacheEnabledChange: (value) => updateSetting('objectCacheEnabled', value), onFieldChange: updateRedisField, onSave: saveRedisSettings, onTest: testRedisConnection, onFlush: flushObjectCache, key: 'redis-card' }),
+			h(RedisCard, { form: redisForm, diagnostics, busy: busy || !!asyncActions.redis_test || !!asyncActions.object_cache_flush, objectCacheEnabled: settings.objectCacheEnabled, onObjectCacheEnabledChange: (value) => updateSetting('objectCacheEnabled', value), onFieldChange: updateRedisField, onSave: saveRedisSettings, onTest: testRedisConnection, onFlush: flushObjectCache, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'redis-card' }),
 
 			h(
 				Card,
@@ -6693,7 +6827,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 				]
 			),
 
-			h(VarnishCard, { form: varnishForm, diagnostics, busy: busy || !!asyncActions.varnish_test || !!asyncActions.varnish_flush_all, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onTest: runVarnishTest, onFlushAll: runVarnishFlushAll, key: 'varnish-card' }),
+			h(VarnishCard, { form: varnishForm, diagnostics, busy: busy || !!asyncActions.varnish_test || !!asyncActions.varnish_flush_all, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onTest: runVarnishTest, onFlushAll: runVarnishFlushAll, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'varnish-card' }),
 			h('div', { className: 'uc-info-grid', key: 'php-cache-cards' }, [
 			h(OPcacheCard, { stats, busy: busy || !!asyncActions.opcache_flush, onFlush: flushOpcache, key: 'opcache-card' }),
 			h(APCuCard, { stats, settings, busy: busy || !!asyncActions.apcu_flush, onFlush: flushApcu, onToggleScheduledCleanup: (value) => updateSetting('apcuFlushOnScheduledCleanup', value), key: 'apcu-card' }),

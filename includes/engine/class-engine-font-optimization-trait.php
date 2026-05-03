@@ -681,12 +681,11 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $scan_url = add_query_arg('ucwp_google_fonts_scan', '1', $url);
-            $response = wp_remote_get(
+            $response = ucwp_safe_loopback_remote_request(
                 $scan_url,
                 array(
                     'timeout' => 20,
                     'redirection' => 3,
-                    'sslverify' => false,
                     'user-agent' => 'UltraCache-GoogleFontsScanner/' . (defined('UCWP_VERSION') ? UCWP_VERSION : '1.0') . '; ' . home_url('/'),
                     'headers' => array(
                         'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -820,7 +819,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     return $css_url;
                 }
 
-                $response = wp_remote_get(
+                $response = ucwp_safe_remote_request(
                     $normalized_url,
                     array(
                         'timeout' => 10,
@@ -946,7 +945,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     return $file_url;
                 }
 
-                $response = wp_remote_get(
+                $response = ucwp_safe_remote_request(
                     $remote_url,
                     array(
                         'timeout' => 10,

@@ -679,7 +679,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $profile_url = add_query_arg($profile_query_args, $url);
 
             $started = microtime(true);
-            $response = wp_remote_get($profile_url, array(
+            $response = ucwp_safe_loopback_remote_request($profile_url, array(
                 'timeout'     => 90,
                 'redirection' => 3,
                 'headers'     => $headers,

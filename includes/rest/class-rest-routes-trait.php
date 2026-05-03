@@ -66,6 +66,13 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
+                '/cache-conflicts/remove-dropins' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'remove_conflicting_cache_dropins'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/cron-warm/start' => array(
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,

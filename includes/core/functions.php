@@ -12,16 +12,45 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+if (!function_exists('ucwp_is_sensitive_debug_key')) {
+    function ucwp_is_sensitive_debug_key($key)
+    {
+        $key = strtolower((string) $key);
+        if ('' === $key) {
+            return false;
+        }
+
+        return 1 === preg_match('/(?:^key$|password|passwd|pwd|secret|token|authorization|cookie|nonce|auth|credential|security|redis[_-]?password|varnish.*key|varnish.*secret|api[_-]?key|access[_-]?key|private[_-]?key|order[_-]?key|client[_-]?secret)/i', $key);
+    }
+}
+
+if (!function_exists('ucwp_redact_sensitive_string')) {
+    function ucwp_redact_sensitive_string($value)
+    {
+        $value = (string) $value;
+
+        $json_key_pattern = '(?:redis_password|redisPassword|varnish_admin_secret|varnishCliKey|password|passwd|pwd|secret|token|authorization|cookie|nonce|auth|credential|security|api[_-]?key|access[_-]?key|private[_-]?key|order[_-]?key|client[_-]?secret|key)';
+        $value = preg_replace('/((?:"|\')' . $json_key_pattern . '(?:"|\')\s*:\s*(?:"|\'))[^"\']*((?:"|\'))/i', '$1[redacted]$2', $value);
+        $value = preg_replace('/(' . $json_key_pattern . '\s*[=:]\s*)[^,\s&}\]]+/i', '$1[redacted]', $value);
+        $value = preg_replace('/((?:password|passwd|pwd|secret|token|nonce|auth|credential|security|key)=)([^&\s]+)/i', '$1[redacted]', $value);
+
+        if (preg_match('/(?:bearer\s+|basic\s+)[a-z0-9._~+\/=:-]+/i', $value)) {
+            $value = preg_replace('/(?:bearer\s+|basic\s+)[a-z0-9._~+\/=:-]+/i', '[redacted]', $value);
+        }
+
+        return $value;
+    }
+}
+
 if (!function_exists('ucwp_redact_sensitive_debug_value')) {
     function ucwp_redact_sensitive_debug_value($key, $value, $depth = 0)
     {
-        $sensitive_key = preg_match('/(?:password|secret|token|key|authorization|cookie|nonce|auth|credential)/i', (string) $key);
-        if ($sensitive_key) {
+        if (ucwp_is_sensitive_debug_key($key)) {
             return '[redacted]';
         }
 
-        if ($depth > 4) {
-            return is_scalar($value) || null === $value ? $value : '[truncated]';
+        if ($depth > 8) {
+            return is_scalar($value) || null === $value ? ucwp_redact_sensitive_string((string) $value) : '[truncated]';
         }
 
         if (is_array($value)) {
@@ -33,12 +62,7 @@ if (!function_exists('ucwp_redact_sensitive_debug_value')) {
         }
 
         if (is_string($value)) {
-            if (preg_match('/(?:password|secret|token|nonce|auth|credential)=([^&\s]+)/i', $value)) {
-                return preg_replace('/((?:password|secret|token|nonce|auth|credential)=)([^&\s]+)/i', '$1[redacted]', $value);
-            }
-            if (preg_match('/(?:bearer\s+|basic\s+)[a-z0-9._~+\/=:-]+/i', $value)) {
-                return '[redacted]';
-            }
+            return ucwp_redact_sensitive_string($value);
         }
 
         return $value;
@@ -1009,6 +1033,11 @@ if (!function_exists('ucwp_safe_file_put_contents')) {
             return false;
         }
 
+        if (!ucwp_is_allowed_writable_path($path, $context)) {
+            ucwp_debug_log('file_put_contents blocked: path outside allowed write roots', array('path' => $path, 'context' => $context));
+            return false;
+        }
+
         $dir = dirname($path);
         if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
             if (function_exists('ucwp_safe_mkdir')) {
@@ -1136,11 +1165,76 @@ if (!function_exists('ucwp_is_allowed_destructive_path')) {
             return true;
         }
 
-        if (false !== strpos((string) $context, 'runtime') && preg_match('/^(?:\\.[A-Za-z0-9_-]+-)?ultracache-runtime-secrets\\.php$/', $base)) {
+        if (false !== strpos((string) $context, 'runtime') && preg_match('/^(?:\\.[A-Za-z0-9_.-]+-)?ultracache-runtime-secrets\\.php(?:\\.tmp-[A-Za-z0-9_.-]+)?$/', $base)) {
             return true;
         }
 
         return false;
+    }
+}
+
+if (!function_exists('ucwp_is_allowed_writable_path')) {
+    function ucwp_is_allowed_writable_path($path, $context = '')
+    {
+        $normalized = ucwp_normalize_filesystem_path_for_guard($path);
+        $context = (string) $context;
+        if ('' === $normalized) {
+            return false;
+        }
+
+        $allowed_dirs = array();
+        foreach (array('UCWP_CACHE_DIR', 'UCWP_OPTIMIZED_IMAGES_DIR', 'UCWP_AVIF_DIR', 'UCWP_WEBP_DIR', 'UCWP_OBJECT_CACHE_DIR') as $constant) {
+            if (defined($constant)) {
+                $allowed_dirs[] = constant($constant);
+            }
+        }
+
+        foreach ($allowed_dirs as $dir) {
+            if (ucwp_path_has_dir_prefix($normalized, $dir)) {
+                return true;
+            }
+        }
+
+        $base = basename($normalized);
+        $dir = dirname($normalized);
+
+        if (defined('WP_CONTENT_DIR')) {
+            $content_dir = wp_normalize_path(WP_CONTENT_DIR);
+            foreach (array('advanced-cache.php', 'object-cache.php', 'ultracache-runtime-secrets.php') as $managed_file) {
+                $target = trailingslashit($content_dir) . $managed_file;
+                if ($normalized === ucwp_normalize_filesystem_path_for_guard($target)) {
+                    return true;
+                }
+                if (0 === strpos($base, $managed_file . '.tmp-') && ucwp_path_has_dir_prefix($normalized, $content_dir)) {
+                    return true;
+                }
+            }
+        }
+
+        if (false !== strpos($context, 'runtime') && preg_match('/^(?:\.[A-Za-z0-9_.-]+-)?ultracache-runtime-secrets\.php(?:\.tmp-[A-Za-z0-9_.-]+)?$/', $base)) {
+            return true;
+        }
+
+        if (false !== strpos($context, 'set_wp_cache_flag')) {
+            if ('wp-config.php' === $base && file_exists($dir . '/wp-config.php')) {
+                return true;
+            }
+            if (preg_match('/^wp-config\.php\.tmp-[A-Za-z0-9_.]+$/', $base) && file_exists($dir . '/wp-config.php')) {
+                return true;
+            }
+            if (preg_match('/^wp-config-backup-\d{8}-\d{6}-[A-Za-z0-9]+\.php$/', $base) && file_exists($dir . '/wp-config.php')) {
+                return true;
+            }
+        }
+
+        if (false !== strpos($context, 'sync_browser_cache_rules') && defined('ABSPATH')) {
+            $root = wp_normalize_path(ABSPATH);
+            if (ucwp_path_has_dir_prefix($normalized, $root) && ('.htaccess' === $base || preg_match('/^\.htaccess\.tmp-[A-Za-z0-9_.]+$/', $base))) {
+                return true;
+            }
+        }
+
+        return (bool) apply_filters('ucwp_is_allowed_writable_path', false, $normalized, $context);
     }
 }
 
@@ -1191,6 +1285,11 @@ if (!function_exists('ucwp_safe_rename')) {
             return file_exists($to);
         }
 
+        if (!ucwp_is_allowed_writable_path($from, $context) || !ucwp_is_allowed_writable_path($to, $context)) {
+            ucwp_debug_log('rename blocked: path outside allowed write roots', array('from' => $from, 'to' => $to, 'context' => (string) $context));
+            return false;
+        }
+
         clearstatcache(true, $from);
         clearstatcache(true, $to);
         if (!file_exists($from)) {
@@ -1226,6 +1325,23 @@ if (!function_exists('ucwp_safe_rename')) {
 if (!function_exists('ucwp_safe_copy')) {
     function ucwp_safe_copy($from, $to, $context = '')
     {
+        $from = is_string($from) ? $from : '';
+        $to = is_string($to) ? $to : '';
+        if ('' === $from || '' === $to || !file_exists($from)) {
+            ucwp_debug_log('copy failed: invalid path', array('from' => $from, 'to' => $to, 'context' => (string) $context));
+            return false;
+        }
+
+        if (!ucwp_is_allowed_writable_path($to, $context)) {
+            ucwp_debug_log('copy blocked: destination outside allowed write roots', array('from' => $from, 'to' => $to, 'context' => (string) $context));
+            return false;
+        }
+
+        $dir = dirname($to);
+        if ('' !== $dir && '.' !== $dir && !is_dir($dir) && !ucwp_safe_mkdir($dir, 0755, true, $context . ' parent mkdir')) {
+            return false;
+        }
+
         $filesystem = ucwp_get_wp_filesystem();
         if ($filesystem) {
             $result = $filesystem->copy($from, $to, true, FS_CHMOD_FILE);
@@ -1246,6 +1362,12 @@ if (!function_exists('ucwp_safe_copy')) {
 if (!function_exists('ucwp_safe_mkdir')) {
     function ucwp_safe_mkdir($dir, $mode = 0755, $recursive = true, $context = '')
     {
+        $dir = is_string($dir) ? $dir : '';
+        if ('' === $dir || !ucwp_is_allowed_writable_path($dir, $context)) {
+            ucwp_debug_log('mkdir blocked: directory outside allowed write roots', array('dir' => $dir, 'mode' => $mode, 'recursive' => (bool) $recursive, 'context' => (string) $context));
+            return false;
+        }
+
         if (is_dir($dir)) {
             return true;
         }
@@ -1369,8 +1491,8 @@ if (!function_exists('ucwp_safe_tempnam')) {
     {
         $dir = (string) $dir;
         $prefix = (string) $prefix;
-        if ('' === $dir || !is_dir($dir) || !ucwp_path_is_writable($dir)) {
-            ucwp_debug_log('tempnam directory unavailable', array('dir' => $dir, 'context' => (string) $context));
+        if ('' === $dir || !ucwp_is_allowed_writable_path($dir, $context) || !is_dir($dir) || !ucwp_path_is_writable($dir)) {
+            ucwp_debug_log('tempnam directory unavailable or blocked', array('dir' => $dir, 'context' => (string) $context));
             return false;
         }
 
@@ -1448,6 +1570,22 @@ if (!function_exists('ucwp_safe_stream_set_blocking')) {
 if (!function_exists('ucwp_safe_remote_request')) {
     function ucwp_safe_remote_request($url, array $args = array(), $context = '')
     {
+        $url = is_string($url) ? trim($url) : '';
+        if ('' === $url) {
+            return new WP_Error('ucwp_empty_remote_url', 'Remote request URL is empty.');
+        }
+
+        $defaults = array(
+            'timeout' => 10,
+            'redirection' => 3,
+            'reject_unsafe_urls' => true,
+            'user-agent' => 'UltraCache/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown') . '; ' . home_url('/'),
+        );
+        $args = array_merge($defaults, $args);
+        $args['redirection'] = max(0, min(5, (int) $args['redirection']));
+        $args['timeout'] = max(1, min(60, (int) $args['timeout']));
+        $args['reject_unsafe_urls'] = true;
+
         $response = wp_safe_remote_request($url, $args);
         if (is_wp_error($response)) {
             ucwp_debug_log('wp_safe_remote_request failed', array(
@@ -1556,9 +1694,50 @@ if (!function_exists('ucwp_is_ssl_verification_wp_error')) {
     }
 }
 
+if (!function_exists('ucwp_is_trusted_loopback_url')) {
+    function ucwp_is_trusted_loopback_url($url)
+    {
+        $url = is_string($url) ? trim($url) : '';
+        if ('' === $url) {
+            return false;
+        }
+
+        $parts = wp_parse_url($url);
+        if (!is_array($parts)) {
+            return false;
+        }
+
+        $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) : '';
+        $host = isset($parts['host']) ? ucwp_normalize_host((string) $parts['host']) : '';
+        if (!in_array($scheme, array('http', 'https'), true) || '' === $host) {
+            return false;
+        }
+
+        $trusted_hosts = ucwp_get_trusted_hosts();
+        if (in_array($host, $trusted_hosts, true)) {
+            return true;
+        }
+
+        if (in_array($host, array('localhost', '127.0.0.1', '::1', '[::1]'), true)) {
+            return true;
+        }
+
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return 0 === strpos($host, '10.') || 0 === strpos($host, '192.168.') || 1 === preg_match('/^172\.(1[6-9]|2\d|3[0-1])\./', $host);
+        }
+
+        return (bool) apply_filters('ucwp_is_trusted_loopback_url', false, $url, $host);
+    }
+}
+
 if (!function_exists('ucwp_safe_loopback_remote_request')) {
     function ucwp_safe_loopback_remote_request($url, array $args = array(), $context = '')
     {
+        if (!ucwp_is_trusted_loopback_url($url)) {
+            ucwp_debug_log('loopback remote request blocked: untrusted URL', array('url' => (string) $url, 'context' => (string) $context));
+            return new WP_Error('ucwp_untrusted_loopback_url', 'Loopback request URL is not local/trusted for this site.');
+        }
+
         $is_local_https = ucwp_is_local_https_url($url);
         if (!$is_local_https) {
             return ucwp_safe_remote_request($url, $args, $context);

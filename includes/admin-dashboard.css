@@ -1014,6 +1014,35 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	color: #9bdfff;
 }
 
+#uc-dashboard .uc-toast__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 10px;
+}
+
+#uc-dashboard .uc-toast__action {
+	appearance: none;
+	border: 1px solid rgba(151, 163, 182, 0.35);
+	background: rgba(255, 255, 255, 0.04);
+	color: var(--uc-text);
+	font-size: 11px;
+	line-height: 1.2;
+	font-weight: 700;
+	padding: 6px 8px;
+	cursor: pointer;
+}
+
+#uc-dashboard .uc-toast__action:hover {
+	border-color: rgba(151, 163, 182, 0.65);
+	background: rgba(255, 255, 255, 0.08);
+}
+
+#uc-dashboard .uc-toast__action--danger {
+	border-color: rgba(255, 93, 115, 0.55);
+	color: #ffb3bd;
+}
+
 #uc-dashboard .uc-toast__close {
 	appearance: none;
 	border: 0;

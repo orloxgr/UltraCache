@@ -1,3 +1,45 @@
+= 2.56.209 - Disabled Cache Plugin Warning Fix =
+- Split cache conflict UI so the removable warning box appears only for real non-UltraCache advanced-cache.php/object-cache.php drop-ins.
+- Stopped disabled/installed cache plugin folders such as W3 Total Cache from keeping a persistent warning visible after conflicting drop-ins are removed.
+- Kept active cache/performance plugin conflicts as dismissible toast warnings only.
+- Forced diagnostics refresh after removing conflicting cache helpers so the drop-in warning disappears immediately when resolved.
+- No cache/media/performance pipeline changes.
+
+= 2.56.207 - Public Metadata + Profile Preset Polish =
+* Added public package requirement headers (`Requires at least` and `Requires PHP`) to the main plugin file.
+* Shortened the plugin header and readme short descriptions for WordPress.org-style metadata.
+* Updated performance profile descriptions to clarify public-safe behavior and visual-testing expectations.
+* Kept automations/scheduled jobs/save-time warm actions off in every profile preset.
+* Kept automatic media generation on upload/on demand off in profile presets; users can enable or run media rebuild manually.
+* Kept Inline CSS Bundling off in every profile preset, including Aggressive.
+* Kept the build scoped to metadata/profile preset polish only; no cache/media/performance pipeline behavior was changed.
+
+= 2.56.206 - Public Package Cleanup =
+* Synchronized root uninstall cleanup with the current UltraCache runtime data model, scheduled hooks, media queue table, queue options, and generated cache locations.
+* Preserved the conservative uninstall policy that keeps optimized media variants under `wp-content/uploads/uc-images/` unless a site owner removes them manually.
+* Verified the public WP-CLI command list/readme remains single-entry and package-ready.
+* No new optimization feature was added.
+
+= 2.56.205 - Action Queue Simplification RC Cleanup =
+* Removed the unnecessary legacy action-queue scrub/migration behavior from job loading; private pre-release queue state can be cleared manually instead of migrated.
+* Kept future action queue storage/output redaction for newly created jobs and results.
+* Avoided activation/upgrade queue deletion logic and kept the build scoped to RC cleanup only.
+* No new optimization feature was added.
+
+= 2.56.204 - Public RC Secret Redaction Hotfix =
+* Hardened dashboard action queue loading so existing stored jobs are normalized and scrubbed before being returned or saved again.
+* Added stronger recursive redaction for nested diagnostics, runtime config snapshots, JSON-like strings, REST job payloads, and dashboard queue results.
+* Removed raw runtime Redis/Varnish secret values from public diagnostics output while preserving configured/health status indicators.
+* Kept the build scoped to RC hardening only; no new optimization feature was added.
+
+= 2.56.203 - Public Release Candidate Hardening =
+- Added public-release packaging files including GPL license and conservative uninstall cleanup behavior.
+- Hardened dashboard action queue storage so sensitive credentials are redacted before jobs/results are persisted.
+- Added stricter filesystem write/copy/rename/mkdir guards for generated assets, drop-ins, runtime files, wp-config helpers, and managed .htaccess updates.
+- Hardened same-site loopback/profiler requests with safer URL validation and WordPress safe remote request defaults.
+- Made core WooCommerce dynamic paths/query arguments a hard cache bypass rather than an optional site setting.
+- Updated public readme/README guidance for experimental features, privacy/external-service behavior, and RC-safe defaults.
+
 = 2.56.202 - JS Bundle Candidate Diagnostics =
 - Added persistent diagnostics for the experimental Combine safe deferred JS feature.
 - Records scanned/deferred/eligible script counts, rejection reasons, eligible groups, generated bundles, bundle bytes, and sample candidates.

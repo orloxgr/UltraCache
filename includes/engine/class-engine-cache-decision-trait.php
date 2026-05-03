@@ -320,10 +320,12 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 $settings = $this->get_settings();
             }
 
-            if (empty($settings['woo_safe_mode'])) {
-                return false;
-            }
-
+            /*
+             * Public cache-safety hardening: core WooCommerce dynamic endpoints are
+             * never eligible for static HTML cache. The woo_safe_mode setting may
+             * still control broader WooCommerce tuning elsewhere, but cart, checkout,
+             * account, endpoint, and Woo query/cookie requests remain hard bypasses.
+             */
             if (function_exists('is_cart') && is_cart()) {
                 $this->last_bypass_reason = 'woocommerce-cart';
                 return true;
@@ -712,11 +714,11 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 $reason = 'disabled';
             } elseif (!$this->is_cacheable_local_url($absolute_url)) {
                 $reason = 'non-local-url';
-            } elseif (!empty($settings['woo_safe_mode']) && '' !== $matched_woo_path_rule) {
+            } elseif ('' !== $matched_woo_path_rule) {
                 $reason = 'woocommerce-dynamic-path';
                 $matched_woo_rule = $matched_woo_path_rule;
                 $matched_woo_rule_type = 'path';
-            } elseif (!empty($settings['woo_safe_mode']) && '' !== $matched_woo_query_arg) {
+            } elseif ('' !== $matched_woo_query_arg) {
                 $reason = 'woocommerce-dynamic-query';
                 $matched_woo_rule = $matched_woo_query_arg;
                 $matched_woo_rule_type = 'query';

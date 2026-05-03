@@ -116,7 +116,8 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function save_action_jobs(array $jobs)
         {
-            update_option($this->get_action_queue_option_key(), $this->normalize_action_jobs($jobs), false);
+            $normalized = $this->normalize_action_jobs($jobs);
+            update_option($this->get_action_queue_option_key(), $this->scrub_action_jobs_for_storage($normalized), false);
         }
 
         private function find_active_heavy_action_job(array $jobs, $exclude_id = '')
@@ -170,6 +171,61 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             }
         }
 
+        private function is_sensitive_action_queue_key($key)
+        {
+            if (function_exists('ucwp_is_sensitive_debug_key')) {
+                return (bool) ucwp_is_sensitive_debug_key($key);
+            }
+
+            return 1 === preg_match('/(?:^key$|password|passwd|pwd|secret|token|authorization|cookie|nonce|auth|credential|security|redis[_-]?password|varnish.*key|varnish.*secret|api[_-]?key|access[_-]?key|private[_-]?key|order[_-]?key|client[_-]?secret)/i', (string) $key);
+        }
+
+        private function scrub_action_queue_payload($value, $key = '', $depth = 0)
+        {
+            if (function_exists('ucwp_redact_sensitive_debug_value')) {
+                return ucwp_redact_sensitive_debug_value($key, $value, $depth);
+            }
+
+            if ($this->is_sensitive_action_queue_key($key)) {
+                return '[redacted]';
+            }
+
+            if ($depth > 8) {
+                return is_scalar($value) || null === $value ? $value : '[truncated]';
+            }
+
+            if (is_array($value)) {
+                $scrubbed = array();
+                foreach ($value as $child_key => $child_value) {
+                    $scrubbed[$child_key] = $this->scrub_action_queue_payload($child_value, (string) $child_key, $depth + 1);
+                }
+                return $scrubbed;
+            }
+
+            if (is_string($value)) {
+                if (function_exists('ucwp_redact_sensitive_string')) {
+                    return ucwp_redact_sensitive_string($value);
+                }
+                if (preg_match('/(?:password|passwd|pwd|secret|token|nonce|auth|credential|security|key)=([^&\s]+)/i', $value)) {
+                    return preg_replace('/((?:password|passwd|pwd|secret|token|nonce|auth|credential|security|key)=)([^&\s]+)/i', '$1[redacted]', $value);
+                }
+                if (preg_match('/(?:bearer\s+|basic\s+)[a-z0-9._~+\/=:-]+/i', $value)) {
+                    return '[redacted]';
+                }
+            }
+
+            return $value;
+        }
+
+        private function scrub_action_jobs_for_storage(array $jobs)
+        {
+            $scrubbed = array();
+            foreach ($jobs as $id => $job) {
+                $scrubbed[$id] = is_array($job) ? $this->scrub_action_queue_payload($job, 'job', 0) : $job;
+            }
+            return $scrubbed;
+        }
+
         private function normalize_action_params($params)
         {
             if (!is_array($params)) {
@@ -198,12 +254,13 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             }
 
             $params = $this->normalize_action_params($request->get_param('params'));
+            $stored_params = $this->scrub_action_queue_payload($params, 'params', 0);
             $id = 'ucwp_' . wp_generate_password(18, false, false);
             $now = time();
             $job = array(
                 'id'        => $id,
                 'action'    => $action,
-                'params'    => $params,
+                'params'    => is_array($stored_params) ? $stored_params : array(),
                 'status'    => 'queued',
                 'message'   => 'Waiting for dashboard processing.',
                 'createdAt' => $now,
@@ -211,6 +268,26 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             );
 
             $jobs = $this->load_action_jobs();
+
+            if ('redis_test' === $action) {
+                $job['status'] = 'running';
+                $job['message'] = 'Testing Redis connection.';
+                $job['startedAt'] = $now;
+                $job['updatedAt'] = $now;
+
+                $result = $this->run_action_queue_job($action, $params);
+                $ok = !empty($result['success']) || !empty($result['skipped']);
+                $job['status'] = $ok ? 'done' : 'failed';
+                $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
+                $job['result'] = $this->scrub_action_queue_payload($result, 'result', 0);
+                $job['finishedAt'] = time();
+                $job['updatedAt'] = time();
+                $jobs[$id] = $job;
+                $this->save_action_jobs($jobs);
+
+                return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
+            }
+
             if ($this->is_heavy_action_queue_action($action)) {
                 $active = $this->find_active_heavy_action_job($jobs);
                 if (!empty($active)) {
@@ -221,13 +298,13 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                     $jobs[$id] = $job;
                     $this->save_action_jobs($jobs);
 
-                    return new WP_REST_Response(array('success' => true, 'job' => $job), 202);
+                    return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
                 }
             }
             $jobs[$id] = $job;
             $this->save_action_jobs($jobs);
 
-            return new WP_REST_Response(array('success' => true, 'job' => $job), 202);
+            return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
         }
 
         public function get_action_job(WP_REST_Request $request)
@@ -251,7 +328,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                         $job['updatedAt'] = time();
                         $jobs[$id] = $job;
                         $this->save_action_jobs($jobs);
-                        return new WP_REST_Response(array('success' => true, 'job' => $job), 200);
+                        return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
                     }
                     if (!$this->acquire_action_queue_heavy_lock($action, $id)) {
                         $job['status'] = 'failed';
@@ -260,7 +337,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                         $job['updatedAt'] = time();
                         $jobs[$id] = $job;
                         $this->save_action_jobs($jobs);
-                        return new WP_REST_Response(array('success' => true, 'job' => $job), 200);
+                        return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
                     }
                 }
 
@@ -281,7 +358,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 $ok = !empty($result['success']) || !empty($result['skipped']);
                 $job['status'] = $ok ? 'done' : 'failed';
                 $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
-                $job['result'] = $result;
+                $job['result'] = $this->scrub_action_queue_payload($result, 'result', 0);
                 $job['finishedAt'] = time();
                 $job['updatedAt'] = time();
                 $jobs[$id] = $job;
@@ -295,7 +372,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 $this->save_action_jobs($jobs);
             }
 
-            return new WP_REST_Response(array('success' => true, 'job' => $job), 200);
+            return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
         }
 
         private function run_action_queue_job($action, array $params)

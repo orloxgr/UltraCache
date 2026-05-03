@@ -1432,6 +1432,27 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             return $summary;
         }
 
+        private static function redact_diagnostics_for_output($value, $key = '', $depth = 0)
+        {
+            if (function_exists('ucwp_redact_sensitive_debug_value')) {
+                return ucwp_redact_sensitive_debug_value($key, $value, $depth);
+            }
+
+            if ($depth > 8) {
+                return is_scalar($value) || null === $value ? $value : '[truncated]';
+            }
+
+            if (is_array($value)) {
+                $redacted = array();
+                foreach ($value as $child_key => $child_value) {
+                    $redacted[$child_key] = self::redact_diagnostics_for_output($child_value, (string) $child_key, $depth + 1);
+                }
+                return $redacted;
+            }
+
+            return $value;
+        }
+
         public static function get_dashboard_diagnostics()
         {
             $settings             = self::get_dashboard_settings();
@@ -1471,7 +1492,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $css_bundle_summary_diagnostics = self::get_css_bundle_summary_diagnostics($settings);
             $cache_storage_diagnostics = self::get_cache_storage_diagnostics($settings, $css_bundle_summary_diagnostics);
 
-            return array(
+            $diagnostics = array(
                 'pageCache' => array(
                     'enabled' => !empty($settings['pageCacheEnabled']),
                     'active'  => (bool) (defined('WP_CACHE') && WP_CACHE && file_exists($advanced_cache_path)),
@@ -1601,6 +1622,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'lastCacheWrite' => self::get_page_cache_activity_snapshot(),
                 'lastEvent' => self::normalize_last_cache_event($last),
             );
+
+            return self::redact_diagnostics_for_output($diagnostics, 'diagnostics', 0);
         }
 
         private static function get_path_diagnostic($path, $type = 'file', $managed_marker = '')
@@ -1681,8 +1704,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
 
             $expected_runtime = self::build_runtime_config();
             $expected_public_runtime = $expected_runtime;
-            unset($expected_public_runtime['revalidate_secret']);
-            $diag['expected'] = $expected_public_runtime;
+            unset($expected_public_runtime['revalidate_secret'], $expected_public_runtime['redis_password'], $expected_public_runtime['varnish_admin_secret']);
+            $diag['expected'] = self::redact_diagnostics_for_output($expected_public_runtime, 'expected', 0);
 
             if (!empty($diag['exists']) && !empty($diag['readable'])) {
                 $raw = ucwp_safe_file_get_contents($path, 'dashboard runtime config raw diagnostic');
@@ -1694,10 +1717,10 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                         $diag['readError'] = self::maybe_translate('Invalid JSON');
                     } else {
                         $normalized_public = self::normalize_runtime_config(array_merge($expected_public_runtime, $loaded));
-                        unset($normalized_public['revalidate_secret']);
+                        unset($normalized_public['revalidate_secret'], $normalized_public['redis_password'], $normalized_public['varnish_admin_secret']);
                         $diag['valid'] = true;
                         $diag['keys'] = array_values(array_keys($loaded));
-                        $diag['loaded'] = $normalized_public;
+                        $diag['loaded'] = self::redact_diagnostics_for_output($normalized_public, 'loaded', 0);
                         $diag['inSync'] = ($normalized_public === $expected_public_runtime);
                     }
                 }
