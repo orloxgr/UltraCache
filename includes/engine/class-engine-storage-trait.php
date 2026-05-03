@@ -98,7 +98,15 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
         private function validate_cached_html_css_bundle_refs($html, $cache_file = '')
         {
             $html = (string) $html;
-            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+            if ('' === $html || false === stripos($html, '/cache/ultracache/')) {
+                return true;
+            }
+
+            $has_generated_css = (false !== stripos($html, '/cache/ultracache/css-bundles/'))
+                || (false !== stripos($html, '/cache/ultracache/font-css/'))
+                || (false !== stripos($html, '/cache/ultracache/optimized-css/'))
+                || (false !== stripos($html, '/cache/ultracache/js-bundles/'));
+            if (!$has_generated_css) {
                 return true;
             }
 
@@ -116,14 +124,14 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                 ucwp_safe_unlink($cache_file . '.br');
             }
 
-            $this->record_cache_event('stale-css-bundle-html-invalidated', array(
+            $this->record_cache_event('stale-generated-css-html-invalidated', array(
                 'file' => $cache_file,
                 'missing' => array_slice(array_values($missing), 0, 20),
                 'missing_count' => count($missing),
             ));
 
             if (!headers_sent()) {
-                header('X-Ultra-Cache-Stale-CSS-Bundle: invalidated');
+                header('X-Ultra-Cache-Stale-Generated-CSS: invalidated');
             }
 
             return false;
@@ -133,34 +141,49 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
         {
             $html = (string) $html;
             $missing = array();
-            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+            if ('' === $html || false === stripos($html, '/cache/ultracache/')) {
                 return $missing;
             }
 
-            preg_match_all('#(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s\"\'<>?#)]+\.css#i', $html, $absolute_matches);
-            preg_match_all('#/wp-content/cache/ultracache/css-bundles/[^\s\"\'<>?#)]+\.css#i', $html, $path_matches);
+            preg_match_all('#(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css#i', $html, $absolute_matches);
+            preg_match_all('#/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css#i', $html, $path_matches);
+            preg_match_all('#(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/js-bundles/[^\s\"\'<>?#)]+\.js#i', $html, $absolute_js_matches);
+            preg_match_all('#/wp-content/cache/ultracache/js-bundles/[^\s\"\'<>?#)]+\.js#i', $html, $path_js_matches);
 
             $refs = array_merge(
                 isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
-                isset($path_matches[0]) && is_array($path_matches[0]) ? $path_matches[0] : array()
+                isset($path_matches[0]) && is_array($path_matches[0]) ? $path_matches[0] : array(),
+                isset($absolute_js_matches[0]) && is_array($absolute_js_matches[0]) ? $absolute_js_matches[0] : array(),
+                isset($path_js_matches[0]) && is_array($path_js_matches[0]) ? $path_js_matches[0] : array()
             );
 
             $refs = array_values(array_unique(array_map('strval', $refs)));
-            $bundle_dir = wp_normalize_path($this->get_frontpage_css_dir());
+            $allowed_dirs = array(
+                'css-bundles' => wp_normalize_path($this->get_frontpage_css_dir()),
+                'font-css' => wp_normalize_path(trailingslashit(UCWP_CACHE_DIR) . 'font-css/'),
+                'optimized-css' => wp_normalize_path(trailingslashit(UCWP_CACHE_DIR) . 'optimized-css/'),
+                'js-bundles' => wp_normalize_path(trailingslashit(UCWP_CACHE_DIR) . 'js-bundles/'),
+            );
             foreach ($refs as $ref) {
                 $path = (string) wp_parse_url($ref, PHP_URL_PATH);
                 if ('' === $path) {
                     $path = $ref;
                 }
-                $basename = basename(rawurldecode($path));
-                if ('' === $basename || false === preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $basename)) {
+
+                if (!preg_match('#/wp-content/cache/ultracache/(css-bundles|font-css|optimized-css|js-bundles)/([^/]+\.(?:css|js))$#i', rawurldecode($path), $match)) {
                     continue;
                 }
 
-                $file = wp_normalize_path($bundle_dir . $basename);
+                $bucket = strtolower((string) $match[1]);
+                $basename = basename((string) $match[2]);
+                if ('' === $basename || empty($allowed_dirs[$bucket]) || false === preg_match('/^[A-Za-z0-9_.-]+\.(?:css|js)$/', $basename)) {
+                    continue;
+                }
+
+                $file = wp_normalize_path($allowed_dirs[$bucket] . $basename);
                 clearstatcache(true, $file);
                 if (!is_readable($file) || filesize($file) <= 0) {
-                    $missing[$basename] = $basename;
+                    $missing[$bucket . '/' . $basename] = $bucket . '/' . $basename;
                 }
             }
 
@@ -414,7 +437,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
         private function get_cache_paths_for_all_buckets($url)
         {
             $files = array();
-            foreach (array('orig', 'webp', 'avif') as $bucket) {
+            foreach (array('orig', 'avif', 'webp') as $bucket) {
                 $file = $this->get_cache_path($url, $bucket);
                 if ($file) {
                     $files[] = $file;

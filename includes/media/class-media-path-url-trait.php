@@ -44,16 +44,97 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			return trailingslashit(UCWP_WEBP_DIR) . $relative_path;
 		}
 
-		private function get_avif_url_from_source($source_file) {
+		private function optimized_storage_filesystem() {
+			return function_exists('ucwp_get_wp_filesystem') ? ucwp_get_wp_filesystem() : false;
+		}
+
+		private function optimized_storage_path_exists($path, $refresh = false) {
+			$path = is_string($path) ? wp_normalize_path($path) : '';
+			if ('' === $path) {
+				return false;
+			}
+
+			$key = 'exists|' . $path;
+			if (!$refresh && isset($this->optimized_variant_exists_memo[$key])) {
+				return (bool) $this->optimized_variant_exists_memo[$key];
+			}
+
+			$filesystem = $this->optimized_storage_filesystem();
+			if ($filesystem && method_exists($filesystem, 'exists')) {
+				$exists = (bool) $filesystem->exists($path);
+				if ($exists && method_exists($filesystem, 'is_file')) {
+					$exists = (bool) $filesystem->is_file($path);
+				}
+			} else {
+				// Encapsulated fallback only. Most installations use the direct WP_Filesystem transport,
+				// but frontend rendering must fail open and keep original JPG/PNG when filesystem access is unavailable.
+				$exists = @file_exists($path) && @is_file($path);
+			}
+
+			$this->optimized_variant_exists_memo[$key] = (bool) $exists;
+			return (bool) $exists;
+		}
+
+		private function optimized_storage_readable_source_exists($path) {
+			$path = is_string($path) ? wp_normalize_path($path) : '';
+			if ('' === $path) {
+				return false;
+			}
+
+			$filesystem = $this->optimized_storage_filesystem();
+			if ($filesystem && method_exists($filesystem, 'exists')) {
+				$exists = (bool) $filesystem->exists($path);
+				if ($exists && method_exists($filesystem, 'is_file')) {
+					$exists = (bool) $filesystem->is_file($path);
+				}
+				if ($exists && method_exists($filesystem, 'is_readable')) {
+					$exists = (bool) $filesystem->is_readable($path);
+				}
+				return (bool) $exists;
+			}
+
+			// Encapsulated fallback. Image libraries require a real local path, so this helper is
+			// the only place this touched media path uses native readability checks.
+			return @file_exists($path) && @is_file($path) && @is_readable($path);
+		}
+
+		private function optimized_storage_ensure_directory($dir) {
+			$dir = is_string($dir) ? wp_normalize_path($dir) : '';
+			if ('' === $dir) {
+				return false;
+			}
+
+			$filesystem = $this->optimized_storage_filesystem();
+			if ($filesystem && method_exists($filesystem, 'is_dir') && $filesystem->is_dir($dir)) {
+				return true;
+			}
+			if (function_exists('wp_mkdir_p') && wp_mkdir_p($dir)) {
+				return true;
+			}
+			if ($filesystem && method_exists($filesystem, 'mkdir')) {
+				return (bool) $filesystem->mkdir($dir, FS_CHMOD_DIR);
+			}
+
+			return false;
+		}
+
+		private function optimized_storage_forget_path($path) {
+			$path = is_string($path) ? wp_normalize_path($path) : '';
+			if ('' !== $path) {
+				unset($this->optimized_variant_exists_memo['exists|' . $path]);
+			}
+		}
+
+		private function get_avif_url_from_source($source_file, $force_generation_budget = false) {
 			$avif_path = $this->get_avif_path_from_source($source_file);
 
 			if (!$avif_path) {
 				return false;
 			}
 
-			if (!file_exists($avif_path)) {
-				$generated = $this->ensure_generated_variant($source_file, 'avif');
-				if (!$generated || !file_exists($avif_path)) {
+			if (!$this->optimized_storage_path_exists($avif_path)) {
+				$generated = $this->ensure_generated_variant($source_file, 'avif', (bool) $force_generation_budget);
+				if (!$generated || !$this->optimized_storage_path_exists($avif_path, true)) {
 					return false;
 				}
 			}
@@ -64,19 +145,19 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return false;
 			}
 
-			return trailingslashit(UCWP_AVIF_URL) . str_replace(DIRECTORY_SEPARATOR, '/', $relative_path);
+			return $this->get_root_relative_optimized_media_url('avif', $relative_path);
 		}
 
-		private function get_webp_url_from_source($source_file) {
+		private function get_webp_url_from_source($source_file, $force_generation_budget = false) {
 			$webp_path = $this->get_webp_path_from_source($source_file);
 
 			if (!$webp_path) {
 				return false;
 			}
 
-			if (!file_exists($webp_path)) {
-				$generated = $this->ensure_generated_variant($source_file, 'webp');
-				if (!$generated || !file_exists($webp_path)) {
+			if (!$this->optimized_storage_path_exists($webp_path)) {
+				$generated = $this->ensure_generated_variant($source_file, 'webp', (bool) $force_generation_budget);
+				if (!$generated || !$this->optimized_storage_path_exists($webp_path, true)) {
 					return false;
 				}
 			}
@@ -87,7 +168,30 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return false;
 			}
 
-			return trailingslashit(UCWP_WEBP_URL) . str_replace(DIRECTORY_SEPARATOR, '/', $relative_path);
+			return $this->get_root_relative_optimized_media_url('webp', $relative_path);
+		}
+
+		private function get_root_relative_optimized_media_url($format, $relative_path) {
+			$format = strtolower((string) $format);
+			$relative_path = ltrim(str_replace('\\', '/', (string) $relative_path), '/');
+			if ('' === $relative_path || !in_array($format, array('avif', 'webp'), true)) {
+				return false;
+			}
+
+			foreach (explode('/', $relative_path) as $segment) {
+				if ('' === $segment || '.' === $segment || '..' === $segment) {
+					return false;
+				}
+			}
+
+			$base_url = ('avif' === $format && defined('UCWP_AVIF_URL')) ? UCWP_AVIF_URL : (defined('UCWP_WEBP_URL') ? UCWP_WEBP_URL : '');
+			$base_path = (string) wp_parse_url((string) $base_url, PHP_URL_PATH);
+			if ('' === $base_path) {
+				$base_path = (string) wp_parse_url(content_url('uploads/uc-images/' . $format . '/'), PHP_URL_PATH);
+			}
+
+			$base_path = '/' . ltrim(str_replace('\\', '/', (string) $base_path), '/');
+			return trailingslashit($base_path) . $relative_path;
 		}
 
 		private function get_avif_url_from_attachment_context($attachment, $size) {
@@ -118,7 +222,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			return $this->get_webp_url_from_public_url($image[0]);
 		}
 
-		private function get_avif_url_from_public_url($public_url) {
+		private function get_avif_url_from_public_url($public_url, $force_generation_budget = false) {
 			$relative_path = $this->get_uploads_relative_path_from_public_url($public_url);
 			if (!$relative_path) {
 				return false;
@@ -132,10 +236,10 @@ trait Ultra_Cache_Media_Path_Url_Trait
 
 			$source_path = trailingslashit($uploads_root) . $relative_path;
 
-			return $this->get_avif_url_from_source($source_path);
+			return $this->get_avif_url_from_source($source_path, (bool) $force_generation_budget);
 		}
 
-		private function get_webp_url_from_public_url($public_url) {
+		private function get_webp_url_from_public_url($public_url, $force_generation_budget = false) {
 			$relative_path = $this->get_uploads_relative_path_from_public_url($public_url);
 			if (!$relative_path) {
 				return false;
@@ -149,7 +253,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 
 			$source_path = trailingslashit($uploads_root) . $relative_path;
 
-			return $this->get_webp_url_from_source($source_path);
+			return $this->get_webp_url_from_source($source_path, (bool) $force_generation_budget);
 		}
 
 		private function normalize_local_path_for_compare($path) {
@@ -217,6 +321,14 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			$base_path   = '/' . ltrim(str_replace('\\', '/', $base_path), '/');
 			$base_path   = rtrim($base_path, '/');
 			if ('' === $public_path || '' === $base_path) {
+				return false;
+			}
+
+			// 2.56.178: optimized AVIF/WebP files live under uploads/uc-images.
+			// They are generated targets, not source uploads, so never feed them back
+			// into the converter and create nested uc-images/avif/uc-images paths.
+			$optimized_images_prefix = $base_path . '/uc-images/';
+			if (0 === strpos($public_path, $optimized_images_prefix)) {
 				return false;
 			}
 
@@ -320,16 +432,28 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		}
 
 		private function get_best_url_from_public_url($public_url) {
+			// 2.56.186: keep AVIF-first selection, but do not let a slow/failed AVIF
+			// on-demand attempt prevent the same discovered image candidate from falling
+			// back to WebP in warm/cron/stale/manual contexts. The discovery layer must
+			// resolve each URL atomically: AVIF if available/generated, otherwise WebP,
+			// otherwise preserve the original URL.
+			$attempted_avif = false;
 			if ($this->can_serve_avif()) {
+				$attempted_avif = true;
 				$avif_url = $this->get_avif_url_from_public_url($public_url);
 				if ($avif_url) {
+					$this->remember_optimized_image_url_rewrite($public_url, $avif_url);
 					return $avif_url;
 				}
 			}
 
 			if ($this->can_serve_webp()) {
-				$webp_url = $this->get_webp_url_from_public_url($public_url);
+				// If AVIF was already attempted for this exact candidate and failed, allow
+				// the WebP fallback to finish in safe generation contexts even when the
+				// AVIF attempt consumed the normal per-request budget/time window.
+				$webp_url = $this->get_webp_url_from_public_url($public_url, $attempted_avif);
 				if ($webp_url) {
+					$this->remember_optimized_image_url_rewrite($public_url, $webp_url);
 					return $webp_url;
 				}
 			}

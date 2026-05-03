@@ -64,6 +64,9 @@
 		'deferAllJsEnabled',
 		'deferJsForceList',
 		'deferJsExcludeList',
+		'jsBundleEnabled',
+		'jsBundleIncludeList',
+		'jsBundleExcludeList',
 		'delaySafeThirdPartyJsEnabled',
 		'lazyMailerliteNonceEnabled',
 		'delaySafeThirdPartyJsPatterns',
@@ -146,6 +149,7 @@
 		'cssBundleScope',
 		'pageCssBundleOnEntryEnabled',
 		'deferJsEnabled',
+		'jsBundleEnabled',
 		'delaySafeThirdPartyJsEnabled',
 		'lazyMailerliteNonceEnabled',
 		'delayFunctionalThirdPartyJsEnabled',
@@ -174,7 +178,7 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: 'All Off', description: 'Disable page cache, object cache, media, CSS, JS, fonts, prefetch, warmup, and scheduled jobs. Best for first install or troubleshooting.', patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
+			deferJsEnabled: false, jsBundleEnabled: false, jsBundleIncludeList: '', delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
@@ -182,7 +186,7 @@
 		} },
 		safe: { label: 'Safe', description: 'Enables page caching, WooCommerce-safe bypasses, browser cache headers, save-time warmup, and stale protection. No JS/CSS/media rewrites.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: false, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
-			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', deferJsEnabled: false, delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false, cssBundleScope: 'homepage',
+			cronWarmEnabled: false, cacheCleanupEnabled: false, mediaOptimizationEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', deferJsEnabled: false, jsBundleEnabled: false, jsBundleIncludeList: '', delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: true, delayFunctionalThirdPartyJsEnabled: false, homepageCssBundleEnabled: false, asyncCssEnabled: false, speculationRulesEnabled: false, cacheQueryStringsEnabled: false, cssBundleScope: 'homepage',
 		} },
 		balanced: { label: 'Balanced', description: 'Adds object cache, media optimization, Safe CLS/LCP image hints, conservative JS defer, safe CSS bundling, and font-display improvements.', patch: {
 			pageCacheEnabled: true, objectCacheEnabled: true, cacheStatsEnabled: false, browserCacheRulesEnabled: true, preRenderOnSave: true, woocommerceSafeModeEnabled: true, staleWhileRevalidateEnabled: true, cacheFreshTtlMinutes: 60, cacheMaxStaleMinutes: 1440,
@@ -2117,8 +2121,8 @@
 			['Analytics file', !!analyticsDiag.exists && !!analyticsDiag.validJson, analyticsDiag.exists ? (analyticsDiag.validJson ? 'Present · Valid JSON' : 'Present · Invalid JSON') : 'Missing'],
 			['Browser cache rules', !!browserCacheRulesDiag.exists && !!browserCacheRulesDiag.managed, browserCacheRulesDiag.exists ? (browserCacheRulesDiag.managed ? 'Present · Managed block found' : 'Present · No UltraCache block') : 'Missing'],
 			['Object cache directory', !!objectCacheDirDiag.exists, objectCacheDirDiag.exists ? (objectCacheDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
-			['AVIF cache directory', !!avifDirDiag.exists, avifDirDiag.exists ? (avifDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
-			['WebP cache directory', !!webpDirDiag.exists, webpDirDiag.exists ? (webpDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
+			['AVIF optimized media directory', !!avifDirDiag.exists, avifDirDiag.exists ? (avifDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
+			['WebP optimized media directory', !!webpDirDiag.exists, webpDirDiag.exists ? (webpDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
 		];
 		const storageRows = [
 			['Total UltraCache storage', storageWarningLevel === 'ok', formatBytes(storageTotal.bytes || 0) + ' · ' + formatFileCount(storageTotal.files || 0, !!storageTotal.truncated) + (storageTotal.truncated ? ' · capped scan' : '')],
@@ -2404,6 +2408,7 @@
 						h('div', { className: 'uc-section-title' }, 'Media runtime diagnostics'),
 						renderRows(mediaRuntimeRows, 'neutral'),
 					]),
+					h(JSBundleDiagnosticsPanel, { diagnostics, key: 'js-bundle-diagnostics-panel' }),
 					h(FontPipelineDiagnosticsPanel, { diagnostics, key: 'font-pipeline-diagnostics-panel' }),
 					h('div', { className: 'uc-diagnostic-group', key: 'cache-group' }, [
 						h('div', { className: 'uc-section-title' }, 'Cache diagnostics'),
@@ -3273,6 +3278,62 @@
 				]),
 				h('div', { className: 'text-xs text-zinc-500 mt-4' }, redisSupportText),
 			]),
+		]);
+	}
+
+
+	function JSBundleDiagnosticsPanel({ diagnostics }) {
+		const jsDiag = diagnostics && diagnostics.jsBundle ? diagnostics.jsBundle : {};
+		const storage = jsDiag.storage || {};
+		const topReasons = jsDiag.topReasons || jsDiag.reasonCounts || {};
+		const reasonKeys = Object.keys(topReasons).slice(0, 8);
+		const statusOk = !jsDiag.enabled || (jsDiag.bundlesGenerated || 0) > 0 || (jsDiag.scriptsScanned || 0) > 0;
+		const statusText = !jsDiag.enabled ? 'Disabled' : ((jsDiag.bundlesGenerated || 0) > 0 ? 'Generated' : 'No bundle');
+		const settingLine = [
+			jsDiag.enabled ? 'JS bundle ON' : 'JS bundle OFF',
+			jsDiag.deferJsEnabled ? 'Defer JS ON' : 'Defer JS OFF',
+			'Includes ' + String(jsDiag.includePatternCount || 0),
+			'Excludes ' + String(jsDiag.excludePatternCount || 0),
+		].join(' · ');
+
+		return h('div', { className: 'uc-diagnostic-group', key: 'js-bundle-diagnostics-lite' }, [
+			h('div', { className: 'uc-section-title', key: 'title' }, 'JS Bundle Candidate Diagnostics'),
+			h('div', { className: 'text-xs text-zinc-500 mb-3', key: 'description' }, 'Read-only summary for the experimental Combine safe deferred JS feature. It explains why bundles were or were not generated.'),
+			h('div', { className: 'space-y-3', key: 'rows' }, [
+				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'status' }, [
+					h('div', { className: 'text-sm text-white' }, 'Status'),
+					h(StatusPill, { ok: !!statusOk, text: statusText, tone: !jsDiag.enabled ? 'neutral' : ((jsDiag.bundlesGenerated || 0) > 0 ? 'success' : 'warning') }),
+				]),
+				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'settings' }, [
+					h('div', { className: 'text-sm text-white' }, 'Settings'),
+					h('div', { className: 'text-xs text-zinc-300 text-right break-all' }, settingLine),
+				]),
+				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'scan' }, [
+					h('div', { className: 'text-sm text-white' }, 'Last scan'),
+					h('div', { className: 'text-xs text-zinc-300 text-right' }, formatNumber(jsDiag.scriptsScanned || 0) + ' scanned · ' + formatNumber(jsDiag.deferredScripts || 0) + ' deferred · ' + formatNumber(jsDiag.eligibleScripts || 0) + ' eligible'),
+				]),
+				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'bundles' }, [
+					h('div', { className: 'text-sm text-white' }, 'Bundles'),
+					h('div', { className: 'text-xs text-zinc-300 text-right' }, formatNumber(jsDiag.bundlesGenerated || 0) + ' bundle(s) · ' + formatNumber(jsDiag.bundledScripts || 0) + ' script(s) · ' + formatBytes(jsDiag.bundleBytes || 0)),
+				]),
+				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'storage' }, [
+					h('div', { className: 'text-sm text-white' }, 'Storage'),
+					h('div', { className: 'text-xs text-zinc-300 text-right' }, formatNumber(storage.files || 0) + ' file(s) · ' + formatBytes(storage.bytes || 0)),
+				]),
+			]),
+			jsDiag.message ? h('div', { className: 'mt-2 text-xs text-zinc-400', key: 'message' }, jsDiag.message) : null,
+			reasonKeys.length ? h('div', { className: 'mt-3 rounded bg-black/10 p-4 space-y-2', key: 'reasons' }, [
+				h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400', key: 'reason-title' }, 'Top rejection / eligibility reasons'),
+				reasonKeys.map(function(key) {
+					return h(DetailRow, { key: 'reason-' + key, label: key, value: formatNumber(topReasons[key] || 0), mono: true });
+				}),
+			]) : null,
+			Array.isArray(jsDiag.bundles) && jsDiag.bundles.length ? h('div', { className: 'mt-3 rounded bg-black/10 p-4 space-y-2', key: 'generated' }, [
+				h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400', key: 'generated-title' }, 'Generated JS bundles'),
+				jsDiag.bundles.map(function(item, index) {
+					return h(DetailRow, { key: 'bundle-' + index, label: item.file || ('bundle ' + (index + 1)), value: formatNumber(item.count || 0) + ' scripts · ' + formatBytes(item.bytes || 0), mono: true });
+				}),
+			]) : null,
 		]);
 	}
 
@@ -5475,8 +5536,8 @@ async function deleteAllPluginDataAndDeactivate() {
 	}
 
 	const mediaFolders = [
-		'wp-content/cache/ultracache-avif',
-		'wp-content/cache/ultracache-webp',
+		'wp-content/uploads/uc-images/avif',
+		'wp-content/uploads/uc-images/webp',
 	];
 	const confirmed = window.confirm(
 		'Delete all UltraCache plugin data and deactivate the plugin?\n\n' +
@@ -5745,7 +5806,7 @@ async function deleteAllPluginDataAndDeactivate() {
 					}),
 					h(ToggleRow, {
 						label: 'Generate on Demand',
-						description: 'When enabled, UltraCache may create a missing next-gen image variant during safe frontend GET/HEAD requests, guarded by per-image locks, per-request limits, and a short time budget.',
+						description: 'When enabled, UltraCache may create missing AVIF/WebP variants during safe frontend renders, warm-ups, cron warm tasks, and stale background refreshes. Generation is guarded by per-image locks, per-request limits, and a short time budget.',
 						checked: !!settings.mediaGenerateOnDemandEnabled,
 						onChange: (value) => updateSetting('mediaGenerateOnDemandEnabled', value),
 						disabled: busy || !mediaOptimizationEnabled,
@@ -5982,6 +6043,14 @@ h(ToggleRow, {
 									key: 'defer-all-js',
 								}),
 h(ToggleRow, {
+									label: 'Combine safe deferred JS',
+									description: 'Experimental. During warm/store, combines only consecutive same-host scripts that are already safe deferred candidates into generated UltraCache JS bundles. Exclusions and inline-script safeguards always win. Default: off.',
+									checked: !!settings.jsBundleEnabled,
+									onChange: (value) => updateSetting('jsBundleEnabled', value),
+									disabled: busy || !settings.deferJsEnabled,
+									key: 'js-bundle-safe-deferred',
+								}),
+h(ToggleRow, {
 									label: 'Delay safe third-party JS',
 									description: 'Delay analytics, pixels, ads, tracking, and marketing scripts until user interaction or a late safe fallback timeout, keeping them out of the initial PageSpeed/LCP/TBT critical window. Examples: Google Analytics, gtag, GTM, Google Site Kit event providers, Meta Pixel, TikTok Pixel, LinkedIn Insight, Pinterest Tag, Bing UET, Hotjar, Clarity, DoubleClick, Google Ads, Taboola, Outbrain, and Yahoo tracking.',
 									checked: settings.delaySafeThirdPartyJsEnabled,
@@ -6144,7 +6213,7 @@ h('div', { className: 'uc-muted mt-2 text-xs', key: 'google-fonts-cache-status' 
 						]),
 h(ToggleRow, {
 							label: 'Optimize Self-Hosted Font CSS',
-							description: 'Rewrite local @font-face CSS to add font-display: swap, normalize font URLs, and preload up to two likely first-paint WOFF2 files.',
+							description: 'Rewrite local and inline @font-face CSS to add font-display: swap, prefer matching WOFF2 sources when available, normalize font URLs, and preload up to two likely first-paint WOFF2 files.',
 							checked: settings.selfHostedFontCssOptimizationEnabled,
 							onChange: (value) => updateSetting('selfHostedFontCssOptimizationEnabled', value),
 							disabled: busy,
@@ -6152,7 +6221,7 @@ h(ToggleRow, {
 						}),
 h(ToggleRow, {
 							label: 'Delay icon font-face blocks',
-							description: 'Move matching icon-font @font-face blocks out of the main CSS bundle and load them as a non-render-blocking delayed font stylesheet. This can reduce critical font loading, but icons may appear slightly later.',
+							description: 'Detect matching icon-font @font-face blocks in bundled or standalone CSS and load them through a non-render-blocking delayed font stylesheet. This can reduce critical font loading, but icons may appear slightly later.',
 							checked: !!settings.delayIconFontsEnabled,
 							onChange: (value) => updateSetting('delayIconFontsEnabled', value),
 							disabled: busy,
@@ -6435,7 +6504,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 										}),
 										h(SaveableTextAreaField, {
 											label: 'Delay These Fonts / Patterns',
-											description: 'Newline-separated font-family, filename, or URL fragments. Matching @font-face blocks are moved from the main CSS bundle into a delayed non-render-blocking font stylesheet. Use this mainly for icon fonts.',
+											description: 'Newline-separated font-family, filename, or URL fragments. Matching @font-face blocks from bundled or standalone CSS are moved into a delayed non-render-blocking font stylesheet. Use this mainly for icon fonts.',
 											value: settings.delayIconFontsList || '',
 											onSave: (value) => updateSetting('delayIconFontsList', value),
 											disabled: busy,
@@ -6456,6 +6525,26 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											onPopulate: populateDelayIconFontExclusionDefaults,
 											populateWarning: 'Your current delayed font exclusion list will be merged with recommended defaults.',
 											key: 'delay-icon-fonts-exclude-list',
+										}),
+										h(SaveableTextAreaField, {
+											label: 'JS Bundle Include Patterns',
+											description: 'Optional newline-separated handle or URL fragments. When filled, only matching deferred scripts may be combined. Leave empty to let UltraCache use conservative same-host deferred candidates only.',
+											value: settings.jsBundleIncludeList || '',
+											onSave: (value) => updateSetting('jsBundleIncludeList', value),
+											disabled: busy || !settings.jsBundleEnabled,
+											placeholder: 'tooltipster\nplainoverlay\nion.rangeSlider\nlocal-enhancement.js',
+											saveLabel: 'Save JS Bundle Includes',
+											key: 'js-bundle-include-list',
+										}),
+										h(SaveableTextAreaField, {
+											label: 'JS Bundle Exclude Patterns',
+											description: 'Always keep matching scripts separate from generated JS bundles. These exclusions win over include rules and work together with the shared JS Delay / Defer Exclusions list.',
+											value: settings.jsBundleExcludeList || '',
+											onSave: (value) => updateSetting('jsBundleExcludeList', value),
+											disabled: busy || !settings.jsBundleEnabled,
+											placeholder: 'jquery\nwp-includes\nwoocommerce\ncart\ncheckout\nsr7\ntptools\nelementor\nswiper',
+											saveLabel: 'Save JS Bundle Exclusions',
+											key: 'js-bundle-exclude-list',
 										}),
 										h(DeferDelayExclusionsField, {
 											value: settings.deferJsExcludeList || '',
@@ -6713,7 +6802,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					h(Button, { onClick: deleteAllPluginDataAndDeactivate, disabled: busy, variant: 'danger' }, busy ? 'Working…' : 'Delete all plugin Data and disable plugin'),
 					]),
 					h('div', { className: 'mt-4 text-xs text-zinc-500', key: 'hint' }, 'Recommended flow: export from the known-good site, then import into the target site and review Diagnostics once.'),
-					h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'delete-hint' }, 'Delete all plugin Data and disable plugin keeps converted media folders. Remove wp-content/cache/ultracache-avif and wp-content/cache/ultracache-webp manually if you want to delete converted media.'),
+					h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'delete-hint' }, 'Delete all plugin Data and disable plugin keeps converted media folders. Remove wp-content/uploads/uc-images/avif and wp-content/uploads/uc-images/webp manually if you want to delete converted media.'),
 				]
 			),
 

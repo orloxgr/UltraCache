@@ -129,6 +129,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'filesWithoutFontFace' => 0,
                     'nonFontCssFiles' => 0,
                     'nonFontCssBytes' => 0,
+                    'delayedIconActiveCssFiles' => 0,
+                    'delayedIconActiveCssBytes' => 0,
                     'fontDisplayPatchFiles' => 0,
                     'fontDisplayPatchBytes' => 0,
                     'fontDisplayPatchFontFaces' => 0,
@@ -158,6 +160,11 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     $file_bytes = max(0, (int) ucwp_safe_filesize($file, 'font_pipeline_source_diagnostics'));
                     $basename = basename($file);
                     $is_font_display_patch = (0 === strpos((string) $basename, 'font-display-'));
+                    $is_delayed_icon_active_css = (false !== strpos($css, 'UltraCache delayed icon font active CSS'));
+                    if ($is_delayed_icon_active_css) {
+                        $summary['delayedIconActiveCssFiles']++;
+                        $summary['delayedIconActiveCssBytes'] += $file_bytes;
+                    }
                     if ($is_font_display_patch) {
                         $summary['fontDisplayPatchFiles']++;
                         $summary['fontDisplayPatchBytes'] += $file_bytes;
@@ -169,7 +176,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     }
                     if ($font_faces <= 0) {
                         $summary['filesWithoutFontFace']++;
-                        if ($file_bytes > 0) {
+                        if ($file_bytes > 0 && !$is_delayed_icon_active_css) {
                             $summary['nonFontCssFiles']++;
                             $summary['nonFontCssBytes'] += $file_bytes;
                         }
@@ -180,7 +187,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                         'fontFaceBlocks' => max(0, (int) $font_faces),
                         'woff2Sources' => max(0, (int) $woff2),
                         'ttfSources' => max(0, (int) $ttf),
-                        'nonFontCss' => ($font_faces <= 0 && $file_bytes > 0),
+                        'nonFontCss' => ($font_faces <= 0 && $file_bytes > 0 && !$is_delayed_icon_active_css),
+                        'delayedIconActiveCss' => (bool) $is_delayed_icon_active_css,
                     );
                 }
                 usort($summary['largestFiles'], static function ($a, $b) {
@@ -281,12 +289,14 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'filesWithoutFontFace' => (int) ($font_css_source_stats['filesWithoutFontFace'] ?? 0),
                     'nonFontCssFiles' => (int) ($font_css_source_stats['nonFontCssFiles'] ?? 0),
                     'nonFontCssBytes' => (int) ($font_css_source_stats['nonFontCssBytes'] ?? 0),
+                    'delayedIconActiveCssFiles' => (int) ($font_css_source_stats['delayedIconActiveCssFiles'] ?? 0),
+                    'delayedIconActiveCssBytes' => (int) ($font_css_source_stats['delayedIconActiveCssBytes'] ?? 0),
                     'fontDisplayPatchFiles' => (int) ($font_css_source_stats['fontDisplayPatchFiles'] ?? 0),
                     'fontDisplayPatchBytes' => (int) ($font_css_source_stats['fontDisplayPatchBytes'] ?? 0),
                     'fontDisplayPatchFontFaces' => (int) ($font_css_source_stats['fontDisplayPatchFontFaces'] ?? 0),
                     'fontDisplaySwapDeclarations' => (int) ($font_css_source_stats['fontDisplaySwapDeclarations'] ?? 0),
                     'largestFiles' => isset($font_css_source_stats['largestFiles']) && is_array($font_css_source_stats['largestFiles']) ? $font_css_source_stats['largestFiles'] : array(),
-                    'cleanupMode' => 'font-face-only-generated-css-skip-mixed-sources',
+                    'cleanupMode' => 'font-face-only-generated-css-skip-mixed-sources-except-delayed-icon-active-css',
                 ),
                 'cssBundles' => array(
                     'dirExists' => is_dir($css_bundle_dir),
@@ -331,6 +341,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 array('key' => 'cacheQueryStringAllowlist', 'label' => 'Query-string args whitelist', 'area' => 'Cache query strings', 'kind' => 'Textarea', 'shared' => false),
                 array('key' => 'deferJsForceList', 'label' => 'Defer those scripts', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
                 array('key' => 'deferJsExcludeList', 'label' => 'JS Delay / Defer Exclusions', 'area' => 'JavaScript', 'kind' => 'Shared final override', 'shared' => true),
+                array('key' => 'jsBundleIncludeList', 'label' => 'JS Bundle Include Patterns', 'area' => 'JavaScript bundles', 'kind' => 'Pattern list', 'shared' => false),
+                array('key' => 'jsBundleExcludeList', 'label' => 'JS Bundle Exclude Patterns', 'area' => 'JavaScript bundles', 'kind' => 'Pattern list', 'shared' => false),
                 array('key' => 'delaySafeThirdPartyJsPatterns', 'label' => 'Safe third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
                 array('key' => 'delayFunctionalThirdPartyJsPatterns', 'label' => 'Functional third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
                 array('key' => 'delayThirdPartyJsExcludeList', 'label' => 'Third-Party Delay Exclusions', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
@@ -642,7 +654,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     $path = wp_normalize_path((string) $file_info->getPathname());
                     $name = strtolower((string) $file_info->getFilename());
 
-                    if (false !== strpos($path, '/css-bundles/') || false !== strpos($path, '/google-fonts/') || false !== strpos($path, '/font-css/') || false !== strpos($path, '/diagnostics/') || false !== strpos($path, '/locks/')) {
+                    if (false !== strpos($path, '/css-bundles/') || false !== strpos($path, '/google-fonts/') || false !== strpos($path, '/font-css/') || false !== strpos($path, '/optimized-css/') || false !== strpos($path, '/diagnostics/') || false !== strpos($path, '/locks/')) {
                         continue;
                     }
 
@@ -903,8 +915,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
             $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
             $object_dir = defined('UCWP_OBJECT_CACHE_DIR') ? trailingslashit(UCWP_OBJECT_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/';
-            $avif_dir = defined('UCWP_AVIF_DIR') ? trailingslashit(UCWP_AVIF_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-avif/';
-            $webp_dir = defined('UCWP_WEBP_DIR') ? trailingslashit(UCWP_WEBP_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-webp/';
+            $avif_dir = defined('UCWP_AVIF_DIR') ? trailingslashit(UCWP_AVIF_DIR) : trailingslashit(WP_CONTENT_DIR) . 'uploads/uc-images/avif/';
+            $webp_dir = defined('UCWP_WEBP_DIR') ? trailingslashit(UCWP_WEBP_DIR) : trailingslashit(WP_CONTENT_DIR) . 'uploads/uc-images/webp/';
 
             $css_summary = is_array($css_summary) ? $css_summary : self::get_css_bundle_summary_diagnostics(is_array($settings) ? $settings : array());
             $manifest = isset($css_summary['manifest']) && is_array($css_summary['manifest']) ? $css_summary['manifest'] : array();
@@ -921,7 +933,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'recursive' => true,
                 'maxFiles' => 8000,
                 'includeExtensions' => array('html', 'gz', 'br'),
-                'excludePathContains' => array('/css-bundles/', '/google-fonts/', '/font-css/'),
+                'excludePathContains' => array('/css-bundles/', '/js-bundles/', '/google-fonts/', '/font-css/', '/optimized-css/'),
             ));
             $cache_root = self::scan_storage_path_for_diagnostics($cache_dir, array('recursive' => true, 'maxFiles' => 8000));
             $object_cache = self::scan_storage_path_for_diagnostics($object_dir, array('recursive' => true, 'maxFiles' => 8000));
@@ -987,6 +999,9 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'exists' => !empty($object_cache['exists']),
                 ),
                 'mediaCache' => array(
+                    'storageRoot' => 'uploads/uc-images',
+                    'persistent' => true,
+                    'message' => self::maybe_translate('Optimized AVIF/WebP media is stored under uploads/uc-images so normal cache cleanup does not remove persistent generated image assets.'),
                     'files' => (int) $avif['files'] + (int) $webp['files'],
                     'bytes' => (int) $avif['bytes'] + (int) $webp['bytes'],
                     'avifFiles' => (int) $avif['files'],
@@ -1334,6 +1349,89 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'message' => 'Security diagnostics are read-only. Sensitive query args are enforced as an engine safety floor even if not present in the visible exclusion list.',
             );
         }
+        private static function get_js_bundle_diagnostics($settings = array())
+        {
+            $settings = is_array($settings) ? $settings : array();
+            $last = get_option('ucwp_last_js_bundle_diagnostics', array());
+            $last = is_array($last) ? $last : array();
+            $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
+            $bundle_dir = trailingslashit($cache_dir) . 'js-bundles/';
+            $files = glob($bundle_dir . '*.js');
+            $file_count = 0;
+            $bytes = 0;
+            $latest = 0;
+            if (is_array($files)) {
+                foreach ($files as $file) {
+                    if (!is_string($file) || !is_file($file)) {
+                        continue;
+                    }
+                    $file_count++;
+                    $size = ucwp_safe_filesize($file, 'js_bundle_diagnostics');
+                    if (false !== $size) {
+                        $bytes += max(0, (int) $size);
+                    }
+                    $mtime = ucwp_safe_filemtime($file, 'js_bundle_diagnostics');
+                    if (false !== $mtime) {
+                        $latest = max($latest, (int) $mtime);
+                    }
+                }
+            }
+
+            $fallback_message = !empty($settings['jsBundleEnabled'])
+                ? 'No JS bundle diagnostics have been recorded yet. Run a warm/store action after enabling Combine safe deferred JS.'
+                : 'Combine safe deferred JS is disabled.';
+
+            $summary = array_merge(array(
+                'enabled' => !empty($settings['jsBundleEnabled']),
+                'deferJsEnabled' => !empty($settings['deferJsEnabled']),
+                'timestamp' => 0,
+                'lastRunHuman' => '',
+                'scriptsScanned' => 0,
+                'deferredScripts' => 0,
+                'eligibleScripts' => 0,
+                'singleEligibleScripts' => 0,
+                'eligibleGroups' => 0,
+                'bundlesGenerated' => 0,
+                'bundledScripts' => 0,
+                'bundleBytes' => 0,
+                'bundleBuildFailures' => 0,
+                'includePatternCount' => 0,
+                'excludePatternCount' => 0,
+                'reasonCounts' => array(),
+                'samples' => array(),
+                'bundles' => array(),
+                'message' => $fallback_message,
+            ), $last);
+
+            $summary['enabled'] = !empty($settings['jsBundleEnabled']);
+            $summary['deferJsEnabled'] = !empty($settings['deferJsEnabled']);
+            $summary['storage'] = array(
+                'dir' => $bundle_dir,
+                'exists' => is_dir($bundle_dir),
+                'writable' => is_dir($bundle_dir) ? ucwp_path_is_writable($bundle_dir) : ucwp_path_is_writable(dirname($bundle_dir)),
+                'files' => (int) $file_count,
+                'bytes' => (int) $bytes,
+                'latestModified' => (int) $latest,
+            );
+            if (empty($summary['reasonCounts']) || !is_array($summary['reasonCounts'])) {
+                $summary['reasonCounts'] = array();
+            }
+            arsort($summary['reasonCounts']);
+            $summary['topReasons'] = array_slice($summary['reasonCounts'], 0, 12, true);
+            if (!empty($summary['samples']) && is_array($summary['samples'])) {
+                $summary['samples'] = array_slice($summary['samples'], 0, 50);
+            } else {
+                $summary['samples'] = array();
+            }
+            if (!empty($summary['bundles']) && is_array($summary['bundles'])) {
+                $summary['bundles'] = array_slice($summary['bundles'], 0, 20);
+            } else {
+                $summary['bundles'] = array();
+            }
+
+            return $summary;
+        }
+
         public static function get_dashboard_diagnostics()
         {
             $settings             = self::get_dashboard_settings();
@@ -1452,6 +1550,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'googleFonts' => self::get_google_fonts_cache_diagnostics(),
                 'fontPipeline' => self::get_font_pipeline_diagnostics($settings),
                 'settingsTransparency' => self::get_settings_transparency_diagnostics($settings),
+                'jsBundle' => self::get_js_bundle_diagnostics($settings),
                 'cssBundleSummary' => $css_bundle_summary_diagnostics,
                 'cacheStorage' => $cache_storage_diagnostics,
                 'securityCorrectness' => self::get_security_cache_correctness_diagnostics($settings),
@@ -1490,6 +1589,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'paths' => array(
                     'cacheDir'          => self::get_path_diagnostic(UCWP_CACHE_DIR, 'dir'),
                     'objectCacheDir'    => self::get_path_diagnostic(UCWP_OBJECT_CACHE_DIR, 'dir'),
+                    'optimizedImagesDir' => defined('UCWP_OPTIMIZED_IMAGES_DIR') ? self::get_path_diagnostic(UCWP_OPTIMIZED_IMAGES_DIR, 'dir') : array(),
                     'avifDir'           => self::get_path_diagnostic(UCWP_AVIF_DIR, 'dir'),
                     'webpDir'           => self::get_path_diagnostic(UCWP_WEBP_DIR, 'dir'),
                     'advancedCache'     => self::get_path_diagnostic($advanced_cache_path, 'file', 'UltraCache advanced-cache drop-in'),

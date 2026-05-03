@@ -45,6 +45,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'deferAllJsEnabled'          => false,
                 'deferJsForceList'           => '',
                 'deferJsExcludeList'         => '',
+                'jsBundleEnabled'            => false,
+                'jsBundleIncludeList'        => '',
+                'jsBundleExcludeList'        => implode("\n", self::get_default_js_bundle_exclusion_patterns()),
                 'delaySafeThirdPartyJsEnabled'   => false,
                 'lazyMailerliteNonceEnabled' => true,
                 'delaySafeThirdPartyJsPatterns' => implode("\n", self::get_default_safe_third_party_delay_patterns()),
@@ -173,6 +176,43 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             );
         }
 
+        private static function get_default_js_bundle_exclusion_patterns()
+        {
+            return array(
+                'jquery',
+                'jquery-migrate',
+                '/wp-includes/js/',
+                'wp-hooks',
+                'wp-i18n',
+                'wp-util',
+                'wp-api',
+                'api-fetch',
+                'underscore',
+                'backbone',
+                'woocommerce',
+                'wc-',
+                'cart',
+                'checkout',
+                'my-account',
+                'selectWoo',
+                'revslider',
+                'sliderrevolution',
+                'sr7',
+                'tptools',
+                'tools.js',
+                'elementor',
+                'frontend-modules',
+                'swiper',
+                'smartmenus',
+                'mailerlite',
+                'complianz',
+                'google-site-kit',
+                'googlesitekit',
+                'gtag',
+                'gtm',
+            );
+        }
+
         private static function get_default_delay_icon_font_patterns()
         {
             return array(
@@ -192,6 +232,10 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'material-icons',
                 'materialicons',
                 'ionicons',
+                'feather.ttf',
+                'feather fonts',
+                'star.ttf',
+                'woocommerce star',
             );
         }
 
@@ -975,6 +1019,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'mediaGenerateOnDemandEnabled',
                 'deferJsEnabled',
                 'deferAllJsEnabled',
+                'jsBundleEnabled',
                 'delaySafeThirdPartyJsEnabled',
                 'lazyMailerliteNonceEnabled',
                 'delayFunctionalThirdPartyJsEnabled',
@@ -1050,6 +1095,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             // lines while Defer all JS is enabled: this field is the user's final
             // escape hatch for aggressive defer regressions such as inline globals.
             $settings['deferJsExcludeList'] = self::normalize_textarea_setting($settings['deferJsExcludeList']);
+            $settings['jsBundleIncludeList'] = self::normalize_textarea_setting($settings['jsBundleIncludeList']);
+            $settings['jsBundleExcludeList'] = self::normalize_textarea_setting($settings['jsBundleExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = '';
             $settings['delaySafeThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delaySafeThirdPartyJsPatterns']);
             $settings['delayFunctionalThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delayFunctionalThirdPartyJsPatterns']);
@@ -1361,6 +1408,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'defer_stage_aggressive'       => $defer_stage_aggressive,
                 'defer_js_force_list'          => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsForceList'])),
                 'defer_js_exclude_list'        => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
+                'js_bundle'                    => !empty($ui['jsBundleEnabled']),
+                'js_bundle_include_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['jsBundleIncludeList'])),
+                'js_bundle_exclude_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['jsBundleExcludeList'])),
                 'delay_safe_third_party_js'         => $delay_safe_third_party_js_enabled,
                 'lazy_mailerlite_nonce'        => !empty($ui['lazyMailerliteNonceEnabled']),
                 'delay_safe_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delaySafeThirdPartyJsPatterns'])),

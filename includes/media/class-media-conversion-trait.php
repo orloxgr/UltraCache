@@ -13,7 +13,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 		public function to_avif($source_file) {
 			$source_file = (string) $source_file;
 
-			if (!file_exists($source_file) || !is_readable($source_file)) {
+			if (!$this->optimized_storage_readable_source_exists($source_file)) {
 				return false;
 			}
 
@@ -33,8 +33,8 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 			$dest_dir = dirname($dest_file);
 
-			if (!file_exists($dest_dir)) {
-				wp_mkdir_p($dest_dir);
+			if (!$this->optimized_storage_ensure_directory($dest_dir)) {
+				return false;
 			}
 
 			$success = false;
@@ -54,26 +54,29 @@ trait Ultra_Cache_Media_Conversion_Trait
 			}
 
 			if (!$success) {
-				if (file_exists($dest_file)) {
+				if ($this->optimized_storage_path_exists($dest_file, true)) {
 					ucwp_safe_unlink($dest_file);
+					$this->optimized_storage_forget_path($dest_file);
 				}
 				return false;
 			}
 
-			if (!file_exists($dest_file) || (int) ucwp_safe_filesize($dest_file, 'media_converter_dest_verify') <= 0) {
-				if (file_exists($dest_file)) {
+			if (!$this->optimized_storage_path_exists($dest_file, true) || !$this->is_valid_generated_media_file($dest_file, 'avif', 'media_converter_dest_verify')) {
+				if ($this->optimized_storage_path_exists($dest_file, true)) {
 					ucwp_safe_unlink($dest_file);
+					$this->optimized_storage_forget_path($dest_file);
 				}
 				return false;
 			}
 
+			$this->optimized_storage_forget_path($dest_file);
 			return $dest_file;
 		}
 
 		public function to_webp($source_file) {
 			$source_file = (string) $source_file;
 
-			if (!file_exists($source_file) || !is_readable($source_file)) {
+			if (!$this->optimized_storage_readable_source_exists($source_file)) {
 				return false;
 			}
 
@@ -93,8 +96,8 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 			$dest_dir = dirname($dest_file);
 
-			if (!file_exists($dest_dir)) {
-				wp_mkdir_p($dest_dir);
+			if (!$this->optimized_storage_ensure_directory($dest_dir)) {
+				return false;
 			}
 
 			$success = false;
@@ -110,19 +113,22 @@ trait Ultra_Cache_Media_Conversion_Trait
 			}
 
 			if (!$success) {
-				if (file_exists($dest_file)) {
+				if ($this->optimized_storage_path_exists($dest_file, true)) {
 					ucwp_safe_unlink($dest_file);
+					$this->optimized_storage_forget_path($dest_file);
 				}
 				return false;
 			}
 
-			if (!file_exists($dest_file) || (int) ucwp_safe_filesize($dest_file, 'media_converter_dest_verify') <= 0) {
-				if (file_exists($dest_file)) {
+			if (!$this->optimized_storage_path_exists($dest_file, true) || !$this->is_valid_generated_media_file($dest_file, 'webp', 'media_converter_dest_verify')) {
+				if ($this->optimized_storage_path_exists($dest_file, true)) {
 					ucwp_safe_unlink($dest_file);
+					$this->optimized_storage_forget_path($dest_file);
 				}
 				return false;
 			}
 
+			$this->optimized_storage_forget_path($dest_file);
 			return $dest_file;
 		}
 
@@ -155,7 +161,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 			}
 
 			$file = get_attached_file($attachment_id);
-			if (!$file || !is_string($file) || !file_exists($file)) {
+			if (!$file || !is_string($file) || !$this->optimized_storage_readable_source_exists($file)) {
 				return array();
 			}
 
@@ -170,7 +176,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 					}
 
 					$size_file = trailingslashit($base_dir) . ltrim((string) $size['file'], '/');
-					if (file_exists($size_file)) {
+					if ($this->optimized_storage_readable_source_exists($size_file)) {
 						$files[] = $size_file;
 					}
 				}
@@ -184,12 +190,12 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 			if ('avif' === $format) {
 				$path = $this->get_avif_path_from_source($source_file);
-				return $path && file_exists($path);
+				return $path && $this->optimized_storage_path_exists($path);
 			}
 
 			if ('webp' === $format) {
 				$path = $this->get_webp_path_from_source($source_file);
-				return $path && file_exists($path);
+				return $path && $this->optimized_storage_path_exists($path);
 			}
 
 			return false;
@@ -418,14 +424,23 @@ trait Ultra_Cache_Media_Conversion_Trait
 				return $gd_avif_supported;
 			}
 
+			$cache_key = 'ucwp_gd_avif_encode_probe_v2';
+			$cached = get_transient($cache_key);
+			if (is_array($cached) && array_key_exists('supported', $cached)) {
+				$gd_avif_supported = !empty($cached['supported']);
+				return $gd_avif_supported;
+			}
+
 			if (!function_exists('imageavif') || !function_exists('imagecreatetruecolor')) {
 				$gd_avif_supported = false;
+				set_transient($cache_key, array('supported' => false, 'error' => 'GD imageavif() is unavailable'), DAY_IN_SECONDS);
 				return false;
 			}
 
 			$tmp = $this->create_temp_file('ucwp-avif-test');
 			if (!$tmp) {
 				$gd_avif_supported = false;
+				set_transient($cache_key, array('supported' => false, 'error' => 'Unable to create GD AVIF probe file'), HOUR_IN_SECONDS);
 				return false;
 			}
 
@@ -435,6 +450,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 			$image = imagecreatetruecolor(2, 2);
 			if (!$image) {
 				$gd_avif_supported = false;
+				set_transient($cache_key, array('supported' => false, 'error' => 'Unable to create GD AVIF probe canvas'), HOUR_IN_SECONDS);
 				return false;
 			}
 
@@ -451,25 +467,38 @@ trait Ultra_Cache_Media_Conversion_Trait
 			}
 
 			$result = false;
+			$gd_error = '';
 
+			set_error_handler(static function($severity, $message) use (&$gd_error) {
+				$gd_error = (string) $message;
+				return true;
+			});
 			try {
-				$result = @imageavif($image, $test_file, 52);
+				// A real encode probe is required because some servers expose imageavif()
+				// while the underlying GD build has no usable AVIF codec and writes 0-byte files.
+				$result = imageavif($image, $test_file, 52);
 			} catch (\Throwable $e) {
+				$gd_error = $e->getMessage();
 				$result = false;
+			} finally {
+				restore_error_handler();
 			}
-
 
 			imagedestroy($image);
 
 			$gd_avif_supported = (
 				$result &&
-				file_exists($test_file) &&
-				(int) ucwp_safe_filesize($test_file, 'media_converter_format_support_test') > 0
+				$this->is_valid_generated_media_file($test_file, 'avif', 'media_converter_gd_avif_support_probe')
 			);
 
 			if (file_exists($test_file)) {
 				ucwp_safe_unlink($test_file);
 			}
+
+			set_transient($cache_key, array(
+				'supported' => (bool) $gd_avif_supported,
+				'error' => $gd_avif_supported ? '' : ($gd_error ?: 'GD AVIF probe did not produce a valid non-empty AVIF file'),
+			), DAY_IN_SECONDS);
 
 			return $gd_avif_supported;
 		}
@@ -537,6 +566,34 @@ trait Ultra_Cache_Media_Conversion_Trait
 			return $gd_webp_supported;
 		}
 
+		private function is_valid_generated_media_file($file, $format, $context = '') {
+			$file = (string) $file;
+			$format = strtolower((string) $format);
+			$context = (string) $context;
+
+			if ('' === $file || !file_exists($file) || !is_file($file)) {
+				return false;
+			}
+
+			if ((int) ucwp_safe_filesize($file, $context ?: 'media_converter_generated_file_validate') <= 0) {
+				return false;
+			}
+
+			if ('avif' === $format) {
+				$head = (string) ucwp_safe_file_get_contents($file, $context ?: 'media_converter_avif_header_validate', true);
+				$head = substr($head, 0, 128);
+				return (false !== strpos($head, 'ftyp') && (false !== stripos($head, 'avif') || false !== stripos($head, 'avis')));
+			}
+
+			if ('webp' === $format) {
+				$head = (string) ucwp_safe_file_get_contents($file, $context ?: 'media_converter_webp_header_validate', true);
+				$head = substr($head, 0, 16);
+				return (0 === strpos($head, 'RIFF') && false !== strpos($head, 'WEBP'));
+			}
+
+			return true;
+		}
+
 		private function create_temp_file($prefix) {
 			$prefix = (string) $prefix;
 
@@ -593,6 +650,15 @@ trait Ultra_Cache_Media_Conversion_Trait
 			$editor_class = get_class($editor);
 			if ('image/avif' === $mime_type) {
 				$this->update_media_diagnostic_state(array('lastImageEditorClass' => $editor_class));
+				if (false !== stripos($editor_class, 'GD') && !$this->supports_gd_avif()) {
+					$this->update_media_diagnostic_state(array(
+						'lastAvifEncodeEngine' => 'wp_image_editor:' . $editor_class,
+						'lastAvifEncodeError' => 'Skipped WP_Image_Editor_GD AVIF save because the real GD AVIF encode probe failed',
+						'lastAvifEncodeFile' => (string) $source_file,
+						'lastAvifEncodeAt' => time(),
+					));
+					return false;
+				}
 			}
 
 			if (method_exists($editor, 'set_quality')) {
@@ -621,7 +687,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 				return false;
 			}
 
-			$ok = !empty($saved['path']) && file_exists($saved['path']) && (int) ucwp_safe_filesize($saved['path'], 'media_converter_image_editor_save') > 0;
+			$ok = !empty($saved['path']) && $this->is_valid_generated_media_file($saved['path'], ('image/avif' === $mime_type ? 'avif' : 'webp'), 'media_converter_image_editor_save');
 			if ('image/avif' === $mime_type && !$ok) {
 				$this->update_media_diagnostic_state(array(
 					'lastAvifEncodeEngine' => 'wp_image_editor:' . $editor_class,
@@ -657,6 +723,10 @@ trait Ultra_Cache_Media_Conversion_Trait
 				$result = $image->writeImage($dest_file);
 				$image->clear();
 				$image->destroy();
+
+				if ($result && !$this->is_valid_generated_media_file($dest_file, $format, 'media_converter_imagick_save')) {
+					$result = false;
+				}
 
 				if ('avif' === $format && $result) {
 					$this->update_media_diagnostic_state(array(
@@ -734,15 +804,21 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 			$result = false;
 
+			set_error_handler(static function($severity, $message) use (&$gd_error) {
+				$gd_error = (string) $message;
+				return true;
+			});
 			try {
 				if ('avif' === $format) {
-					$result = @imageavif($image, $dest_file, (int) $quality);
+					$result = imageavif($image, $dest_file, (int) $quality);
 				} elseif ('webp' === $format) {
-					$result = @imagewebp($image, $dest_file, (int) $quality);
+					$result = imagewebp($image, $dest_file, (int) $quality);
 				}
 			} catch (\Throwable $e) {
 				$gd_error = $e->getMessage();
 				$result   = false;
+			} finally {
+				restore_error_handler();
 			}
 
 
@@ -750,13 +826,13 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 			$ok = (
 				$result &&
-				file_exists($dest_file) &&
-				(int) ucwp_safe_filesize($dest_file, 'media_converter_gd_save') > 0
+				$this->is_valid_generated_media_file($dest_file, $format, 'media_converter_gd_save')
 			);
 
 			if (!$ok) {
-				if (file_exists($dest_file)) {
+				if ($this->optimized_storage_path_exists($dest_file, true)) {
 					ucwp_safe_unlink($dest_file);
+					$this->optimized_storage_forget_path($dest_file);
 				}
 
 				if ($gd_error) {

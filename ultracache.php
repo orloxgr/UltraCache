@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: High-performance WordPress caching with static HTML pre-rendering, Redis object caching, Varnish integration, compression, and AVIF/WebP media optimization.
- * Version: 2.56.174
+ * Version: 2.56.202
  * Author: Byron Iniotakis
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.56.174');
+    define('UCWP_VERSION', '2.56.202');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -45,17 +45,27 @@ if (!defined('UCWP_WP_CACHE_MANAGED_KEY')) {
 if (!defined('UCWP_CACHE_DIR')) {
     define('UCWP_CACHE_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/');
 }
+if (!defined('UCWP_OPTIMIZED_IMAGES_DIR')) {
+    define('UCWP_OPTIMIZED_IMAGES_DIR', trailingslashit(WP_CONTENT_DIR) . 'uploads/uc-images/');
+}
+if (!defined('UCWP_OPTIMIZED_IMAGES_URL')) {
+    $ucwp_optimized_images_url_path = (string) wp_parse_url(content_url('uploads/uc-images'), PHP_URL_PATH);
+    if ('' === $ucwp_optimized_images_url_path) {
+        $ucwp_optimized_images_url_path = '/wp-content/uploads/uc-images';
+    }
+    define('UCWP_OPTIMIZED_IMAGES_URL', trailingslashit('/' . ltrim(str_replace('\\', '/', $ucwp_optimized_images_url_path), '/')));
+}
 if (!defined('UCWP_AVIF_DIR')) {
-    define('UCWP_AVIF_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-avif/');
+    define('UCWP_AVIF_DIR', trailingslashit(UCWP_OPTIMIZED_IMAGES_DIR) . 'avif/');
 }
 if (!defined('UCWP_AVIF_URL')) {
-    define('UCWP_AVIF_URL', trailingslashit(content_url('cache/ultracache-avif')));
+    define('UCWP_AVIF_URL', trailingslashit(UCWP_OPTIMIZED_IMAGES_URL) . 'avif/');
 }
 if (!defined('UCWP_WEBP_DIR')) {
-    define('UCWP_WEBP_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-webp/');
+    define('UCWP_WEBP_DIR', trailingslashit(UCWP_OPTIMIZED_IMAGES_DIR) . 'webp/');
 }
 if (!defined('UCWP_WEBP_URL')) {
-    define('UCWP_WEBP_URL', trailingslashit(content_url('cache/ultracache-webp')));
+    define('UCWP_WEBP_URL', trailingslashit(UCWP_OPTIMIZED_IMAGES_URL) . 'webp/');
 }
 if (!defined('UCWP_OBJECT_CACHE_DIR')) {
     define('UCWP_OBJECT_CACHE_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/');

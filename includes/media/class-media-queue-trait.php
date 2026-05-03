@@ -68,7 +68,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 		private function get_attachment_source_signature($attachment_id) {
 			$file = get_attached_file(absint($attachment_id));
-			if (!$file || !is_string($file) || !file_exists($file)) {
+			if (!$file || !is_string($file) || !$this->optimized_storage_readable_source_exists($file)) {
 				return array('mtime' => 0, 'size' => 0);
 			}
 
@@ -126,6 +126,10 @@ trait Ultra_Cache_Media_Queue_Trait
 			$needs_repair = ($completed_rows > 0 && $target_missing);
 
 			return array(
+				'storageRoot' => 'uploads/uc-images',
+				'persistentStorage' => true,
+				'avifDir' => (string) $avif_dir,
+				'webpDir' => (string) $webp_dir,
 				'avifDirExists' => $avif_dir_exists,
 				'webpDirExists' => $webp_dir_exists,
 				'avifHasFiles' => $avif_has_files,
@@ -133,7 +137,7 @@ trait Ultra_Cache_Media_Queue_Trait
 				'targetHasFiles' => $target_has_files,
 				'targetMissing' => $target_missing,
 				'needsRepair' => $needs_repair,
-				'message' => $needs_repair ? 'Optimized image files appear to be missing. Start/Resume can repair the queue without a full library rescan.' : '',
+				'message' => $needs_repair ? 'Optimized image files appear to be missing from persistent uploads/uc-images storage. Start/Resume or warm-up regeneration can repair missing variants without relying on the old cache directory.' : '',
 			);
 		}
 
@@ -151,11 +155,11 @@ trait Ultra_Cache_Media_Queue_Trait
 				return array_merge(array('repaired' => false, 'requeued' => 0, 'reason' => 'not_needed'), $health);
 			}
 
-			if (defined('UCWP_AVIF_DIR') && UCWP_AVIF_DIR && !is_dir(UCWP_AVIF_DIR)) {
-				wp_mkdir_p(UCWP_AVIF_DIR);
+			if (defined('UCWP_AVIF_DIR') && UCWP_AVIF_DIR) {
+				$this->optimized_storage_ensure_directory(UCWP_AVIF_DIR);
 			}
-			if (defined('UCWP_WEBP_DIR') && UCWP_WEBP_DIR && !is_dir(UCWP_WEBP_DIR)) {
-				wp_mkdir_p(UCWP_WEBP_DIR);
+			if (defined('UCWP_WEBP_DIR') && UCWP_WEBP_DIR) {
+				$this->optimized_storage_ensure_directory(UCWP_WEBP_DIR);
 			}
 
 			$count = $wpdb->query($wpdb->prepare(

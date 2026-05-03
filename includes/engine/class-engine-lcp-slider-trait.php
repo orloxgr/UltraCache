@@ -152,14 +152,20 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                 $html = $this->apply_html_rewrite_safely($html, 'sr7-first-slide-lcp-priority', function ($html) {
                     return $this->apply_sr7_first_slide_lcp_priority_markup($html);
                 });
-                return $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
+                $html = $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
                     return $this->inject_safe_lcp_priority_preloads($html);
+                });
+                return $this->apply_html_rewrite_safely($html, 'lcp-preload-guard-cleanup', function ($html) {
+                    return $this->cleanup_ambiguous_sr7_generated_lcp_preloads($html);
                 });
             }
 
             if (!empty($frontend_safe_mode)) {
-                return $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
+                $html = $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
                     return $this->inject_safe_lcp_priority_preloads($html);
+                });
+                return $this->apply_html_rewrite_safely($html, 'lcp-preload-guard-cleanup', function ($html) {
+                    return $this->cleanup_ambiguous_sr7_generated_lcp_preloads($html);
                 });
             }
 
@@ -634,6 +640,21 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                 return $updated;
             }
 
+            // 2.56.193: after image rewriting and SR7 runtime markup generation, the
+            // safest preload target is the actual final sr7-module-bg background URL
+            // present in the cached HTML. This restores LCP preload after the 2.56.192
+            // /revslider/o/ guard without preloading ambiguous helper assets.
+            $sr7_confirmed_module_bg_candidates = $this->find_confirmed_sr7_module_bg_lcp_preload_candidates($html, 1);
+            if (!empty($sr7_confirmed_module_bg_candidates)) {
+                $updated = $html;
+                foreach ($sr7_confirmed_module_bg_candidates as $candidate) {
+                    if (!empty($candidate['url'])) {
+                        $updated = $this->inject_lcp_preload_link($updated, $candidate['url']);
+                    }
+                }
+                return $updated;
+            }
+
             $sr7_first_slide_candidates = $this->find_sr7_first_slide_lcp_candidates($html, 1);
             if (!empty($sr7_first_slide_candidates)) {
                 $updated = $html;
@@ -676,6 +697,102 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
             }
 
             return $html;
+        }
+
+        private function find_confirmed_sr7_module_bg_lcp_preload_candidates($html, $limit = 1)
+        {
+            $html = (string) $html;
+            $limit = max(1, min(3, (int) $limit));
+            if ('' === $html || false === stripos($html, '<sr7-module-bg')) {
+                return array();
+            }
+
+            if (!preg_match_all('/<sr7-module-bg\b[^>]*>/i', $html, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+                return array();
+            }
+
+            $candidates = array();
+            $seen = array();
+            foreach ($matches as $index => $match) {
+                $tag_html = isset($match[0][0]) ? (string) $match[0][0] : '';
+                $tag_offset = isset($match[0][1]) ? (int) $match[0][1] : 0;
+                if ('' === $tag_html) {
+                    continue;
+                }
+
+                $urls = array();
+                foreach ($this->extract_candidate_urls_from_style($this->extract_attribute_from_html_tag($tag_html, 'style')) as $style_url) {
+                    $urls[] = array('url' => $style_url, 'attribute' => 'style');
+                }
+
+                foreach (array('src', 'data-src', 'data-bg', 'data-background', 'data-bg-image', 'data-background-image', 'poster') as $attribute) {
+                    $value = $this->extract_attribute_from_html_tag($tag_html, $attribute);
+                    if ('' !== $value) {
+                        $urls[] = array('url' => $value, 'attribute' => $attribute);
+                    }
+                }
+
+                foreach ($urls as $url_entry) {
+                    $raw_url = isset($url_entry['url']) ? (string) $url_entry['url'] : '';
+                    $attribute = isset($url_entry['attribute']) ? (string) $url_entry['attribute'] : 'style';
+                    if ('' === trim($raw_url)) {
+                        continue;
+                    }
+
+                    if (0 === strpos($raw_url, '//')) {
+                        $raw_url = (is_ssl() ? 'https:' : 'http:') . $raw_url;
+                    } elseif (0 === strpos($raw_url, '/')) {
+                        $raw_url = $this->absolutize_public_resource_url($raw_url);
+                    }
+
+                    $normalized_url = $this->normalize_public_resource_url($raw_url);
+                    if ('' === $normalized_url || !$this->is_lcp_candidate_image_url($normalized_url)) {
+                        continue;
+                    }
+
+                    // /revslider/o/ optimized helper URLs are valid generated assets, but they
+                    // are not reliable first-paint preload targets. The confirmed module-bg path
+                    // must point to the final background URL already present in cached HTML.
+                    if ($this->is_sr7_generated_image_list_url($normalized_url)) {
+                        continue;
+                    }
+
+                    $key = strtolower($this->normalize_public_resource_url($normalized_url));
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+
+                    $dimensions = $this->get_public_image_dimensions($normalized_url);
+                    $width = isset($dimensions['width']) ? (int) $dimensions['width'] : 0;
+                    $height = isset($dimensions['height']) ? (int) $dimensions['height'] : 0;
+
+                    $candidates[] = array(
+                        'url' => $normalized_url,
+                        'raw_url' => $raw_url,
+                        'attribute' => $attribute,
+                        'tag' => 'SR7-MODULE-BG',
+                        'is_sr7' => true,
+                        'sr7_module_bg_candidate' => true,
+                        'sr7_verified_first_slide' => true,
+                        'sr7_role' => 'module-bg-final-html',
+                        'lcp_reason' => 'sr7-module-bg-final-html',
+                        'width' => $width,
+                        'height' => $height,
+                        'area' => ($width > 0 && $height > 0) ? ($width * $height) : 0,
+                        'score' => 3000000 - ((int) $index * 100),
+                        'tag_offset' => $tag_offset,
+                        'source' => 'sr7-module-bg-final-html',
+                    );
+                    break;
+                }
+            }
+
+            if (empty($candidates)) {
+                return array();
+            }
+
+            return $this->dedupe_lcp_candidates_by_url($this->sort_lcp_candidates_by_area_then_score($candidates), $limit);
         }
 
         private function find_manual_lcp_hero_selector_candidates($html, $limit = 1)
@@ -1070,7 +1187,7 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                     continue;
                 }
 
-                if (false !== stripos($value, '/revslider/') || false !== stripos($value, '/cache/ultracache-avif/revslider/') || false !== stripos($value, '/cache/ultracache-webp/revslider/')) {
+                if (false !== stripos($value, '/revslider/') || false !== stripos($value, '/uploads/uc-images/avif/revslider/') || false !== stripos($value, '/uploads/uc-images/webp/revslider/')) {
                     return true;
                 }
             }
@@ -2996,8 +3113,8 @@ HTML;
             }
 
             return false !== stripos($url, '/wp-content/uploads/revslider/o/')
-                || false !== stripos($url, '/wp-content/cache/ultracache-avif/revslider/o/')
-                || false !== stripos($url, '/wp-content/cache/ultracache-webp/revslider/o/');
+                || false !== stripos($url, '/wp-content/uploads/uc-images/avif/revslider/o/')
+                || false !== stripos($url, '/wp-content/uploads/uc-images/webp/revslider/o/');
         }
 
         private function is_lcp_candidate_image_url($src)
@@ -3024,6 +3141,16 @@ HTML;
             $src = $this->prefer_existing_lcp_preload_equivalent_url($src);
             $src = esc_url($this->normalize_public_resource_url($src));
             if ('' === $src) {
+                return $html;
+            }
+
+            // 2.56.192: never preload SR7 generated image-list placeholders under
+            // /revslider/o/. They can be valid generated files but SR7 often does not
+            // consume them immediately, which creates Chrome "preloaded but not used"
+            // warnings. The actual rewritten first-slide/source image can still get
+            // fetchpriority/runtime priority; ambiguous helper assets should not get
+            // a network preload.
+            if ($this->is_sr7_generated_image_list_url($src)) {
                 return $html;
             }
 
@@ -3163,6 +3290,64 @@ HTML;
             }
         }
 
+        private function cleanup_ambiguous_sr7_generated_lcp_preloads($html)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return $html;
+            }
+
+            $seen_plugin_image_preloads = array();
+            $changed = false;
+
+            $updated = preg_replace_callback('/<link\b[^>]*>/i', function ($matches) use (&$seen_plugin_image_preloads, &$changed) {
+                $tag = isset($matches[0]) ? (string) $matches[0] : '';
+                if ('' === $tag) {
+                    return $tag;
+                }
+
+                $rel = strtolower((string) $this->extract_attribute_from_html_tag($tag, 'rel'));
+                $as = strtolower((string) $this->extract_attribute_from_html_tag($tag, 'as'));
+                $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'href'), ENT_QUOTES, 'UTF-8');
+                if (false === strpos($rel, 'preload') || 'image' !== trim($as) || '' === trim($href)) {
+                    return $tag;
+                }
+
+                $is_ucwp_preload = false !== stripos($tag, 'data-ucwp-lcp-preload')
+                    || false !== stripos($tag, 'data-ucwp-critical-chain');
+                if (!$is_ucwp_preload) {
+                    return $tag;
+                }
+
+                $normalized = $this->normalize_public_resource_url($href);
+                if ('' === $normalized) {
+                    return $tag;
+                }
+
+                // 2.56.192: remove UltraCache-managed preloads for SR7 generated
+                // /revslider/o/ helper assets. They are safe to rewrite/use when SR7 asks
+                // for them, but they are not reliable first-paint preload targets.
+                if ($this->is_sr7_generated_image_list_url($normalized)) {
+                    $changed = true;
+                    return '';
+                }
+
+                $key = strtolower($normalized);
+                if (isset($seen_plugin_image_preloads[$key])) {
+                    $changed = true;
+                    return '';
+                }
+
+                $seen_plugin_image_preloads[$key] = true;
+                return $tag;
+            }, $html);
+
+            if (!is_string($updated) || '' === $updated) {
+                return $html;
+            }
+
+            return $changed ? $updated : $html;
+        }
+
         private function is_same_origin_public_resource_url($url)
         {
             $url = $this->normalize_public_resource_url($url);
@@ -3247,14 +3432,20 @@ HTML;
             }
 
             $uploads_marker = '/wp-content/uploads/';
-            $avif_marker = '/wp-content/cache/ultracache-avif/';
-            $webp_marker = '/wp-content/cache/ultracache-webp/';
+            $avif_marker = '/wp-content/uploads/uc-images/avif/';
+            $webp_marker = '/wp-content/uploads/uc-images/webp/';
+            $legacy_avif_marker = '/wp-content/cache/ultracache-avif/';
+            $legacy_webp_marker = '/wp-content/cache/ultracache-webp/';
             $original_relative = false !== strpos($original_base, $uploads_marker) ? substr($original_base, strpos($original_base, $uploads_marker) + strlen($uploads_marker)) : '';
             $preferred_relative = '';
             if (false !== strpos($preferred_base, $avif_marker)) {
                 $preferred_relative = substr($preferred_base, strpos($preferred_base, $avif_marker) + strlen($avif_marker));
             } elseif (false !== strpos($preferred_base, $webp_marker)) {
                 $preferred_relative = substr($preferred_base, strpos($preferred_base, $webp_marker) + strlen($webp_marker));
+            } elseif (false !== strpos($preferred_base, $legacy_avif_marker)) {
+                $preferred_relative = substr($preferred_base, strpos($preferred_base, $legacy_avif_marker) + strlen($legacy_avif_marker));
+            } elseif (false !== strpos($preferred_base, $legacy_webp_marker)) {
+                $preferred_relative = substr($preferred_base, strpos($preferred_base, $legacy_webp_marker) + strlen($legacy_webp_marker));
             }
 
             if ('' === $original_relative || '' === $preferred_relative || $original_relative !== $preferred_relative) {

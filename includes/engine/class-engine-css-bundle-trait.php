@@ -260,7 +260,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     $path = wp_normalize_path((string) $file_info->getPathname());
                     $name = strtolower((string) $file_info->getFilename());
 
-                    if (false !== strpos($path, '/css-bundles/') || false !== strpos($path, '/google-fonts/') || false !== strpos($path, '/font-css/') || false !== strpos($path, '/diagnostics/') || false !== strpos($path, '/locks/')) {
+                    if (false !== strpos($path, '/css-bundles/') || false !== strpos($path, '/google-fonts/') || false !== strpos($path, '/font-css/') || false !== strpos($path, '/optimized-css/') || false !== strpos($path, '/diagnostics/') || false !== strpos($path, '/locks/')) {
                         continue;
                     }
 
@@ -1034,6 +1034,10 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 'material-icons',
                 'materialicons',
                 'ionicons',
+                'feather.ttf',
+                'feather fonts',
+                'star.ttf',
+                'woocommerce star',
                 '/webfonts/',
                 '/icons/',
                 'fa-solid',
@@ -1095,7 +1099,32 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 if ('' !== $pattern) {
                     $result['patterns'][] = $pattern;
                 }
-                $delayed_blocks[] = "/* UltraCache Delayed Font Source: " . (string) $source_url . ('' !== $family ? ' | ' . $family : '') . " */\n" . $block;
+                $delayed_block = $this->normalize_protocol_relative_urls_in_css($block, $source_url);
+                if (false !== stripos($delayed_block, '.ttf')) {
+                    // 2.56.197: delayed icon-font CSS must also prefer same-path
+                    // WOFF2/WOFF siblings. The generic inline cleanup is not enough
+                    // for quoted src() values and multi-source icon font declarations.
+                    $preferred_delayed_block = $this->rewrite_font_face_ttf_sources_to_preferred_formats($delayed_block, $source_url);
+                    if (is_string($preferred_delayed_block) && '' !== trim($preferred_delayed_block)) {
+                        $delayed_block = $preferred_delayed_block;
+                    }
+                }
+                if (function_exists('ucwp_optimize_font_face_block')) {
+                    $delayed_stats = array(
+                        'fontDisplayAdded' => 0,
+                        'duplicateSrcRemoved' => 0,
+                        'ttfSourcesRemoved' => 0,
+                        'fontFaceBlocksChanged' => 0,
+                    );
+                    $optimized_delayed_block = ucwp_optimize_font_face_block($delayed_block, $delayed_stats);
+                    if (is_string($optimized_delayed_block) && '' !== trim($optimized_delayed_block)) {
+                        $delayed_block = $optimized_delayed_block;
+                    }
+                } else {
+                    $delayed_block = $this->normalize_font_face_display_in_css($delayed_block);
+                }
+
+                $delayed_blocks[] = "/* UltraCache Delayed Font Source: " . (string) $source_url . ('' !== $family ? ' | ' . $family : '') . " */\n" . $delayed_block;
                 $result['delayedCount']++;
                 return "\n/* UltraCache delayed icon font-face removed: " . ('' !== $family ? $family : 'matched font') . " */\n";
             }, $css);
@@ -1106,7 +1135,11 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             }
 
             if (!empty($delayed_blocks)) {
-                $result['delayedCss'] = trim(implode("\n\n", $delayed_blocks)) . "\n";
+                $delayed_css = trim(implode("\n\n", $delayed_blocks)) . "\n";
+                if (false !== stripos($delayed_css, '.ttf')) {
+                    $delayed_css = $this->rewrite_font_face_ttf_sources_to_preferred_formats($delayed_css, $source_url);
+                }
+                $result['delayedCss'] = trim((string) $delayed_css) . "\n";
                 $result['families'] = array_values(array_unique(array_map('strval', $result['families'])));
                 $result['patterns'] = array_values(array_unique(array_map('strval', $result['patterns'])));
             }
@@ -1118,6 +1151,16 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
         {
             $url = isset($entry['delayedFontUrl']) ? (string) $entry['delayedFontUrl'] : '';
             if ('' === $url) {
+                return '';
+            }
+
+            // 2.56.199: never inject a delayed icon-font stylesheet unless the
+            // generated CSS file exists and has content. Otherwise a clean generated
+            // CSS rebuild can remove the file while stale runtime state still injects
+            // the URL, breaking icon-font glyphs.
+            $file = !empty($entry['delayedFontFile']) ? (string) $entry['delayedFontFile'] : $this->resolve_local_path_from_public_url($url);
+            clearstatcache(true, $file);
+            if ('' === $file || !is_readable($file) || filesize($file) <= 0) {
                 return '';
             }
 
@@ -1265,15 +1308,26 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $delayed_font_bytes = 0;
             if ('' !== trim($delayed_font_css)) {
                 $delayed_font_content = trim($delayed_font_css) . "\n";
+                if (false !== stripos($delayed_font_content, '.ttf')) {
+                    $delayed_font_content = $this->rewrite_font_face_ttf_sources_to_preferred_formats($delayed_font_content, home_url('/'));
+                    $delayed_font_content = trim((string) $delayed_font_content) . "\n";
+                }
                 $delayed_font_hash = md5($delayed_font_content);
                 $delayed_font_filename = 'bundle-' . $mode . '-' . $signature . '-delayed-fonts.css';
                 $delayed_font_file = $dir . $delayed_font_filename;
                 if (!file_exists($delayed_font_file) || md5_file($delayed_font_file) !== $delayed_font_hash) {
                     $this->write_cache_variant_atomically($delayed_font_file, $delayed_font_content);
                 }
-                $delayed_font_bytes = is_readable($delayed_font_file) ? (int) filesize($delayed_font_file) : strlen($delayed_font_content);
-                $delayed_font_url = home_url('/wp-content/cache/ultracache/css-bundles/' . rawurlencode($delayed_font_filename));
-                $delayed_font_url = $this->normalize_public_resource_url($delayed_font_url);
+                clearstatcache(true, $delayed_font_file);
+                $delayed_font_bytes = is_readable($delayed_font_file) ? (int) filesize($delayed_font_file) : 0;
+                if ($delayed_font_bytes > 0) {
+                    $delayed_font_url = home_url('/wp-content/cache/ultracache/css-bundles/' . rawurlencode($delayed_font_filename));
+                    $delayed_font_url = $this->normalize_public_resource_url($delayed_font_url);
+                } else {
+                    $delayed_font_file = '';
+                    $delayed_font_url = '';
+                    $delayed_font_bytes = 0;
+                }
             }
 
             $stats['delayedFontFamilies'] = array_values(array_unique(array_map('strval', $delayed_font_families)));

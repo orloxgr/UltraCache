@@ -1,3 +1,100 @@
+= 2.56.202 - JS Bundle Candidate Diagnostics =
+- Added persistent diagnostics for the experimental Combine safe deferred JS feature.
+- Records scanned/deferred/eligible script counts, rejection reasons, eligible groups, generated bundles, bundle bytes, and sample candidates.
+- Exposes the last JS bundle result in dashboard diagnostics and `wp ultracache status --section=diagnostics`.
+- Leaves frontend behavior unchanged except for reporting; conservative JS bundle safeguards remain in place.
+
+= 2.56.201 - Experimental Safe Deferred JS Bundle =
+* Added an opt-in Advanced Settings & Exclusions switch for combining only consecutive, same-host deferred JavaScript files into generated UltraCache JS bundles during cache warm/store.
+* Added visible JS bundle include and exclude pattern lists; exclusions win over includes and the shared JS Delay / Defer Exclusions list remains authoritative.
+* Added conservative safeguards for inline before/after scripts, WordPress core dependencies, WooCommerce critical scripts, Slider/Elementor protected scripts, modules, async scripts, missing source files, and non-local scripts.
+
+= 2.56.200 - Real AVIF Capability Guard =
+- Validates GD AVIF support with a real suppressed encode probe and rejects 0-byte/invalid AVIF outputs.
+- Keeps AVIF generation on Imagick when Imagick AVIF is available instead of falling through to GD/WP_Image_Editor_GD.
+- Suppresses GD imageavif warnings during support probes/conversion and skips GD AVIF saves when the real probe fails.
+- Adds stricter generated AVIF/WebP file validation before optimized variants are accepted.
+- Improves warm output when DONOTCACHEPAGE is set by debugging/logged-in tooling such as Query Monitor.
+
+= 2.56.199 - Atomic Delayed Icon Font CSS =
+* Fixed delayed icon-font extraction after mixed CSS moved to /optimized-css/: delayed-*.css is now always written to /font-css/ before the HTML link is injected.
+* Added generated CSS link guards so missing delayed font, bundle delayed-font, font-css, and optimized-css references are not emitted after a clean CSS rebuild.
+* If delayed icon font CSS cannot be written and verified, UltraCache keeps the original stylesheet instead of stripping @font-face and breaking icon glyphs.
+
+= 2.56.198 - Mixed Active CSS Bucket for Delayed Icon Fonts =
+* Fix: Delay icon font-face blocks no longer writes preserved mixed theme/plugin CSS into /cache/ultracache/font-css/.
+* New: Preserved active CSS without delayed icon @font-face blocks is written under /cache/ultracache/optimized-css/ with active-* filenames.
+* Guard: UltraCache generated optimized-css assets are excluded from CSS bundle/font rewrite source scans to prevent re-processing loops.
+
+= 2.56.197 - Delayed Icon Font TTF to WOFF Rewrite =
+* Expanded generic icon-font auto detection for local TTF font-face blocks such as feather/star icon fonts.
+* Rewrites same-path local .ttf sources to .woff2 or .woff when available before delaying icon font-face CSS.
+* Prevents local font-display patch CSS from duplicating icon-font TTF blocks when Delay icon font-face blocks is enabled.
+
+= 2.56.195 - Generic Bundle Path TTF Cleanup =
+- Fixed bundled/final HTML font optimization path so generic local @font-face .ttf declarations can be rewritten through the active bundle manifest WOFF2 registry.
+- Added same-path .ttf to .woff2 preference where a valid local WOFF2 file exists.
+- Kept the fix generic to local TTF references, not vendor-specific Themepunch targeting.
+
+= 2.56.194 - Themepunch Slider Font TTF Cleanup =
+- Rewrite Slider Revolution/Themepunch gfonts TTF font-face and config URL tokens to matching linked WOFF2 fonts when available.
+- Keep RevSlider helper image preload suppression from 2.56.192/2.56.193.
+
+= 2.56.193 - Restore Safe SR7 Module Background LCP Preload =
+* Restores UltraCache-managed LCP preload for confirmed final sr7-module-bg background URLs present in cached HTML.
+* Keeps the 2.56.192 guard that suppresses ambiguous /revslider/o/ helper-asset preloads to avoid Chrome unused-preload warnings.
+* Keeps duplicate UltraCache image preload cleanup.
+* Adds a small defensive fix for legacy optimized-image marker variables in LCP preload URL equivalence checks.
+
+= 2.56.192 - RevSlider LCP Preload Guard =
+- Suppresses UltraCache-managed LCP image preload tags for ambiguous SR7/RevSlider generated image-list helper assets under `/revslider/o/`.
+- Prevents Chrome “preloaded but not used” warnings caused by generated RevSlider helper AVIF/WebP assets that are not consumed immediately by the SR7 runtime.
+- Keeps image rewriting, on-demand generation, and runtime/fetchpriority LCP marking intact; only unsafe network preloads are suppressed.
+- Deduplicates UltraCache-managed image preload links during LCP preload cleanup.
+
+= 2.56.187 - Verified Optimized Image Output Hardening + WP-CLI Help =
+* Hardened optimized image validation so zero-byte AVIF/WebP outputs are treated as invalid, ignored, and regenerated or fallen back safely.
+* Existing optimized variants are now considered usable only when the file exists and has non-zero size.
+* Added media diagnostics counters for zero-byte optimized files and invalid optimized output, while keeping AVIF generation Imagick-first and WebP as the safe fallback.
+* Expanded the root `wp ultracache` command into a complete command reference grouped by cache, media, settings, diagnostics, cron, object-cache, and integrations.
+* Added `wp ultracache help` and `wp ultracache commands --format=json` aliases for discoverability and scripting.
+* Added `wp ultracache media help` and a user-friendly `wp ultracache media regenerate` action that rebuilds and processes the optimized media queue.
+
+= 2.56.186 - On-Demand AVIF Failure WebP Fallback =
+* Fixes safe warm/cron/stale/manual on-demand image resolution so a slow or failed AVIF generation attempt cannot prevent the same discovered upload image candidate from falling back to WebP.
+* Keeps AVIF-first selection when AVIF exists or can be generated successfully.
+* Preserves the shared optimized URL rewrite map for normal and escaped JSON/script URL forms.
+* Does not add RevSlider-specific parsing or legacy cache image paths.
+
+= 2.56.185 - Complete Escaped JSON Image Rewrite and AVIF Preference =
+* Complete local upload image rewrite for escaped JSON/script URL tokens using the shared optimized URL map.
+* Preserve escaped-slash JSON format while rewriting to root-relative persistent uploads/uc-images URLs.
+* Prefer AVIF before WebP during warm/on-demand cache generation when the request bucket supports AVIF, falling back only if AVIF generation fails.
+
+= 2.56.184 - Connect Existing Image Discovery to On-Demand Rewrite =
+* Connects existing src/data-src/srcset/style/global upload URL discovery passes to the same on-demand optimized media resolver before cached HTML is saved.
+* Adds escaped absolute upload URL token support for builder/slider JSON strings such as https:\/\/example.com\/wp-content\/uploads\/...png.
+* Keeps persistent root-relative /wp-content/uploads/uc-images/ URLs and avoids legacy cache image paths.
+
+= 2.56.184 - Generic CSS url() Upload Image Rewrite =
+- Prioritized CSS url(...) background image rewrites before generic image sweeps so builder/slider inline background images are converted within the warm generation budget.
+- Added support for HTML-entity quoted CSS URLs such as url(&quot;...png&quot;) without hardcoding Slider Revolution.
+- Kept optimized image frontend URLs root-relative under /wp-content/uploads/uc-images/.
+
+= 2.56.181 - Page-Specific Warm Image Generation Rewrite =
+* Added a final root-relative uploads image URL sweep so warm/cache HTML can trigger missing AVIF/WebP generation for page-specific images, including URLs outside normal image attributes.
+* Kept optimized media output under persistent /wp-content/uploads/uc-images/ paths with no legacy cache-directory fallback.
+* Changed optimized media URL constants to root-relative paths for safer cached HTML behind HTTPS/reverse proxies.
+- Outputs optimized AVIF/WebP URLs as root-relative /wp-content/uploads/uc-images/... paths to avoid HTTP/HTTPS scheme mismatch behind reverse proxies.
+- Allows the final media rewrite pass to scan root-relative /wp-content/uploads/... image URLs during warm-up/render instead of requiring an absolute uploads base URL in the HTML.
+- Keeps optimized AVIF/WebP media exclusively under uploads/uc-images with no legacy cache-dir fallback.
+
+= 2.56.178 - Persistent Optimized Image Storage =
+* Moved newly generated AVIF/WebP media variants from transient wp-content/cache folders to persistent wp-content/uploads/uc-images/avif and wp-content/uploads/uc-images/webp storage.
+* Kept legacy cache-folder AVIF/WebP paths readable for migration/repair compatibility, but new frontend rewrites target uploads/uc-images.
+* Added diagnostics metadata for persistent optimized media storage and legacy cache-media folders.
+* No intended changes to object cache, JavaScript optimization, font optimization, or CSS bundle generation.
+
 = 2.56.174 - CSS Bundle Cleanup Cached HTML Ref Protection =
 * Protect orphan-like CSS bundle files during cleanup when existing cached HTML files still reference them.
 * Added cached HTML CSS reference diagnostics for CSS bundle storage.

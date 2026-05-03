@@ -292,8 +292,8 @@ trait Ultra_Cache_Engine_Media_Image_Trait
 
             $content_path = rtrim((string) wp_parse_url(content_url('/'), PHP_URL_PATH), '/');
             $cache_prefixes = array(
-                $content_path . '/cache/ultracache-avif/',
-                $content_path . '/cache/ultracache-webp/',
+                $content_path . '/uploads/uc-images/avif/',
+                $content_path . '/uploads/uc-images/webp/',
             );
 
             $relative = '';

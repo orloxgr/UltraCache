@@ -1174,7 +1174,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 
             $processed = $this->optimize_self_hosted_font_css_links_with_processor($html);
             if (is_string($processed)) {
-                return $processed;
+                return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($processed);
             }
 
             $preload_urls = array();
@@ -1238,7 +1238,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 $html = $this->inject_delayed_font_css_links($html, array_values($delayed_font_assets), 'ucwp-no-bundle-delayed-icon-fonts');
             }
 
-            return $html;
+            return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($html);
         }
 
         private function optimize_self_hosted_font_css_links_with_processor($html)
@@ -1326,7 +1326,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     $updated_html = $this->inject_delayed_font_css_links($updated_html, array_values($delayed_font_assets), 'ucwp-no-bundle-delayed-icon-fonts');
                 }
 
-                return $updated_html;
+                return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($updated_html);
             } catch (\Throwable $e) {
                 return null;
             }
@@ -1346,7 +1346,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $normalized_path = strtolower((string) wp_parse_url($source_url, PHP_URL_PATH));
-            if (false !== strpos($normalized_path, '/cache/ultracache/css-bundles/') || false !== strpos($normalized_path, '/cache/ultracache/font-css/')) {
+            if (false !== strpos($normalized_path, '/cache/ultracache/css-bundles/') || false !== strpos($normalized_path, '/cache/ultracache/font-css/') || false !== strpos($normalized_path, '/cache/ultracache/optimized-css/')) {
                 $request_assets[$source_url] = array();
                 return array();
             }
@@ -1405,7 +1405,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $source_path_lc = strtolower(str_replace('\\', '/', $source_path));
-            if (false !== strpos($source_path_lc, '/cache/ultracache/css-bundles/') || false !== strpos($source_path_lc, '/cache/ultracache/font-css/')) {
+            if (false !== strpos($source_path_lc, '/cache/ultracache/css-bundles/') || false !== strpos($source_path_lc, '/cache/ultracache/font-css/') || false !== strpos($source_path_lc, '/cache/ultracache/optimized-css/')) {
                 return array();
             }
 
@@ -1415,33 +1415,12 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $optimized_css = $this->rewrite_self_hosted_font_css_content($css, $source_url);
-            $font_css_optimization_stats = array();
-            if (function_exists('ucwp_optimize_generated_font_css')) {
-                $font_css_optimization = ucwp_optimize_generated_font_css($optimized_css, $source_url);
-                if (is_array($font_css_optimization) && isset($font_css_optimization['stats']) && is_array($font_css_optimization['stats'])) {
-                    $font_css_optimization_stats = $font_css_optimization['stats'];
-                }
-                if (!empty($font_css_optimization_stats['nonFontCssDetected'])) {
-                    /*
-                     * Public-release safety: do not replace a mixed layout/theme stylesheet
-                     * with a font-only generated copy. Keep the original stylesheet intact.
-                     */
-                    return array();
-                }
-                if (is_array($font_css_optimization) && isset($font_css_optimization['css']) && is_string($font_css_optimization['css'])) {
-                    $optimized_css = $font_css_optimization['css'];
-                }
-            }
-
-            if ('' === trim((string) $optimized_css) || false === stripos((string) $optimized_css, '@font-face')) {
-                return array();
-            }
-
             $settings = $this->get_settings();
             $delayed_font_css = '';
             $delayed_font_families = array();
             $delayed_font_patterns = array();
             $delayed_font_count = 0;
+            $preserve_mixed_css_for_delayed_icon_fonts = false;
 
             if (!empty($settings['delay_icon_fonts'])) {
                 $font_split = $this->split_delayed_icon_font_faces_from_css($optimized_css, $source_url, $settings);
@@ -1451,11 +1430,72 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     $delayed_font_families = array_values(array_unique(array_map('strval', (array) ($font_split['families'] ?? array()))));
                     $delayed_font_patterns = array_values(array_unique(array_map('strval', (array) ($font_split['patterns'] ?? array()))));
                     $delayed_font_count = max(0, (int) ($font_split['delayedCount'] ?? 0));
+                    $preserve_mixed_css_for_delayed_icon_fonts = true;
                 }
             }
 
+            $font_css_optimization_stats = array();
+            if (!$preserve_mixed_css_for_delayed_icon_fonts && function_exists('ucwp_optimize_generated_font_css')) {
+                $font_css_optimization = ucwp_optimize_generated_font_css($optimized_css, $source_url);
+                if (is_array($font_css_optimization) && isset($font_css_optimization['stats']) && is_array($font_css_optimization['stats'])) {
+                    $font_css_optimization_stats = $font_css_optimization['stats'];
+                }
+                if (!empty($font_css_optimization_stats['nonFontCssDetected'])) {
+                    /*
+                     * Public-release safety: do not replace a mixed layout/theme stylesheet
+                     * with a font-only generated copy. Keep the original stylesheet intact.
+                     *
+                     * Exception: when Delay icon font-face blocks matched a standalone mixed
+                     * stylesheet, the matching @font-face blocks were already removed above and
+                     * moved to a delayed stylesheet. In that case preserving the remaining mixed
+                     * CSS in a generated copy is intentional and keeps the visible non-font CSS
+                     * active while preventing the original icon font from staying render-blocking.
+                     */
+                    return array();
+                }
+                if (is_array($font_css_optimization) && isset($font_css_optimization['css']) && is_string($font_css_optimization['css'])) {
+                    $optimized_css = $font_css_optimization['css'];
+                }
+            }
+
+            if ($preserve_mixed_css_for_delayed_icon_fonts) {
+                $font_css_optimization_stats = array(
+                    'sourceUrl' => $source_url,
+                    'mixedCssPreservedForDelayedIconFonts' => true,
+                    'delayedIconFontFaceBlocks' => $delayed_font_count,
+                    'delayedIconFontFamilies' => $delayed_font_families,
+                    'delayedIconFontPatterns' => $delayed_font_patterns,
+                    'beforeBytes' => strlen($css),
+                    'afterBytes' => strlen((string) $optimized_css),
+                );
+                $optimized_css = trim((string) $optimized_css);
+                if ('' === $optimized_css) {
+                    $optimized_css = '/* UltraCache delayed all matching icon @font-face blocks from this stylesheet. */';
+                }
+                $optimized_css = "/* UltraCache delayed icon font active CSS: preserved source CSS without delayed icon @font-face blocks. */
+" . $optimized_css . "
+";
+            }
+
+            if ('' === trim((string) $optimized_css) || (false === stripos((string) $optimized_css, '@font-face') && '' === trim($delayed_font_css))) {
+                return array();
+            }
+
             $hash = md5($source_url . '|' . md5($optimized_css));
-            $dir = trailingslashit(UCWP_CACHE_DIR) . 'font-css/';
+            $active_css_is_mixed = !empty($preserve_mixed_css_for_delayed_icon_fonts);
+            $asset_dir_slug = $active_css_is_mixed ? 'optimized-css' : 'font-css';
+            $asset_file_prefix = $active_css_is_mixed ? 'active-' : '';
+            $write_reason = $active_css_is_mixed ? 'optimized active css without delayed icon font-face blocks' : 'optimized font css';
+
+            /*
+             * 2.56.198: /font-css/ is reserved for actual font-only or delayed
+             * font-face CSS. When Delay icon font-face blocks preserves a mixed
+             * theme/plugin stylesheet after extracting icon @font-face blocks, keep
+             * the active non-font CSS under /optimized-css/ instead. Otherwise tools
+             * such as Lighthouse correctly flag a large render stylesheet, but show
+             * it misleadingly as font-css.
+             */
+            $dir = trailingslashit(UCWP_CACHE_DIR) . $asset_dir_slug . '/';
             if (!is_dir($dir)) {
                 wp_mkdir_p($dir);
             }
@@ -1466,17 +1506,26 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 ");
             }
 
-            $file = $dir . $hash . '.css';
+            $filename = $asset_file_prefix . $hash . '.css';
+            $file = $dir . $filename;
             if (!file_exists($file) || md5_file($file) !== md5($optimized_css)) {
-                ucwp_safe_file_put_contents($file, $optimized_css, LOCK_EX, 'optimized font css');
+                ucwp_safe_file_put_contents($file, $optimized_css, LOCK_EX, $write_reason);
+            }
+            clearstatcache(true, $file);
+            if (!is_readable($file) || filesize($file) <= 0) {
+                return array();
             }
 
             $asset = array(
-                'css_url'      => content_url('cache/ultracache/font-css/' . $hash . '.css'),
-                'preload_urls' => $this->extract_preloadable_font_urls_from_css($optimized_css, 2),
+                'css_url'      => content_url('cache/ultracache/' . $asset_dir_slug . '/' . $filename),
+                'preload_urls' => $active_css_is_mixed ? array() : $this->extract_preloadable_font_urls_from_css($optimized_css, 2),
                 'sourceBytes'  => strlen($css),
                 'cssBytes'     => strlen($optimized_css),
             );
+            if ($active_css_is_mixed) {
+                $asset['activeCssIsMixed'] = true;
+                $asset['activeCssBucket'] = $asset_dir_slug;
+            }
             if (!empty($font_css_optimization_stats)) {
                 $asset['fontCssOptimization'] = $font_css_optimization_stats;
             }
@@ -1484,21 +1533,781 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             if ('' !== trim($delayed_font_css)) {
                 $delayed_font_content = trim($delayed_font_css) . "
 ";
-                $delayed_font_hash = md5($source_url . '|delayed|' . md5($delayed_font_content));
-                $delayed_font_file = $dir . 'delayed-' . $delayed_font_hash . '.css';
-                if (!file_exists($delayed_font_file) || md5_file($delayed_font_file) !== md5($delayed_font_content)) {
-                    ucwp_safe_file_put_contents($delayed_font_file, $delayed_font_content, LOCK_EX, 'delayed optimized font css');
+                if (false !== stripos($delayed_font_content, '.ttf')) {
+                    // 2.56.197: delayed standalone font-css output must get the
+                    // same local TTF -> WOFF2/WOFF sibling cleanup as the render path.
+                    $delayed_font_content = $this->rewrite_font_face_ttf_sources_to_preferred_formats($delayed_font_content, $source_url);
+                    $delayed_font_content = trim((string) $delayed_font_content) . "
+";
                 }
-                $delayed_font_url = content_url('cache/ultracache/font-css/delayed-' . $delayed_font_hash . '.css');
-                $asset['delayedFontUrl'] = $delayed_font_url;
-                $asset['delayed_font_url'] = $delayed_font_url;
-                $asset['delayedFontFaceBlocks'] = $delayed_font_count;
-                $asset['delayedFontFamilies'] = $delayed_font_families;
-                $asset['delayedFontPatterns'] = $delayed_font_patterns;
-                $this->delayed_font_css_assets_current_request[$source_url] = $asset;
+                if ('' === trim($delayed_font_content) || false === stripos($delayed_font_content, '@font-face')) {
+                    if ($active_css_is_mixed) {
+                        return array();
+                    }
+                } else {
+                    /*
+                     * 2.56.199: delayed icon-font CSS always belongs in /font-css/,
+                     * even when the active preserved stylesheet is stored under
+                     * /optimized-css/. The previous build wrote mixed active CSS to
+                     * optimized-css but still used that active directory for delayed-*.css,
+                     * while the HTML pointed to font-css/delayed-*.css. That created
+                     * missing stylesheet refs and broke icon-font glyphs after a clean CSS
+                     * rebuild. Keep the extraction atomic: if the delayed font file cannot
+                     * be written and verified, do not replace the original stylesheet.
+                     */
+                    $delayed_dir = trailingslashit(UCWP_CACHE_DIR) . 'font-css/';
+                    if (!is_dir($delayed_dir)) {
+                        wp_mkdir_p($delayed_dir);
+                    }
+                    $delayed_index_file = $delayed_dir . 'index.php';
+                    if (!file_exists($delayed_index_file)) {
+                        ucwp_safe_file_put_contents($delayed_index_file, "<?php
+// Silence is golden.
+");
+                    }
+                    $delayed_font_hash = md5($source_url . '|delayed|' . md5($delayed_font_content));
+                    $delayed_font_filename = 'delayed-' . $delayed_font_hash . '.css';
+                    $delayed_font_file = $delayed_dir . $delayed_font_filename;
+                    if (!file_exists($delayed_font_file) || md5_file($delayed_font_file) !== md5($delayed_font_content)) {
+                        ucwp_safe_file_put_contents($delayed_font_file, $delayed_font_content, LOCK_EX, 'delayed optimized font css');
+                    }
+                    clearstatcache(true, $delayed_font_file);
+                    if (!is_readable($delayed_font_file) || filesize($delayed_font_file) <= 0) {
+                        return array();
+                    }
+                    $delayed_font_url = content_url('cache/ultracache/font-css/' . $delayed_font_filename);
+                    $asset['delayedFontUrl'] = $delayed_font_url;
+                    $asset['delayed_font_url'] = $delayed_font_url;
+                    $asset['delayedFontFile'] = $delayed_font_file;
+                    $asset['delayedFontFaceBlocks'] = $delayed_font_count;
+                    $asset['delayedFontFamilies'] = $delayed_font_families;
+                    $asset['delayedFontPatterns'] = $delayed_font_patterns;
+                    $this->delayed_font_css_assets_current_request[$source_url] = $asset;
+                }
             }
 
             return $asset;
+        }
+
+        private function rewrite_inline_font_face_ttf_sources_to_linked_woff2($html)
+        {
+            $html = (string) $html;
+            if ('' === $html || false === stripos($html, '.ttf')) {
+                return $html;
+            }
+
+            $registry = $this->build_linked_woff2_font_face_registry_from_html($html);
+
+            $changed = false;
+            $updated = $html;
+
+            if (false !== stripos($updated, '@font-face')) {
+                // 2.56.195: final generic TTF cleanup. Bundle replacement can remove
+                // the stylesheet links that originally exposed matching WOFF2 @font-face
+                // declarations, then leave inline @font-face TTF blocks in the final HTML.
+                // Rewrite any local @font-face TTF declaration using the full active
+                // stylesheet/manifest WOFF2 registry, not a vendor-specific target.
+                $font_face_updated = preg_replace_callback('/@font-face\s*\{.*?\}/is', function ($matches) use ($registry, &$changed) {
+                    $block = isset($matches[0]) ? (string) $matches[0] : '';
+                    if ('' === $block || false === stripos($block, '.ttf')) {
+                        return $block;
+                    }
+
+                    $rewritten = $this->rewrite_inline_font_face_ttf_css_with_woff2_registry($block, $registry);
+                    if (is_string($rewritten) && $rewritten !== $block) {
+                        $changed = true;
+                        return $rewritten;
+                    }
+
+                    return $block;
+                }, $updated);
+
+                if (is_string($font_face_updated) && '' !== $font_face_updated) {
+                    $updated = $font_face_updated;
+                }
+            }
+
+            if (false !== stripos($updated, '.ttf')) {
+                $token_updated = $this->rewrite_generic_local_ttf_url_tokens_to_woff2($updated, $registry);
+                if (is_string($token_updated) && $token_updated !== $updated) {
+                    $changed = true;
+                    $updated = $token_updated;
+                }
+            }
+
+            return $changed ? $updated : $html;
+        }
+
+        private function rewrite_generic_local_ttf_url_tokens_to_woff2($html, array $registry)
+        {
+            $html = (string) $html;
+            if ('' === $html || false === stripos($html, '.ttf')) {
+                return $html;
+            }
+
+            // Only rewrite local public font URLs. This is intentionally generic: the
+            // target is .ttf, not a specific vendor directory. URL tokens outside
+            // @font-face are handled only when a safe same-path .woff2 exists; family
+            // matching remains inside the @font-face block pass where family/weight/style
+            // are known.
+            $patterns = array(
+                '~https?://[^\s"\'<>)]+/wp-content/[^\s"\'<>)]+?\.ttf(?:\?[^\s"\'<>)]+)?~i',
+                '~/wp-content/[^\s"\'<>)]+?\.ttf(?:\?[^\s"\'<>)]+)?~i',
+                '~https?:\\/\\/[^\s"\'<>)]+\\/wp-content\\/[^\s"\'<>)]+?\.ttf(?:\?[^\s"\'<>)]+)?~i',
+                '~\\/wp-content\\/[^\s"\'<>)]+?\.ttf(?:\?[^\s"\'<>)]+)?~i',
+            );
+
+            $updated = $html;
+            foreach ($patterns as $pattern) {
+                $updated = preg_replace_callback($pattern, function ($matches) {
+                    $original = isset($matches[0]) ? (string) $matches[0] : '';
+                    if ('' === $original) {
+                        return $original;
+                    }
+
+                    $slash_escaped = false !== strpos($original, '\\/');
+                    $candidate = $slash_escaped ? str_replace('\\/', '/', $original) : $original;
+                    $replacement = $this->find_same_path_preferred_font_url_for_ttf_url($candidate);
+                    if ('' === $replacement) {
+                        return $original;
+                    }
+
+                    return $this->prepare_font_url_for_inline_replacement($replacement, $slash_escaped);
+                }, $updated);
+
+                if (!is_string($updated) || '' === $updated) {
+                    return $html;
+                }
+            }
+
+            return $updated;
+        }
+
+        private function rewrite_themepunch_gfont_ttf_url_tokens_to_linked_woff2($html, array $registry)
+        {
+            // Backward-compatible wrapper retained for older internal callers/tests.
+            return $this->rewrite_generic_local_ttf_url_tokens_to_woff2($html, $registry);
+        }
+
+        private function build_linked_woff2_font_face_registry_from_html($html)
+        {
+            $registry = array();
+            $html = (string) $html;
+            // The final HTML may not contain direct .woff2 references when CSS bundling is active:
+            // the matching @font-face WOFF2 declarations can live inside linked generated CSS bundles.
+            // Therefore only require linked stylesheets here and inspect the stylesheet contents below.
+            if ('' === $html || false === stripos($html, '<link')) {
+                return $registry;
+            }
+
+            if (!preg_match_all('/<link\b[^>]*\bhref=("|\')(.*?)\1[^>]*>/is', $html, $matches, PREG_SET_ORDER)) {
+                return $registry;
+            }
+
+            foreach ($matches as $match) {
+                $tag = isset($match[0]) ? (string) $match[0] : '';
+                if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
+                    continue;
+                }
+
+                $href = isset($match[2]) ? html_entity_decode((string) $match[2], ENT_QUOTES) : '';
+                $stylesheet_url = $this->normalize_public_resource_url($this->absolutize_public_resource_url($href, home_url('/')));
+                if ('' === $stylesheet_url) {
+                    continue;
+                }
+
+                $path = $this->resolve_local_path_from_public_url($stylesheet_url);
+                if ('' === $path || !is_readable($path)) {
+                    continue;
+                }
+
+                $css = ucwp_safe_file_get_contents($path, 'build_linked_woff2_font_face_registry_from_html', true);
+                if (!is_string($css) || '' === $css || false === stripos($css, '@font-face') || false === stripos($css, '.woff2')) {
+                    continue;
+                }
+
+                if (!preg_match_all('/@font-face\s*\{.*?\}/is', $css, $blocks)) {
+                    continue;
+                }
+
+                foreach ((array) $blocks[0] as $block) {
+                    $block = (string) $block;
+                    if (false === stripos($block, '.woff2')) {
+                        continue;
+                    }
+
+                    $family_key = $this->normalize_font_face_family_key($this->extract_font_face_css_declaration($block, 'font-family'));
+                    if ('' === $family_key) {
+                        continue;
+                    }
+
+                    $style_key = $this->normalize_font_face_style_key($this->extract_font_face_css_declaration($block, 'font-style'));
+                    $weight_range = $this->normalize_font_face_weight_range($this->extract_font_face_css_declaration($block, 'font-weight'));
+                    $woff2_url = $this->extract_first_font_face_woff2_url($block, $stylesheet_url);
+                    if ('' === $woff2_url) {
+                        continue;
+                    }
+
+                    if (!isset($registry[$family_key])) {
+                        $registry[$family_key] = array();
+                    }
+                    if (!isset($registry[$family_key][$style_key])) {
+                        $registry[$family_key][$style_key] = array();
+                    }
+
+                    $entry_key = (string) $weight_range['min'] . '-' . (string) $weight_range['max'] . '|' . $woff2_url;
+                    $registry[$family_key][$style_key][$entry_key] = array(
+                        'family' => $family_key,
+                        'style'  => $style_key,
+                        'weight' => $weight_range,
+                        'url'    => $woff2_url,
+                    );
+                }
+            }
+
+            if (false !== stripos($html, 'data-ucwp-page-css-bundle=') || false !== stripos($html, 'data-ucwp-frontpage-css=') || false !== stripos($html, 'id="ucwp-page-css-bundle"') || false !== stripos($html, "id='ucwp-page-css-bundle'") || false !== stripos($html, 'id="ucwp-frontpage-css"') || false !== stripos($html, "id='ucwp-frontpage-css'")) {
+                $entry = $this->get_frontpage_css_manifest_entry();
+                if (!empty($entry['sourceUrls']) && is_array($entry['sourceUrls'])) {
+                    foreach ((array) $entry['sourceUrls'] as $source_url) {
+                        $source_url = $this->normalize_public_resource_url((string) $source_url);
+                        if ('' === $source_url) {
+                            continue;
+                        }
+
+                        $this->add_woff2_font_faces_from_css_url_to_registry($registry, $source_url);
+
+                        $asset = $this->build_optimized_font_css_asset($source_url);
+                        if (!empty($asset['css_url'])) {
+                            $this->add_woff2_font_faces_from_css_url_to_registry($registry, (string) $asset['css_url']);
+                        }
+                    }
+                }
+
+                $bundle_map = $this->build_runtime_font_css_url_map_from_bundle_manifest();
+                if (!empty($bundle_map) && is_array($bundle_map)) {
+                    foreach ((array) $bundle_map as $mapped_css_url) {
+                        $this->add_woff2_font_faces_from_css_url_to_registry($registry, (string) $mapped_css_url);
+                    }
+                }
+            }
+
+            foreach ($registry as $family => $styles) {
+                foreach ($styles as $style => $entries) {
+                    $registry[$family][$style] = array_values($entries);
+                }
+            }
+
+            return $registry;
+        }
+
+        private function add_woff2_font_faces_from_css_url_to_registry(array &$registry, $stylesheet_url)
+        {
+            $stylesheet_url = $this->normalize_public_resource_url($this->absolutize_public_resource_url((string) $stylesheet_url, home_url('/')));
+            if ('' === $stylesheet_url) {
+                return 0;
+            }
+
+            $path = $this->resolve_local_path_from_public_url($stylesheet_url);
+            if ('' === $path || !is_readable($path)) {
+                return 0;
+            }
+
+            $css = ucwp_safe_file_get_contents($path, 'add_woff2_font_faces_from_css_url_to_registry', true);
+            if (!is_string($css) || '' === $css || false === stripos($css, '@font-face') || false === stripos($css, '.woff2')) {
+                return 0;
+            }
+
+            if (!preg_match_all('/@font-face\s*\{.*?\}/is', $css, $blocks)) {
+                return 0;
+            }
+
+            $added = 0;
+            foreach ((array) $blocks[0] as $block) {
+                $block = (string) $block;
+                if (false === stripos($block, '.woff2')) {
+                    continue;
+                }
+
+                $family_key = $this->normalize_font_face_family_key($this->extract_font_face_css_declaration($block, 'font-family'));
+                if ('' === $family_key) {
+                    continue;
+                }
+
+                $style_key = $this->normalize_font_face_style_key($this->extract_font_face_css_declaration($block, 'font-style'));
+                $weight_range = $this->normalize_font_face_weight_range($this->extract_font_face_css_declaration($block, 'font-weight'));
+                $woff2_url = $this->extract_first_font_face_woff2_url($block, $stylesheet_url);
+                if ('' === $woff2_url) {
+                    continue;
+                }
+
+                if (!isset($registry[$family_key])) {
+                    $registry[$family_key] = array();
+                }
+                if (!isset($registry[$family_key][$style_key])) {
+                    $registry[$family_key][$style_key] = array();
+                }
+
+                $entry_key = (string) $weight_range['min'] . '-' . (string) $weight_range['max'] . '|' . $woff2_url;
+                if (empty($registry[$family_key][$style_key][$entry_key])) {
+                    $added++;
+                }
+                $registry[$family_key][$style_key][$entry_key] = array(
+                    'family' => $family_key,
+                    'style'  => $style_key,
+                    'weight' => $weight_range,
+                    'url'    => $woff2_url,
+                );
+            }
+
+            return $added;
+        }
+
+        private function rewrite_inline_font_face_ttf_css_with_woff2_registry($css, array $registry)
+        {
+            $css = (string) $css;
+            if ('' === $css || false === stripos($css, '@font-face') || false === stripos($css, '.ttf')) {
+                return $css;
+            }
+
+            $changed = false;
+            $updated = preg_replace_callback('/@font-face\s*\{.*?\}/is', function ($matches) use ($registry, &$changed) {
+                $block = isset($matches[0]) ? (string) $matches[0] : '';
+                if ('' === $block || false === stripos($block, '.ttf')) {
+                    return $block;
+                }
+
+                $family_key = $this->normalize_font_face_family_key($this->extract_font_face_css_declaration($block, 'font-family'));
+                if ('' === $family_key) {
+                    return $this->normalize_font_face_display_in_css($block);
+                }
+
+                $style_key = $this->normalize_font_face_style_key($this->extract_font_face_css_declaration($block, 'font-style'));
+                $weight_range = $this->normalize_font_face_weight_range($this->extract_font_face_css_declaration($block, 'font-weight'));
+                $replacement_url = $this->find_same_path_preferred_font_url_for_font_face_ttf_block($block);
+                if ('' === $replacement_url) {
+                    $replacement_url = $this->find_matching_woff2_font_face_url($registry, $family_key, $style_key, $weight_range);
+                }
+                if ('' === $replacement_url) {
+                    return $this->normalize_font_face_display_in_css($block);
+                }
+
+                $slash_escaped = false !== strpos($block, '\\/');
+                $replacement_url = $this->prepare_font_url_for_inline_replacement($replacement_url, $slash_escaped);
+                if ('' === $replacement_url) {
+                    return $this->normalize_font_face_display_in_css($block);
+                }
+
+                $replacement_format = $this->get_font_format_for_font_url($replacement_url);
+                $new_src = 'src:url(' . $replacement_url . ') format("' . $replacement_format . '");';
+                $rewritten = preg_replace('/src\s*:\s*[^;}]+\s*;?/i', $new_src, $block, 1);
+                if (!is_string($rewritten) || '' === $rewritten) {
+                    return $this->normalize_font_face_display_in_css($block);
+                }
+
+                $rewritten = $this->normalize_font_face_display_in_css($rewritten);
+                if ($rewritten !== $block) {
+                    $changed = true;
+                }
+
+                return $rewritten;
+            }, $css);
+
+            return is_string($updated) && $changed ? $updated : $css;
+        }
+
+        private function extract_font_face_css_declaration($block, $property)
+        {
+            if (function_exists('ucwp_font_css_extract_declaration')) {
+                return ucwp_font_css_extract_declaration($block, $property);
+            }
+
+            $property = preg_quote((string) $property, '/');
+            if (preg_match('/' . $property . '\s*:\s*([^;}]+)\s*;?/i', (string) $block, $matches)) {
+                return trim((string) $matches[1]);
+            }
+
+            return '';
+        }
+
+        private function normalize_font_face_family_key($family)
+        {
+            $family = trim((string) $family, " \t\n\r\0\x0B\"'");
+            $family = preg_replace('/\s+/', ' ', $family);
+            return is_string($family) ? strtolower($family) : '';
+        }
+
+        private function normalize_font_face_style_key($style)
+        {
+            $style = strtolower(trim((string) $style, " \t\n\r\0\x0B\"'"));
+            if ('' === $style) {
+                return 'normal';
+            }
+
+            if (false !== strpos($style, 'italic')) {
+                return 'italic';
+            }
+
+            if (false !== strpos($style, 'oblique')) {
+                return 'oblique';
+            }
+
+            return 'normal';
+        }
+
+        private function normalize_font_face_weight_range($weight)
+        {
+            $weight = strtolower(trim((string) $weight, " \t\n\r\0\x0B\"'"));
+            if ('' === $weight || 'normal' === $weight) {
+                return array('raw' => '400', 'min' => 400, 'max' => 400);
+            }
+            if ('bold' === $weight) {
+                return array('raw' => '700', 'min' => 700, 'max' => 700);
+            }
+
+            if (preg_match_all('/\d{3}/', $weight, $matches) && !empty($matches[0])) {
+                $values = array_map('intval', $matches[0]);
+                $values = array_values(array_filter($values, static function ($value) {
+                    return $value >= 100 && $value <= 1000;
+                }));
+                if (!empty($values)) {
+                    return array('raw' => $weight, 'min' => min($values), 'max' => max($values));
+                }
+            }
+
+            return array('raw' => '' !== $weight ? $weight : '400', 'min' => 400, 'max' => 400);
+        }
+
+        /**
+         * Rewrite local TTF src() entries inside @font-face CSS to same-path WOFF2/WOFF
+         * siblings when available. This is intentionally generic and applies to delayed
+         * icon-font stylesheets as well as final inline cleanup.
+         */
+        private function rewrite_font_face_ttf_sources_to_preferred_formats($css, $base_url = '')
+        {
+            $css = (string) $css;
+            if ('' === $css || false === stripos($css, '.ttf')) {
+                return $css;
+            }
+
+            $base_url = '' !== (string) $base_url ? (string) $base_url : home_url('/');
+            $changed = false;
+            $updated = preg_replace_callback('/@font-face\s*\{.*?\}/is', function ($matches) use ($base_url, &$changed) {
+                $block = isset($matches[0]) ? (string) $matches[0] : '';
+                if ('' === $block || false === stripos($block, '.ttf')) {
+                    return $block;
+                }
+
+                $block_changed = false;
+                $rewritten = preg_replace_callback('/src\s*:\s*([^;}]+)\s*;?/i', function ($src_matches) use ($base_url, &$block_changed) {
+                    $src = isset($src_matches[1]) ? (string) $src_matches[1] : '';
+                    if ('' === trim($src)) {
+                        return (string) ($src_matches[0] ?? '');
+                    }
+
+                    $items = function_exists('ucwp_font_css_split_src_items') ? ucwp_font_css_split_src_items($src) : array_map('trim', explode(',', $src));
+                    if (empty($items)) {
+                        return (string) ($src_matches[0] ?? '');
+                    }
+
+                    $has_better_source = false;
+                    foreach ($items as $item) {
+                        $item_lc = strtolower((string) $item);
+                        if (false !== strpos($item_lc, '.woff2') || false !== strpos($item_lc, "format('woff2')") || false !== strpos($item_lc, 'format("woff2")') || preg_match('/format\(\s*woff2\s*\)/i', $item_lc)) {
+                            $has_better_source = true;
+                            break;
+                        }
+                        if (false !== strpos($item_lc, '.woff') || false !== strpos($item_lc, "format('woff')") || false !== strpos($item_lc, 'format("woff")') || preg_match('/format\(\s*woff\s*\)/i', $item_lc)) {
+                            $has_better_source = true;
+                        }
+                    }
+
+                    $seen = array();
+                    $kept = array();
+                    foreach ($items as $item) {
+                        $item = trim((string) $item);
+                        if ('' === $item) {
+                            continue;
+                        }
+
+                        $is_ttf_item = (false !== stripos($item, '.ttf')) || (bool) preg_match('/format\(\s*["\']?truetype["\']?\s*\)/i', $item);
+                        if ($is_ttf_item) {
+                            $ttf_url = $this->extract_first_ttf_url_from_css_src_item($item, $base_url);
+                            $replacement_url = '' !== $ttf_url ? $this->find_same_path_preferred_font_url_for_ttf_url($ttf_url) : '';
+                            if ('' !== $replacement_url) {
+                                $format = $this->get_font_format_for_font_url($replacement_url);
+                                $item = 'url(' . esc_url_raw($replacement_url) . ') format("' . $format . '")';
+                                $block_changed = true;
+                            } elseif ($has_better_source) {
+                                // A WOFF2/WOFF source is already present in the same src list.
+                                // Keep the better source and drop the TTF fallback from delayed CSS.
+                                $block_changed = true;
+                                continue;
+                            }
+                        }
+
+                        $key = strtolower((string) preg_replace('/\s+/', '', $item));
+                        if (isset($seen[$key])) {
+                            $block_changed = true;
+                            continue;
+                        }
+                        $seen[$key] = true;
+                        $kept[] = $item;
+                    }
+
+                    if (empty($kept)) {
+                        return (string) ($src_matches[0] ?? '');
+                    }
+
+                    return 'src:' . implode(',', $kept) . ';';
+                }, $block);
+
+                if (!is_string($rewritten) || '' === $rewritten) {
+                    return $block;
+                }
+
+                $rewritten = $this->normalize_font_face_display_in_css($rewritten);
+                if ($block_changed || $rewritten !== $block) {
+                    $changed = true;
+                    return $rewritten;
+                }
+
+                return $block;
+            }, $css);
+
+            return is_string($updated) && $changed ? $updated : $css;
+        }
+
+        private function extract_first_ttf_url_from_css_src_item($item, $base_url = '')
+        {
+            $item = (string) $item;
+            if ('' === $item || false === stripos($item, '.ttf')) {
+                return '';
+            }
+
+            if (!preg_match('/url\(\s*(["\']?)([^)"\']+\.ttf(?:[?#][^)"\']*)?)\1\s*\)/i', $item, $matches)) {
+                return '';
+            }
+
+            $raw = isset($matches[2]) ? trim((string) $matches[2]) : '';
+            if ('' === $raw) {
+                return '';
+            }
+
+            $base_url = '' !== (string) $base_url ? (string) $base_url : home_url('/');
+            $url = $this->normalize_public_resource_url($this->absolutize_public_resource_url($raw, $base_url));
+            return '' !== $url ? esc_url_raw($url) : '';
+        }
+
+        private function find_same_path_preferred_font_url_for_font_face_ttf_block($block)
+        {
+            $block = (string) $block;
+            if ('' === $block || false === stripos($block, '.ttf')) {
+                return '';
+            }
+
+            if (!preg_match_all('/url\(([^)]+\.ttf(?:[\?#][^)]*)?)\)/i', $block, $matches)) {
+                return '';
+            }
+
+            foreach ((array) $matches[1] as $raw) {
+                $raw = trim((string) $raw, " \t\n\r\0\x0B\"'");
+                if ('' === $raw) {
+                    continue;
+                }
+
+                $replacement = $this->find_same_path_preferred_font_url_for_ttf_url($raw);
+                if ('' !== $replacement) {
+                    return $replacement;
+                }
+            }
+
+            return '';
+        }
+
+        private function find_same_path_preferred_font_url_for_ttf_url($ttf_url)
+        {
+            $ttf_url = trim((string) $ttf_url);
+            if ('' === $ttf_url || false === stripos($ttf_url, '.ttf')) {
+                return '';
+            }
+
+            $normalized = $this->normalize_public_resource_url($this->absolutize_public_resource_url($ttf_url, home_url('/')));
+            if ('' === $normalized) {
+                return '';
+            }
+
+            $path = (string) wp_parse_url($normalized, PHP_URL_PATH);
+            if ('' === $path || !preg_match('/\.ttf$/i', $path)) {
+                return '';
+            }
+
+            $query = (string) wp_parse_url($normalized, PHP_URL_QUERY);
+            foreach (array('.woff2', '.woff') as $extension) {
+                $candidate_path = preg_replace('/\.ttf$/i', $extension, $path, 1);
+                if (!is_string($candidate_path) || '' === $candidate_path) {
+                    continue;
+                }
+
+                $candidate_url = $candidate_path . ('' !== $query ? ('?' . $query) : '');
+                $candidate_abs = $this->normalize_public_resource_url($this->absolutize_public_resource_url($candidate_url, home_url('/')));
+                if ('' === $candidate_abs) {
+                    continue;
+                }
+
+                $candidate_file = $this->resolve_local_path_from_public_url($candidate_abs);
+                if ('' === $candidate_file || !is_readable($candidate_file)) {
+                    continue;
+                }
+
+                $size = function_exists('ucwp_safe_filesize') ? (int) ucwp_safe_filesize($candidate_file, 'same_path_preferred_font_candidate') : (int) @filesize($candidate_file);
+                if ($size <= 0) {
+                    continue;
+                }
+
+                return esc_url_raw($candidate_abs);
+            }
+
+            return '';
+        }
+
+        private function find_same_path_woff2_url_for_font_face_ttf_block($block)
+        {
+            $url = $this->find_same_path_preferred_font_url_for_font_face_ttf_block($block);
+            return preg_match('/\.woff2(?:$|[?#])/i', (string) $url) ? $url : '';
+        }
+
+        private function find_same_path_woff2_url_for_ttf_url($ttf_url)
+        {
+            $url = $this->find_same_path_preferred_font_url_for_ttf_url($ttf_url);
+            return preg_match('/\.woff2(?:$|[?#])/i', (string) $url) ? $url : '';
+        }
+
+        private function get_font_format_for_font_url($url)
+        {
+            $path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
+            if (preg_match('/\.woff2$/', $path)) {
+                return 'woff2';
+            }
+            if (preg_match('/\.woff$/', $path)) {
+                return 'woff';
+            }
+            return 'woff2';
+        }
+
+        private function extract_first_font_face_woff2_url($block, $base_url)
+        {
+            $block = (string) $block;
+            if ('' === $block || false === stripos($block, '.woff2')) {
+                return '';
+            }
+
+            if (!preg_match_all('/url\(([^)]+\.woff2(?:[\?#][^)]*)?)\)/i', $block, $matches)) {
+                return '';
+            }
+
+            foreach ((array) $matches[1] as $raw) {
+                $raw = trim((string) $raw, " \t\n\r\0\x0B\"'");
+                if ('' === $raw) {
+                    continue;
+                }
+                $url = $this->normalize_public_resource_url($this->absolutize_public_resource_url($raw, $base_url));
+                if ('' !== $url) {
+                    return esc_url_raw($url);
+                }
+            }
+
+            return '';
+        }
+
+        private function find_matching_woff2_font_face_url(array $registry, $family_key, $style_key, array $weight_range)
+        {
+            $family_key = $this->normalize_font_face_family_key($family_key);
+            $style_key = $this->normalize_font_face_style_key($style_key);
+            if ('' === $family_key || empty($registry[$family_key])) {
+                return '';
+            }
+
+            $styles_to_try = array($style_key);
+            if ('normal' !== $style_key) {
+                $styles_to_try[] = 'normal';
+            }
+
+            $requested_min = (int) ($weight_range['min'] ?? 400);
+            $requested_max = (int) ($weight_range['max'] ?? $requested_min);
+            $requested = $requested_min === $requested_max ? $requested_min : $requested_min;
+
+            foreach ($styles_to_try as $style) {
+                if (empty($registry[$family_key][$style]) || !is_array($registry[$family_key][$style])) {
+                    continue;
+                }
+
+                foreach ($registry[$family_key][$style] as $entry) {
+                    $entry_min = (int) ($entry['weight']['min'] ?? 400);
+                    $entry_max = (int) ($entry['weight']['max'] ?? $entry_min);
+                    if ($requested >= $entry_min && $requested <= $entry_max && !empty($entry['url'])) {
+                        return esc_url_raw((string) $entry['url']);
+                    }
+                }
+            }
+
+            return '';
+        }
+
+        private function find_first_woff2_font_face_url_for_family(array $registry, $family_key)
+        {
+            $family_key = $this->normalize_font_face_family_key($family_key);
+            if ('' === $family_key || empty($registry[$family_key]) || !is_array($registry[$family_key])) {
+                return '';
+            }
+
+            foreach (array('normal', 'italic', 'oblique') as $preferred_style) {
+                if (empty($registry[$family_key][$preferred_style]) || !is_array($registry[$family_key][$preferred_style])) {
+                    continue;
+                }
+                foreach ($registry[$family_key][$preferred_style] as $entry) {
+                    if (!empty($entry['url'])) {
+                        return esc_url_raw((string) $entry['url']);
+                    }
+                }
+            }
+
+            foreach ($registry[$family_key] as $entries) {
+                if (!is_array($entries)) {
+                    continue;
+                }
+                foreach ($entries as $entry) {
+                    if (!empty($entry['url'])) {
+                        return esc_url_raw((string) $entry['url']);
+                    }
+                }
+            }
+
+            return '';
+        }
+
+        private function prepare_font_url_for_inline_replacement($url, $slash_escaped = false)
+        {
+            $url = $this->normalize_public_resource_url((string) $url);
+            if ('' === $url) {
+                return '';
+            }
+
+            $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+            $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+            if ('' !== $host && '' !== $home_host && $host === $home_host) {
+                $path = (string) wp_parse_url($url, PHP_URL_PATH);
+                $query = (string) wp_parse_url($url, PHP_URL_QUERY);
+                if ('' !== $path) {
+                    $url = $path . ('' !== $query ? ('?' . $query) : '');
+                }
+            }
+
+            $url = esc_url_raw($url);
+            if ('' === $url) {
+                return '';
+            }
+
+            return $slash_escaped ? str_replace('/', '\/', $url) : $url;
         }
 
         private function build_runtime_font_css_url_map_from_html($html)
@@ -1525,7 +2334,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 }
 
                 $path = strtolower((string) wp_parse_url($source_url, PHP_URL_PATH));
-                if (false !== strpos($path, '/cache/ultracache/css-bundles/') || false !== strpos($path, '/cache/ultracache/font-css/')) {
+                if (false !== strpos($path, '/cache/ultracache/css-bundles/') || false !== strpos($path, '/cache/ultracache/font-css/') || false !== strpos($path, '/cache/ultracache/optimized-css/')) {
                     continue;
                 }
 
@@ -1845,7 +2654,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     }
 
                     $path = strtolower((string) wp_parse_url($normalized, PHP_URL_PATH));
-                    if (false !== strpos($path, '/cache/ultracache/font-css/') || false !== strpos($path, '/cache/ultracache/css-bundles/')) {
+                    if (false !== strpos($path, '/cache/ultracache/font-css/') || false !== strpos($path, '/cache/ultracache/css-bundles/') || false !== strpos($path, '/cache/ultracache/optimized-css/')) {
                         continue;
                     }
 
@@ -1880,6 +2689,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 
             $combined_blocks = array();
             $signature_parts = array();
+            $settings = $this->get_settings();
             $stats = array(
                 'sourceStylesheets' => 0,
                 'fontFaceBlocksScanned' => 0,
@@ -1927,6 +2737,14 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 foreach ($blocks as $block) {
                     $block = (string) $block;
                     $stats['fontFaceBlocksScanned']++;
+                    if (!empty($settings['delay_icon_fonts'])) {
+                        $delay_meta = array();
+                        if ($this->should_delay_css_font_face_block($block, $css, $settings, $delay_meta)) {
+                            // 2.56.196: do not create a render-path font-display patch
+                            // that duplicates an icon font scheduled for delayed loading.
+                            continue;
+                        }
+                    }
                     if (false !== stripos($block, 'font-display')) {
                         continue;
                     }
@@ -2132,6 +2950,12 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 
                 $url = esc_url_raw((string) $asset['delayedFontUrl']);
                 if ('' === $url || isset($seen[$url]) || $this->html_link_href_exists($html, $url)) {
+                    continue;
+                }
+
+                $delayed_file = !empty($asset['delayedFontFile']) ? (string) $asset['delayedFontFile'] : $this->resolve_local_path_from_public_url($url);
+                clearstatcache(true, $delayed_file);
+                if ('' === $delayed_file || !is_readable($delayed_file) || filesize($delayed_file) <= 0) {
                     continue;
                 }
 

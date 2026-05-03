@@ -267,21 +267,29 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             }
 
             if ($this->should_bypass_preload_url($url, array('ignore_runtime_bypass' => $ignore_runtime_bypass))) {
+                $bypass_reason = (string) $this->last_bypass_reason;
+                $bypass_message = 'URL is configured to bypass cache: ' . $bypass_reason;
+                if ('donotcachepage' === strtolower($bypass_reason)) {
+                    $bypass_message .= ' (DONOTCACHEPAGE was set during the warm request; this is commonly caused by debugging/logged-in tooling such as Query Monitor, admin-bar integrations, or plugins that intentionally bypass page cache.)';
+                }
                 $result = array(
                     'success' => false,
                     'cached'  => false,
                     'url'     => $url,
-                    'message' => 'URL is configured to bypass cache: ' . $this->last_bypass_reason,
+                    'message' => $bypass_message,
                     'files'   => array(),
                 );
                 $this->record_analytics_warm($url, $result);
                 return $result;
             }
 
-            $requested_buckets = isset($args['buckets']) && is_array($args['buckets']) ? $args['buckets'] : array('orig', 'webp', 'avif');
-            $buckets = array_values(array_unique(array_intersect(array('orig', 'webp', 'avif'), array_map('strval', $requested_buckets))));
+            // 2.56.185: warm AVIF before WebP so auto/best warm generation does not
+            // settle on a WebP fallback before the AVIF bucket has had a chance to generate.
+            $bucket_priority = array('orig', 'avif', 'webp');
+            $requested_buckets = isset($args['buckets']) && is_array($args['buckets']) ? $args['buckets'] : $bucket_priority;
+            $buckets = array_values(array_unique(array_intersect($bucket_priority, array_map('strval', $requested_buckets))));
             if (empty($buckets)) {
-                $buckets = array('orig', 'webp', 'avif');
+                $buckets = $bucket_priority;
             }
 
             $settings_for_warm = $this->get_settings();
@@ -413,7 +421,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             }
 
             foreach ($items as $item) {
-                if ('.' === $item || '..' === $item || 'google-fonts' === $item || 'css-bundles' === $item) {
+                if ('.' === $item || '..' === $item || 'google-fonts' === $item || 'css-bundles' === $item || 'js-bundles' === $item) {
                     continue;
                 }
 

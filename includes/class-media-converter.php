@@ -51,6 +51,28 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		 */
 		private $on_demand_request_started_at = null;
 
+
+		/**
+		 * Per-request memoized optimized variant existence checks.
+		 *
+		 * @var array<string,bool>
+		 */
+		private $optimized_variant_exists_memo = array();
+
+		/**
+		 * Per-request map from discovered upload image URL tokens to optimized URLs.
+		 *
+		 * @var array<string,string>
+		 */
+		private $optimized_image_url_rewrite_map = array();
+
+		/**
+		 * Current safe generation context: frontend, warm, cron, stale, or manual.
+		 *
+		 * @var string
+		 */
+		private $media_generation_context = 'frontend';
+
 		/**
 		 * Background conversion queue option name.
 		 */

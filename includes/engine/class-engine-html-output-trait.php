@@ -428,6 +428,12 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
+            if (!empty($settings['self_hosted_font_css_optimization']) && false !== stripos((string) $html, '.ttf')) {
+                $html = $this->apply_html_rewrite_safely($html, 'final-generic-ttf-font-face-cleanup', function ($html) {
+                    return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($html);
+                });
+            }
+
             if (empty($settings['frontend_safe_mode']) && !empty($settings['self_hosted_font_runtime_rewrite'])) {
                 // Runtime font CSS rewrites are intentionally allowed during slider/hero safe mode.
                 // The helper only rewrites late stylesheet href attributes via MutationObserver and
@@ -469,6 +475,12 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             if (!empty($settings['defer_js']) && !empty($settings['defer_all_js'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'defer-all-js-final-pass', function ($html) use ($settings) {
                     return $this->apply_defer_all_js_to_html($html, $settings);
+                });
+            }
+
+            if (!empty($settings['js_bundle']) && !empty($settings['defer_js'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'safe-deferred-js-bundle', function ($html) use ($settings) {
+                    return $this->apply_safe_deferred_js_bundle_to_html($html, $settings);
                 });
             }
 
