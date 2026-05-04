@@ -109,9 +109,10 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             $jobs = is_array($jobs) ? $jobs : array();
             $normalized = $this->normalize_action_jobs($jobs);
             if ($normalized !== $jobs) {
-                update_option($this->get_action_queue_option_key(), $normalized, false);
+                update_option($this->get_action_queue_option_key(), $this->scrub_action_jobs_for_storage($normalized), false);
             }
-            return $normalized;
+
+            return $this->reconcile_action_queue_state($normalized);
         }
 
         private function save_action_jobs(array $jobs)
@@ -134,6 +135,30 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             }
 
             return array();
+        }
+
+        private function get_action_queue_lock_payload()
+        {
+            $lock = get_option($this->get_action_queue_lock_option_key(), array());
+            return is_array($lock) ? $lock : array();
+        }
+
+        private function is_action_queue_job_locked(array $job, $job_id = '')
+        {
+            $lock = $this->get_action_queue_lock_payload();
+            if (empty($lock)) {
+                return false;
+            }
+
+            $lock_job_id = (string) ($lock['jobId'] ?? '');
+            if ('' !== (string) $job_id && '' !== $lock_job_id && $lock_job_id !== (string) $job_id) {
+                return false;
+            }
+
+            $lock_action = sanitize_key((string) ($lock['action'] ?? ''));
+            $job_action = sanitize_key((string) ($job['action'] ?? ''));
+
+            return '' !== $lock_action && '' !== $job_action && $lock_action === $job_action;
         }
 
         private function acquire_action_queue_heavy_lock($action, $job_id)
@@ -169,6 +194,118 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             if (is_array($existing) && (string) ($existing['jobId'] ?? '') === (string) $job_id) {
                 delete_option($key);
             }
+        }
+
+        private function get_action_queue_job_age(array $job)
+        {
+            $started = isset($job['startedAt']) ? (int) $job['startedAt'] : 0;
+            $updated = isset($job['updatedAt']) ? (int) $job['updatedAt'] : 0;
+            $created = isset($job['createdAt']) ? (int) $job['createdAt'] : 0;
+            $base = max($started, $updated, $created);
+
+            return $base > 0 ? max(0, time() - $base) : 0;
+        }
+
+        private function get_action_queue_lock_age()
+        {
+            $existing = get_option($this->get_action_queue_lock_option_key(), array());
+            if (!is_array($existing)) {
+                return 0;
+            }
+
+            $time = isset($existing['time']) ? (int) $existing['time'] : 0;
+            return $time > 0 ? max(0, time() - $time) : 0;
+        }
+
+        private function reconcile_action_queue_heavy_lock(array $jobs)
+        {
+            $key = $this->get_action_queue_lock_option_key();
+            $lock = get_option($key, array());
+            if (!is_array($lock) || empty($lock)) {
+                return $jobs;
+            }
+
+            $now = time();
+            $lock_job_id = (string) ($lock['jobId'] ?? '');
+            $lock_action = sanitize_key((string) ($lock['action'] ?? ''));
+            $lock_time = isset($lock['time']) ? (int) $lock['time'] : 0;
+            $lock_age = $lock_time > 0 ? max(0, $now - $lock_time) : PHP_INT_MAX;
+            $stale_after = $this->get_action_queue_stale_seconds();
+            $matching_job = ($lock_job_id !== '' && isset($jobs[$lock_job_id]) && is_array($jobs[$lock_job_id])) ? $jobs[$lock_job_id] : array();
+            $matching_status = (string) ($matching_job['status'] ?? '');
+            $matching_action = sanitize_key((string) ($matching_job['action'] ?? $lock_action));
+            $matching_age = !empty($matching_job) ? $this->get_action_queue_job_age($matching_job) : PHP_INT_MAX;
+            $delete_lock = false;
+
+            if (empty($matching_job)) {
+                $delete_lock = true;
+            } elseif (!in_array($matching_status, array('queued', 'running'), true)) {
+                $delete_lock = true;
+            } elseif (!$this->is_heavy_action_queue_action($matching_action)) {
+                $delete_lock = true;
+            } elseif ($lock_age > $stale_after || $matching_age > $stale_after) {
+                $jobs[$lock_job_id]['status'] = 'failed';
+                $jobs[$lock_job_id]['message'] = 'Dashboard processing action was marked stale and stopped from blocking new work.';
+                $jobs[$lock_job_id]['finishedAt'] = $now;
+                $jobs[$lock_job_id]['updatedAt'] = $now;
+                $delete_lock = true;
+            }
+
+            if ($delete_lock) {
+                delete_option($key);
+            }
+
+            return $jobs;
+        }
+
+        private function reconcile_action_queue_orphaned_running_jobs(array $jobs)
+        {
+            $now = time();
+            $lock = $this->get_action_queue_lock_payload();
+            $lock_job_id = is_array($lock) ? (string) ($lock['jobId'] ?? '') : '';
+
+            foreach ($jobs as $id => $job) {
+                if (!is_array($job)) {
+                    continue;
+                }
+
+                $status = (string) ($job['status'] ?? '');
+                $action = (string) ($job['action'] ?? '');
+                if ('running' !== $status || !$this->is_heavy_action_queue_action($action)) {
+                    continue;
+                }
+
+                if ('' !== $lock_job_id && (string) $id === $lock_job_id) {
+                    continue;
+                }
+
+                $age = $this->get_action_queue_job_age($job);
+                if ($age < 10) {
+                    continue;
+                }
+
+                $job['status'] = 'failed';
+                $job['message'] = 'Dashboard processing action was released because its worker lock was no longer active.';
+                $job['finishedAt'] = $now;
+                $job['updatedAt'] = $now;
+                $job['orphanedRuntime'] = true;
+                $jobs[$id] = $job;
+            }
+
+            return $jobs;
+        }
+
+        private function reconcile_action_queue_state(array $jobs)
+        {
+            $before = $jobs;
+            $jobs = $this->reconcile_action_queue_heavy_lock($jobs);
+            $jobs = $this->reconcile_action_queue_orphaned_running_jobs($jobs);
+
+            if ($jobs !== $before) {
+                update_option($this->get_action_queue_option_key(), $this->scrub_action_jobs_for_storage($jobs), false);
+            }
+
+            return $jobs;
         }
 
         private function is_sensitive_action_queue_key($key)
@@ -261,50 +398,72 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 'id'        => $id,
                 'action'    => $action,
                 'params'    => is_array($stored_params) ? $stored_params : array(),
-                'status'    => 'queued',
-                'message'   => 'Waiting for dashboard processing.',
+                'status'    => 'running',
+                'message'   => 'Processing dashboard action.',
                 'createdAt' => $now,
+                'startedAt' => $now,
                 'updatedAt' => $now,
+                'direct'    => true,
             );
 
-            $jobs = $this->load_action_jobs();
+            /*
+             * Dashboard work actions are intentionally synchronous from 2.56.250.
+             *
+             * Older builds attempted to enqueue these actions and then run them from
+             * a separate worker/polling request protected by a global "heavy" lock.
+             * That made simple dashboard buttons such as Flush All Cache appear done
+             * while stale purge_all locks/jobs were still blocking later actions.
+             *
+             * The dashboard UX now treats these as blocking work buttons: click, wait,
+             * receive success/failure. The settings debounce queue remains separate
+             * and is flushed before the work action is called from the admin UI.
+             */
+            $lock_acquired = false;
+            if ($this->is_heavy_action_queue_action($action)) {
+                if (!$this->acquire_action_queue_heavy_lock($action, $id)) {
+                    $lock = $this->get_action_queue_lock_payload();
+                    $running_action = is_array($lock) && !empty($lock['action']) ? sanitize_key((string) $lock['action']) : 'another action';
+                    $job['status'] = 'failed';
+                    $job['message'] = 'Another heavy dashboard action is already running: ' . $running_action . '.';
+                    $job['alreadyRunning'] = true;
+                    $job['finishedAt'] = time();
+                    $job['updatedAt'] = time();
 
-            if ('redis_test' === $action) {
-                $job['status'] = 'running';
-                $job['message'] = 'Testing Redis connection.';
-                $job['startedAt'] = $now;
-                $job['updatedAt'] = $now;
+                    $jobs = $this->load_action_jobs();
+                    $jobs[$id] = $job;
+                    $this->save_action_jobs($jobs);
 
+                    return new WP_REST_Response(array('success' => false, 'message' => $job['message'], 'alreadyRunning' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 423);
+                }
+                $lock_acquired = true;
+            }
+
+            try {
                 $result = $this->run_action_queue_job($action, $params);
                 $ok = !empty($result['success']) || !empty($result['skipped']);
                 $job['status'] = $ok ? 'done' : 'failed';
                 $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
                 $job['result'] = $this->scrub_action_queue_payload($result, 'result', 0);
-                $job['finishedAt'] = time();
-                $job['updatedAt'] = time();
-                $jobs[$id] = $job;
-                $this->save_action_jobs($jobs);
-
-                return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
-            }
-
-            if ($this->is_heavy_action_queue_action($action)) {
-                $active = $this->find_active_heavy_action_job($jobs);
-                if (!empty($active)) {
-                    $job['status'] = 'failed';
-                    $job['message'] = 'Another heavy dashboard action is already running: ' . (string) ($active['action'] ?? 'unknown') . '.';
-                    $job['finishedAt'] = $now;
-                    $job['updatedAt'] = $now;
-                    $jobs[$id] = $job;
-                    $this->save_action_jobs($jobs);
-
-                    return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
+            } catch (Throwable $error) {
+                $job['status'] = 'failed';
+                $job['message'] = $error->getMessage();
+            } catch (Exception $error) {
+                $job['status'] = 'failed';
+                $job['message'] = $error->getMessage();
+            } finally {
+                if ($lock_acquired) {
+                    $this->release_action_queue_heavy_lock($id);
                 }
             }
+
+            $job['finishedAt'] = time();
+            $job['updatedAt'] = time();
+
+            $jobs = $this->load_action_jobs();
             $jobs[$id] = $job;
             $this->save_action_jobs($jobs);
 
-            return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
+            return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
         }
 
         public function get_action_job(WP_REST_Request $request)
@@ -317,49 +476,10 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
             $job = $jobs[$id];
             $status = (string) ($job['status'] ?? 'queued');
+            $action = (string) ($job['action'] ?? '');
+
             if ('queued' === $status) {
-                $action = (string) ($job['action'] ?? '');
-                if ($this->is_heavy_action_queue_action($action)) {
-                    $active = $this->find_active_heavy_action_job($jobs, $id);
-                    if (!empty($active)) {
-                        $job['status'] = 'failed';
-                        $job['message'] = 'Another heavy dashboard action is already running: ' . (string) ($active['action'] ?? 'unknown') . '.';
-                        $job['finishedAt'] = time();
-                        $job['updatedAt'] = time();
-                        $jobs[$id] = $job;
-                        $this->save_action_jobs($jobs);
-                        return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
-                    }
-                    if (!$this->acquire_action_queue_heavy_lock($action, $id)) {
-                        $job['status'] = 'failed';
-                        $job['message'] = 'Another heavy dashboard action lock is active. Try again shortly.';
-                        $job['finishedAt'] = time();
-                        $job['updatedAt'] = time();
-                        $jobs[$id] = $job;
-                        $this->save_action_jobs($jobs);
-                        return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
-                    }
-                }
-
-                $job['status'] = 'running';
-                $job['message'] = 'Processing via dashboard.';
-                $job['startedAt'] = time();
-                $job['updatedAt'] = time();
-                $jobs[$id] = $job;
-                $this->save_action_jobs($jobs);
-
-                try {
-                    $result = $this->run_action_queue_job($action, is_array($job['params'] ?? null) ? $job['params'] : array());
-                } finally {
-                    if ($this->is_heavy_action_queue_action($action)) {
-                        $this->release_action_queue_heavy_lock($id);
-                    }
-                }
-                $ok = !empty($result['success']) || !empty($result['skipped']);
-                $job['status'] = $ok ? 'done' : 'failed';
-                $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
-                $job['result'] = $this->scrub_action_queue_payload($result, 'result', 0);
-                $job['finishedAt'] = time();
+                $job['message'] = !empty($job['message']) ? (string) $job['message'] : 'Waiting for dashboard runner.';
                 $job['updatedAt'] = time();
                 $jobs[$id] = $job;
                 $this->save_action_jobs($jobs);
@@ -370,6 +490,96 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 $job['updatedAt'] = time();
                 $jobs[$id] = $job;
                 $this->save_action_jobs($jobs);
+                if ($this->is_heavy_action_queue_action($action)) {
+                    $this->release_action_queue_heavy_lock($id);
+                }
+            }
+
+            return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
+        }
+
+        public function run_action_job_request(WP_REST_Request $request)
+        {
+            $id = sanitize_text_field((string) $request->get_param('id'));
+            $jobs = $this->load_action_jobs();
+            if (empty($jobs[$id]) || !is_array($jobs[$id])) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Dashboard processing action not found.'), 404);
+            }
+
+            $job = $jobs[$id];
+            $status = (string) ($job['status'] ?? 'queued');
+            $action = (string) ($job['action'] ?? '');
+            if (!in_array($action, $this->get_allowed_action_queue_actions(), true)) {
+                $job['status'] = 'failed';
+                $job['message'] = 'Unsupported dashboard processing action.';
+                $job['finishedAt'] = time();
+                $job['updatedAt'] = time();
+                $jobs[$id] = $job;
+                $this->save_action_jobs($jobs);
+                return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
+            }
+
+            if (in_array($status, array('done', 'failed'), true)) {
+                return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
+            }
+
+            if ('running' === $status) {
+                return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
+            }
+
+            $lock_acquired = false;
+            if ($this->is_heavy_action_queue_action($action)) {
+                $active = $this->find_active_heavy_action_job($jobs, $id);
+                if (!empty($active)) {
+                    $job['status'] = 'failed';
+                    $job['message'] = 'Dashboard action already running: ' . (string) ($active['action'] ?? 'unknown') . '.';
+                    $job['blockedBy'] = (string) ($active['id'] ?? '');
+                    $job['finishedAt'] = time();
+                    $job['updatedAt'] = time();
+                    $jobs[$id] = $job;
+                    $this->save_action_jobs($jobs);
+                    return new WP_REST_Response(array('success' => true, 'alreadyRunning' => true, 'job' => $this->scrub_action_queue_payload($active, 'job', 0)), 202);
+                }
+
+                if (!$this->acquire_action_queue_heavy_lock($action, $id)) {
+                    $job['message'] = 'Waiting for another heavy dashboard action to finish.';
+                    $job['updatedAt'] = time();
+                    $jobs[$id] = $job;
+                    $this->save_action_jobs($jobs);
+                    return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
+                }
+                $lock_acquired = true;
+            }
+
+            $job['status'] = 'running';
+            $job['message'] = 'Processing via dashboard runner.';
+            $job['startedAt'] = time();
+            $job['updatedAt'] = time();
+            $jobs[$id] = $job;
+            $this->save_action_jobs($jobs);
+
+            try {
+                $result = $this->run_action_queue_job($action, is_array($job['params'] ?? null) ? $job['params'] : array());
+                $ok = !empty($result['success']) || !empty($result['skipped']);
+                $job['status'] = $ok ? 'done' : 'failed';
+                $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
+                $job['result'] = $this->scrub_action_queue_payload($result, 'result', 0);
+            } catch (Throwable $error) {
+                $job['status'] = 'failed';
+                $job['message'] = $error->getMessage();
+            } catch (Exception $error) {
+                $job['status'] = 'failed';
+                $job['message'] = $error->getMessage();
+            }
+
+            $job['finishedAt'] = time();
+            $job['updatedAt'] = time();
+            $jobs = $this->load_action_jobs();
+            $jobs[$id] = $job;
+            $this->save_action_jobs($jobs);
+
+            if ($lock_acquired) {
+                $this->release_action_queue_heavy_lock($id);
             }
 
             return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
@@ -382,7 +592,11 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                     case 'purge_all':
                         return $this->unwrap_rest_payload($this->purge_all());
                     case 'object_cache_flush':
-                        return $this->unwrap_rest_payload($this->object_cache_flush());
+                        $flush_request = new WP_REST_Request('POST', '/');
+                        foreach ($params as $key => $value) {
+                            $flush_request->set_param($key, $value);
+                        }
+                        return $this->unwrap_rest_payload($this->object_cache_flush($flush_request));
                     case 'object_cache_full_count':
                         return $this->unwrap_rest_payload($this->object_cache_full_count());
                     case 'warm_frontpage_html':

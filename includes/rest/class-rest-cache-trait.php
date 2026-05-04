@@ -8,6 +8,17 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
     {
         public function get_stats()
         {
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'is_dashboard_heavy_work_active') && Ultra_Cache_WP::is_dashboard_heavy_work_active()) {
+                $payload = method_exists('Ultra_Cache_WP', 'get_lightweight_dashboard_busy_stats')
+                    ? Ultra_Cache_WP::get_lightweight_dashboard_busy_stats()
+                    : array('success' => true, 'busy' => true, 'dashboardWorkActive' => true);
+                return new WP_REST_Response($payload, 200);
+            }
+
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_stats_snapshot')) {
+                return new WP_REST_Response(Ultra_Cache_WP::get_dashboard_stats_snapshot(20, true), 200);
+            }
+
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
                 return new WP_REST_Response(Ultra_Cache_WP::get_engine_stats(), 200);
             }
@@ -160,6 +171,9 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Varnish helper not available.'), 500);
             }
 
+            if (method_exists('Ultra_Cache_WP', 'reset_settings_cache')) {
+                Ultra_Cache_WP::reset_settings_cache();
+            }
             $result = Ultra_Cache_WP::varnish_test_connection();
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
                 $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
@@ -235,13 +249,54 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
         }
 
-        public function object_cache_flush()
+        public function object_cache_backend_test(WP_REST_Request $request)
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'test_object_cache_backend')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Object cache backend test helper not available.'), 500);
+            }
+
+            $backend = sanitize_key((string) $request->get_param('backend'));
+            if (!in_array($backend, array('redis', 'apcu', 'disk', 'active', 'selected'), true)) {
+                $backend = 'selected';
+            }
+
+            $settings = array();
+            foreach (array('redisHost', 'redisPort', 'redisUsername', 'redisPassword', 'redisDatabase', 'redisPrefix', 'redisUseTls', 'redisPersistent', 'redisConnectTimeoutMs', 'redisReadTimeoutMs') as $key) {
+                if (null !== $request->get_param($key)) {
+                    $settings[$key] = $request->get_param($key);
+                }
+            }
+
+            if (array_key_exists('redisPassword', $settings) && '' === trim((string) $settings['redisPassword']) && !empty($request->get_param('redisPasswordConfigured'))) {
+                unset($settings['redisPassword']);
+            }
+
+            $result = Ultra_Cache_WP::test_object_cache_backend($backend, $settings);
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
+                $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
+            }
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
+                $result['settings'] = Ultra_Cache_WP::get_dashboard_settings_for_client();
+            }
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
+                $result['stats'] = Ultra_Cache_WP::get_engine_stats();
+            }
+
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+        }
+
+        public function object_cache_flush(WP_REST_Request $request = null)
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_object_cache')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Object cache helper not available.'), 500);
             }
 
-            $result = Ultra_Cache_WP::flush_object_cache();
+            $backend = $request instanceof WP_REST_Request ? sanitize_key((string) $request->get_param('backend')) : 'active';
+            if (!in_array($backend, array('redis', 'apcu', 'disk', 'active', 'selected'), true)) {
+                $backend = 'active';
+            }
+
+            $result = Ultra_Cache_WP::flush_object_cache($backend);
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
         }
 

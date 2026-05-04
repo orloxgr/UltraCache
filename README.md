@@ -2,9 +2,9 @@
 
 UltraCache is a WordPress performance plugin for site owners and operators who want practical caching controls, visible safeguards, cache warm-up, object cache support, media optimization, CSS/font optimization, Varnish-aware purge tools, and diagnostics that explain what is happening.
 
-Current version: **2.56.238**
+Current version: **2.57.06**
 
-2.56.238 makes the browser Runtime Scan collector survive the final JS optimization pipeline by injecting it after the unified finalizer and preventing UltraCache from delaying its own diagnostic collector. This fixes scans that visibly counted down but returned zero captured errors.
+2.57.06 is a stabilization build that stops automatic dashboard browser probes, adds passive/cached stats snapshots with request backoff, and moves the manual homepage cache-status probe into the Cache Decision Tester area.
 
 Release notes are maintained in [`changelog.txt`](changelog.txt).
 

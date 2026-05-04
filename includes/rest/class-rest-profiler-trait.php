@@ -828,7 +828,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 if ('' === $line) {
                     continue;
                 }
-                if ($line === $suggestion || false !== strpos($suggestion, $line) || false !== strpos($line, $suggestion)) {
+                if ($line === $suggestion || false !== strpos($suggestion, $line)) {
                     return true;
                 }
             }
@@ -876,6 +876,235 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             return sanitize_text_field($base);
         }
 
+        private function runtime_js_scan_is_generic_token($token)
+        {
+            $token = strtolower(trim((string) $token));
+            if ('' === $token || strlen($token) < 3) {
+                return true;
+            }
+
+            return in_array($token, array(
+                'function',
+                'anonymous',
+                'jquery',
+                'jQuery',
+                'core',
+                'plugin',
+                'plugins',
+                'script',
+                'scripts',
+                'javascript',
+                'dispatch',
+                'handle',
+                'each',
+                'init',
+                'ready',
+                'main',
+                'map',
+                'maps',
+                'load',
+                'callback',
+                'min',
+                'ver',
+                'html',
+                'div',
+                'body',
+                'window',
+                'document',
+                'event',
+                'error',
+                'typeerror',
+                'undefined',
+                'computed',
+            ), true);
+        }
+
+        private function runtime_js_scan_split_symbol_tokens($symbol)
+        {
+            $symbol = trim((string) $symbol);
+            if ('' === $symbol) {
+                return array();
+            }
+
+            $expanded = preg_replace('/([a-z0-9])([A-Z])/', '$1 $2', $symbol);
+            $parts = preg_split('/[^A-Za-z0-9]+/', (string) $expanded);
+            $tokens = array();
+            foreach ((array) $parts as $part) {
+                $token = strtolower(trim((string) $part));
+                if ($this->runtime_js_scan_is_generic_token($token)) {
+                    continue;
+                }
+                $tokens[$token] = true;
+            }
+
+            return array_keys($tokens);
+        }
+
+        private function runtime_js_scan_script_basenames_from_text($text)
+        {
+            $text = (string) $text;
+            $out = array();
+            if ('' === $text) {
+                return array();
+            }
+
+            if (preg_match_all('/(?:https?:\/\/[^\s\)\]\}\"\']+\/)?([^\s\)\]\}\"\'\/]+\.js)(?:\?[^\s\)\]\}\"\']*)?(?::\d+){0,2}/i', $text, $matches)) {
+                foreach ((array) $matches[1] as $base) {
+                    $base = sanitize_text_field(basename((string) $base));
+                    if ('' === $base) {
+                        continue;
+                    }
+                    $lower = strtolower($base);
+                    if (in_array($lower, array('jquery.min.js', 'jquery-migrate.min.js'), true)) {
+                        continue;
+                    }
+                    $out[$base] = true;
+                }
+            }
+
+            return array_keys($out);
+        }
+
+        private function runtime_js_scan_url_fragments_from_text($text)
+        {
+            $text = (string) $text;
+            $out = array();
+            if ('' === $text) {
+                return array();
+            }
+
+            if (preg_match_all('#https?://[^\s\)\]\}\"\'<>]+#i', $text, $matches)) {
+                foreach ((array) $matches[0] as $url) {
+                    $url = html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8');
+                    $url = preg_replace('/(?::\d+){1,2}$/', '', $url);
+                    $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+                    $path = (string) wp_parse_url($url, PHP_URL_PATH);
+
+                    if ('' !== $host && !$this->runtime_js_scan_is_generic_token($host)) {
+                        $out[$host] = true;
+                    }
+
+                    $path = trim($path, '/');
+                    if ('' === $path) {
+                        continue;
+                    }
+
+                    $parts = array_values(array_filter(explode('/', strtolower($path)), 'strlen'));
+                    if (count($parts) >= 2) {
+                        $last_two = implode('/', array_slice($parts, -2));
+                        if (false === strpos($last_two, '.js') && false === strpos($last_two, '.css')) {
+                            $out[$last_two] = true;
+                        }
+                    }
+                    if (count($parts) >= 3) {
+                        $last_three = implode('/', array_slice($parts, -3));
+                        if (false === strpos($last_three, '.js') && false === strpos($last_three, '.css')) {
+                            $out[$last_three] = true;
+                        }
+                    }
+                }
+            }
+
+            return array_keys($out);
+        }
+
+        private function runtime_js_scan_add_function_dependency_suggestions(&$suggestions, &$seen, $function_name, $source, $message, $detail, array $exclusions)
+        {
+            $function_name = trim((string) $function_name);
+            if ('' === $function_name || $this->runtime_js_scan_is_generic_token($function_name)) {
+                return;
+            }
+
+            $reason = 'A runtime error says a callback/function was called before it was available. Suggestions are derived from the missing function name and stack/source URLs; add the smallest matching exclusions and scan again.';
+            $source_base = $this->runtime_js_scan_basename_from_source($source);
+            $stack_text = (string) $source . "\n" . (string) $detail . "\n" . (string) $message;
+
+            if ('' !== $source_base && preg_match('/\.js$/i', $source_base) && !in_array(strtolower($source_base), array('jquery.min.js', 'jquery-migrate.min.js', 'main.js'), true)) {
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'runtime function error source', $source, $message, $reason, $exclusions, 'review');
+            }
+
+            $this->runtime_js_scan_add_suggestion($suggestions, $seen, $function_name, 'missing runtime function', $source, $message, $reason, $exclusions, 'recommended');
+
+            foreach ($this->runtime_js_scan_split_symbol_tokens($function_name) as $token) {
+                if ($this->runtime_js_scan_is_generic_token($token)) {
+                    continue;
+                }
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $token, 'missing runtime function token', $source, $message, $reason, $exclusions, 'recommended');
+            }
+
+            foreach ($this->runtime_js_scan_url_fragments_from_text($stack_text) as $fragment) {
+                $fragment = trim((string) $fragment);
+                if ('' === $fragment || $this->runtime_js_scan_is_generic_token($fragment)) {
+                    continue;
+                }
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $fragment, 'runtime stack URL fragment', $source, $message, $reason, $exclusions, 'recommended');
+            }
+        }
+
+        private function runtime_js_scan_add_jquery_plugin_dependency_suggestions(&$suggestions, &$seen, $method, $source, $message, $detail, array $exclusions)
+        {
+            $method = trim((string) $method);
+            if ('' === $method) {
+                return;
+            }
+
+            $reason = 'A runtime error says a jQuery plugin method was called before it was registered. These suggestions are derived from the failing script, missing method name, and stack trace symbols; add the smallest matching exclusions and scan again.';
+            $source_base = $this->runtime_js_scan_basename_from_source($source);
+            $stack_text = (string) $source . "\n" . (string) $detail . "\n" . (string) $message;
+
+            $candidate_scripts = array();
+            if ('' !== $source_base && 'jquery.min.js' !== strtolower($source_base) && 'jquery-migrate.min.js' !== strtolower($source_base)) {
+                $candidate_scripts[$source_base] = true;
+            }
+            foreach ($this->runtime_js_scan_script_basenames_from_text($stack_text) as $base) {
+                $candidate_scripts[$base] = true;
+            }
+
+            foreach (array_keys($candidate_scripts) as $base) {
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $base, 'failing script', $source, $message, $reason, $exclusions, 'high');
+            }
+
+            $candidate_symbols = array();
+            $candidate_symbols[$method] = true;
+            foreach ($this->runtime_js_scan_split_symbol_tokens($method) as $token) {
+                $candidate_symbols[$token] = true;
+            }
+
+            if (preg_match_all('/(?:\$|jQuery)\.fn\.([A-Za-z_$][A-Za-z0-9_$-]*)/i', $stack_text, $matches)) {
+                foreach ((array) $matches[1] as $symbol) {
+                    $symbol = sanitize_text_field((string) $symbol);
+                    if ('' === $symbol) {
+                        continue;
+                    }
+                    $candidate_symbols[$symbol] = true;
+                    foreach ($this->runtime_js_scan_split_symbol_tokens($symbol) as $token) {
+                        $candidate_symbols[$token] = true;
+                    }
+                }
+            }
+
+            if (preg_match_all('/\b[A-Za-z_$][A-Za-z0-9_$-]*\.([A-Za-z_$][A-Za-z0-9_$-]*(?:[_-][A-Za-z0-9_$-]+)+)/', $stack_text, $stack_symbol_matches)) {
+                foreach ((array) $stack_symbol_matches[1] as $symbol) {
+                    $symbol = sanitize_text_field((string) $symbol);
+                    if ('' === $symbol) {
+                        continue;
+                    }
+                    $candidate_symbols[$symbol] = true;
+                    foreach ($this->runtime_js_scan_split_symbol_tokens($symbol) as $token) {
+                        $candidate_symbols[$token] = true;
+                    }
+                }
+            }
+
+            foreach (array_keys($candidate_symbols) as $symbol) {
+                $symbol = trim((string) $symbol);
+                if ('' === $symbol || $this->runtime_js_scan_is_generic_token($symbol)) {
+                    continue;
+                }
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $symbol, 'missing jQuery plugin method', $source, $message, $reason, $exclusions, 'recommended');
+            }
+        }
+
         private function build_runtime_js_scan_suggestions(array $errors)
         {
             $exclusions = $this->get_runtime_js_scan_current_exclusions();
@@ -919,12 +1148,19 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
 
+                if (preg_match('/\$\(\.\.\.\)\.([A-Za-z_$][A-Za-z0-9_$-]*)\s+is\s+not\s+a\s+function/i', $message, $method_match)) {
+                    $this->runtime_js_scan_add_jquery_plugin_dependency_suggestions($suggestions, $seen, (string) $method_match[1], $source, $message, $detail, $exclusions);
+                    continue;
+                }
+
+                if (preg_match('/(?:InvalidValueError:\s*)?([A-Za-z_$][A-Za-z0-9_$-]*)\s+is\s+not\s+a\s+function/i', $message, $function_match)) {
+                    $this->runtime_js_scan_add_function_dependency_suggestions($suggestions, $seen, (string) $function_match[1], $source, $message, $detail, $exclusions);
+                    continue;
+                }
+
                 if (false !== strpos($text, ' is not a function') || false !== strpos($text, 'c is not a function')) {
-                    if (preg_match('/jquery|sticky|plainoverlay|icheck|magnific|flexslider|zoom|smartmenus|tooltipster|tabs?/i', $source . ' ' . $message)) {
-                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'jquery', 'jQuery plugin dependency', $source, $message, 'A jQuery plugin/function failed at runtime. Keep jQuery available before this plugin, or exclude the failing plugin from Defer all JS.', $exclusions);
-                        if ('' !== $source_base) {
-                            $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'failing jQuery plugin', $source, $message, 'This jQuery plugin failed at runtime. Add it to exclusions if excluding jQuery alone does not resolve the error.', $exclusions, 'recommended');
-                        }
+                    if ('' !== $source_base && preg_match('/\.js$/i', $source_base)) {
+                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'runtime function error source', $source, $message, 'A function call failed at runtime. The failing script is shown as a targeted exclusion candidate. If the error names a missing jQuery plugin method, Runtime Scan will also derive method/token suggestions from the message and stack trace.', $exclusions, 'review');
                     }
                     continue;
                 }

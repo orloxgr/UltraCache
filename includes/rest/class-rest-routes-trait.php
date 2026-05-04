@@ -59,6 +59,13 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         'args'                => $this->get_redis_test_args(),
                     ),
                 ),
+                '/object-cache/backend-test' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'object_cache_backend_test'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/object-cache/flush' => array(
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
@@ -379,6 +386,20 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         ),
                     ),
                 ),
+                '/action-queue/(?P<id>[A-Za-z0-9_\-]+)/run' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'run_action_job_request'),
+                        'permission_callback' => array($this, 'check_permission'),
+                        'args'                => array(
+                            'id' => array(
+                                'type'              => 'string',
+                                'required'          => true,
+                                'sanitize_callback' => 'sanitize_text_field',
+                            ),
+                        ),
+                    ),
+                ),
             );
         }
 
@@ -394,37 +415,54 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             }
         }
 
+        private function taxonomy_has_query_string_terms($taxonomy)
+        {
+            $taxonomy = sanitize_key((string) $taxonomy);
+            if ('' === $taxonomy || !taxonomy_exists($taxonomy)) {
+                return false;
+            }
+
+            $terms = get_terms(array(
+                'taxonomy'   => $taxonomy,
+                'hide_empty' => false,
+                'fields'     => 'ids',
+                'number'     => 1,
+            ));
+
+            return !is_wp_error($terms) && !empty($terms);
+        }
+
+        private function add_taxonomy_query_string_candidates(&$items, &$sources, $taxonomy, $taxonomy_object, $source)
+        {
+            $taxonomy = sanitize_key((string) $taxonomy);
+            if ('' === $taxonomy || !is_object($taxonomy_object)) {
+                return;
+            }
+
+            $has_query_var = isset($taxonomy_object->query_var) && false !== $taxonomy_object->query_var;
+            if (!$has_query_var) {
+                return;
+            }
+
+            if (!$this->taxonomy_has_query_string_terms($taxonomy)) {
+                return;
+            }
+
+            $this->add_query_string_candidate($items, $sources, $taxonomy, $source);
+
+            if (isset($taxonomy_object->query_var) && is_string($taxonomy_object->query_var) && '' !== $taxonomy_object->query_var && $taxonomy_object->query_var !== $taxonomy) {
+                $this->add_query_string_candidate($items, $sources, $taxonomy_object->query_var, $source . ' query var');
+            }
+        }
+
         private function get_query_string_allowlist_candidates()
         {
             $items = array();
             $sources = array();
 
-            $common = array(
-                'swoof'           => 'Common WooCommerce filter key',
-                'pa_translations' => 'Common WooCommerce attribute/filter key',
-                'product_author'  => 'Common product taxonomy/filter key',
-                'product_cat'     => 'WooCommerce product category key',
-                'product_tag'     => 'WooCommerce product tag key',
-                'product_genre'   => 'Common product taxonomy/filter key',
-                'pa_series'       => 'Common WooCommerce attribute/filter key',
-                'group_by_series' => 'Common product grouping key',
-                'pa_format'       => 'Common WooCommerce attribute/filter key',
-            );
-
-            foreach ($common as $key => $source) {
-                $this->add_query_string_candidate($items, $sources, $key, $source);
-            }
-
-            if (taxonomy_exists('product_cat')) {
-                $this->add_query_string_candidate($items, $sources, 'product_cat', 'WooCommerce product category taxonomy');
-            }
-            if (taxonomy_exists('product_tag')) {
-                $this->add_query_string_candidate($items, $sources, 'product_tag', 'WooCommerce product tag taxonomy');
-            }
-
-            $product_taxonomies = get_object_taxonomies('product', 'objects');
-            if (is_array($product_taxonomies)) {
-                foreach ($product_taxonomies as $taxonomy => $taxonomy_object) {
+            $taxonomies = get_taxonomies(array(), 'objects');
+            if (is_array($taxonomies)) {
+                foreach ($taxonomies as $taxonomy => $taxonomy_object) {
                     if (!is_object($taxonomy_object)) {
                         continue;
                     }
@@ -434,11 +472,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         continue;
                     }
 
-                    $this->add_query_string_candidate($items, $sources, $taxonomy, 'Product taxonomy');
-
-                    if (isset($taxonomy_object->query_var) && is_string($taxonomy_object->query_var) && '' !== $taxonomy_object->query_var && $taxonomy_object->query_var !== $taxonomy) {
-                        $this->add_query_string_candidate($items, $sources, $taxonomy_object->query_var, 'Product taxonomy query var');
-                    }
+                    $this->add_taxonomy_query_string_candidates($items, $sources, $taxonomy, $taxonomy_object, 'Registered taxonomy');
                 }
             }
 
@@ -459,15 +493,22 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         }
 
                         $taxonomy = function_exists('wc_attribute_taxonomy_name') ? wc_attribute_taxonomy_name($attribute_name) : ('pa_' . $attribute_name);
+                        if (!taxonomy_exists($taxonomy) || !$this->taxonomy_has_query_string_terms($taxonomy)) {
+                            continue;
+                        }
+
                         $this->add_query_string_candidate($items, $sources, $taxonomy, 'WooCommerce product attribute taxonomy');
-                        $this->add_query_string_candidate($items, $sources, 'filter_' . $attribute_name, 'WooCommerce layered nav filter key');
-                        $this->add_query_string_candidate($items, $sources, 'query_type_' . $attribute_name, 'WooCommerce layered nav query type key');
+                        $this->add_query_string_candidate($items, $sources, 'filter_' . $attribute_name, 'WooCommerce layered nav attribute filter');
+                        $this->add_query_string_candidate($items, $sources, 'query_type_' . $attribute_name, 'WooCommerce layered nav attribute query type');
                     }
                 }
             }
 
+            $items = array_keys($items);
+            sort($items, SORT_NATURAL | SORT_FLAG_CASE);
+
             return array(
-                'items'   => array_keys($items),
+                'items'   => $items,
                 'sources' => $sources,
             );
         }
@@ -485,7 +526,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'sources'             => $sources,
                 'count'               => count($items),
                 'woocommerceDetected' => class_exists('WooCommerce') || function_exists('wc_get_attribute_taxonomies'),
-                'message'             => count($items) ? sprintf('Detected %d likely query-string keys.', count($items)) : 'No query-string keys were detected.',
+                'message'             => count($items) ? sprintf('Detected %d taxonomy/attribute query-string keys.', count($items)) : 'No taxonomy/attribute query-string keys were detected.',
             ), 200);
         }
 

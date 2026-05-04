@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.56.238
+Stable tag: 2.57.06
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -221,9 +221,34 @@ Disable the last risky optimization, confirm the issue disappears, then add visi
 
 == Changelog ==
 
-= 2.56.238 =
-* Injects the browser Runtime Scan collector after the unified final output pipeline, so UltraCache does not defer/delay its own collector.
-* Protects the Runtime Scan collector from inline JS delay handling and keeps the native template enhancement buffer forced only for scan requests.
+= 2.57.06 =
+- Stopped automatic browser homepage probes from running on dashboard load.
+- Added manual Check Homepage Cache Status inside Cache Decision Tester.
+- Added cached/passive dashboard stats snapshots and safer stats refresh backoff.
+- Added stale dashboard purge-lock quarantine protection.
+
+= 2.57.01 =
+* Fixed menu warm-up URL discovery to use only assigned frontend nav menu locations instead of every stored WordPress menu.
+* Filtered non-cacheable/query-bypassed menu URLs before they enter the warm queue, avoiding false failed items for theme/demo query variants.
+* Kept the 2.57.00 mobile Support this plugin polish intact.
+
+= 2.56.245 =
+* Fix stale dashboard heavy-action lock recovery so stuck actions such as purge_all stop blocking the dashboard without SSH cleanup or install-time mutation.
+* Reconcile heavy action locks against queued/running jobs during normal dashboard enqueue/status requests and release stale/mismatched locks safely.
+
+= 2.56.244 =
+* Fix Object Cache payload probe false warning immediately after backend/fallback switch by using a fresh selected/active backend probe when the current runtime object cache instance is stale.
+
+= 2.56.243 =
+* Fix Object Cache backend/fallback state isolation so selected backend, fallback backend, and Enable Object Cache do not overwrite each other during immediate saves.
+
+= 2.56.242 =
+* Fix Varnish/Redis runtime secret freshness after saving credentials so immediate tests read the newly written off-docroot secret file.
+* Invalidate OPcache/stat cache around runtime secret writes and reads, and refresh settings caches before Varnish tests without exposing secrets.
+
+= 2.56.239 =
+* Changes Query-string args whitelist Populate so it uses detected registered attributes, taxonomies, categories, and tags from the current WordPress/WooCommerce setup instead of a generic hardcoded candidate list.
+* Updates Query-string whitelist UI copy to describe taxonomy/attribute query args accurately.
 
 = 2.56.231 =
 * Corrects Defer all JS manual mode so an empty JS Delay / Defer Exclusions list stays empty and all eligible scripts are deferred.

@@ -134,6 +134,12 @@ trait Ultra_Cache_WP_Varnish_Trait
             $method = ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN';
             $effective_method = ('admin' === $mode) ? 'admin BAN' : $method;
             $key = trim((string) $settings['varnishCliKey']);
+            if (method_exists(__CLASS__, 'get_runtime_varnish_admin_secret')) {
+                $runtime_key = trim((string) self::get_runtime_varnish_admin_secret());
+                if ('' !== $runtime_key) {
+                    $key = $runtime_key;
+                }
+            }
 
             return array(
                 'enabled'      => !empty($settings['varnishCliEnabled']),
@@ -635,6 +641,7 @@ trait Ultra_Cache_WP_Varnish_Trait
 
         public static function varnish_test_connection()
         {
+            self::reset_settings_cache();
             $home = home_url('/');
             $parsed = wp_parse_url($home);
             $host = $parsed && !empty($parsed['host']) ? $parsed['host'] : '';
@@ -650,6 +657,20 @@ trait Ultra_Cache_WP_Varnish_Trait
 
         private static function get_reverse_proxy_status()
         {
+            if (method_exists(__CLASS__, 'is_dashboard_heavy_work_active') && self::is_dashboard_heavy_work_active()) {
+                return array(
+                    'detected' => false,
+                    'varnish' => false,
+                    'nginx_cache' => false,
+                    'litespeed_cache' => false,
+                    'server_cache' => false,
+                    'provider' => '',
+                    'providers' => array(),
+                    'message' => 'Reverse proxy loopback check skipped while a heavy dashboard action is running.',
+                    'skipped' => true,
+                );
+            }
+
             $cached = get_transient('ucwp_reverse_proxy_status_v2');
             if (is_array($cached)) {
                 return $cached;

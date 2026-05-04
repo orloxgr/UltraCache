@@ -453,7 +453,8 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             }
 
             foreach ($items as $item) {
-                if ('.' === $item || '..' === $item || 'google-fonts' === $item || 'css-bundles' === $item || 'js-bundles' === $item) {
+                // Keep runtime locks while purge_all is running; deleting locks/ can orphan the active purge-all.lock FD.
+                if ('.' === $item || '..' === $item || 'google-fonts' === $item || 'css-bundles' === $item || 'js-bundles' === $item || 'locks' === $item) {
                     continue;
                 }
 
@@ -1431,19 +1432,15 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
         private function get_safe_nav_menu_urls()
         {
             $urls = array();
-            $menus = wp_get_nav_menus();
+            $menu_ids = $this->get_assigned_nav_menu_ids();
 
-            if (empty($menus) || !is_array($menus)) {
+            if (empty($menu_ids)) {
                 return $urls;
             }
 
-            foreach ($menus as $menu) {
-                if (empty($menu) || empty($menu->term_id)) {
-                    continue;
-                }
-
+            foreach ($menu_ids as $menu_id) {
                 try {
-                    $items = wp_get_nav_menu_items($menu->term_id);
+                    $items = wp_get_nav_menu_items((int) $menu_id);
                 } catch (Throwable $e) {
                     $items = array();
                 }
@@ -1460,13 +1457,65 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                         $url = $item['url'];
                     }
 
-                    if ($url !== '') {
-                        $urls[] = $url;
+                    $normalized_url = $this->normalize_menu_warm_url($url);
+                    if ('' !== $normalized_url && $this->is_warmable_menu_url($normalized_url)) {
+                        $urls[] = $normalized_url;
                     }
                 }
             }
 
             return array_values(array_unique(array_filter($urls)));
+        }
+
+        private function get_assigned_nav_menu_ids()
+        {
+            $locations = get_nav_menu_locations();
+            if (empty($locations) || !is_array($locations)) {
+                return array();
+            }
+
+            $menu_ids = array();
+            foreach ($locations as $menu_id) {
+                $menu_id = (int) $menu_id;
+                if ($menu_id > 0) {
+                    $menu_ids[$menu_id] = $menu_id;
+                }
+            }
+
+            return array_values($menu_ids);
+        }
+
+        private function normalize_menu_warm_url($url)
+        {
+            $url = is_string($url) ? trim($url) : '';
+            if ('' === $url || '#' === $url) {
+                return '';
+            }
+
+            if (0 === strpos($url, '#') || 0 === stripos($url, 'mailto:') || 0 === stripos($url, 'tel:') || 0 === stripos($url, 'javascript:')) {
+                return '';
+            }
+
+            if (0 === strpos($url, '//')) {
+                $home_parts = wp_parse_url(home_url('/'));
+                $scheme = !empty($home_parts['scheme']) ? (string) $home_parts['scheme'] : 'https';
+                $url = $scheme . ':' . $url;
+            } elseif (0 === strpos($url, '/')) {
+                $url = home_url($url);
+            }
+
+            return esc_url_raw($url);
+        }
+
+        private function is_warmable_menu_url($url)
+        {
+            $url = is_string($url) ? trim($url) : '';
+            if ('' === $url || !$this->is_cacheable_local_url($url)) {
+                return false;
+            }
+
+            $inspection = $this->inspect_url($url);
+            return is_array($inspection) && !empty($inspection['cacheable']);
         }
 
         private function get_public_crawl_post_types()

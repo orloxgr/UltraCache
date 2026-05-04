@@ -165,17 +165,22 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                 return $missing;
             }
 
-            preg_match_all('#(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css#i', $html, $absolute_matches);
-            preg_match_all('#/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css#i', $html, $path_matches);
-            preg_match_all('#(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/js-bundles/[^\s\"\'<>?#)]+\.js#i', $html, $absolute_js_matches);
-            preg_match_all('#/wp-content/cache/ultracache/js-bundles/[^\s\"\'<>?#)]+\.js#i', $html, $path_js_matches);
-
-            $refs = array_merge(
-                isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
-                isset($path_matches[0]) && is_array($path_matches[0]) ? $path_matches[0] : array(),
-                isset($absolute_js_matches[0]) && is_array($absolute_js_matches[0]) ? $absolute_js_matches[0] : array(),
-                isset($path_js_matches[0]) && is_array($path_js_matches[0]) ? $path_js_matches[0] : array()
+            $generated_asset_patterns = array(
+                '~(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css~i',
+                '~/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css~i',
+                '~(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/js-bundles/[^\s\"\'<>?#)]+\.js~i',
+                '~/wp-content/cache/ultracache/js-bundles/[^\s\"\'<>?#)]+\.js~i',
             );
+
+            $refs = array();
+            foreach ($generated_asset_patterns as $generated_asset_pattern) {
+                $matches = array();
+                $matched = preg_match_all($generated_asset_pattern, $html, $matches);
+                if (false === $matched || empty($matches[0]) || !is_array($matches[0])) {
+                    continue;
+                }
+                $refs = array_merge($refs, $matches[0]);
+            }
 
             $refs = array_values(array_unique(array_map('strval', $refs)));
             $allowed_dirs = array(

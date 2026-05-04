@@ -1455,6 +1455,12 @@ trait Ultra_Cache_WP_Diagnostics_Trait
 
         public static function get_dashboard_diagnostics()
         {
+            if (method_exists(__CLASS__, 'is_dashboard_heavy_work_active') && self::is_dashboard_heavy_work_active()) {
+                return method_exists(__CLASS__, 'get_lightweight_dashboard_busy_diagnostics')
+                    ? self::get_lightweight_dashboard_busy_diagnostics()
+                    : array('dashboardWork' => array('active' => true, 'message' => 'Skipped while a heavy dashboard action is running.'));
+            }
+
             $settings             = self::get_dashboard_settings();
             $support              = self::get_media_support_status();
             $compression          = self::get_compression_support_status();

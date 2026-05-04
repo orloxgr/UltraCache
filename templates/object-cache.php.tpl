@@ -155,15 +155,26 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		public function get_backend_status() {
-			$fallback_active = ('redis' === (string) $this->selected_backend && 'redis' !== (string) $this->active_backend);
 			$configured_fallback = $this->sanitize_fallback_backend($this->fallback_backend_policy);
-			$fallback_backend = $fallback_active ? (string) $this->active_backend : ('none' === $configured_fallback ? 'runtime' : $configured_fallback);
+			$fallback_backend = ('none' === $configured_fallback ? 'runtime' : $configured_fallback);
+			$fallback_active = (
+				(string) $this->selected_backend !== (string) $this->active_backend
+				&& 'runtime' !== (string) $this->active_backend
+				&& (string) $fallback_backend === (string) $this->active_backend
+			);
+			if ($fallback_active) {
+				$fallback_backend = (string) $this->active_backend;
+			}
 			$fallback_reason = '';
 			$fallback_message = '';
 			if ($fallback_active) {
 				$fallback_label = 'apcu' === $fallback_backend ? 'APCu' : ('runtime' === $fallback_backend ? 'runtime-only' : strtoupper($fallback_backend));
-				$fallback_reason = '' !== (string) $this->redis_error ? (string) $this->redis_error : 'Redis was selected but did not become active during drop-in bootstrap.';
-				$fallback_message = 'Redis selected, ' . $fallback_label . ' fallback active.' . ('' !== $fallback_reason ? ' Redis: ' . $fallback_reason : '');
+				if ('redis' === (string) $this->selected_backend && '' !== (string) $this->redis_error) {
+					$fallback_reason = (string) $this->redis_error;
+				} else {
+					$fallback_reason = strtoupper((string) $this->selected_backend) . ' was selected but did not become active during drop-in bootstrap.';
+				}
+				$fallback_message = strtoupper((string) $this->selected_backend) . ' selected, ' . $fallback_label . ' fallback active.' . ('' !== $fallback_reason ? ' Reason: ' . $fallback_reason : '');
 			}
 
 			return array(
@@ -255,7 +266,13 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 
 			if ('apcu' === $this->selected_backend) {
-				$this->bootstrap_apcu_backend();
+				if ($this->bootstrap_apcu_backend()) {
+					return;
+				}
+				if ('disk' === $this->fallback_backend_policy) {
+					$this->active_backend = 'disk';
+					return;
+				}
 				return;
 			}
 

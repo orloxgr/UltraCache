@@ -1338,7 +1338,7 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	}
 
 	#uc-dashboard .uc-support-inline--mobile {
-		cursor: pointer;
+		cursor: auto;
 	}
 
 	#uc-dashboard .uc-support-inline--mobile .uc-support-inline__title {
