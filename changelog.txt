@@ -1,22 +1,159 @@
-= 2.57.06 =
-- Stopped automatic browser homepage probes from running on dashboard load.
-- Added manual Check Homepage Cache Status inside Cache Decision Tester.
-- Added cached/passive dashboard stats snapshots and safer stats refresh backoff.
-- Added stale dashboard purge-lock quarantine protection.
+= 2.57.46 =
+* Final public-readiness packaging polish: updated WordPress readme changelog/upgrade notice and package metadata.
+* Replaced private-build source wording with neutral public wording.
+* Added index guards to top-level plugin includes/templates directories.
 
-- Adds server-side heavy-work throttling: while purge/heavy action locks are active, dashboard stats and diagnostics return a lightweight busy payload instead of running full cache/object/media diagnostics.
-- Skips browser compression probe requests and reverse-proxy HEAD loopback checks while heavy dashboard work is active.
-- Reuses localized dashboard diagnostics from stats to avoid duplicate full diagnostics work during admin page render.
-* Added dashboard heavy-action quiet mode: stats polling and browser probes pause while a blocking work action is running.
-* Restored server-side direct heavy-action locking so a second heavy dashboard job is rejected instead of starting in parallel.
+= 2.57.45 =
+* Varnish UI polish: move the admin-mode security and current-mode helper copy to the bottom of the Varnish card.
+* Restyle the admin-mode security helper copy as plain card description text without warning border/background.
 
+= 2.57.44 =
+* Removed the development-only Varnish debug log feature from settings, dashboard UI, schema, and runtime code.
+* Redacted Varnish result detail strings before storing/displaying purge/test results.
+* Escaped Varnish BAN URL expressions so URL purges match literal paths/queries instead of raw regex fragments.
+
+= 2.57.43 =
+* Object cache diagnostics: add passive/manual-test-only clarity flags to the default dashboard object-cache diagnostics payload, matching the stats-disabled payload.
+* Keep fallback truth UI metadata consistent without reintroducing automatic live Redis/payload probes.
+
+= 2.57.42 =
+* Object cache backend truth / UI clarity hardening.
+* Keeps passive selected/active/fallback backend status visible even when cache stats are disabled, without object-cache counts or live backend probes.
+* Treats runtime-only object cache as an active fallback state, not as disk and not as a false success.
+* Updates dashboard status tone so persistent fallbacks and runtime-only fallback show as warning while healthy selected=active remains success.
+
+= 2.57.41 =
+- Hardened CSS bundle stale-reference handling in the advanced-cache drop-in so cached HTML referencing missing generated CSS/font/optimized CSS assets is invalidated instead of served as HIT/STALE.
+- Added CSS bundle file verification after atomic writes so manifest entries are only returned after the generated bundle is readable, non-empty, and matches the expected content hash.
+- Added stricter delayed-icon-font companion validation so failed delayed-font writes do not produce stale companion metadata.
+
+= 2.57.40 =
+- Refined Runtime JS Scan reporting by redacting internal diagnostic URL parameters before storing/displaying report URLs.
+- Kept review/manual Runtime JS Scan suggestions non-appendable while preserving them for manual review.
+- Derived failing script sources from stack/detail text and surfaced raw captured browser errors in the dashboard.
+
+= 2.57.39 =
+- Hardens cache-poisoning bypass parity between the WordPress engine and advanced-cache drop-in.
+- Adds non-removable security query guards for REST, nonce/token/order/payment/internal UltraCache control args.
+- Adds advanced-cache cookie parity for wordpress_sec_ and hard protected frontend paths for REST/login/admin/WooCommerce endpoints.
+- Treats invalid public ucwp_* internal control/profile/revalidate requests as bypass-only instead of canonical cacheable requests.
+
+= 2.57.38 =
+- Hardened object-cache drop-in recursive cleanup with explicit symlink-directory hard-stops.
+- Hardened uninstall directory cleanup to avoid recursive WP_Filesystem directory deletes and skip symlinks.
+- Narrowed runtime secret filesystem allowlist to the canonical off-docroot secret path and its atomic temp sibling only.
+
+= 2.57.37 =
+* Restricts automatic page-cache/object-cache/runtime-config full reconcile writes to WP-CLI or admins with both manage_options and activate_plugins.
+* Hardens same-site frontend loopback URL validation so warm/profile/inspect flows do not accept arbitrary explicit ports on the site host.
+* Redacts internal UltraCache runtime/profile query tokens such as ucwp_rt from debug contexts.
+
+= 2.57.36 =
+* Converted managed runtime config from runtime-config.json to guarded runtime-config.php while keeping a legacy JSON read fallback for safe transition.
+* Ensured the internal revalidate secret is stored in the off-docroot runtime secrets file without overwriting Redis/Varnish secrets.
+* Applied restrictive 0600 permissions after runtime secret writes and aligned delete-all-data cleanup with the current off-docroot secret path.
+
+= 2.57.35 =
+- Removed the remaining dashboard render call to the deleted JSBundleDiagnosticsPanel component so the Advanced Diagnostics card can render after JS bundling removal.
+- Kept the 2.57.34 hard removal of experimental JS bundling intact without changing JS defer, delay, runtime scan, LCP boundary defer, or main-thread relief behavior.
+
+= 2.57.34 =
+- Removed the experimental safe deferred JS bundling feature from runtime HTML rewriting, dashboard settings, diagnostics, and saved settings mapping.
+- Kept JS defer, delay, runtime scan, LCP boundary defer, and main-thread relief behavior unchanged.
+- Stopped generating UltraCache js-bundles assets and removed js-bundles from generated-asset stale-reference validation/purge preservation paths.
+
+= 2.57.33 =
+- Hard-stops object-cache symlink traversal by using non-recursive empty-directory removal after symlink entries are skipped.
+- Updates the core safe directory removal helper to avoid WP_Filesystem recursive delete behavior that can follow symlinked directories.
+- Keeps managed media temp files from 2.57.32 under wp-content/cache/ultracache/tmp/media/.
+
+= 2.57.32 =
+- Moves GD AVIF/WebP probe temp files into a managed UltraCache temp directory under wp-content/cache/ultracache/tmp/media/.
+- Cleans stale managed media temp files through the guarded filesystem helpers instead of relying on system temp cleanup.
+- Adds initial object-cache cleanup/delete recursion symlink skip checks.
+
+= 2.57.31 =
+- Isolated early drop-in filesystem helpers so advanced-cache/object-cache templates no longer shadow the core WP_Filesystem/path-guarded ucwp_safe_* helpers.
+* Allow explicitly configured external Redis and Varnish infrastructure hosts/ports instead of local/private-only blocking.
+* Keep syntax validation and obvious public frontend endpoint blocking for Varnish HTTP targets.
+* Keep stronger destructive file/plugin mutation capability gates from 2.57.29.
+
+= 2.57.29 =
+- Added Redis socket target validation for Redis tests and runtime Redis connections.
+- Added stronger capability gates for destructive file/plugin mutations such as delete-all-data and conflicting drop-in removal.
+
+= 2.57.28 =
+- Hardens manual STORE/callback profiler activation so public query/header flags require the same signed runtime token used by authenticated dashboard profiler requests.
+- Routes engine profiler activation through the shared token-gated helper to avoid a second unauthenticated activation path.
+
+= 2.57.27 =
+- Hardens public-release filesystem handling by adding a guarded chmod helper that prefers WP_Filesystem and updating Varnish/object-cache permission writes to use it.
+- Allows safe custom local/private Varnish HTTP/admin ports while continuing to block public frontend endpoints such as :80/:443 and unsafe socket targets.
+- Updates uninstall cleanup to prefer WP_Filesystem reads/deletes before guarded native fallbacks.
+
+= 2.57.26 =
+- Adds a safe runtime-artifact cleanup pass for old UltraCache lock/test leftovers in wp-content/cache/ultracache/locks/.
+- Adds `wp ultracache cleanup_artifacts` with dry-run, max-age, and structured output support.
+- Scheduled cleanup now reports runtime artifacts deleted while avoiding active flock-held locks.
+
+= 2.57.21 =
+- Adds Elementor module load-order patterns to the visible JS Delay / Defer Populate Defaults list, including frontend modules, webpack runtime, common.min.js, and elementor-admin-bar.min.js.
+- Teaches JS Delay / Defer Scan and Runtime Scan to suggest targeted Elementor path fragments instead of only broad basenames when elementorModules is missing.
+- Keeps the Defer all JS behavior user-visible: the fix adds actionable visible exclusions/suggestions rather than silently protecting Elementor with a hidden override.
+
+= 2.57.20 =
+- Improves Runtime Scan semantic dependency mapping for browser console/runtime failures involving React/wp-element, Elementor modules, and wp-api-fetch inline-after blocks.
+- Preserves non-URL browser pseudo-sources such as wp-api-fetch-js-after:3225 so inline WordPress dependency-order errors can generate actionable JS Delay / Defer exclusion suggestions.
+- Groups Runtime Scan suggestions for React/wp-element and wp-api-fetch separately in the dashboard for clearer review before appending missing exclusions.
+
+= 2.57.19 =
+- UI polish: dashboard StatCard numeric values now use a dedicated targeted class with lighter 24px typography so large counters look more elegant without affecting other white text or generic Tailwind-style utility classes.
+- Keeps the 2.57.18 dashboard stats zero-display guard and authenticated REST refresh behavior unchanged.
+
+= 2.57.18 =
+- Fixes dashboard stat cards so a passive bootstrap placeholder is never rendered as real zero counters while Count Cache stats is ON.
+- Forces the first authenticated dashboard stats refresh through the REST stats endpoint when statistics are enabled, while preserving the zero-impact disabled path when they are OFF.
+- Shows an explicit refreshing state until live counters arrive from REST.
+
+= 2.57.17 =
+- Fixes a stats-ON dashboard regression from 2.57.16 where the authenticated REST stats endpoint returned only the passive placeholder payload, causing the dashboard to show zero/missing counters even though engine counters existed.
+- Keeps Count cache stats OFF as a hard zero-impact path: disabled stats still return the tiny disabled payload and do not trigger engine/storage/object-cache scans.
+- Preserves the 2.57.15 purge-all.lock cleanup and 2.57.14 locks-directory preservation fixes.
+
+= 2.57.16 =
+- Hard-gated dashboard/REST cache stats when Count cache stats is OFF so stats endpoints return a tiny disabled payload instead of running engine stats, filesystem scans, Redis/APCu counts, manifest scans, or analytics reads.
+- Made dashboard bootstrap use the disabled/passive stats payload instead of calling get_engine_stats() on load.
+- Added a client-side stats-OFF guard so refreshStats() does not call the stats endpoint while Count cache stats is disabled.
+- Stopped the automatic browser/frontend compression probe from running on dashboard load; probes remain manual-only.
+- Kept the 2.57.15 purge-all.lock cleanup fix intact.
+
+= 2.57.15 =
+- Clarified Flush All Cache runtime lock lifecycle by removing the stale purge-all.lock file after the active flock is released.
+- Kept the locks/ directory preserved during purge cleanup so active runtime lock handles are not orphaned mid-purge.
+- Fixed WP-CLI full purge reporting so a failed/blocked purge_all no longer prints a false success message.
+- Added a clearer REST failure message when Flush All Cache cannot acquire the active purge lock.
+
+= 2.57.14 =
 - Fixed Flush All Cache runtime lock lifecycle by preserving the UltraCache `locks/` directory during purge-all cleanup.
-- Prevents purge-all from deleting its own active `purge-all.lock` while the PHP worker is still running, which could leave dashboard REST/status requests in an inconsistent 503/stale-lock state.
-- Kept the 2.57.02 generated asset validation regex fix intact.
+- Prevents purge-all from deleting its own active `purge-all.lock` while the PHP worker is still running.
+- Kept the 2.57.13 generated asset validation regex fix intact.
 
-= 2.57.01 =
-- Fixed menu warm-up URL discovery to use only assigned frontend nav menu locations instead of every stored WordPress menu.
-- Menu warm-up now filters non-cacheable/query-bypassed menu URLs before they enter the warm queue, avoiding false failed items for theme/demo query variants.
+= 2.57.13 =
+- Fixed generated asset validation regex patterns so final HTML/cache validation no longer triggers preg_match_all() "Unknown modifier" warnings for UltraCache-generated CSS/JS references.
+- Kept the 2.57.12 warm progress layout unchanged.
+
+= 2.57.12 =
+- Moved the active warm-up progress panel below the Warm Cache and Media Optimization controls so running jobs no longer push the top action layout.
+- Kept warm-up, media conversion, source selection, and cache logic unchanged.
+= 2.57.11 =
+- Reordered the Warm Cache card so homepage warm buttons appear first, followed by menu controls/buttons, then full-site source controls/buttons.
+- Stacked Menu warm-up menu and Menu depth as separate full-width rows instead of placing them side-by-side.
+- Changed Full-site warm-up sources from a multi-select list into a dropdown panel with switch toggles while preserving saved source choices.
+
+= 2.57.10 =
+- Shows all saved WordPress menus in the Menu Warm selector, with assigned/frontend menus listed first and unassigned saved menus listed separately.
+- Keeps menu warm-up user-controlled: unassigned/demo menus are never scanned automatically and only run when selected.
+- Preserves the 2.57.09 warm scope controls, menu depth selector, full-site source selector, and removal of CSS Bundle Summary from the Warm Cache card.
 
 = 2.57.00 =
 - Milestone RC polish release.

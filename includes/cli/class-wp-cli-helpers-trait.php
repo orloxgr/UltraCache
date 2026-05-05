@@ -149,6 +149,10 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 return (bool) $engine->is_cacheable_local_url($url);
             }
 
+            if (function_exists('ucwp_is_strict_frontend_loopback_url')) {
+                return ucwp_is_strict_frontend_loopback_url($url);
+            }
+
             $parts = wp_parse_url($url);
             $home_parts = wp_parse_url(home_url('/'));
             if (empty($parts['scheme']) || empty($parts['host']) || empty($home_parts['host'])) {
@@ -275,7 +279,6 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'mediaOptimizationEnabled',
                 'deferJsEnabled',
                 'deferAllJsEnabled',
-                'jsBundleEnabled',
                 'delaySafeThirdPartyJsEnabled',
                 'delayFunctionalThirdPartyJsEnabled',
                 'asyncExternalScriptsEnabled',
@@ -299,7 +302,6 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'speculationRulesEnabled',
                 'browserCacheRulesEnabled',
                 'varnishCliEnabled',
-                'varnishCliDebug',
                 'preRenderOnSave',
                 'woocommerceSafeModeEnabled',
                 'cacheCleanupEnabled',
@@ -330,8 +332,6 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'cacheExceptionQueryArgs',
                 'deferJsForceList',
                 'deferJsExcludeList',
-                'jsBundleIncludeList',
-                'jsBundleExcludeList',
                 'delaySafeThirdPartyJsPatterns',
                 'delayFunctionalThirdPartyJsPatterns',
                 'delayThirdPartyJsExcludeList',

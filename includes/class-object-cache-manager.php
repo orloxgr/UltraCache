@@ -148,13 +148,14 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			}
 			$configured_fallback = self::sanitize_fallback_backend($status['configuredFallback'] ?? $selected_fallback);
 			$standby_fallback = ('none' === $configured_fallback ? 'runtime' : $configured_fallback);
-			$status['fallbackActive'] = (
-				$status['selected'] !== $status['active']
-				&& 'runtime' !== $status['active']
-				&& $standby_fallback === $status['active']
-			);
+			$active_backend = (string) $status['active'];
+			$status['fallbackActive'] = ((string) $status['selected'] !== $active_backend);
 			$status['configuredFallback'] = $configured_fallback;
-			$status['fallback'] = $status['fallbackActive'] ? (string) $status['active'] : $standby_fallback;
+			$status['fallback'] = $status['fallbackActive'] ? $active_backend : $standby_fallback;
+			$status['activeFallbackBackend'] = $status['fallbackActive'] ? $active_backend : '';
+			$status['activeFallbackKind'] = $status['fallbackActive'] ? ('runtime' === $active_backend ? 'runtime-only' : 'persistent') : '';
+			$status['fallbackPersistent'] = $status['fallbackActive'] && in_array($active_backend, array('redis', 'apcu', 'disk'), true);
+			$status['activeBackendRuntimeOnly'] = ('runtime' === $active_backend);
 			if ($status['fallbackActive']) {
 				$backend_error = '';
 				if ('redis' === $status['selected']) {
@@ -320,21 +321,11 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				return false;
 			}
 
-			$filesystem = function_exists('ucwp_get_wp_filesystem') ? ucwp_get_wp_filesystem() : false;
-			if ($filesystem && method_exists($filesystem, 'chmod')) {
-				$filesystem->chmod($path, $mode);
-				clearstatcache(true, $path);
-				$perms = (is_file($path) && is_readable($path)) ? fileperms($path) : false;
-				if (false !== $perms && (($perms & 0777) === $mode)) {
-					return true;
-				}
+			if (function_exists('ucwp_safe_chmod')) {
+				return ucwp_safe_chmod($path, $mode, 'object_cache_restrictive_permissions');
 			}
 
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- Best-effort permission normalization after WP_Filesystem-generated drop-in write.
-			@chmod($path, $mode);
-			clearstatcache(true, $path);
-			$perms = (is_file($path) && is_readable($path)) ? fileperms($path) : false;
-			return false !== $perms && (($perms & 0777) === $mode);
+			return false;
 		}
 
 		private static function maybe_sync_redis_secret_config(array $settings) {
@@ -650,6 +641,14 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 
 			if (!$result['available']) {
 				$result['message'] = 'PHP Redis extension is not loaded on this server.';
+				return $result;
+			}
+
+			$target_validation = self::validate_redis_socket_target($settings, 'object_cache_redis_test');
+			if (is_wp_error($target_validation)) {
+				$result['blocked'] = true;
+				$result['code'] = $target_validation->get_error_code();
+				$result['message'] = $target_validation->get_error_message();
 				return $result;
 			}
 
@@ -1188,7 +1187,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		private static function cleanup_expired_directory($dir) {
-			if (!is_dir($dir)) {
+			if (!is_dir($dir) || is_link($dir)) {
 				return 0;
 			}
 
@@ -1204,11 +1203,14 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				}
 
 				$path = $dir . DIRECTORY_SEPARATOR . $item;
+				if (is_link($path)) {
+					continue;
+				}
 				if (is_dir($path)) {
 					$removed += self::cleanup_expired_directory($path);
 					$left = ucwp_safe_scandir($path, 'object_cache_cleanup_expired_directory child scandir');
 					if (is_array($left) && 2 === count($left)) {
-						ucwp_safe_rmdir($path);
+						ucwp_safe_rmdir_empty($path, 'object_cache_cleanup_expired_directory empty child rmdir');
 					}
 					continue;
 				}
@@ -1228,7 +1230,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		private static function flush_stale_temp_files($dir) {
-			if (!is_dir($dir)) {
+			if (!is_dir($dir) || is_link($dir)) {
 				return;
 			}
 			$items = ucwp_safe_scandir($dir, 'object_cache_cleanup_tmp scandir');
@@ -1240,6 +1242,9 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 					continue;
 				}
 				$path = $dir . DIRECTORY_SEPARATOR . $item;
+				if (is_link($path)) {
+					continue;
+				}
 				if (is_dir($path)) {
 					self::flush_stale_temp_files($path);
 					continue;
@@ -1313,7 +1318,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		private static function recursive_delete($dir) {
-			if (!is_dir($dir)) {
+			if (!is_dir($dir) || is_link($dir)) {
 				return;
 			}
 			$items = ucwp_safe_scandir($dir, 'object_cache_recursive_delete scandir');
@@ -1325,13 +1330,16 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 					continue;
 				}
 				$path = $dir . DIRECTORY_SEPARATOR . $item;
+				if (is_link($path)) {
+					continue;
+				}
 				if (is_dir($path)) {
 					self::recursive_delete($path);
 				} else {
 					ucwp_safe_unlink($path);
 				}
 			}
-			ucwp_safe_rmdir($dir);
+			ucwp_safe_rmdir_empty($dir, 'object_cache_recursive_delete empty root rmdir');
 		}
 
 
@@ -1358,6 +1366,9 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 					continue;
 				}
 				$path = UCWP_OBJECT_CACHE_DIR . DIRECTORY_SEPARATOR . $item;
+				if (is_link($path)) {
+					continue;
+				}
 				if (is_dir($path)) {
 					self::recursive_delete($path);
 				} elseif (file_exists($path)) {
@@ -1467,6 +1478,28 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			}
 		}
 
+		private static function get_redis_policy_host($host) {
+			$host = trim((string) $host);
+			$host = preg_replace('#^(?:tcp|tls|ssl)://#i', '', $host);
+			return trim((string) $host, " \t\n\r\0\x0B[]");
+		}
+
+		private static function validate_redis_socket_target($settings, $context = 'object_cache_redis') {
+			$settings = is_array($settings) ? $settings : self::get_plugin_settings();
+			$host = !empty($settings['redis_host']) ? (string) $settings['redis_host'] : '127.0.0.1';
+			$port = max(1, min(65535, absint($settings['redis_port'] ?? 6379)));
+			$policy_host = self::get_redis_policy_host($host);
+
+			if (function_exists('ucwp_is_allowed_redis_socket_target') && !ucwp_is_allowed_redis_socket_target($policy_host, $port, $context)) {
+				return new WP_Error(
+					'ucwp_unsafe_redis_endpoint',
+					'Blocked invalid Redis endpoint ' . $policy_host . ':' . $port . '. Use a valid explicitly configured Redis host and port. External Redis infrastructure is supported when intentionally configured.'
+				);
+			}
+
+			return true;
+		}
+
 		private static function connect_redis($settings = null) {
 			self::$redis_last_error = '';
 			if (!self::redis_supported()) {
@@ -1488,6 +1521,12 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			$prefix = self::get_redis_prefix($settings);
 			$connect_timeout = max(0.05, ((int) ($settings['redis_connect_timeout_ms'] ?? 200)) / 1000);
 			$read_timeout = max(0.05, ((int) ($settings['redis_read_timeout_ms'] ?? 200)) / 1000);
+
+			$target_validation = self::validate_redis_socket_target($settings, 'object_cache_redis_connect');
+			if (is_wp_error($target_validation)) {
+				self::$redis_last_error = $target_validation->get_error_message();
+				return null;
+			}
 
 			try {
 				$redis = new Redis();

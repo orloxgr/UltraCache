@@ -33,6 +33,10 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 return new WP_Error('ucwp_profile_url_not_allowed', 'Only same-site URLs can be scanned.');
             }
 
+            if (function_exists('ucwp_is_strict_frontend_loopback_url') && !ucwp_is_strict_frontend_loopback_url($url)) {
+                return new WP_Error('ucwp_profile_url_not_allowed', 'Only same-site frontend URLs on the site port can be scanned.');
+            }
+
             $scheme = isset($parts['scheme']) && in_array(strtolower((string) $parts['scheme']), array('http', 'https'), true) ? strtolower((string) $parts['scheme']) : '';
             if ('' === $scheme) {
                 $scheme = isset($home_parts['scheme']) ? strtolower((string) $home_parts['scheme']) : 'https';
@@ -831,6 +835,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 if ($line === $suggestion || false !== strpos($suggestion, $line)) {
                     return true;
                 }
+                if (strlen($line) >= 4 && strlen($suggestion) >= 4 && false !== strpos($line, $suggestion)) {
+                    return true;
+                }
             }
             return false;
         }
@@ -841,6 +848,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if ('' === $suggested_exclusion) {
                 return;
             }
+            $confidence = strtolower(trim((string) $confidence));
+            if ('' === $confidence) {
+                $confidence = 'high';
+            }
+            $appendable = !in_array($confidence, array('review', 'review-only', 'manual'), true);
             $key = strtolower($suggested_exclusion . '|' . (string) $source . '|' . (string) $symbol);
             if (isset($seen[$key])) {
                 return;
@@ -849,8 +861,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $suggestions[] = array(
                 'symbol'             => (string) $symbol,
                 'source'             => 'browser-runtime-error',
-                'category'           => 'browser-runtime-error',
-                'categoryLabel'      => 'Browser runtime errors',
+                'category'           => $appendable ? 'browser-runtime-error' : 'review-only',
+                'categoryLabel'      => $appendable ? 'Browser runtime errors' : 'Review-only candidates',
                 'sample'             => substr((string) $message, 0, 500),
                 'definingScriptUrl'  => (string) $source,
                 'definingHandle'     => '',
@@ -858,7 +870,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'confidence'         => (string) $confidence,
                 'reason'             => (string) $reason,
                 'alreadyExcluded'    => $this->runtime_js_scan_exclusion_already_matches($suggested_exclusion, $exclusions),
-                'appendable'         => true,
+                'appendable'         => $appendable,
             );
         }
 
@@ -868,12 +880,108 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if ('' === $source) {
                 return '';
             }
+
+            $source = html_entity_decode($source, ENT_QUOTES, 'UTF-8');
+            $source = preg_replace('/(?::\d+){1,2}$/', '', $source);
             $path = (string) wp_parse_url($source, PHP_URL_PATH);
             if ('' === $path) {
                 $path = preg_replace('/[?#].*$/', '', $source);
             }
             $base = basename($path);
             return sanitize_text_field($base);
+        }
+
+        private function runtime_js_scan_path_fragment_from_source($source, $parts = 4)
+        {
+            $source = trim((string) $source);
+            if ('' === $source) {
+                return '';
+            }
+
+            $source = html_entity_decode($source, ENT_QUOTES, 'UTF-8');
+            $source = preg_replace('/(?::\d+){1,2}$/', '', $source);
+            $path = (string) wp_parse_url($source, PHP_URL_PATH);
+            if ('' === $path) {
+                $path = preg_replace('/[?#].*$/', '', $source);
+            }
+
+            $path = trim((string) $path, '/');
+            if ('' === $path || false === stripos($path, '.js')) {
+                return '';
+            }
+
+            $segments = array_values(array_filter(explode('/', strtolower($path)), 'strlen'));
+            if (empty($segments)) {
+                return '';
+            }
+
+            $parts = max(2, min(6, (int) $parts));
+            $fragment = implode('/', array_slice($segments, -1 * min($parts, count($segments))));
+            return sanitize_text_field($fragment);
+        }
+
+        private function runtime_js_scan_sanitize_source($source)
+        {
+            $source = trim((string) $source);
+            if ('' === $source) {
+                return '';
+            }
+
+            $source = html_entity_decode($source, ENT_QUOTES, 'UTF-8');
+            if (preg_match('#^https?://#i', $source) || 0 === strpos($source, '/') || 0 === strpos($source, '//')) {
+                return esc_url_raw($source);
+            }
+
+            // Preserve browser pseudo-sources such as wp-api-fetch-js-after:3225.
+            // These inline WordPress handles are not valid URLs, but they are the
+            // only reliable clue for mapping an inline-after error to its handle.
+            return sanitize_text_field($source);
+        }
+
+        private function runtime_js_scan_sanitize_display_url($url)
+        {
+            $url = trim((string) $url);
+            if ('' === $url) {
+                return '';
+            }
+
+            $url = html_entity_decode($url, ENT_QUOTES, 'UTF-8');
+            $url = esc_url_raw($url);
+            if ('' === $url) {
+                return '';
+            }
+
+            return remove_query_arg(array(
+                'ucwp_runtime_js_scan',
+                'ucwp_runtime_js_scan_id',
+                'ucwp_runtime_js_scan_nonce',
+                'ucwp_rt',
+                'ucwp_profile_bypass',
+                'ucwp_store_profile',
+                'ucwp_callback_profile',
+                'ucwp_store_profile_verbose',
+                'ucwp_store_profile_verbose_settings',
+                'ucwp_profile_run',
+                'ucwp_revalidate',
+            ), $url);
+        }
+
+        private function runtime_js_scan_source_from_text($text)
+        {
+            $text = (string) $text;
+            if ('' === $text) {
+                return '';
+            }
+
+            if (preg_match('#https?://[^\s\)\]\}"\'<>]+\.js(?:\?[^\s\)\]\}"\'<>]*)?(?::\d+){0,2}#i', $text, $match)) {
+                return $this->runtime_js_scan_sanitize_source((string) $match[0]);
+            }
+
+            if (preg_match('/([A-Za-z0-9._\/-]+\.js)(?:\?[^\s\)\]\}"\'<>]*)?(?::\d+){0,2}/i', $text, $match)) {
+                return $this->runtime_js_scan_sanitize_source((string) $match[0]);
+            }
+
+            return '';
         }
 
         private function runtime_js_scan_is_generic_token($token)
@@ -1105,6 +1213,80 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
         }
 
+        private function runtime_js_scan_add_known_dependency_suggestions(&$suggestions, &$seen, $source, $message, $detail, array $exclusions)
+        {
+            $text = strtolower((string) $message . ' ' . (string) $source . ' ' . (string) $detail);
+            $source_base = $this->runtime_js_scan_basename_from_source($source);
+            $matched = false;
+
+            if (false !== strpos($text, 'react is not defined') || false !== strpos($text, "react' is not defined") || false !== strpos($text, "can't find variable: react")) {
+                $matched = true;
+                $reason = 'Browser runtime error says React was unavailable when a dependent script executed. Keep the WordPress React dependency chain and the failing dependent script out of Defer/Delay until the page scans cleanly.';
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react', 'React global', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react-dom', 'ReactDOM global', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-element', 'WordPress React wrapper', $source, $message, $reason, $exclusions, 'recommended');
+                if ('' !== $source_base) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'React dependent script', $source, $message, 'This script threw while React was missing. Excluding the dependency chain is the primary fix; this filename is the targeted dependent script to review.', $exclusions, 'high');
+                }
+            }
+
+            if (false !== strpos($text, 'reactdom is not defined') || false !== strpos($text, 'react-dom')) {
+                $matched = true;
+                $reason = 'Browser runtime error points to the ReactDOM dependency. Keep React, ReactDOM, and wp-element outside Defer/Delay before dependent blocks execute.';
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react', 'ReactDOM dependency', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react-dom', 'ReactDOM dependency', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-element', 'WordPress React wrapper', $source, $message, $reason, $exclusions, 'recommended');
+                if ('' !== $source_base) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'ReactDOM dependent script', $source, $message, $reason, $exclusions, 'high');
+                }
+            }
+
+            if (false !== strpos($text, 'elementormodules is not defined') || false !== strpos($text, 'elementor modules is not defined')) {
+                $matched = true;
+                $reason = 'Browser runtime error says Elementor modules were unavailable. Keep Elementor module/runtime providers and the failing Elementor dependent script in the visible JS Delay / Defer Exclusions list, then scan again.';
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor-frontend-modules', 'Elementor modules dependency', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'frontend-modules', 'Elementor modules dependency', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementorModules', 'Elementor modules global', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor-webpack-runtime', 'Elementor webpack runtime', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor-pro-webpack-runtime', 'Elementor Pro webpack runtime', $source, $message, $reason, $exclusions, 'recommended');
+
+                $source_fragment = $this->runtime_js_scan_path_fragment_from_source($source, 4);
+                if ('' !== $source_fragment && false !== strpos(strtolower($source_fragment), 'elementor')) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_fragment, 'Elementor dependent script path', $source, $message, 'This targeted Elementor script path is safer than excluding a broad basename such as common.min.js when fixing the missing elementorModules order.', $exclusions, 'recommended');
+                }
+
+                if (false !== strpos($text, 'common.min.js')) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor/assets/js/common.min.js', 'Elementor common script path', $source, $message, 'Elementor common.min.js executed before elementorModules existed. Exclude the Elementor common path or its exact basename only if the path is unavailable.', $exclusions, 'recommended');
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'common.min.js', 'Elementor common script basename', $source, $message, 'Fallback basename for Elementor common.min.js. Prefer the path-based suggestion when possible because common.min.js can be broad.', $exclusions, 'review');
+                }
+
+                if (false !== strpos($text, 'elementor-admin-bar.min.js')) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor/assets/js/elementor-admin-bar.min.js', 'Elementor admin-bar script path', $source, $message, 'Elementor admin-bar script executed before elementorModules existed. Keep this dependent admin-bar script ordered with Elementor modules.', $exclusions, 'recommended');
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor-admin-bar.min.js', 'Elementor admin-bar script basename', $source, $message, 'Fallback basename for Elementor admin-bar. Use only if the path-based suggestion is not present in the final HTML.', $exclusions, 'high');
+                }
+
+                if ('' !== $source_base) {
+                    $source_base_confidence = in_array(strtolower($source_base), array('common.min.js'), true) ? 'review' : 'high';
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'Elementor dependent script', $source, $message, 'This Elementor script executed before elementorModules existed. Keep its module dependency chain protected and review this script as the failing dependent source.', $exclusions, $source_base_confidence);
+                }
+            }
+
+            if (false !== strpos($text, 'wp-api-fetch-js-after') || false !== strpos($text, 'wp.apifetch') || false !== strpos($text, 'api-fetch') || false !== strpos($text, "reading 'use'") || false !== strpos($text, 'reading \"use\"')) {
+                if (false !== strpos($text, 'wp-api-fetch') || false !== strpos($text, 'api-fetch') || false !== strpos($text, "reading 'use'") || false !== strpos($text, 'reading \"use\"')) {
+                    $matched = true;
+                    $reason = 'Browser runtime error points to the WordPress apiFetch inline-after block. Keep wp-api-fetch and its hook dependency available before inline-after configuration runs.';
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-api-fetch', 'wp.apiFetch dependency', $source, $message, $reason, $exclusions, 'recommended');
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-hooks', 'wp.apiFetch hook dependency', $source, $message, $reason, $exclusions, 'recommended');
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-api-fetch-js-after', 'wp-api-fetch inline-after block', $source, $message, $reason, $exclusions, 'recommended');
+                    if ('' !== $source_base && false !== strpos(strtolower($source_base), 'api-fetch') && 'wp-api-fetch-js-after' !== strtolower($source_base)) {
+                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'wp-api-fetch pseudo-source', $source, $message, $reason, $exclusions, 'recommended');
+                    }
+                }
+            }
+
+            return $matched;
+        }
+
         private function build_runtime_js_scan_suggestions(array $errors)
         {
             $exclusions = $this->get_runtime_js_scan_current_exclusions();
@@ -1116,10 +1298,17 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
                 $message = isset($error['message']) ? sanitize_text_field((string) $error['message']) : '';
-                $source = isset($error['source']) ? esc_url_raw((string) $error['source']) : '';
+                $source = isset($error['source']) ? $this->runtime_js_scan_sanitize_source((string) $error['source']) : '';
                 $detail = isset($error['detail']) ? sanitize_text_field((string) $error['detail']) : '';
+                if ('' === $source) {
+                    $source = $this->runtime_js_scan_source_from_text($message . ' ' . $detail);
+                }
                 $text = strtolower($message . ' ' . $source . ' ' . $detail);
                 $source_base = $this->runtime_js_scan_basename_from_source($source);
+
+                if ($this->runtime_js_scan_add_known_dependency_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions)) {
+                    continue;
+                }
 
                 if (false !== strpos($text, 'jquery is not defined') || preg_match('/\$ is not defined/', $text)) {
                     $reason = 'Browser runtime error says jQuery was not available when an inline block or script executed. Add jQuery to the visible JS Delay / Defer Exclusions list, then scan again.';
@@ -1196,13 +1385,19 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 if (!is_array($error)) {
                     continue;
                 }
+                $message = isset($error['message']) ? sanitize_text_field((string) $error['message']) : '';
+                $detail = isset($error['detail']) ? sanitize_textarea_field(substr((string) $error['detail'], 0, 3000)) : '';
+                $source = isset($error['source']) ? $this->runtime_js_scan_sanitize_source((string) $error['source']) : '';
+                if ('' === $source) {
+                    $source = $this->runtime_js_scan_source_from_text($message . ' ' . $detail);
+                }
                 $errors[] = array(
                     'kind'    => isset($error['kind']) ? sanitize_text_field((string) $error['kind']) : '',
-                    'message' => isset($error['message']) ? sanitize_text_field((string) $error['message']) : '',
-                    'source'  => isset($error['source']) ? esc_url_raw((string) $error['source']) : '',
+                    'message' => $message,
+                    'source'  => $source,
                     'line'    => isset($error['line']) ? (int) $error['line'] : 0,
                     'column'  => isset($error['column']) ? (int) $error['column'] : 0,
-                    'detail'  => isset($error['detail']) ? sanitize_textarea_field((string) $error['detail']) : '',
+                    'detail'  => $detail,
                     'atMs'    => isset($error['atMs']) ? (int) $error['atMs'] : 0,
                 );
                 if (count($errors) >= 80) {
@@ -1212,7 +1407,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             return array(
                 'scanId'    => $scan_id,
-                'url'       => isset($payload['url']) ? esc_url_raw((string) $payload['url']) : '',
+                'url'       => isset($payload['url']) ? $this->runtime_js_scan_sanitize_display_url((string) $payload['url']) : '',
                 'completed' => !empty($payload['completed']),
                 'errors'    => $errors,
                 'userAgent' => isset($payload['userAgent']) ? sanitize_text_field((string) $payload['userAgent']) : '',
@@ -1245,7 +1440,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             $report = array(
                 'scanId'     => $scan_id,
-                'url'        => !empty($payload['url']) ? $payload['url'] : (string) ($existing['url'] ?? ''),
+                'url'        => !empty($payload['url']) ? $payload['url'] : $this->runtime_js_scan_sanitize_display_url((string) ($existing['url'] ?? '')),
                 'startedAt'  => isset($existing['startedAt']) ? (int) $existing['startedAt'] : time(),
                 'updatedAt'  => time(),
                 'completed'  => !empty($payload['completed']) || !empty($existing['completed']),

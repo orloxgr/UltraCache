@@ -40,7 +40,11 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
                 WP_CLI::error('Full purge is not available.');
             }
 
-            $engine->purge_all();
+            $purged = (bool) $engine->purge_all();
+            if (!$purged) {
+                WP_CLI::error('Full cache purge is already running or the purge lock could not be acquired.');
+            }
+
             WP_CLI::success('Purged the full cache.');
         }
 
@@ -420,7 +424,7 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
             }
 
             WP_CLI::success(sprintf(
-                'Scheduled cleanup finished. CSS bundles deleted: %d. Recognized CSS bundle files before/after: %d/%d. Old orphan-like eligible before: %d. Recent orphan-like protected by grace before: %d. Protected by cached HTML before: %d. Cached HTML CSS refs before: %d. Cleanup limit: %d/run. Grace: %d seconds. Warmed %d URL(s).',
+                'Scheduled cleanup finished. CSS bundles deleted: %d. Recognized CSS bundle files before/after: %d/%d. Old orphan-like eligible before: %d. Recent orphan-like protected by grace before: %d. Protected by cached HTML before: %d. Cached HTML CSS refs before: %d. Cleanup limit: %d/run. Grace: %d seconds. Runtime artifacts deleted: %d. Warmed %d URL(s).',
                 (int) ($result['cssBundleFilesDeleted'] ?? 0),
                 (int) ($result['cssBundleFilesBefore'] ?? 0),
                 (int) ($result['cssBundleFilesAfter'] ?? 0),
@@ -430,8 +434,87 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
                 (int) ($result['cssBundleCachedHtmlRefsBefore'] ?? 0),
                 (int) ($result['cssBundleCleanupLimit'] ?? 0),
                 (int) ($result['cssBundleGraceSeconds'] ?? 0),
+                (int) ($result['runtimeArtifactsDeleted'] ?? 0),
                 (int) ($result['warmed'] ?? 0)
             ));
+        }
+
+        /**
+         * Clean safe old runtime lock/test artifacts.
+         *
+         * ## OPTIONS
+         *
+         * [--dry-run]
+         * : Preview matching artifacts without deleting them.
+         *
+         * [--max-age-minutes=<number>]
+         * : Minimum age for regular runtime lock markers. Default: 10. Test dummy markers are eligible immediately if not actively locked.
+         *
+         * [--format=<format>]
+         * : Output format: table, json, or yaml. Default: table.
+         *
+         * ## EXAMPLES
+         *
+         *     wp ultracache cleanup_artifacts --dry-run
+         *     wp ultracache cleanup_artifacts --max-age-minutes=10
+         */
+
+        public function cleanup_artifacts($args, $assoc_args)
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'cleanup_runtime_artifacts')) {
+                WP_CLI::error('Runtime artifact cleanup is not available.');
+            }
+
+            $format = !empty($assoc_args['format']) ? (string) $assoc_args['format'] : 'table';
+            $max_age_minutes = isset($assoc_args['max-age-minutes']) ? max(1, absint($assoc_args['max-age-minutes'])) : 10;
+            $result = Ultra_Cache_WP::cleanup_runtime_artifacts(array(
+                'dry_run' => !empty($assoc_args['dry-run']),
+                'max_age_seconds' => $max_age_minutes * MINUTE_IN_SECONDS,
+            ));
+
+            if (!empty($result['items']) && 'table' === $format) {
+                $items = array();
+                foreach ((array) $result['items'] as $item) {
+                    $items[] = array(
+                        'file' => (string) ($item['file'] ?? ''),
+                        'action' => (string) ($item['action'] ?? ''),
+                        'reason' => (string) ($item['reason'] ?? ''),
+                        'ageSeconds' => (int) ($item['ageSeconds'] ?? 0),
+                    );
+                }
+                if (!empty($items)) {
+                    WP_CLI::line('Runtime artifact cleanup candidates:');
+                    \WP_CLI\Utils\format_items('table', $items, array('file', 'action', 'reason', 'ageSeconds'));
+                }
+            }
+
+            $summary = array(
+                'success' => !empty($result['success']) ? 'yes' : 'no',
+                'dryRun' => !empty($result['dryRun']) ? 'yes' : 'no',
+                'maxAgeSeconds' => (int) ($result['maxAgeSeconds'] ?? 0),
+                'scanned' => (int) ($result['scanned'] ?? 0),
+                'matched' => (int) ($result['matched'] ?? 0),
+                'deleted' => (int) ($result['deleted'] ?? 0),
+                'wouldDelete' => (int) ($result['wouldDelete'] ?? 0),
+                'skippedActive' => (int) ($result['skippedActive'] ?? 0),
+                'skippedYoung' => (int) ($result['skippedYoung'] ?? 0),
+                'skippedUnknown' => (int) ($result['skippedUnknown'] ?? 0),
+                'failed' => (int) ($result['failed'] ?? 0),
+                'message' => (string) ($result['message'] ?? ''),
+            );
+
+            if ('table' === $format) {
+                $this->output_assoc($summary, 'table');
+                if (empty($result['success'])) {
+                    WP_CLI::error('Runtime artifact cleanup completed with failures.');
+                }
+                return;
+            }
+
+            $this->output_assoc($result, $format);
+            if (empty($result['success'])) {
+                WP_CLI::halt(1);
+            }
         }
 
     }

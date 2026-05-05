@@ -35,15 +35,129 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 'pass',
                 'pwd',
                 'redirect_to',
+                'rest_route',
                 'customer-logout',
                 'logout',
                 'pay_for_order',
                 'cancel_order',
                 'download_file',
+                'ucwp_revalidate',
+                'ucwp_rt',
+                'ucwp_store_profile',
+                'ucwp_callback_profile',
+                'ucwp_store_profile_verbose',
+                'ucwp_store_profile_verbose_settings',
+                'ucwp_profile_bypass',
+                'ucwp_profile_run',
                 'ucwp_runtime_js_scan',
                 'ucwp_runtime_js_scan_id',
                 'ucwp_runtime_js_scan_nonce',
             );
+        }
+
+        private function get_hard_security_excluded_paths()
+        {
+            return array(
+                '/wp-admin/',
+                '/wp-login.php',
+                '/wp-json/',
+                '/xmlrpc.php',
+                '/wp-cron.php',
+                '/wp-comments-post.php',
+                '/wc-api/',
+                '/cart/',
+                '/checkout/',
+                '/my-account/',
+                '/order-pay/',
+                '/order-received/',
+                '/add-payment-method/',
+                '/lost-password/',
+            );
+        }
+
+        private function merge_hard_security_excluded_paths(array $excluded_paths)
+        {
+            return array_values(array_unique(array_merge($excluded_paths, $this->get_hard_security_excluded_paths())));
+        }
+
+        private function get_internal_control_query_args()
+        {
+            return array(
+                'ucwp_revalidate',
+                'ucwp_rt',
+                'ucwp_store_profile',
+                'ucwp_callback_profile',
+                'ucwp_store_profile_verbose',
+                'ucwp_store_profile_verbose_settings',
+                'ucwp_profile_bypass',
+                'ucwp_profile_run',
+                'ucwp_runtime_js_scan',
+                'ucwp_runtime_js_scan_id',
+                'ucwp_runtime_js_scan_nonce',
+            );
+        }
+
+        private function query_contains_internal_control_keys($query)
+        {
+            if ('' === (string) $query) {
+                return false;
+            }
+
+            parse_str((string) $query, $query_vars);
+            if (empty($query_vars) || !is_array($query_vars)) {
+                return false;
+            }
+
+            $lookup = array_fill_keys($this->get_internal_control_query_args(), true);
+            foreach (array_keys($query_vars) as $query_key) {
+                $normalized_key = sanitize_key((string) $query_key);
+                if (isset($lookup[$normalized_key])) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function request_has_internal_control_markers($query = '')
+        {
+            if ($this->query_contains_internal_control_keys($query)) {
+                return true;
+            }
+
+            $headers = array(
+                'HTTP_X_ULTRACACHE_REVALIDATE',
+                'HTTP_X_ULTRACACHE_TOKEN',
+                'HTTP_X_ULTRACACHE_PROFILE_BYPASS',
+                'HTTP_X_ULTRACACHE_STORE_PROFILE',
+                'HTTP_X_ULTRACACHE_STORE_PROFILE_VERBOSE',
+                'HTTP_X_ULTRACACHE_STORE_PROFILE_VERBOSE_SETTINGS',
+                'HTTP_X_ULTRACACHE_CALLBACK_PROFILE',
+            );
+            foreach ($headers as $header) {
+                if ('' !== trim((string) ucwp_server_value($header))) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function has_invalid_internal_control_request($query = '')
+        {
+            if (!$this->request_has_internal_control_markers($query)) {
+                return false;
+            }
+
+            if ($this->is_internal_revalidate_request() || $this->is_profile_bypass_request()) {
+                return false;
+            }
+
+            if (function_exists('ucwp_request_profiler_enabled') && ucwp_request_profiler_enabled()) {
+                return false;
+            }
+
+            return true;
         }
 
         private function merge_hard_security_excluded_query_args(array $excluded_query_args)
@@ -502,6 +616,11 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 $this->profile_request_checkpoint('should_bypass_return', array('reason' => 'internal-revalidate-allowed'));
                 return false;
             }
+            if ($this->has_invalid_internal_control_request(ucwp_server_value('QUERY_STRING'))) {
+                $this->last_bypass_reason = 'invalid-internal-control';
+                $this->profile_request_checkpoint('should_bypass_return', array('reason' => $this->last_bypass_reason));
+                return true;
+            }
             $this->profile_request_checkpoint('should_bypass_after_internal_revalidate');
 
             $this->profile_request_checkpoint('should_bypass_before_woocommerce_dynamic');
@@ -559,6 +678,11 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             $parts = wp_parse_url($url);
             $path = isset($parts['path']) ? $this->normalize_path_value((string) $parts['path']) : '/';
             $query = isset($parts['query']) ? (string) $parts['query'] : '';
+            if ($this->has_invalid_internal_control_request($query)) {
+                $this->last_bypass_reason = 'invalid-internal-control';
+                $this->profile_request_checkpoint('should_bypass_return', array('reason' => $this->last_bypass_reason));
+                return true;
+            }
             if ('' !== $query) {
                 parse_str($query, $ucwp_query_vars_for_cacheability);
                 unset(
@@ -576,6 +700,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             $this->profile_request_checkpoint('should_bypass_after_url_parse', array('path' => substr((string) $path, 0, 160), 'query_length' => strlen($query)));
 
             $excluded_paths = !empty($settings['excluded_paths']) && is_array($settings['excluded_paths']) ? $settings['excluded_paths'] : array();
+            $excluded_paths = $this->merge_hard_security_excluded_paths($excluded_paths);
             $this->profile_request_checkpoint('should_bypass_before_excluded_path_rules', array('rule_count' => count($excluded_paths)));
             if ($this->path_matches_any_rule($path, $excluded_paths)) {
                 $this->last_bypass_reason = 'excluded-path';
@@ -656,6 +781,10 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             $url = trim((string) $url);
             if ('' === $url) {
                 return false;
+            }
+
+            if (function_exists('ucwp_is_strict_frontend_loopback_url')) {
+                return ucwp_is_strict_frontend_loopback_url($url);
             }
 
             $parts = wp_parse_url($url);
@@ -879,8 +1008,13 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             $parts = wp_parse_url($url);
             $path = isset($parts['path']) ? $this->normalize_path_value((string) $parts['path']) : '/';
             $query = isset($parts['query']) ? (string) $parts['query'] : '';
+            if ($this->has_invalid_internal_control_request($query)) {
+                $this->last_bypass_reason = 'invalid-internal-control';
+                return true;
+            }
 
             $excluded_paths = !empty($settings['excluded_paths']) && is_array($settings['excluded_paths']) ? $settings['excluded_paths'] : array();
+            $excluded_paths = $this->merge_hard_security_excluded_paths($excluded_paths);
             if ($this->path_matches_any_rule($path, $excluded_paths)) {
                 $this->last_bypass_reason = 'excluded-path';
                 return true;

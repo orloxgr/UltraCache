@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.57.06
+ * Version: 2.57.46
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 7.4
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.57.06');
+    define('UCWP_VERSION', '2.57.46');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -106,244 +106,6 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             return self::$instance;
-        }
-
-        public static function get_dashboard_runtime_lock_path($name)
-        {
-            $name = sanitize_key((string) $name);
-            if ('' === $name) {
-                return '';
-            }
-
-            return trailingslashit(UCWP_CACHE_DIR) . 'locks/' . $name . '.lock';
-        }
-
-        private static $dashboard_stale_runtime_locks = array();
-
-        public static function maybe_quarantine_stale_dashboard_runtime_lock($name, $ttl = 300)
-        {
-            $file = self::get_dashboard_runtime_lock_path($name);
-            if ('' === $file || !file_exists($file)) {
-                return false;
-            }
-
-            $mtime = (int) @filemtime($file);
-            $age = $mtime > 0 ? max(0, time() - $mtime) : 0;
-            if ($age <= max(30, (int) $ttl)) {
-                return false;
-            }
-
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native flock is required to safely inspect runtime lock ownership.
-            $handle = @fopen($file, 'c+');
-            if (!$handle) {
-                return false;
-            }
-
-            $quarantined = false;
-            if (@flock($handle, LOCK_EX | LOCK_NB)) {
-                $target = $file . '.stale.' . gmdate('Ymd_His');
-                @flock($handle, LOCK_UN);
-                $quarantined = @rename($file, $target);
-                if ($quarantined) {
-                    self::$dashboard_stale_runtime_locks[] = array(
-                        'name' => (string) $name,
-                        'age' => $age,
-                        'file' => $file,
-                        'quarantinedTo' => $target,
-                    );
-                }
-            }
-
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock inspection handle.
-            @fclose($handle);
-
-            return $quarantined;
-        }
-
-        public static function get_dashboard_stale_runtime_lock_notices()
-        {
-            return self::$dashboard_stale_runtime_locks;
-        }
-
-        public static function is_dashboard_runtime_lock_active($name, $ttl = 180)
-        {
-            $file = self::get_dashboard_runtime_lock_path($name);
-            if ('' === $file || !file_exists($file)) {
-                return false;
-            }
-
-            $mtime = (int) @filemtime($file);
-            if ($mtime > 0 && (time() - $mtime) > max(30, (int) $ttl)) {
-                self::maybe_quarantine_stale_dashboard_runtime_lock($name, $ttl);
-                return false;
-            }
-
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Non-blocking runtime lock inspection requires native flock semantics.
-            $handle = @fopen($file, 'r');
-            if (!$handle) {
-                return true;
-            }
-
-            $locked = true;
-            if (@flock($handle, LOCK_EX | LOCK_NB)) {
-                @flock($handle, LOCK_UN);
-                $locked = false;
-            }
-
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock inspection handle.
-            @fclose($handle);
-
-            return $locked;
-        }
-
-        public static function get_dashboard_heavy_work_status()
-        {
-            $now = time();
-            $status = array(
-                'active'  => false,
-                'action'  => '',
-                'source'  => '',
-                'age'     => 0,
-                'message' => '',
-            );
-
-            $purge_lock_file = self::get_dashboard_runtime_lock_path('purge-all');
-            if (self::is_dashboard_runtime_lock_active('purge-all', 300)) {
-                $mtime = $purge_lock_file && file_exists($purge_lock_file) ? (int) @filemtime($purge_lock_file) : 0;
-                $status = array(
-                    'active'  => true,
-                    'action'  => 'purge_all',
-                    'source'  => 'runtime_lock',
-                    'age'     => $mtime > 0 ? max(0, $now - $mtime) : 0,
-                    'message' => 'A cache purge is currently running. Expensive dashboard diagnostics and probes are temporarily skipped.',
-                );
-            }
-
-            $option_key = defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_queue_heavy_lock' : 'ucwp_settings_action_queue_heavy_lock';
-            $lock = get_option($option_key, array());
-            if (is_array($lock) && !empty($lock)) {
-                $lock_time = isset($lock['time']) ? (int) $lock['time'] : 0;
-                $lock_age = $lock_time > 0 ? max(0, $now - $lock_time) : 0;
-                if ($lock_age <= 300) {
-                    $action = sanitize_key((string) ($lock['action'] ?? 'dashboard_action'));
-                    if (!$status['active'] || 'purge_all' !== $status['action']) {
-                        $status = array(
-                            'active'  => true,
-                            'action'  => $action,
-                            'source'  => 'action_queue_lock',
-                            'age'     => $lock_age,
-                            'message' => 'A heavy dashboard action is currently running. Expensive dashboard diagnostics and probes are temporarily skipped.',
-                        );
-                    }
-                }
-            }
-
-            return $status;
-        }
-
-        public static function is_dashboard_heavy_work_active()
-        {
-            $status = self::get_dashboard_heavy_work_status();
-            return !empty($status['active']);
-        }
-
-        public static function get_lightweight_dashboard_busy_diagnostics($status = null)
-        {
-            $status = is_array($status) ? $status : self::get_dashboard_heavy_work_status();
-            return array(
-                'dashboardWork' => array(
-                    'active'  => !empty($status['active']),
-                    'action'  => (string) ($status['action'] ?? ''),
-                    'source'  => (string) ($status['source'] ?? ''),
-                    'age'     => max(0, (int) ($status['age'] ?? 0)),
-                    'message' => (string) ($status['message'] ?? 'Dashboard heavy work is active.'),
-                ),
-                'compression' => array(
-                    'serverDefault' => array(
-                        'cachedOnly' => true,
-                        'message'    => 'Skipped while a heavy dashboard action is running.',
-                    ),
-                ),
-                'reverseProxy' => array(
-                    'detected' => false,
-                    'message'  => 'Skipped while a heavy dashboard action is running.',
-                ),
-            );
-        }
-
-        public static function get_lightweight_dashboard_busy_stats($status = null)
-        {
-            $status = is_array($status) ? $status : self::get_dashboard_heavy_work_status();
-            return array(
-                'success' => true,
-                'busy' => true,
-                'dashboardWorkActive' => !empty($status['active']),
-                'dashboardWorkAction' => (string) ($status['action'] ?? ''),
-                'dashboardWorkSource' => (string) ($status['source'] ?? ''),
-                'dashboardWorkAge' => max(0, (int) ($status['age'] ?? 0)),
-                'dashboardWorkMessage' => (string) ($status['message'] ?? 'Dashboard heavy work is active.'),
-                'dashboardStaleRuntimeLocks' => self::get_dashboard_stale_runtime_lock_notices(),
-                'diagnostics' => self::get_lightweight_dashboard_busy_diagnostics($status),
-            );
-        }
-
-        public static function get_dashboard_stats_snapshot($max_age = 20, $allow_refresh = true)
-        {
-            $cache_key = defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_dashboard_stats_snapshot_v1' : 'ucwp_dashboard_stats_snapshot_v1';
-            $cached = get_transient($cache_key);
-            $now = time();
-            $max_age = max(3, (int) $max_age);
-
-            if (is_array($cached) && isset($cached['time'], $cached['stats']) && is_array($cached['stats'])) {
-                $age = max(0, $now - (int) $cached['time']);
-                if ($age <= $max_age || !$allow_refresh) {
-                    $stats = $cached['stats'];
-                    $stats['dashboardStatsSnapshotCached'] = true;
-                    $stats['dashboardStatsSnapshotAge'] = $age;
-                    $stats['dashboardStatsRefreshInterval'] = $max_age;
-                    if (!isset($stats['dashboardStaleRuntimeLocks'])) {
-                        $stats['dashboardStaleRuntimeLocks'] = self::get_dashboard_stale_runtime_lock_notices();
-                    }
-                    return $stats;
-                }
-            }
-
-            if (!$allow_refresh) {
-                return array(
-                    'success' => true,
-                    'dashboardStatsSnapshotCached' => false,
-                    'dashboardStatsRefreshInterval' => $max_age,
-                    'dashboardStaleRuntimeLocks' => self::get_dashboard_stale_runtime_lock_notices(),
-                );
-            }
-
-            $stats = self::get_engine_stats(false);
-            $stats = is_array($stats) ? $stats : array();
-            $stats['dashboardStatsSnapshotCached'] = false;
-            $stats['dashboardStatsSnapshotAge'] = 0;
-            $stats['dashboardStatsRefreshInterval'] = $max_age;
-            $stats['dashboardStaleRuntimeLocks'] = self::get_dashboard_stale_runtime_lock_notices();
-            set_transient($cache_key, array('time' => $now, 'stats' => $stats), max(30, $max_age * 2));
-            return $stats;
-        }
-
-        public function maybe_short_circuit_dashboard_probe_requests()
-        {
-            if (empty($_GET['ucwp_probe_browser'])) {
-                return;
-            }
-
-            if (!self::is_dashboard_heavy_work_active()) {
-                return;
-            }
-
-            if (!headers_sent()) {
-                status_header(204);
-                header('X-UltraCache-Probe-Skipped: heavy-dashboard-work');
-                header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-            }
-
-            exit;
         }
 
         private function __construct()
@@ -444,7 +206,6 @@ if (!class_exists('Ultra_Cache_WP')) {
         private function register_hooks()
         {
             $this->register_request_profile_hooks();
-            add_action('plugins_loaded', array($this, 'maybe_short_circuit_dashboard_probe_requests'), -9999);
             add_action('plugins_loaded', array($this, 'bootstrap_components'), 5);
             add_action('plugins_loaded', array($this, 'reconcile_page_cache_dropin'), 19);
             add_action('plugins_loaded', array($this, 'reconcile_object_cache_dropin'), 20);
@@ -689,33 +450,30 @@ if (!class_exists('Ultra_Cache_WP')) {
             ));
         }
 
-        private function should_run_full_object_cache_reconcile()
+        private static function can_run_privileged_file_mutations()
         {
             if (defined('WP_CLI') && WP_CLI) {
                 return true;
             }
 
-            if (function_exists('is_admin') && is_admin()) {
-                return true;
+            if (!function_exists('current_user_can')) {
+                return false;
             }
 
-            return false;
+            return current_user_can('manage_options') && current_user_can('activate_plugins');
+        }
+
+        private function should_run_full_object_cache_reconcile()
+        {
+            return self::can_run_privileged_file_mutations();
         }
 
         private function should_run_full_page_cache_reconcile()
         {
-            if (defined('WP_CLI') && WP_CLI) {
-                return true;
-            }
-
-            // File mutations are intentionally kept in privileged/admin contexts.
-            // Public frontend requests only perform a read-only health check so they
-            // do not initialize WP_Filesystem or attempt drop-in repair on traffic.
-            if (function_exists('is_admin') && is_admin()) {
-                return true;
-            }
-
-            return false;
+            // File mutations are intentionally kept in privileged plugin-management
+            // contexts. is_admin() is not sufficient because admin-ajax.php and
+            // low-privilege wp-admin requests can also run in an admin context.
+            return self::can_run_privileged_file_mutations();
         }
 
         private static function is_page_cache_enabled_raw_fast()
@@ -744,6 +502,90 @@ if (!class_exists('Ultra_Cache_WP')) {
             $cached = is_array($saved) && !empty($saved['objectCacheEnabled']);
 
             return $cached;
+        }
+
+        public static function are_cache_stats_enabled()
+        {
+            $settings = defined('UCWP_SETTINGS_KEY') ? get_option(UCWP_SETTINGS_KEY, array()) : array();
+            if (!is_array($settings)) {
+                return false;
+            }
+
+            return !empty($settings['cacheStatsEnabled']) || !empty($settings['cache_stats_enabled']);
+        }
+
+        public static function get_cache_stats_disabled_payload($source = 'stats_disabled')
+        {
+            return array(
+                'success' => true,
+                'enabled' => false,
+                'disabled' => true,
+                'cacheStatsEnabled' => false,
+                'message' => 'Cache stats are disabled.',
+                'impact' => 'off',
+                'timestamp' => time(),
+                'source' => (string) $source,
+                'dashboardStatsDisabled' => true,
+                'dashboardStatsDisabledReason' => 'Cache stats are disabled.',
+                'dashboardStatsSnapshotCached' => false,
+                'dashboardStatsSnapshotAge' => 0,
+                'dashboardStatsRefreshInterval' => 0,
+                'dashboardStatsPollingDisabled' => true,
+                'diagnostics' => array(
+                    'cacheStats' => array(
+                        'enabled' => false,
+                        'disabled' => true,
+                        'message' => 'When disabled, UltraCache does not collect, refresh, scan, or poll cache statistics.',
+                    ),
+                    'objectCache' => method_exists(__CLASS__, 'get_object_cache_status_diagnostic_lite')
+                        ? self::get_object_cache_status_diagnostic_lite()
+                        : array(),
+                ),
+            );
+        }
+
+        public static function get_dashboard_stats_snapshot($max_age = 20, $allow_refresh = true)
+        {
+            $now = time();
+            $max_age = max(3, (int) $max_age);
+
+            // Count cache stats OFF is a hard stop for dashboard/stat snapshots.
+            // Do not read cached snapshots, refresh engine stats, scan storage,
+            // count Redis/APCu keys, scan manifests, or touch analytics here.
+            if (!self::are_cache_stats_enabled()) {
+                return self::get_cache_stats_disabled_payload('snapshot_disabled');
+            }
+
+            $cache_key = defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_dashboard_stats_snapshot_v1' : 'ucwp_dashboard_stats_snapshot_v1';
+            $cached = get_transient($cache_key);
+
+            if (is_array($cached) && isset($cached['time'], $cached['stats']) && is_array($cached['stats'])) {
+                $age = max(0, $now - (int) $cached['time']);
+                if ($age <= $max_age || !$allow_refresh) {
+                    $stats = $cached['stats'];
+                    $stats['dashboardStatsSnapshotCached'] = true;
+                    $stats['dashboardStatsSnapshotAge'] = $age;
+                    $stats['dashboardStatsRefreshInterval'] = $max_age;
+                    return $stats;
+                }
+            }
+
+            if (!$allow_refresh) {
+                return array(
+                    'success' => true,
+                    'dashboardStatsSnapshotCached' => false,
+                    'dashboardStatsRefreshInterval' => $max_age,
+                    'message' => 'Dashboard stats are passive; no refresh was requested.',
+                );
+            }
+
+            $stats = self::get_engine_stats(false, true);
+            $stats = is_array($stats) ? $stats : array();
+            $stats['dashboardStatsSnapshotCached'] = false;
+            $stats['dashboardStatsSnapshotAge'] = 0;
+            $stats['dashboardStatsRefreshInterval'] = $max_age;
+            set_transient($cache_key, array('time' => $now, 'stats' => $stats), max(30, $max_age * 2));
+            return $stats;
         }
 
         private static function should_use_live_settings_support_checks()
@@ -872,7 +714,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     'reason' => isset($status['reason']) ? (string) $status['reason'] : '',
                     'exists' => !empty($status['exists']) ? 'true' : 'false',
                     'readable' => !empty($status['readable']) ? 'true' : 'false',
-                    'valid_json' => !empty($status['valid_json']) ? 'true' : 'false',
+                    'valid_config' => !empty($status['valid_config']) ? 'true' : 'false',
                 ));
                 return;
             }
@@ -903,15 +745,9 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private function should_run_full_runtime_config_reconcile()
         {
-            if (defined('WP_CLI') && WP_CLI) {
-                return true;
-            }
-
-            if (function_exists('is_admin') && is_admin()) {
-                return true;
-            }
-
-            return false;
+            // Runtime config writes are treated like drop-in/file mutations: WP-CLI
+            // or a real plugin-management admin only, never plain is_admin().
+            return self::can_run_privileged_file_mutations();
         }
 
         public function bootstrap_components()
@@ -1012,6 +848,11 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private static function get_runtime_config_path()
         {
+            return trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.php';
+        }
+
+        private static function get_legacy_runtime_config_json_path()
+        {
             return trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.json';
         }
 
@@ -1083,7 +924,27 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function write_runtime_secret_array(array $runtime)
         {
             $normalized = self::normalize_runtime_secret_array($runtime);
-            return self::write_file_atomically(self::get_runtime_secret_path(), self::render_runtime_secret_php($normalized), 'runtime_secret write');
+            $path = self::get_runtime_secret_path();
+            $written = self::write_file_atomically($path, self::render_runtime_secret_php($normalized), 'runtime_secret write');
+            if ($written && function_exists('ucwp_safe_chmod')) {
+                ucwp_safe_chmod($path, 0600, 'runtime_secret permissions');
+            }
+
+            return $written;
+        }
+
+        private static function ensure_runtime_revalidate_secret()
+        {
+            $runtime = self::load_runtime_secret_file();
+            $expected = wp_hash('ucwp-revalidate-v1');
+
+            if (isset($runtime['revalidate_secret']) && hash_equals((string) $runtime['revalidate_secret'], (string) $expected)) {
+                return true;
+            }
+
+            $runtime['revalidate_secret'] = (string) $expected;
+
+            return self::write_runtime_secret_array($runtime);
         }
 
         private static function set_runtime_varnish_admin_secret($secret)
@@ -1106,20 +967,25 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             $htaccess = trailingslashit($runtime_dir) . '.htaccess';
-            $htaccess_rules = "<Files \"runtime-config.json\">\nRequire all denied\n</Files>\n<IfModule !mod_authz_core.c>\n<Files \"runtime-config.json\">\nDeny from all\n</Files>\n</IfModule>\n";
+            $htaccess_rules = "<FilesMatch \"^runtime-config\\.(php|json)$\">\nRequire all denied\n</FilesMatch>\n<IfModule !mod_authz_core.c>\n<FilesMatch \"^runtime-config\\.(php|json)$\">\nDeny from all\n</FilesMatch>\n</IfModule>\n";
             if (!file_exists($htaccess)) {
                 ucwp_safe_file_put_contents($htaccess, $htaccess_rules, 0, 'runtime_config htaccess');
             } else {
                 $existing_htaccess = ucwp_safe_file_get_contents($htaccess, 'runtime_config htaccess read');
-                if (is_string($existing_htaccess) && false === strpos($existing_htaccess, 'runtime-config.json')) {
+                if (is_string($existing_htaccess) && false === strpos($existing_htaccess, 'runtime-config.php')) {
                     ucwp_safe_file_put_contents($htaccess, rtrim($existing_htaccess) . "\n\n" . $htaccess_rules, 0, 'runtime_config htaccess append');
                 }
             }
 
             $web_config = trailingslashit($runtime_dir) . 'web.config';
-            $web_config_rules = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n  <location path=\"runtime-config.json\">\n    <system.webServer>\n      <security>\n        <authorization>\n          <clear />\n          <add accessType=\"Deny\" users=\"*\" />\n        </authorization>\n      </security>\n    </system.webServer>\n  </location>\n</configuration>\n";
+            $web_config_rules = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n  <location path=\"runtime-config.php\">\n    <system.webServer>\n      <security>\n        <authorization>\n          <clear />\n          <add accessType=\"Deny\" users=\"*\" />\n        </authorization>\n      </security>\n    </system.webServer>\n  </location>\n  <location path=\"runtime-config.json\">\n    <system.webServer>\n      <security>\n        <authorization>\n          <clear />\n          <add accessType=\"Deny\" users=\"*\" />\n        </authorization>\n      </security>\n    </system.webServer>\n  </location>\n</configuration>\n";
             if (!file_exists($web_config)) {
                 ucwp_safe_file_put_contents($web_config, $web_config_rules, 0, 'runtime_config web_config');
+            } else {
+                $existing_web_config = ucwp_safe_file_get_contents($web_config, 'runtime_config web_config read');
+                if (is_string($existing_web_config) && false === strpos($existing_web_config, 'runtime-config.php')) {
+                    ucwp_safe_file_put_contents($web_config, $web_config_rules, 0, 'runtime_config web_config update');
+                }
             }
         }
 
@@ -1195,20 +1061,52 @@ if (!class_exists('Ultra_Cache_WP')) {
             ));
         }
 
-        private static function load_runtime_config_file($path)
+        private static function load_runtime_config_public_file($path)
         {
             if (!file_exists($path) || !is_readable($path)) {
-                return new WP_Error('ucwp_runtime_config_missing', 'runtime-config.json is missing or not readable.');
+                return new WP_Error('ucwp_runtime_config_missing', 'runtime-config.php is missing or not readable.');
+            }
+
+            $extension = strtolower((string) pathinfo((string) $path, PATHINFO_EXTENSION));
+            if ('php' === $extension) {
+                clearstatcache(true, $path);
+                if (function_exists('opcache_invalidate')) {
+                    @opcache_invalidate($path, true);
+                }
+
+                $loaded = require $path;
+                if (!is_array($loaded)) {
+                    return new WP_Error('ucwp_runtime_config_invalid', 'runtime-config.php did not return a valid array.');
+                }
+
+                return $loaded;
             }
 
             $raw = ucwp_safe_file_get_contents($path, 'load_runtime_config_file');
             if (false === $raw || '' === $raw) {
-                return new WP_Error('ucwp_runtime_config_load_failed', 'Failed to read runtime-config.json.');
+                return new WP_Error('ucwp_runtime_config_load_failed', 'runtime-config file could not be read.');
             }
 
             $loaded = json_decode($raw, true);
             if (!is_array($loaded)) {
-                return new WP_Error('ucwp_runtime_config_invalid', 'runtime-config.json did not contain a valid JSON object.');
+                return new WP_Error('ucwp_runtime_config_invalid', 'runtime-config file did not contain a valid JSON object.');
+            }
+
+            return $loaded;
+        }
+
+        private static function load_runtime_config_file($path)
+        {
+            $loaded = self::load_runtime_config_public_file($path);
+            if (is_wp_error($loaded)) {
+                $legacy_json = self::get_legacy_runtime_config_json_path();
+                if ($path !== $legacy_json && file_exists($legacy_json) && is_readable($legacy_json)) {
+                    $loaded = self::load_runtime_config_public_file($legacy_json);
+                }
+            }
+
+            if (is_wp_error($loaded)) {
+                return $loaded;
             }
 
             $loaded = array_merge($loaded, self::load_runtime_secret_file());
@@ -1216,17 +1114,12 @@ if (!class_exists('Ultra_Cache_WP')) {
             return self::normalize_runtime_config($loaded);
         }
 
-        private static function render_runtime_config_json(array $runtime)
+        private static function render_runtime_config_php(array $runtime)
         {
             $public_runtime = self::normalize_runtime_config($runtime);
             unset($public_runtime['revalidate_secret'], $public_runtime['redis_password'], $public_runtime['varnish_admin_secret']);
 
-            $encoded = wp_json_encode($public_runtime, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-            if (!is_string($encoded) || '' === $encoded) {
-                return "{}\n";
-            }
-
-            return $encoded . "\n";
+            return "<?php\n/** UltraCache managed runtime config. Secret-free by design. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn " . var_export($public_runtime, true) . ";\n";
         }
 
         private static function write_file_atomically($target, $contents, $context)
@@ -1261,6 +1154,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $status = array(
                 'exists' => file_exists($path),
                 'readable' => is_readable($path),
+                'valid_config' => false,
                 'valid_json' => false,
                 'healthy' => false,
                 'reason' => '',
@@ -1276,23 +1170,23 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return $status;
             }
 
-            $raw = file_get_contents($path);
-            if (!is_string($raw) || '' === $raw) {
-                $status['reason'] = 'empty_or_read_failed';
-                return $status;
-            }
-
-            $decoded = json_decode($raw, true);
-            $status['valid_json'] = is_array($decoded);
-            $status['healthy'] = $status['valid_json'];
-            $status['reason'] = $status['healthy'] ? 'present_valid_json' : 'invalid_json';
+            $loaded = self::load_runtime_config_public_file($path);
+            $status['valid_config'] = is_array($loaded);
+            $status['valid_json'] = false;
+            $status['healthy'] = $status['valid_config'];
+            $status['reason'] = $status['healthy'] ? 'present_valid_php' : 'invalid_config';
 
             return $status;
         }
 
         private static function runtime_config_needs_sync()
         {
-            $loaded = self::load_runtime_config_file(self::get_runtime_config_path());
+            $config_path = self::get_runtime_config_path();
+            if (!file_exists($config_path) || !is_readable($config_path)) {
+                return true;
+            }
+
+            $loaded = self::load_runtime_config_file($config_path);
             if (is_wp_error($loaded)) {
                 return true;
             }
@@ -1350,15 +1244,23 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             self::ensure_directories();
 
-            // Runtime config sync must never create or update the off-docroot
-            // runtime secrets file. Redis/Varnish secrets are written only by
-            // explicit admin saves through set_runtime_*(). Drop-ins only read
-            // the secret file when it already exists.
+            // Keep user-provided Redis/Varnish secrets write-only from explicit
+            // admin saves. Runtime config sync may only ensure the internal
+            // revalidate token and must preserve any existing secret values.
+            self::ensure_runtime_revalidate_secret();
+
             $runtime         = self::build_runtime_config();
             $config_target   = self::get_runtime_config_path();
-            $config_contents = self::render_runtime_config_json($runtime);
+            $config_contents = self::render_runtime_config_php($runtime);
+            $written = self::write_file_atomically($config_target, $config_contents, 'sync_runtime_config');
+            if ($written) {
+                $legacy_json = self::get_legacy_runtime_config_json_path();
+                if (file_exists($legacy_json)) {
+                    ucwp_safe_unlink($legacy_json, 'sync_runtime_config legacy_json_cleanup');
+                }
+            }
 
-            return self::write_file_atomically($config_target, $config_contents, 'sync_runtime_config');
+            return $written;
         }
 
         private static function get_cache_cleanup_schedule_name($hours)
@@ -1565,8 +1467,13 @@ if (!class_exists('Ultra_Cache_WP')) {
             $css_files_before = max(0, (int) ($css_before['files'] ?? ($css_before['totalFiles'] ?? 0)));
             $css_files_after = max(0, (int) ($css_after['files'] ?? ($css_after['totalFiles'] ?? 0)));
 
+            $runtime_artifacts_cleanup = self::cleanup_runtime_artifacts(array(
+                'dry_run' => false,
+                'max_age_seconds' => 600,
+            ));
+
             return array(
-                'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed || $css_files_before !== $css_files_after),
+                'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed || $css_files_before !== $css_files_after || !empty($runtime_artifacts_cleanup['deleted'])),
                 'warmed'  => $warmed,
                 'queueStarted' => $queue_started,
                 'objectCacheRemoved' => $object_cache_removed,
@@ -1581,7 +1488,171 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'cssBundleCachedHtmlRefsBefore' => max(0, (int) ($css_before['cachedHtmlRefFiles'] ?? 0)),
                 'cssBundleCleanupLimit' => max(0, (int) ($css_after['cleanupDeleteLimit'] ?? self::get_storage_cleanup_max_deletes_per_run())),
                 'cssBundleGraceSeconds' => max(0, (int) ($css_after['graceSeconds'] ?? self::get_storage_cleanup_grace_seconds())),
+                'runtimeArtifactsScanned' => (int) ($runtime_artifacts_cleanup['scanned'] ?? 0),
+                'runtimeArtifactsDeleted' => (int) ($runtime_artifacts_cleanup['deleted'] ?? 0),
+                'runtimeArtifactsSkippedActive' => (int) ($runtime_artifacts_cleanup['skippedActive'] ?? 0),
+                'runtimeArtifactsSkippedYoung' => (int) ($runtime_artifacts_cleanup['skippedYoung'] ?? 0),
             );
+        }
+
+        public static function cleanup_runtime_artifacts(array $args = array())
+        {
+            $dry_run = !empty($args['dry_run']);
+            $max_age_seconds = isset($args['max_age_seconds']) ? max(60, (int) $args['max_age_seconds']) : 600;
+            $now = time();
+            $locks_dir = trailingslashit(UCWP_CACHE_DIR) . 'locks/';
+
+            $result = array(
+                'success' => true,
+                'dryRun' => $dry_run,
+                'directory' => $locks_dir,
+                'maxAgeSeconds' => $max_age_seconds,
+                'scanned' => 0,
+                'matched' => 0,
+                'deleted' => 0,
+                'wouldDelete' => 0,
+                'skippedActive' => 0,
+                'skippedYoung' => 0,
+                'skippedUnknown' => 0,
+                'failed' => 0,
+                'items' => array(),
+                'message' => '',
+            );
+
+            if (!is_dir($locks_dir) || !is_readable($locks_dir)) {
+                $result['message'] = 'Runtime locks directory does not exist or is not readable.';
+                return $result;
+            }
+
+            $items = scandir($locks_dir);
+            if (!is_array($items)) {
+                $result['success'] = false;
+                $result['message'] = 'Unable to read runtime locks directory.';
+                return $result;
+            }
+
+            $runtime_lock_pattern = '/^(?:purge-all|page-cache-(?:write|build)-[a-f0-9]{32}|css-(?:bundle|entry)-[a-f0-9]{32})\.lock$/i';
+            $test_artifact_pattern = '/^(?:baseline-dummy|verify-dummy(?:-[a-z0-9_.-]+)?|ucwp-test-[a-z0-9_.-]+|ultracache-test-[a-z0-9_.-]+)\.lock$/i';
+
+            foreach ($items as $item) {
+                if ('.' === $item || '..' === $item) {
+                    continue;
+                }
+
+                $name = basename((string) $item);
+                if ($name !== (string) $item || '' === $name || false === strpos($name, '.lock')) {
+                    continue;
+                }
+
+                $path = $locks_dir . $name;
+                if (!is_file($path) || is_link($path)) {
+                    continue;
+                }
+
+                $result['scanned']++;
+                $is_test_artifact = (bool) preg_match($test_artifact_pattern, $name);
+                $is_runtime_lock = (bool) preg_match($runtime_lock_pattern, $name);
+                if (!$is_test_artifact && !$is_runtime_lock) {
+                    $result['skippedUnknown']++;
+                    continue;
+                }
+
+                $mtime = function_exists('ucwp_safe_filemtime') ? ucwp_safe_filemtime($path, 'runtime_artifact_cleanup') : filemtime($path);
+                $age = false === $mtime ? 0 : max(0, $now - (int) $mtime);
+                $delete_reason = $is_test_artifact ? 'test-artifact' : 'expired-runtime-lock-marker';
+
+                if (!$is_test_artifact && $age < $max_age_seconds) {
+                    $result['matched']++;
+                    $result['skippedYoung']++;
+                    $result['items'][] = array(
+                        'file' => $name,
+                        'action' => 'skip-young',
+                        'reason' => $delete_reason,
+                        'ageSeconds' => $age,
+                    );
+                    continue;
+                }
+
+                $locked = true;
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native flock check is required to avoid deleting active runtime lock files. Path is restricted to UltraCache locks/.
+                $handle = @fopen($path, 'c+');
+                if ($handle) {
+                    $locked = !@flock($handle, LOCK_EX | LOCK_NB);
+                }
+
+                $result['matched']++;
+                if ($locked) {
+                    if ($handle) {
+                        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle.
+                        @fclose($handle);
+                    }
+                    $result['skippedActive']++;
+                    $result['items'][] = array(
+                        'file' => $name,
+                        'action' => 'skip-active',
+                        'reason' => $delete_reason,
+                        'ageSeconds' => $age,
+                    );
+                    continue;
+                }
+
+                if ($dry_run) {
+                    if ($handle) {
+                        @flock($handle, LOCK_UN);
+                        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle.
+                        @fclose($handle);
+                    }
+                    $result['wouldDelete']++;
+                    $result['items'][] = array(
+                        'file' => $name,
+                        'action' => 'would-delete',
+                        'reason' => $delete_reason,
+                        'ageSeconds' => $age,
+                    );
+                    continue;
+                }
+
+                $deleted = function_exists('ucwp_safe_unlink') ? ucwp_safe_unlink($path, 'runtime_artifact_cleanup') : false;
+                if ($handle) {
+                    @flock($handle, LOCK_UN);
+                    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle after delete attempt.
+                    @fclose($handle);
+                }
+
+                if ($deleted) {
+                    $result['deleted']++;
+                    $result['items'][] = array(
+                        'file' => $name,
+                        'action' => 'deleted',
+                        'reason' => $delete_reason,
+                        'ageSeconds' => $age,
+                    );
+                } else {
+                    $result['failed']++;
+                    $result['items'][] = array(
+                        'file' => $name,
+                        'action' => 'failed-delete',
+                        'reason' => $delete_reason,
+                        'ageSeconds' => $age,
+                    );
+                }
+            }
+
+            if ($result['failed'] > 0) {
+                $result['success'] = false;
+            }
+
+            $result['message'] = sprintf(
+                'Runtime artifact cleanup scanned %d lock file(s), matched %d, deleted %d, would delete %d, skipped active %d, skipped young %d.',
+                (int) $result['scanned'],
+                (int) $result['matched'],
+                (int) $result['deleted'],
+                (int) $result['wouldDelete'],
+                (int) $result['skippedActive'],
+                (int) $result['skippedYoung']
+            );
+
+            return $result;
         }
 
 
@@ -2180,16 +2251,12 @@ private static function remove_runtime_secret_files()
 {
     $candidates = array();
 
-    if (defined('WP_CONTENT_DIR')) {
-        $candidates[] = trailingslashit(WP_CONTENT_DIR) . 'ultracache-runtime-secrets.php';
-        $candidates[] = trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-runtime-secrets.php';
+    if (defined('UCWP_CACHE_DIR')) {
+        $candidates[] = trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.php';
+        $candidates[] = trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.json';
     }
 
-    if (defined('UCWP_CACHE_DIR')) {
-        $candidates[] = trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.json';
-        $candidates[] = trailingslashit(UCWP_CACHE_DIR) . 'runtime-secrets.php';
-        $candidates[] = trailingslashit(UCWP_CACHE_DIR) . '.ultracache-runtime-secrets.php';
-    }
+    $candidates[] = self::get_runtime_secret_path();
 
     foreach (array_unique($candidates) as $path) {
         if (is_string($path) && '' !== $path && file_exists($path)) {
@@ -2200,8 +2267,8 @@ private static function remove_runtime_secret_files()
 
 public static function delete_all_plugin_data_and_deactivate()
 {
-    if (!current_user_can('activate_plugins') && !current_user_can('manage_options')) {
-        return new WP_Error('ucwp_forbidden', 'You do not have permission to deactivate this plugin.');
+    if (!current_user_can('manage_options') || !current_user_can('activate_plugins')) {
+        return new WP_Error('ucwp_forbidden', 'Deleting UltraCache data and deactivating the plugin requires manage_options and activate_plugins permissions.');
     }
 
     self::stop_cron_warmup_queue('delete-all-data');
@@ -3127,10 +3194,10 @@ public static function delete_all_plugin_data_and_deactivate()
             return self::clear_apcu_user_cache(true);
         }
 
-        public static function get_engine_stats($full_object_count = false)
+        public static function get_engine_stats($full_object_count = false, $force = false)
         {
-            if (!$full_object_count && self::is_dashboard_heavy_work_active()) {
-                return self::get_lightweight_dashboard_busy_stats();
+            if (!$force && method_exists(__CLASS__, 'are_cache_stats_enabled') && !self::are_cache_stats_enabled()) {
+                return self::get_cache_stats_disabled_payload('engine_stats_disabled');
             }
 
             $stats = array();

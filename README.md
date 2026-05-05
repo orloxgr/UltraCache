@@ -2,9 +2,9 @@
 
 UltraCache is a WordPress performance plugin for site owners and operators who want practical caching controls, visible safeguards, cache warm-up, object cache support, media optimization, CSS/font optimization, Varnish-aware purge tools, and diagnostics that explain what is happening.
 
-Current version: **2.57.06**
+Current version: **2.57.46**
 
-2.57.06 is a stabilization build that stops automatic dashboard browser probes, adds passive/cached stats snapshots with request backoff, and moves the manual homepage cache-status probe into the Cache Decision Tester area.
+2.57.46 is a final public-readiness polish release: package metadata/readme cleanup, neutral public source wording, and directory index guards after the 2.57.33–2.57.45 hardening cycle.
 
 Release notes are maintained in [`changelog.txt`](changelog.txt).
 
@@ -34,7 +34,7 @@ Typical uses:
 | APCu object cache | Yes | Local single-server fallback. Cleared when PHP-FPM restarts. |
 | Runtime-only object cache | Yes | Safe fallback when Redis/APCu are unavailable. |
 | Disk object cache | Advanced/debug only | Explicit option; not recommended as normal production default. |
-| Varnish | Optional integration | HTTP endpoint/admin-secret workflows for local/private Varnish setups. |
+| Varnish | Optional integration | HTTP endpoint/admin-secret workflows for configured Varnish infrastructure. |
 | OPcache | Diagnostics | UltraCache shows OPcache visibility but does not replace PHP OPcache. |
 | Server gzip/Brotli | Detection/coordination | Avoids unnecessary duplicate compression where applicable. |
 | AVIF/WebP | Yes | Depends on Imagick/GD codec support. |
@@ -103,7 +103,7 @@ Review server response timing, STORE profile timing, frontend rewrite stages, CS
 
 UltraCache is designed to start conservatively for public use. Riskier optimization controls are intentionally off by default or marked as advanced/experimental in the dashboard.
 
-Experimental or advanced controls include Combine safe deferred JS, Full CSS Bundle, Aggressive CSS Bundle mode, Aggressive Async CSS, and Advanced Runtime Font CSS Rewrite. Enable these only after testing important pages, cart/checkout/account flows, sliders, forms, menus, fonts, and browser Console output.
+Experimental or advanced controls include Full CSS Bundle, Aggressive CSS Bundle mode, Aggressive Async CSS, and Advanced Runtime Font CSS Rewrite. Enable these only after testing important pages, cart/checkout/account flows, sliders, forms, menus, fonts, and browser Console output.
 
 UltraCache keeps safety lists visible in Advanced Settings & Exclusions so site owners can review and edit exclusions instead of relying on hidden hard-coded site rules.
 
@@ -129,7 +129,7 @@ UltraCache may detect URLs or inline code from services such as Google Tag Manag
 
 ### Varnish
 
-Varnish integration is optional and administrator-configured. If configured, UltraCache may send local/private purge or test requests to the Varnish endpoint selected by the site administrator. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
+Varnish integration is optional and administrator-configured. If configured, UltraCache may send purge or test requests to the Varnish endpoint selected by the site administrator, including external infrastructure endpoints when intentionally configured. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
 
 ### Support and donation links
 
@@ -193,7 +193,7 @@ Check the selected backend vs active backend in Diagnostics. For Redis, verify e
 
 ### Varnish purge does not work
 
-Use local/private Varnish endpoints only. Check whether the site uses HTTP endpoint mode or admin-secret mode, then verify the effective purge method in Diagnostics.
+Use explicitly configured Varnish endpoints only. External infrastructure endpoints are supported, but public frontend ports such as :80/:443 should not be configured as Varnish listeners.
 
 ### Layout breaks after CSS changes
 

@@ -77,7 +77,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
                         'callback'            => array($this, 'remove_conflicting_cache_dropins'),
-                        'permission_callback' => array($this, 'check_permission'),
+                        'permission_callback' => array($this, 'check_file_mutation_permission'),
                     ),
                 ),
                 '/cron-warm/start' => array(
@@ -125,7 +125,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
                         'callback'            => array($this, 'delete_all_plugin_data'),
-                        'permission_callback' => array($this, 'check_permission'),
+                        'permission_callback' => array($this, 'check_file_mutation_permission'),
                         'args'                => array(
                             'confirmation' => array(
                                 'type'              => 'string',
@@ -535,6 +535,13 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             unset($request);
 
             return current_user_can('manage_options');
+        }
+
+        public function check_file_mutation_permission($request = null)
+        {
+            unset($request);
+
+            return current_user_can('manage_options') && current_user_can('activate_plugins');
         }
 
     }

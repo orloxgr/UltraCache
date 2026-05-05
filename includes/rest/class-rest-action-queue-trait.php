@@ -418,26 +418,6 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
              * receive success/failure. The settings debounce queue remains separate
              * and is flushed before the work action is called from the admin UI.
              */
-            $lock_acquired = false;
-            if ($this->is_heavy_action_queue_action($action)) {
-                if (!$this->acquire_action_queue_heavy_lock($action, $id)) {
-                    $lock = $this->get_action_queue_lock_payload();
-                    $running_action = is_array($lock) && !empty($lock['action']) ? sanitize_key((string) $lock['action']) : 'another action';
-                    $job['status'] = 'failed';
-                    $job['message'] = 'Another heavy dashboard action is already running: ' . $running_action . '.';
-                    $job['alreadyRunning'] = true;
-                    $job['finishedAt'] = time();
-                    $job['updatedAt'] = time();
-
-                    $jobs = $this->load_action_jobs();
-                    $jobs[$id] = $job;
-                    $this->save_action_jobs($jobs);
-
-                    return new WP_REST_Response(array('success' => false, 'message' => $job['message'], 'alreadyRunning' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 423);
-                }
-                $lock_acquired = true;
-            }
-
             try {
                 $result = $this->run_action_queue_job($action, $params);
                 $ok = !empty($result['success']) || !empty($result['skipped']);
@@ -450,10 +430,6 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             } catch (Exception $error) {
                 $job['status'] = 'failed';
                 $job['message'] = $error->getMessage();
-            } finally {
-                if ($lock_acquired) {
-                    $this->release_action_queue_heavy_lock($id);
-                }
             }
 
             $job['finishedAt'] = time();

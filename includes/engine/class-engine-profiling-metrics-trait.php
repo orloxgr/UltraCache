@@ -466,11 +466,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             return (bool) $this->store_profile_enabled;
         }
 
-        $query_flag = sanitize_text_field(ucwp_query_value('ucwp_store_profile'));
-        $header_flag = sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_STORE_PROFILE'));
-        $constant_flag = defined('UCWP_STORE_PROFILE') && UCWP_STORE_PROFILE;
-
-        $this->store_profile_enabled = ('1' === $query_flag || 'true' === strtolower((string) $query_flag) || '1' === $header_flag || 'true' === strtolower((string) $header_flag) || $constant_flag);
+        $this->store_profile_enabled = function_exists('ucwp_request_profiler_enabled') ? ucwp_request_profiler_enabled() : false;
         return (bool) $this->store_profile_enabled;
     }
 

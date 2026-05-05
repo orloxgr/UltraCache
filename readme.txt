@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.57.06
+Stable tag: 2.57.46
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -103,7 +103,7 @@ Use Speed Diagnostics / profiler tools when a page is slow on MISS/STORE or when
 
 UltraCache is designed to start conservatively. Riskier optimization controls are intentionally off by default or marked as advanced/experimental in the dashboard.
 
-Experimental or advanced controls include Combine safe deferred JS, Full CSS Bundle, Aggressive CSS Bundle mode, Aggressive Async CSS, and Advanced Runtime Font CSS Rewrite. Enable these only after testing important pages, cart/checkout/account flows, sliders, forms, menus, fonts, and browser Console output.
+Experimental or advanced controls include Full CSS Bundle, Aggressive CSS Bundle mode, Aggressive Async CSS, and Advanced Runtime Font CSS Rewrite. Enable these only after testing important pages, cart/checkout/account flows, sliders, forms, menus, fonts, and browser Console output.
 
 UltraCache keeps safety lists visible in Advanced Settings & Exclusions so site owners can review and edit exclusions instead of relying on hidden hard-coded site rules.
 
@@ -129,7 +129,7 @@ UltraCache may detect URLs or inline code from services such as Google Tag Manag
 
 = Varnish =
 
-Varnish integration is optional and administrator-configured. If configured, UltraCache may send local/private purge or test requests to the Varnish endpoint selected by the site administrator. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
+Varnish integration is optional and administrator-configured. If configured, UltraCache may send purge or test requests to the Varnish endpoint selected by the site administrator, including external infrastructure endpoints when intentionally configured. Varnish admin secrets are treated as runtime secrets and should never be exposed to frontend HTML, JavaScript, REST responses, or logs.
 
 = Support and donation links =
 
@@ -185,7 +185,7 @@ Enable Page Cache first. Save settings, purge all cache, warm the homepage/menu 
 
 = Does UltraCache support Varnish? =
 
-Yes. Varnish support is optional. Use local/private endpoints only. Do not expose the Varnish admin port publicly.
+Yes. Varnish support is optional. Use explicitly configured endpoints only. External infrastructure endpoints are supported when firewalled; do not expose the Varnish admin port publicly.
 
 = Does UltraCache support Redis and APCu? =
 
@@ -221,49 +221,80 @@ Disable the last risky optimization, confirm the issue disappears, then add visi
 
 == Changelog ==
 
-= 2.57.06 =
-- Stopped automatic browser homepage probes from running on dashboard load.
-- Added manual Check Homepage Cache Status inside Cache Decision Tester.
-- Added cached/passive dashboard stats snapshots and safer stats refresh backoff.
-- Added stale dashboard purge-lock quarantine protection.
+= 2.57.46 =
+* Final public-readiness packaging polish after the 2.57 hardening cycle.
+* Updated WordPress readme changelog and upgrade notice for the current public package.
+* Replaced private-build source wording with neutral public wording and added directory index guards.
 
-= 2.57.01 =
-* Fixed menu warm-up URL discovery to use only assigned frontend nav menu locations instead of every stored WordPress menu.
-* Filtered non-cacheable/query-bypassed menu URLs before they enter the warm queue, avoiding false failed items for theme/demo query variants.
-* Kept the 2.57.00 mobile Support this plugin polish intact.
+= 2.57.45 =
+* Polished Varnish admin-mode UI copy placement and styling.
+* Moved helper copy to the bottom of the Varnish card and removed warning-style border/background from the admin-mode security helper text.
 
-= 2.56.245 =
-* Fix stale dashboard heavy-action lock recovery so stuck actions such as purge_all stop blocking the dashboard without SSH cleanup or install-time mutation.
-* Reconcile heavy action locks against queued/running jobs during normal dashboard enqueue/status requests and release stale/mismatched locks safely.
+= 2.57.44 =
+* Removed the development-only Varnish debug log feature from settings, dashboard UI, schema, and runtime code.
+* Redacted Varnish result detail strings before storing/displaying purge/test results.
+* Escaped Varnish BAN URL expressions so URL purges match literal paths/queries instead of raw regex fragments.
 
-= 2.56.244 =
-* Fix Object Cache payload probe false warning immediately after backend/fallback switch by using a fresh selected/active backend probe when the current runtime object cache instance is stale.
+= 2.57.43 =
+* Added passive/manual-test-only clarity flags to default dashboard object-cache diagnostics.
+* Kept object-cache backend truth visible without reintroducing automatic live Redis/payload probes.
 
-= 2.56.243 =
-* Fix Object Cache backend/fallback state isolation so selected backend, fallback backend, and Enable Object Cache do not overwrite each other during immediate saves.
+= 2.57.42 =
+* Improved object-cache backend truth and UI clarity.
+* Keeps selected/active/fallback backend status visible even when cache stats are disabled.
+* Treats runtime-only object cache as an active fallback state.
 
-= 2.56.242 =
-* Fix Varnish/Redis runtime secret freshness after saving credentials so immediate tests read the newly written off-docroot secret file.
-* Invalidate OPcache/stat cache around runtime secret writes and reads, and refresh settings caches before Varnish tests without exposing secrets.
+= 2.57.41 =
+* Hardened advanced-cache stale CSS handling so cached HTML referencing missing generated CSS/font/optimized CSS assets is invalidated instead of served.
+* Added generated CSS bundle and delayed-font companion verification after atomic writes.
 
-= 2.56.239 =
-* Changes Query-string args whitelist Populate so it uses detected registered attributes, taxonomies, categories, and tags from the current WordPress/WooCommerce setup instead of a generic hardcoded candidate list.
-* Updates Query-string whitelist UI copy to describe taxonomy/attribute query args accurately.
+= 2.57.40 =
+* Refined Runtime JS Scan reporting by redacting internal diagnostic URL parameters before storing/displaying report URLs.
+* Kept review/manual Runtime JS Scan suggestions non-appendable and surfaced raw captured browser errors.
 
-= 2.56.231 =
-* Corrects Defer all JS manual mode so an empty JS Delay / Defer Exclusions list stays empty and all eligible scripts are deferred.
-* Keeps WordPress/core dependency protections as visible Populate Defaults recommendations instead of automatic hidden or forced exclusions.
-* Keeps inline after/translations dependency detection in JS Delay / Defer Scan so users can identify and append exclusions iteratively.
+= 2.57.39 =
+* Hardened cache-poisoning bypass parity between the WordPress engine and advanced-cache drop-in.
+* Added non-removable security query/path guards and invalid internal-control request bypass handling.
+
+= 2.57.38 =
+* Hardened object-cache drop-in recursive cleanup and uninstall directory cleanup against symlink traversal.
+* Narrowed runtime secret filesystem allowlist to the canonical off-docroot secret path and its atomic temp sibling only.
+
+= 2.57.37 =
+* Restricted automatic drop-in/runtime-config full reconcile writes to WP-CLI or privileged plugin-management admins.
+* Hardened frontend loopback URL validation and redacted internal runtime/profile query tokens from debug contexts.
+
+= 2.57.36 =
+* Converted managed runtime config to guarded runtime-config.php.
+* Hardened off-docroot runtime secrets, revalidate secret storage, and secret file permissions.
+
+= 2.57.35 =
+* Completed hard removal of the experimental JS bundling UI/runtime leftovers after JS bundling removal.
+
+= 2.57.34 =
+* Removed the experimental safe deferred JS bundling feature while keeping JS defer, delay, runtime scan, LCP boundary defer, and main-thread relief behavior unchanged.
+
+= 2.57.33 =
+* Hard-stopped object-cache symlink traversal and kept managed media temp files under the UltraCache managed cache directory.
 
 Release notes are maintained in `changelog.txt`.
 
 == Upgrade Notice ==
 
-= 2.56.228 =
-* Restores Speed Diagnostics, JS Delay / Defer Scan, and CSS Diagnostics timing-profile persistence after the unified final output pipeline rewrite.
+= 2.57.46 =
+Final public-readiness packaging polish after the 2.57 hardening cycle. Update, purge cache, warm important pages, and review diagnostics.
 
-= 2.56.223 =
-* Restored one final output pipeline so media rewrites, CSS bundles, delayed icon-font companion CSS, and cached HTML storage stay in sync.
+= 2.57.45 =
+Varnish UI copy polish after Varnish debug-log removal and endpoint/secret hardening.
 
-= 2.56.218 =
-Fixes CSS bundle warm storage, shows OPcache last flush status, and disables Redis field autocomplete.
+= 2.57.44 =
+Removes development-only Varnish debug logging, redacts Varnish result details, and safely escapes BAN expressions.
+
+= 2.57.41 =
+Hardened generated CSS stale-reference handling so missing CSS bundle/font references are invalidated before serving cached HTML.
+
+= 2.57.39 =
+Adds stricter cache-poisoning bypass parity between the WordPress engine and advanced-cache drop-in.
+
+= 2.57.36 =
+Moves runtime config to guarded PHP and hardens off-docroot runtime secrets.

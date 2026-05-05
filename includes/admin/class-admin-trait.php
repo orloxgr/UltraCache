@@ -43,14 +43,16 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
             wp_enqueue_script('ucwp-admin-js', UCWP_URL . 'includes/admin-dashboard.js', array('wp-element'), UCWP_VERSION, true);
             wp_script_add_data('ucwp-admin-js', 'type', 'module');
 
-            $dashboard_heavy_status = method_exists(__CLASS__, 'get_dashboard_heavy_work_status') ? self::get_dashboard_heavy_work_status() : array();
-            $dashboard_heavy_active = !empty($dashboard_heavy_status['active']);
-            $dashboard_stats = $dashboard_heavy_active && method_exists(__CLASS__, 'get_lightweight_dashboard_busy_stats')
-                ? self::get_lightweight_dashboard_busy_stats($dashboard_heavy_status)
-                : (method_exists(__CLASS__, 'get_dashboard_stats_snapshot') ? self::get_dashboard_stats_snapshot(20, true) : self::get_engine_stats());
-            $dashboard_diagnostics = $dashboard_heavy_active && method_exists(__CLASS__, 'get_lightweight_dashboard_busy_diagnostics')
-                ? self::get_lightweight_dashboard_busy_diagnostics($dashboard_heavy_status)
-                : (isset($dashboard_stats['diagnostics']) && is_array($dashboard_stats['diagnostics']) ? $dashboard_stats['diagnostics'] : self::get_dashboard_diagnostics());
+            $settings_for_client = self::get_dashboard_settings_for_client();
+            $cache_stats_enabled = !empty($settings_for_client['cacheStatsEnabled']);
+
+            if (!$cache_stats_enabled && method_exists(__CLASS__, 'get_cache_stats_disabled_payload')) {
+                $dashboard_stats = self::get_cache_stats_disabled_payload('admin_bootstrap_disabled');
+                $dashboard_diagnostics = isset($dashboard_stats['diagnostics']) && is_array($dashboard_stats['diagnostics']) ? $dashboard_stats['diagnostics'] : array();
+            } else {
+                $dashboard_stats = method_exists(__CLASS__, 'get_dashboard_stats_snapshot') ? self::get_dashboard_stats_snapshot(20, false) : array('success' => true);
+                $dashboard_diagnostics = isset($dashboard_stats['diagnostics']) && is_array($dashboard_stats['diagnostics']) ? $dashboard_stats['diagnostics'] : array();
+            }
 
             wp_localize_script(
                 'ucwp-admin-js',
@@ -62,7 +64,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                     'frontendProbeUrl' => esc_url_raw(home_url('/')),
                     'version'      => UCWP_VERSION,
                     'stats'        => $dashboard_stats,
-                    'settings'     => self::get_dashboard_settings_for_client(),
+                    'settings'     => $settings_for_client,
                     'defaults'     => self::get_dashboard_defaults_for_client(),
                     'jsDelayDeferRecommendedExclusions' => implode("\n", self::get_default_js_delay_defer_exclusion_patterns()),
                     'jsDelayDeferSliderExclusions'      => implode("\n", self::get_default_slider_js_delay_defer_exclusion_patterns()),

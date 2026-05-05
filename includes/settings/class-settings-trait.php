@@ -46,9 +46,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'deferAllJsEnabled'          => false,
                 'deferJsForceList'           => '',
                 'deferJsExcludeList'         => '',
-                'jsBundleEnabled'            => false,
-                'jsBundleIncludeList'        => '',
-                'jsBundleExcludeList'        => implode("\n", self::get_default_js_bundle_exclusion_patterns()),
                 'delaySafeThirdPartyJsEnabled'   => false,
                 'lazyMailerliteNonceEnabled' => true,
                 'delaySafeThirdPartyJsPatterns' => implode("\n", self::get_default_safe_third_party_delay_patterns()),
@@ -103,7 +100,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'varnishCliKey'              => '',
                 'varnishCliTimeoutSeconds'   => 2,
                 'varnishCliMethod'           => 'BAN',
-                'varnishCliDebug'            => false,
                 'preRenderOnSave'            => false,
                 'woocommerceSafeModeEnabled' => false,
                 'cacheCleanupEnabled'        => false,
@@ -116,6 +112,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cronWarmStartAfterManualPurge' => false,
                 'cronWarmPagesPerMinute'     => 2,
                 'scheduledWarmLimit'         => $default_scheduled_warm_limit,
+                'warmMenuLocation'           => '',
+                'warmMenuDepth'              => '',
+                'warmFullSiteSources'        => '',
                 'staleWhileRevalidateEnabled'=> false,
                 'cacheFreshTtlMinutes'       => 15,
                 'cacheMaxStaleMinutes'       => 720,
@@ -177,43 +176,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'ucwp_runtime_js_scan',
                 'ucwp_runtime_js_scan_id',
                 'ucwp_runtime_js_scan_nonce',
-            );
-        }
-
-        private static function get_default_js_bundle_exclusion_patterns()
-        {
-            return array(
-                'jquery',
-                'jquery-migrate',
-                '/wp-includes/js/',
-                'wp-hooks',
-                'wp-i18n',
-                'wp-util',
-                'wp-api',
-                'api-fetch',
-                'underscore',
-                'backbone',
-                'woocommerce',
-                'wc-',
-                'cart',
-                'checkout',
-                'my-account',
-                'selectWoo',
-                'revslider',
-                'sliderrevolution',
-                'sr7',
-                'tptools',
-                'tools.js',
-                'elementor',
-                'frontend-modules',
-                'swiper',
-                'smartmenus',
-                'mailerlite',
-                'complianz',
-                'google-site-kit',
-                'googlesitekit',
-                'gtag',
-                'gtm',
             );
         }
 
@@ -293,6 +255,18 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'wp-api-fetch-js-after',
                 'js-translations',
                 '-js-translations',
+                'elementor',
+                'elementor-frontend',
+                'elementor-frontend-modules',
+                'frontend-modules',
+                'elementor-webpack-runtime',
+                'elementor-pro-webpack-runtime',
+                'elementorModules',
+                'elementor/assets/js/frontend-modules',
+                'elementor/assets/js/common.min.js',
+                'elementor/assets/js/elementor-admin-bar.min.js',
+                'common.min.js',
+                'elementor-admin-bar.min.js',
             );
         }
 
@@ -465,6 +439,18 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'estimatedTotal' => 1,
                 'maxUrls' => 5000,
                 'defaultScheduledWarmLimit' => 1,
+                'menuOptions' => array(),
+                'menuDepthOptions' => array(
+                    array('value' => '', 'label' => 'Select depth'),
+                    array('value' => '1', 'label' => 'Depth 1'),
+                    array('value' => '2', 'label' => 'Depth 2'),
+                    array('value' => '3', 'label' => 'Depth 3'),
+                    array('value' => 'all', 'label' => 'All depths'),
+                ),
+                'fullSiteSourceOptions' => array(),
+                'selectedMenuLocation' => '',
+                'selectedMenuDepth' => '',
+                'selectedFullSiteSources' => array(),
             );
 
             if (!function_exists('home_url')) {
@@ -830,13 +816,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 return self::maybe_translate('Invalid Varnish HTTP endpoint. Use host:port, for example 127.0.0.1:82.');
             }
 
-            $allowed_ports = self::get_varnish_http_allowed_ports();
-            if (!in_array($port, $allowed_ports, true)) {
-                return self::maybe_translate_sprintf('Blocked unsafe Varnish HTTP endpoint %1$s:%2$d. HTTP mode may only target a Varnish listener on port %3$s. Do not use the public WordPress frontend on ports 80/443; use 127.0.0.1:82 for HTTP mode or Admin mode 127.0.0.1:6082.', $host, $port, implode('/', $allowed_ports));
-            }
-
             if (in_array($host, self::get_varnish_site_host_candidates(), true) && in_array($port, array(80, 443, 8443), true)) {
-                return self::maybe_translate_sprintf('Blocked unsafe Varnish endpoint %1$s:%2$d because it points to the public WordPress frontend. Use 127.0.0.1:82 for HTTP mode or Admin mode 127.0.0.1:6082.', $host, $port);
+                return self::maybe_translate_sprintf('Blocked unsafe Varnish endpoint %1$s:%2$d because it points to the public WordPress frontend. Use a configured Varnish listener such as 127.0.0.1:82, varnish.internal:82, or Admin mode such as 127.0.0.1:6082.', $host, $port);
             }
 
             return '';
@@ -846,17 +827,13 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
         {
             $terminal = trim((string) $terminal);
             if ('' === $terminal) {
-                return array('valid' => false, 'message' => self::maybe_translate('Empty Varnish HTTP endpoint. Use 127.0.0.1:82.'));
+                return array('valid' => false, 'message' => self::maybe_translate('Empty Varnish HTTP endpoint. Use host:port, for example 127.0.0.1:82 or varnish.example.com:8080.'));
             }
 
             list($host, $port) = self::parse_varnish_terminal($terminal);
             $message = self::get_varnish_http_endpoint_block_message($host, $port);
             if ('' !== $message) {
                 return array('valid' => false, 'message' => $message, 'host' => $host, 'port' => $port);
-            }
-
-            if (!ucwp_is_allowed_socket_target($host, $port)) {
-                return array('valid' => false, 'message' => self::maybe_translate_sprintf('Varnish HTTP endpoint %1$s:%2$d is not allowed by the socket target allowlist.', $host, $port), 'host' => $host, 'port' => $port);
             }
 
             return array('valid' => true, 'message' => '', 'host' => $host, 'port' => $port);
@@ -885,7 +862,10 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             return array(
                 'unsafe'       => $unsafe,
                 'messages'     => $messages,
-                'allowedPorts' => self::get_varnish_http_allowed_ports(),
+                'suggestedPorts' => self::get_varnish_http_allowed_ports(),
+                'allowedPorts' => self::get_varnish_http_allowed_ports(), // Backward-compatible alias for suggested/common ports; custom ports are allowed.
+                'customPortsAllowed' => true,
+                'externalConfiguredEndpointsAllowed' => true,
             );
         }
 
@@ -1113,6 +1093,16 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
 
         public static function remove_conflicting_cache_dropins()
         {
+            if (!current_user_can('manage_options') || !current_user_can('activate_plugins')) {
+                return array(
+                    'success' => false,
+                    'message' => self::maybe_translate('Removing conflicting cache drop-ins requires manage_options and activate_plugins permissions.'),
+                    'removed' => array(),
+                    'failed' => array(),
+                    'backups' => array(),
+                );
+            }
+
             if (!defined('WP_CONTENT_DIR')) {
                 return array(
                     'success' => false,
@@ -1332,7 +1322,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'mediaGenerateOnDemandEnabled',
                 'deferJsEnabled',
                 'deferAllJsEnabled',
-                'jsBundleEnabled',
                 'delaySafeThirdPartyJsEnabled',
                 'lazyMailerliteNonceEnabled',
                 'delayFunctionalThirdPartyJsEnabled',
@@ -1364,7 +1353,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'speculationRulesEnabled',
                 'browserCacheRulesEnabled',
                 'varnishCliEnabled',
-                'varnishCliDebug',
                 'preRenderOnSave',
                 'woocommerceSafeModeEnabled',
                 'cacheCleanupEnabled',
@@ -1392,6 +1380,18 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['cssBundleCleanupDeleteLimit'] = self::sanitize_bounded_integer_setting($settings['cssBundleCleanupDeleteLimit'], $defaults['cssBundleCleanupDeleteLimit'], 5, 500);
             $settings['cronWarmPagesPerMinute']    = max(0, min(600, absint($settings['cronWarmPagesPerMinute'])));
             $settings['scheduledWarmLimit']        = max(0, min(5000, absint($settings['scheduledWarmLimit'])));
+            $settings['warmMenuLocation']          = sanitize_key((string) $settings['warmMenuLocation']);
+            $settings['warmMenuDepth']             = in_array((string) $settings['warmMenuDepth'], array('1', '2', '3', 'all'), true) ? (string) $settings['warmMenuDepth'] : '';
+            $warm_full_site_sources = preg_split('/[\r\n,]+/', (string) $settings['warmFullSiteSources']);
+            $warm_full_site_allowed = array('homepage', 'menus', 'pages', 'posts', 'categories', 'tags', 'custom_post_types', 'custom_taxonomies', 'woocommerce_products', 'woocommerce_product_taxonomies');
+            $warm_full_site_clean = array();
+            foreach ((array) $warm_full_site_sources as $warm_full_site_source) {
+                $warm_full_site_source = sanitize_key((string) $warm_full_site_source);
+                if ('' !== $warm_full_site_source && in_array($warm_full_site_source, $warm_full_site_allowed, true)) {
+                    $warm_full_site_clean[$warm_full_site_source] = true;
+                }
+            }
+            $settings['warmFullSiteSources']       = implode(',', array_keys($warm_full_site_clean));
             $settings['varnishCliTimeoutSeconds']  = max(1, min(30, absint($settings['varnishCliTimeoutSeconds'])));
             $settings['cacheFreshTtlMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1, 1440);
             $settings['cacheMaxStaleMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], (int) $settings['cacheFreshTtlMinutes'], 10080);
@@ -1405,8 +1405,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             // defer every eligible script, let the user see breakage, then let the
             // scan/Populate Defaults help them add visible exclusions.
             $settings['deferJsExcludeList'] = self::normalize_textarea_setting($settings['deferJsExcludeList']);
-            $settings['jsBundleIncludeList'] = self::normalize_textarea_setting($settings['jsBundleIncludeList']);
-            $settings['jsBundleExcludeList'] = self::normalize_textarea_setting($settings['jsBundleExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = '';
             $settings['delaySafeThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delaySafeThirdPartyJsPatterns']);
             $settings['delayFunctionalThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delayFunctionalThirdPartyJsPatterns']);
@@ -1501,8 +1499,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['cronWarmStartAfterManualPurge'] = !empty($settings['cronWarmStartAfterManualPurge']);
 
             // Keep the public settings payload canonical. Stored options may still contain
-            // old keys from previous local builds, but they must not leak back to CLI, REST,
-            // exports, or runtime settings after sanitization.
+            // obsolete keys, but they must not leak back to CLI, REST, exports, or
+            // runtime settings after sanitization.
             $settings = array_intersect_key($settings, $defaults);
 
             return $settings;
@@ -1552,9 +1550,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'sanitized_count' => is_array($sanitized) ? count($sanitized) : 0,
             ));
 
-            // This private build does not need a backward-compatibility layer. Keep the
-            // stored option canonical so invalid combinations from previous local builds
-            // do not remain visible in direct option reads, CLI checks, or diagnostics.
+            // Keep the stored option canonical so invalid combinations do not remain
+            // visible in direct option reads, CLI checks, or diagnostics.
             // Redis and Varnish admin secrets are intentionally not persisted in wp_options;
             // hydrated server-side settings read them from the off-docroot runtime secrets file.
             $canonical_for_storage = $sanitized;
@@ -1720,9 +1717,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'defer_stage_aggressive'       => $defer_stage_aggressive,
                 'defer_js_force_list'          => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsForceList'])),
                 'defer_js_exclude_list'        => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
-                'js_bundle'                    => !empty($ui['jsBundleEnabled']),
-                'js_bundle_include_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['jsBundleIncludeList'])),
-                'js_bundle_exclude_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['jsBundleExcludeList'])),
                 'delay_safe_third_party_js'         => $delay_safe_third_party_js_enabled,
                 'lazy_mailerlite_nonce'        => !empty($ui['lazyMailerliteNonceEnabled']),
                 'delay_safe_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delaySafeThirdPartyJsPatterns'])),
@@ -1778,7 +1772,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'varnish_cli_key'              => trim((string) $ui['varnishCliKey']),
                 'varnish_cli_timeout_seconds'  => max(1, min(30, absint($ui['varnishCliTimeoutSeconds']))),
                 'varnish_cli_method'           => ('PURGE' === strtoupper(trim((string) $ui['varnishCliMethod']))) ? 'PURGE' : 'BAN',
-                'varnish_cli_debug'            => !empty($ui['varnishCliDebug']),
                 'media_optimization_enabled'   => !empty($ui['mediaOptimizationEnabled']),
                 'media_generate_on_upload'     => !empty($ui['mediaGenerateOnUploadEnabled']),
                 'media_generate_on_demand'     => !empty($ui['mediaGenerateOnDemandEnabled']),
@@ -1794,6 +1787,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cron_warm_start_after_manual_purge'=> !empty($ui['cronWarmStartAfterManualPurge']),
                 'cron_warm_pages_per_minute'   => max(0, absint($ui['cronWarmPagesPerMinute'])),
                 'scheduled_warm_limit'         => max(0, absint($ui['scheduledWarmLimit'])),
+                'warm_menu_location'           => sanitize_key((string) ($ui['warmMenuLocation'] ?? '')),
+                'warm_menu_depth'              => in_array((string) ($ui['warmMenuDepth'] ?? ''), array('1', '2', '3', 'all'), true) ? (string) $ui['warmMenuDepth'] : '',
+                'warm_full_site_sources'       => self::parse_textarea_setting(str_replace(',', "\n", (string) ($ui['warmFullSiteSources'] ?? ''))),
                 'stale_while_revalidate_enabled' => !empty($ui['staleWhileRevalidateEnabled']),
                 'cache_fresh_ttl_minutes'      => max(1, absint($ui['cacheFreshTtlMinutes'])),
                 'cache_max_stale_minutes'      => max(absint($ui['cacheFreshTtlMinutes']), absint($ui['cacheMaxStaleMinutes'])),

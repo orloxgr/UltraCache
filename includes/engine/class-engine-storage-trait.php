@@ -124,8 +124,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
 
             $has_generated_css = (false !== stripos($html, '/cache/ultracache/css-bundles/'))
                 || (false !== stripos($html, '/cache/ultracache/font-css/'))
-                || (false !== stripos($html, '/cache/ultracache/optimized-css/'))
-                || (false !== stripos($html, '/cache/ultracache/js-bundles/'));
+                || (false !== stripos($html, '/cache/ultracache/optimized-css/'));
             if (!$has_generated_css) {
                 return true;
             }
@@ -168,8 +167,6 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
             $generated_asset_patterns = array(
                 '~(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css~i',
                 '~/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css~i',
-                '~(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/js-bundles/[^\s\"\'<>?#)]+\.js~i',
-                '~/wp-content/cache/ultracache/js-bundles/[^\s\"\'<>?#)]+\.js~i',
             );
 
             $refs = array();
@@ -187,7 +184,6 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                 'css-bundles' => wp_normalize_path($this->get_frontpage_css_dir()),
                 'font-css' => wp_normalize_path(trailingslashit(UCWP_CACHE_DIR) . 'font-css/'),
                 'optimized-css' => wp_normalize_path(trailingslashit(UCWP_CACHE_DIR) . 'optimized-css/'),
-                'js-bundles' => wp_normalize_path(trailingslashit(UCWP_CACHE_DIR) . 'js-bundles/'),
             );
             foreach ($refs as $ref) {
                 $path = (string) wp_parse_url($ref, PHP_URL_PATH);
@@ -195,13 +191,13 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                     $path = $ref;
                 }
 
-                if (!preg_match('#/wp-content/cache/ultracache/(css-bundles|font-css|optimized-css|js-bundles)/([^/]+\.(?:css|js))$#i', rawurldecode($path), $match)) {
+                if (!preg_match('#/wp-content/cache/ultracache/(css-bundles|font-css|optimized-css)/([^/]+\.css)$#i', rawurldecode($path), $match)) {
                     continue;
                 }
 
                 $bucket = strtolower((string) $match[1]);
                 $basename = basename((string) $match[2]);
-                if ('' === $basename || empty($allowed_dirs[$bucket]) || false === preg_match('/^[A-Za-z0-9_.-]+\.(?:css|js)$/', $basename)) {
+                if ('' === $basename || empty($allowed_dirs[$bucket]) || false === preg_match('/^[A-Za-z0-9_.-]+\.css$/', $basename)) {
                     continue;
                 }
 

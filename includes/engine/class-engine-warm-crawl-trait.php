@@ -222,7 +222,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             return true;
         }
 
-        private function release_runtime_lock($name)
+        private function release_runtime_lock($name, $delete_file = false)
         {
             $name = (string) $name;
             if (empty($this->runtime_locks[$name])) {
@@ -230,6 +230,18 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             }
 
             $handle = $this->runtime_locks[$name];
+            $file = $delete_file ? $this->get_runtime_lock_file($name) : '';
+
+            if ($delete_file && '' !== $file && is_string($file)) {
+                @fflush($handle);
+                if (function_exists('ucwp_safe_unlink')) {
+                    ucwp_safe_unlink($file);
+                } elseif (file_exists($file)) {
+                    // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- Fallback only for the path-guarded UltraCache runtime lock file.
+                    @unlink($file);
+                }
+            }
+
             @flock($handle, LOCK_UN);
             // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle.
             @fclose($handle);
@@ -454,7 +466,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
             foreach ($items as $item) {
                 // Keep runtime locks while purge_all is running; deleting locks/ can orphan the active purge-all.lock FD.
-                if ('.' === $item || '..' === $item || 'google-fonts' === $item || 'css-bundles' === $item || 'js-bundles' === $item || 'locks' === $item) {
+                if ('.' === $item || '..' === $item || 'google-fonts' === $item || 'css-bundles' === $item || 'locks' === $item) {
                     continue;
                 }
 
@@ -495,7 +507,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 do_action('ucwp_after_purge_all', array('scope' => 'all'));
                 return true;
             } finally {
-                $this->release_runtime_lock($lock_name);
+                $this->release_runtime_lock($lock_name, true);
             }
         }
 
@@ -1076,7 +1088,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 }
             }
 
-            foreach (get_post_types(array('public' => true), 'names') as $post_type) {
+            foreach ($this->get_public_crawl_post_types() as $post_type) {
                 $post_ids = get_posts(
                     array(
                         'post_type'              => $post_type,
@@ -1103,7 +1115,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             }
 
             if (count($urls) < $max_urls) {
-                foreach (get_taxonomies(array('public' => true), 'names') as $taxonomy) {
+                foreach ($this->get_public_crawl_taxonomies() as $taxonomy) {
                     $term_ids = get_terms(
                         array(
                             'taxonomy'   => $taxonomy,
@@ -1330,6 +1342,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
         public function get_crawl_scope_summary()
         {
+            $scope_settings = $this->get_warm_scope_settings();
             $menu_urls = $this->get_safe_nav_menu_urls();
             $seed_urls = $this->get_crawl_seed_urls();
             $base_url_count = max(0, count($seed_urls) - count($menu_urls));
@@ -1356,6 +1369,8 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 }
             }
 
+            $menu_options = $this->get_warm_nav_menu_options();
+
             $max_urls = (int) apply_filters('ucwp_max_crawl_urls', 5000);
             if ($max_urls <= 0) {
                 $max_urls = 5000;
@@ -1381,6 +1396,18 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 'estimatedTotal' => max(0, $estimated_total),
                 'maxUrls' => $max_urls,
                 'defaultScheduledWarmLimit' => max(1, (int) $default_scheduled_warm_limit),
+                'menuOptions' => $menu_options,
+                'menuDepthOptions' => array(
+                    array('value' => '', 'label' => 'Select depth'),
+                    array('value' => '1', 'label' => 'Depth 1'),
+                    array('value' => '2', 'label' => 'Depth 2'),
+                    array('value' => '3', 'label' => 'Depth 3'),
+                    array('value' => 'all', 'label' => 'All depths'),
+                ),
+                'fullSiteSourceOptions' => $this->get_full_site_warm_source_options(),
+                'selectedMenuLocation' => (string) $scope_settings['menuLocation'],
+                'selectedMenuDepth' => (string) $scope_settings['menuDepth'],
+                'selectedFullSiteSources' => array_values((array) $scope_settings['sources']),
             );
         }
 
@@ -1388,8 +1415,9 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
         {
             $scope = $this->normalize_crawl_scope($scope);
             $urls = array();
+            $sources = $this->get_full_site_warm_sources_lookup();
 
-            if ('menu' !== $scope) {
+            if ('menu' !== $scope && isset($sources['homepage'])) {
                 $urls[] = home_url('/');
 
                 $posts_page_id = (int) get_option('page_for_posts');
@@ -1401,9 +1429,11 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 }
             }
 
-            foreach ($this->get_safe_nav_menu_urls() as $menu_url) {
-                if ($this->is_cacheable_local_url($menu_url)) {
-                    $urls[] = $menu_url;
+            if ('menu' === $scope || isset($sources['menus'])) {
+                foreach ($this->get_safe_nav_menu_urls() as $menu_url) {
+                    if ($this->is_cacheable_local_url($menu_url)) {
+                        $urls[] = $menu_url;
+                    }
                 }
             }
 
@@ -1429,105 +1459,388 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             return is_string($permalink) ? $permalink : '';
         }
 
-        private function get_safe_nav_menu_urls()
+        private function get_warm_scope_settings()
         {
-            $urls = array();
-            $menu_ids = $this->get_assigned_nav_menu_ids();
-
-            if (empty($menu_ids)) {
-                return $urls;
+            /*
+             * Deliberately read the saved dashboard option directly here. This helper is
+             * used while dashboard defaults are being built, so calling get_settings() or
+             * get_dashboard_settings() from here would recurse back into crawl summary
+             * generation. Warm scope selection must stay a light option read.
+             */
+            $raw = get_option(UCWP_SETTINGS_KEY, array());
+            $raw = is_array($raw) ? $raw : array();
+            $sources = array();
+            $source_string = isset($raw['warmFullSiteSources']) ? (string) $raw['warmFullSiteSources'] : '';
+            $allowed = $this->get_allowed_full_site_warm_source_keys();
+            foreach ((array) preg_split('/[\r\n,]+/', $source_string) as $source) {
+                $source = sanitize_key((string) $source);
+                if ('' !== $source && in_array($source, $allowed, true)) {
+                    $sources[$source] = true;
+                }
             }
 
-            foreach ($menu_ids as $menu_id) {
-                try {
-                    $items = wp_get_nav_menu_items((int) $menu_id);
-                } catch (Throwable $e) {
-                    $items = array();
-                }
+            return array(
+                'menuLocation' => isset($raw['warmMenuLocation']) ? sanitize_key((string) $raw['warmMenuLocation']) : '',
+                'menuDepth'    => $this->normalize_warm_menu_depth(isset($raw['warmMenuDepth']) ? (string) $raw['warmMenuDepth'] : ''),
+                'sources'      => array_keys($sources),
+            );
+        }
 
-                if (empty($items) || !is_array($items)) {
+        private function normalize_warm_menu_depth($depth)
+        {
+            $depth = strtolower(trim((string) $depth));
+            return in_array($depth, array('1', '2', '3', 'all'), true) ? $depth : '';
+        }
+
+        private function get_allowed_full_site_warm_source_keys()
+        {
+            return array('homepage', 'menus', 'pages', 'posts', 'categories', 'tags', 'custom_post_types', 'custom_taxonomies', 'woocommerce_products', 'woocommerce_product_taxonomies');
+        }
+
+        private function get_full_site_warm_sources_lookup()
+        {
+            $scope = $this->get_warm_scope_settings();
+            $lookup = array();
+            foreach ((array) $scope['sources'] as $source) {
+                $lookup[$source] = true;
+            }
+            return $lookup;
+        }
+
+        private function is_full_site_source_enabled($source)
+        {
+            $lookup = $this->get_full_site_warm_sources_lookup();
+            return isset($lookup[(string) $source]);
+        }
+
+        private function get_full_site_warm_source_options()
+        {
+            $options = array(
+                array('value' => 'homepage', 'label' => 'Homepage / blog index'),
+                array('value' => 'menus', 'label' => 'Selected menu URLs'),
+                array('value' => 'pages', 'label' => 'Pages'),
+                array('value' => 'posts', 'label' => 'Posts'),
+                array('value' => 'categories', 'label' => 'Categories'),
+                array('value' => 'tags', 'label' => 'Tags'),
+            );
+
+            $post_types = get_post_types(array('public' => true), 'objects');
+            $custom_post_types = array();
+            if (is_array($post_types)) {
+                foreach ($post_types as $post_type => $object) {
+                    $post_type = sanitize_key((string) $post_type);
+                    if ('' !== $post_type && !in_array($post_type, array('post', 'page', 'attachment', 'product'), true)) {
+                        $custom_post_types[] = !empty($object->labels->name) ? (string) $object->labels->name : $post_type;
+                    }
+                }
+            }
+            if (!empty($custom_post_types)) {
+                $options[] = array('value' => 'custom_post_types', 'label' => 'Detected custom post types: ' . implode(', ', array_slice($custom_post_types, 0, 5)));
+            }
+
+            $taxonomies = get_taxonomies(array('public' => true), 'objects');
+            $custom_taxonomies = array();
+            if (is_array($taxonomies)) {
+                foreach ($taxonomies as $taxonomy => $object) {
+                    $taxonomy = sanitize_key((string) $taxonomy);
+                    if ('' !== $taxonomy && !in_array($taxonomy, array('category', 'post_tag', 'product_cat', 'product_tag'), true)) {
+                        $custom_taxonomies[] = !empty($object->labels->name) ? (string) $object->labels->name : $taxonomy;
+                    }
+                }
+            }
+            if (!empty($custom_taxonomies)) {
+                $options[] = array('value' => 'custom_taxonomies', 'label' => 'Detected custom taxonomies: ' . implode(', ', array_slice($custom_taxonomies, 0, 5)));
+            }
+
+            if (post_type_exists('product')) {
+                $options[] = array('value' => 'woocommerce_products', 'label' => 'WooCommerce products');
+            }
+            if (taxonomy_exists('product_cat') || taxonomy_exists('product_tag')) {
+                $options[] = array('value' => 'woocommerce_product_taxonomies', 'label' => 'WooCommerce product categories/tags');
+            }
+
+            return $options;
+        }
+
+        private function get_warm_nav_menu_options()
+        {
+            $options = array();
+            $used_menu_ids = array();
+            $locations = function_exists('get_nav_menu_locations') ? (array) get_nav_menu_locations() : array();
+            $registered = function_exists('get_registered_nav_menus') ? (array) get_registered_nav_menus() : array();
+
+            /*
+             * Show assigned/front-end menus first because they are the safest default
+             * warm-up targets. Still expose every saved WordPress menu below them so
+             * the user can deliberately warm an unassigned/custom menu without the
+             * plugin automatically scanning all stored/demo menus.
+             */
+            foreach ($locations as $location => $menu_id) {
+                $menu_id = (int) $menu_id;
+                if ($menu_id <= 0) {
                     continue;
                 }
 
-                foreach ($items as $item) {
-                    $url = '';
-                    if (is_object($item) && !empty($item->url) && is_string($item->url)) {
-                        $url = $item->url;
-                    } elseif (is_array($item) && !empty($item['url']) && is_string($item['url'])) {
-                        $url = $item['url'];
+                $menu = wp_get_nav_menu_object($menu_id);
+                if (!$menu || empty($menu->term_id)) {
+                    continue;
+                }
+
+                $location_key = sanitize_key((string) $location);
+                if ('' === $location_key) {
+                    continue;
+                }
+
+                $location_label = isset($registered[$location]) && '' !== (string) $registered[$location] ? (string) $registered[$location] : (string) $location;
+                $menu_name = !empty($menu->name) ? (string) $menu->name : ('Menu #' . $menu_id);
+                $used_menu_ids[$menu_id] = true;
+
+                $options[] = array(
+                    'value'    => $location_key,
+                    'label'    => 'Assigned / frontend: ' . $location_label . ' — ' . $menu_name,
+                    'menuId'   => $menu_id,
+                    'location' => $location_key,
+                    'source'   => 'assigned',
+                    'count'    => 0,
+                );
+            }
+
+            try {
+                $menus = function_exists('wp_get_nav_menus') ? wp_get_nav_menus() : array();
+            } catch (Throwable $e) {
+                $menus = array();
+            }
+
+            if (is_array($menus)) {
+                foreach ($menus as $menu) {
+                    $menu_id = is_object($menu) && !empty($menu->term_id) ? (int) $menu->term_id : 0;
+                    if ($menu_id <= 0 || isset($used_menu_ids[$menu_id])) {
+                        continue;
                     }
 
-                    $normalized_url = $this->normalize_menu_warm_url($url);
-                    if ('' !== $normalized_url && $this->is_warmable_menu_url($normalized_url)) {
-                        $urls[] = $normalized_url;
-                    }
+                    $menu_name = !empty($menu->name) ? (string) $menu->name : ('Menu #' . $menu_id);
+                    $options[] = array(
+                        'value'    => 'menu-' . $menu_id,
+                        'label'    => 'Other saved menu: ' . $menu_name,
+                        'menuId'   => $menu_id,
+                        'location' => '',
+                        'source'   => 'saved',
+                        'count'    => 0,
+                    );
                 }
             }
 
-            return array_values(array_unique(array_filter($urls)));
+            return $options;
         }
 
-        private function get_assigned_nav_menu_ids()
+        private function get_menu_id_for_warm_location($location)
         {
-            $locations = get_nav_menu_locations();
-            if (empty($locations) || !is_array($locations)) {
-                return array();
+            $location = sanitize_key((string) $location);
+            if ('' === $location) {
+                return 0;
             }
 
-            $menu_ids = array();
-            foreach ($locations as $menu_id) {
-                $menu_id = (int) $menu_id;
+            if (preg_match('/^menu-([0-9]+)$/', $location, $matches)) {
+                $menu_id = (int) $matches[1];
                 if ($menu_id > 0) {
-                    $menu_ids[$menu_id] = $menu_id;
+                    $menu = wp_get_nav_menu_object($menu_id);
+                    return $menu && !empty($menu->term_id) ? $menu_id : 0;
                 }
             }
 
-            return array_values($menu_ids);
+            foreach ($this->get_warm_nav_menu_options() as $option) {
+                if (!empty($option['value']) && $location === (string) $option['value']) {
+                    return (int) $option['menuId'];
+                }
+            }
+
+            return 0;
+        }
+
+        private function get_nav_menu_item_depth_map(array $items)
+        {
+            $parent_map = array();
+            foreach ($items as $item) {
+                $id = is_object($item) && !empty($item->ID) ? (int) $item->ID : 0;
+                if ($id <= 0) {
+                    continue;
+                }
+                $parent_id = is_object($item) && !empty($item->menu_item_parent) ? (int) $item->menu_item_parent : 0;
+                $parent_map[$id] = $parent_id;
+            }
+
+            $depth_map = array();
+            foreach ($parent_map as $id => $parent_id) {
+                $depth = 1;
+                $seen = array($id => true);
+                while ($parent_id > 0 && isset($parent_map[$parent_id]) && empty($seen[$parent_id])) {
+                    $seen[$parent_id] = true;
+                    $depth++;
+                    $parent_id = (int) $parent_map[$parent_id];
+                    if ($depth > 25) {
+                        break;
+                    }
+                }
+                $depth_map[$id] = max(1, $depth);
+            }
+
+            return $depth_map;
         }
 
         private function normalize_menu_warm_url($url)
         {
-            $url = is_string($url) ? trim($url) : '';
-            if ('' === $url || '#' === $url) {
+            $url = trim((string) $url);
+            if ('' === $url || '#' === $url || 0 === strpos($url, '#')) {
                 return '';
             }
 
-            if (0 === strpos($url, '#') || 0 === stripos($url, 'mailto:') || 0 === stripos($url, 'tel:') || 0 === stripos($url, 'javascript:')) {
-                return '';
+            $lower = strtolower($url);
+            foreach (array('mailto:', 'tel:', 'sms:', 'javascript:') as $blocked_scheme) {
+                if (0 === strpos($lower, $blocked_scheme)) {
+                    return '';
+                }
             }
 
-            if (0 === strpos($url, '//')) {
-                $home_parts = wp_parse_url(home_url('/'));
-                $scheme = !empty($home_parts['scheme']) ? (string) $home_parts['scheme'] : 'https';
-                $url = $scheme . ':' . $url;
-            } elseif (0 === strpos($url, '/')) {
+            if (0 === strpos($url, '/')) {
                 $url = home_url($url);
             }
 
             return esc_url_raw($url);
         }
 
-        private function is_warmable_menu_url($url)
+        private function get_safe_nav_menu_urls($menu_location = null, $menu_depth = null)
         {
-            $url = is_string($url) ? trim($url) : '';
-            if ('' === $url || !$this->is_cacheable_local_url($url)) {
-                return false;
+            $scope = $this->get_warm_scope_settings();
+            $menu_location = null === $menu_location ? (string) $scope['menuLocation'] : sanitize_key((string) $menu_location);
+            $menu_depth = null === $menu_depth ? (string) $scope['menuDepth'] : $this->normalize_warm_menu_depth($menu_depth);
+            if ('' === $menu_location || '' === $menu_depth) {
+                return array();
             }
 
-            $inspection = $this->inspect_url($url);
-            return is_array($inspection) && !empty($inspection['cacheable']);
+            $menu_id = $this->get_menu_id_for_warm_location($menu_location);
+            if ($menu_id <= 0) {
+                return array();
+            }
+
+            try {
+                $items = wp_get_nav_menu_items($menu_id);
+            } catch (Throwable $e) {
+                $items = array();
+            }
+
+            if (empty($items) || !is_array($items)) {
+                return array();
+            }
+
+            $depth_limit = 'all' === $menu_depth ? 0 : max(1, (int) $menu_depth);
+            $depth_map = $this->get_nav_menu_item_depth_map($items);
+            $urls = array();
+
+            foreach ($items as $item) {
+                $item_id = is_object($item) && !empty($item->ID) ? (int) $item->ID : 0;
+                $item_depth = $item_id > 0 && isset($depth_map[$item_id]) ? (int) $depth_map[$item_id] : 1;
+                if ($depth_limit > 0 && $item_depth > $depth_limit) {
+                    continue;
+                }
+
+                $url = '';
+                if (is_object($item) && !empty($item->url) && is_string($item->url)) {
+                    $url = $item->url;
+                } elseif (is_array($item) && !empty($item['url']) && is_string($item['url'])) {
+                    $url = $item['url'];
+                }
+
+                $url = $this->normalize_menu_warm_url($url);
+                if ('' !== $url && $this->is_cacheable_local_url($url)) {
+                    $urls[] = $url;
+                }
+            }
+
+            return array_values(array_unique(array_filter($urls)));
         }
 
         private function get_public_crawl_post_types()
         {
-            $post_types = get_post_types(array('public' => true), 'names');
-            return array_values(is_array($post_types) ? $post_types : array());
+            $sources = $this->get_full_site_warm_sources_lookup();
+            if (empty($sources)) {
+                return array();
+            }
+
+            $post_types = get_post_types(array('public' => true), 'objects');
+            if (!is_array($post_types)) {
+                return array();
+            }
+
+            $selected = array();
+            foreach ($post_types as $post_type => $object) {
+                $post_type = sanitize_key((string) $post_type);
+                if ('' === $post_type || 'attachment' === $post_type) {
+                    continue;
+                }
+
+                if ('page' === $post_type && isset($sources['pages'])) {
+                    $selected[] = $post_type;
+                    continue;
+                }
+
+                if ('post' === $post_type && isset($sources['posts'])) {
+                    $selected[] = $post_type;
+                    continue;
+                }
+
+                if ('product' === $post_type && isset($sources['woocommerce_products'])) {
+                    $selected[] = $post_type;
+                    continue;
+                }
+
+                if (!in_array($post_type, array('page', 'post', 'product'), true) && isset($sources['custom_post_types'])) {
+                    $selected[] = $post_type;
+                }
+            }
+
+            return array_values(array_unique($selected));
         }
 
         private function get_public_crawl_taxonomies()
         {
-            $taxonomies = get_taxonomies(array('public' => true), 'names');
-            return array_values(is_array($taxonomies) ? $taxonomies : array());
+            $sources = $this->get_full_site_warm_sources_lookup();
+            if (empty($sources)) {
+                return array();
+            }
+
+            $taxonomies = get_taxonomies(array('public' => true), 'objects');
+            if (!is_array($taxonomies)) {
+                return array();
+            }
+
+            $selected = array();
+            foreach ($taxonomies as $taxonomy => $object) {
+                $taxonomy = sanitize_key((string) $taxonomy);
+                if ('' === $taxonomy) {
+                    continue;
+                }
+
+                if ('category' === $taxonomy && isset($sources['categories'])) {
+                    $selected[] = $taxonomy;
+                    continue;
+                }
+
+                if ('post_tag' === $taxonomy && isset($sources['tags'])) {
+                    $selected[] = $taxonomy;
+                    continue;
+                }
+
+                if (in_array($taxonomy, array('product_cat', 'product_tag'), true) && isset($sources['woocommerce_product_taxonomies'])) {
+                    $selected[] = $taxonomy;
+                    continue;
+                }
+
+                if (!in_array($taxonomy, array('category', 'post_tag', 'product_cat', 'product_tag'), true) && isset($sources['custom_taxonomies'])) {
+                    $selected[] = $taxonomy;
+                }
+            }
+
+            return array_values(array_unique($selected));
         }
 
         private function get_default_crawl_cursor_state($scope = 'full')

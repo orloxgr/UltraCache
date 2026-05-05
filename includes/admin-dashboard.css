@@ -244,6 +244,14 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	line-height: 1.7;
 }
 
+
+#uc-dashboard .ucwp-stat-card-value {
+	font-size: 24px !important;
+	font-weight: 300 !important;
+	line-height: 1.18;
+	letter-spacing: -0.01em;
+}
+
 #uc-dashboard .rounded,
 #uc-dashboard .rounded-full {
 	border-radius: 0;
@@ -1516,4 +1524,68 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	.uc-js-scan-actions > button {
 		white-space: normal;
 	}
+}
+
+.uc-switch-dropdown {
+	position: relative;
+	width: 100%;
+}
+
+.uc-switch-dropdown-summary {
+	align-items: center;
+	background: rgba(12, 18, 28, 0.9);
+	border: 1px solid var(--uc-border-strong);
+	border-radius: 14px;
+	color: var(--uc-text);
+	cursor: pointer;
+	display: flex;
+	font-size: 13px;
+	font-weight: 700;
+	justify-content: space-between;
+	list-style: none;
+	min-height: 42px;
+	padding: 10px 12px;
+}
+
+.uc-switch-dropdown-summary::-webkit-details-marker {
+	display: none;
+}
+
+.uc-switch-dropdown[open] .uc-switch-dropdown-summary {
+	border-color: rgba(55, 214, 141, 0.35);
+	box-shadow: 0 0 0 3px rgba(55, 214, 141, 0.08);
+}
+
+.uc-switch-dropdown-panel {
+	background: #0b111b;
+	border: 1px solid var(--uc-border-strong);
+	border-radius: 14px;
+	box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+	margin-top: 8px;
+	max-height: 320px;
+	overflow: auto;
+	padding: 6px;
+	position: relative;
+	z-index: 20;
+}
+
+.uc-switch-dropdown-row {
+	align-items: center;
+	border-radius: 12px;
+	cursor: pointer;
+	display: flex;
+	gap: 12px;
+	justify-content: space-between;
+	padding: 9px 8px;
+}
+
+.uc-switch-dropdown-row:hover {
+	background: rgba(255, 255, 255, 0.04);
+}
+
+.uc-switch-dropdown-text {
+	color: var(--uc-text);
+	font-size: 12px;
+	font-weight: 600;
+	min-width: 0;
 }

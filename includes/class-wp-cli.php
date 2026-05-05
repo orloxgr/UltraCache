@@ -114,6 +114,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                 'status' => 'status',
                 'inspect' => 'inspect',
                 'cleanup' => 'cleanup',
+                'cleanup_artifacts' => 'cleanup_artifacts',
                 'media' => 'media',
                 'settings' => 'settings',
                 'stats' => 'stats',
@@ -302,6 +303,10 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                         array(
                             'command' => 'wp ultracache cleanup',
                             'description' => 'Run scheduled cleanup once.',
+                        ),
+                        array(
+                            'command' => 'wp ultracache cleanup_artifacts [--dry-run] [--max-age-minutes=<number>] [--format=table|json|yaml]',
+                            'description' => 'Clean safe old runtime lock/test artifacts from UltraCache locks storage.',
                         ),
                     ),
                 ),

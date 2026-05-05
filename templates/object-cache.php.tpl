@@ -8,22 +8,22 @@
 
 defined('ABSPATH') || exit;
 
-if (!function_exists('ucwp_safe_file_get_contents')) {
-	function ucwp_safe_file_get_contents($file) {
+if (!function_exists('ucwp_dropin_safe_file_get_contents')) {
+	function ucwp_dropin_safe_file_get_contents($file) {
 		return is_readable($file) ? file_get_contents($file) : false;
 	}
 }
 
-if (!function_exists('ucwp_safe_file_put_contents')) {
-    function ucwp_safe_file_put_contents($file, $data, $flags = 0, $context = '') {
+if (!function_exists('ucwp_dropin_safe_file_put_contents')) {
+    function ucwp_dropin_safe_file_put_contents($file, $data, $flags = 0, $context = '') {
         $file = (string) $file;
         $dir = dirname($file);
         if ('' === $file) {
             return false;
         }
         if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
-            if (function_exists('ucwp_safe_mkdir')) {
-                ucwp_safe_mkdir($dir, 0755, true);
+            if (function_exists('ucwp_dropin_safe_mkdir')) {
+                ucwp_dropin_safe_mkdir($dir, 0755, true);
             } else {
                 @mkdir($dir, 0755, true);
             }
@@ -39,20 +39,20 @@ if (!function_exists('ucwp_safe_file_put_contents')) {
         return @file_put_contents($file, $data, $flags);
     }
 }
-if (!function_exists('ucwp_safe_unlink')) {
-	function ucwp_safe_unlink($file) {
+if (!function_exists('ucwp_dropin_safe_unlink')) {
+	function ucwp_dropin_safe_unlink($file) {
 		return !file_exists($file) ? true : unlink($file);
 	}
 }
 
-if (!function_exists('ucwp_safe_rename')) {
-	function ucwp_safe_rename($from, $to) {
+if (!function_exists('ucwp_dropin_safe_rename')) {
+	function ucwp_dropin_safe_rename($from, $to) {
 		return rename($from, $to);
 	}
 }
 
-if (!function_exists('ucwp_safe_mkdir')) {
-    function ucwp_safe_mkdir($dir, $mode = 0755, $recursive = true) {
+if (!function_exists('ucwp_dropin_safe_mkdir')) {
+    function ucwp_dropin_safe_mkdir($dir, $mode = 0755, $recursive = true) {
         $dir = is_string($dir) ? trim($dir) : '';
         if ('' === $dir) {
             return false;
@@ -64,8 +64,8 @@ if (!function_exists('ucwp_safe_mkdir')) {
     }
 }
 
-if (!function_exists('ucwp_safe_scandir')) {
-	function ucwp_safe_scandir($dir) {
+if (!function_exists('ucwp_dropin_safe_scandir')) {
+	function ucwp_dropin_safe_scandir($dir) {
 		$dir = is_string($dir) ? trim($dir) : '';
 		if ('' === $dir || !is_dir($dir) || !is_readable($dir)) {
 			return false;
@@ -74,8 +74,8 @@ if (!function_exists('ucwp_safe_scandir')) {
 	}
 }
 
-if (!function_exists('ucwp_safe_rmdir')) {
-	function ucwp_safe_rmdir($dir) {
+if (!function_exists('ucwp_dropin_safe_rmdir')) {
+	function ucwp_dropin_safe_rmdir($dir) {
 		$dir = is_string($dir) ? trim($dir) : '';
 		if ('' === $dir) {
 			return false;
@@ -83,10 +83,10 @@ if (!function_exists('ucwp_safe_rmdir')) {
 		if (!file_exists($dir)) {
 			return true;
 		}
-		if (!is_dir($dir)) {
+		if (!is_dir($dir) || is_link($dir)) {
 			return false;
 		}
-		$items = ucwp_safe_scandir($dir);
+		$items = ucwp_dropin_safe_scandir($dir);
 		if (is_array($items)) {
 			foreach ($items as $item) {
 				if ('.' === $item || '..' === $item) {
@@ -156,15 +156,14 @@ if (!class_exists('WP_Object_Cache')) {
 
 		public function get_backend_status() {
 			$configured_fallback = $this->sanitize_fallback_backend($this->fallback_backend_policy);
-			$fallback_backend = ('none' === $configured_fallback ? 'runtime' : $configured_fallback);
-			$fallback_active = (
-				(string) $this->selected_backend !== (string) $this->active_backend
-				&& 'runtime' !== (string) $this->active_backend
-				&& (string) $fallback_backend === (string) $this->active_backend
-			);
+			$standby_fallback = ('none' === $configured_fallback ? 'runtime' : $configured_fallback);
+			$fallback_backend = $standby_fallback;
+			$fallback_active = ((string) $this->selected_backend !== (string) $this->active_backend);
 			if ($fallback_active) {
 				$fallback_backend = (string) $this->active_backend;
 			}
+			$fallback_persistent = $fallback_active && in_array((string) $this->active_backend, array('redis', 'apcu', 'disk'), true);
+			$active_runtime_only = ('runtime' === (string) $this->active_backend);
 			$fallback_reason = '';
 			$fallback_message = '';
 			if ($fallback_active) {
@@ -183,6 +182,10 @@ if (!class_exists('WP_Object_Cache')) {
 				'configuredFallback' => $configured_fallback,
 				'fallback' => (string) $fallback_backend,
 				'fallbackActive' => (bool) $fallback_active,
+				'activeFallbackBackend' => $fallback_active ? (string) $this->active_backend : '',
+				'activeFallbackKind' => $fallback_active ? ($active_runtime_only ? 'runtime-only' : 'persistent') : '',
+				'fallbackPersistent' => (bool) $fallback_persistent,
+				'activeBackendRuntimeOnly' => (bool) $active_runtime_only,
 				'fallbackReason' => $fallback_reason,
 				'fallbackMessage' => $fallback_message,
 				'apcu'     => array(
@@ -293,6 +296,11 @@ if (!class_exists('WP_Object_Cache')) {
 				$port = (int) $this->redis_port;
 				$timeout = (float) $this->redis_connect_timeout;
 
+				if (!$this->is_redis_socket_target_allowed($connection_host, $port)) {
+					$this->redis_error = 'Blocked invalid Redis endpoint. Use a valid explicitly configured Redis host and port.';
+					return false;
+				}
+
 				$connected = false;
 				if ($this->redis_persistent) {
 					$persistent_id = 'ucwp:' . md5(implode('|', array($connection_host, $port, (string) $this->redis_database, (string) $this->redis_prefix)));
@@ -396,6 +404,17 @@ if (!class_exists('WP_Object_Cache')) {
 			return $host;
 		}
 
+		private function is_redis_socket_target_allowed($host, $port) {
+			$host = preg_replace('#^(?:tcp|tls|ssl)://#i', '', trim((string) $host));
+			$host = trim((string) $host, " \t\n\r\0\x0B[]");
+			$host_lc = strtolower($host);
+			$port = (int) $port;
+
+			// The drop-in only connects to the Redis endpoint saved in UltraCache settings.
+			// External Redis infrastructure and custom ports are valid production setups.
+			return '' !== $host_lc && $port > 0 && $port <= 65535 && false === strpos($host_lc, '/');
+		}
+
 		private function with_redis_error_handler($callback, $default = false) {
 			$previous = set_error_handler(function ($severity, $message, $file = null, $line = null) {
 				throw new ErrorException($message, 0, $severity, (string) $file, (int) $line);
@@ -425,7 +444,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$this->is_cache_path($this->metrics_file)) {
 				return $data;
 			}
-			$raw = ucwp_safe_file_get_contents($this->metrics_file);
+			$raw = ucwp_dropin_safe_file_get_contents($this->metrics_file);
 			if (false === $raw || '' === $raw) {
 				return $data;
 			}
@@ -445,9 +464,9 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 			$dir = dirname($this->metrics_file);
 			if (!file_exists($dir)) {
-				ucwp_safe_mkdir($dir, 0755, true);
+				ucwp_dropin_safe_mkdir($dir, 0755, true);
 			}
-			ucwp_safe_file_put_contents($this->metrics_file, json_encode($data), LOCK_EX);
+			ucwp_dropin_safe_file_put_contents($this->metrics_file, json_encode($data), LOCK_EX);
 		}
 
 		public function persist_metrics() {
@@ -789,7 +808,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$this->is_cache_path($dir)) {
 				return false;
 			}
-			if (!is_dir($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
+			if (!is_dir($dir) && !ucwp_dropin_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
 				return false;
 			}
 			return $dir . '/' . sha1($key) . '.cache';
@@ -851,11 +870,11 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function ensure_base_dir() {
 			if (!is_dir($this->cache_dir)) {
-				ucwp_safe_mkdir($this->cache_dir, 0755, true);
+				ucwp_dropin_safe_mkdir($this->cache_dir, 0755, true);
 			}
 			$index = rtrim($this->cache_dir, '/\\') . '/index.php';
 			if (!file_exists($index)) {
-				ucwp_safe_file_put_contents($index, "<?php\n// Silence is golden.\n");
+				ucwp_dropin_safe_file_put_contents($index, "<?php\n// Silence is golden.\n");
 			}
 		}
 
@@ -1073,7 +1092,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$path || !$this->is_cache_path($path) || !file_exists($path)) {
 				return true;
 			}
-			return ucwp_safe_unlink($path);
+			return ucwp_dropin_safe_unlink($path);
 		}
 
 		private function write_redis_payload($key, $group, $payload, $expire) {
@@ -1220,7 +1239,7 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 			$dir = dirname($path);
-			if (!is_dir($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
+			if (!is_dir($dir) && !ucwp_dropin_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
 				return false;
 			}
 			$tmp = $path . '.tmp-' . uniqid('', true);
@@ -1230,13 +1249,13 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 			$data = serialize($envelope);
-			$result = ucwp_safe_file_put_contents($tmp, $data, LOCK_EX);
+			$result = ucwp_dropin_safe_file_put_contents($tmp, $data, LOCK_EX);
 			if (false === $result) {
-				ucwp_safe_unlink($tmp);
+				ucwp_dropin_safe_unlink($tmp);
 				return false;
 			}
-			if (!ucwp_safe_rename($tmp, $path)) {
-				ucwp_safe_unlink($tmp);
+			if (!ucwp_dropin_safe_rename($tmp, $path)) {
+				ucwp_dropin_safe_unlink($tmp);
 				return false;
 			}
 			return true;
@@ -1254,7 +1273,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!is_string($path) || '' === trim($path) || !$this->is_cache_path($path)) {
 				return false;
 			}
-			$data = ucwp_safe_file_get_contents($path);
+			$data = ucwp_dropin_safe_file_get_contents($path);
 			if (false === $data || '' === $data) {
 				return false;
 			}
@@ -1479,7 +1498,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!is_dir($this->cache_dir) || !$this->is_cache_path($this->cache_dir)) {
 				return;
 			}
-			$items = ucwp_safe_scandir($this->cache_dir);
+			$items = ucwp_dropin_safe_scandir($this->cache_dir);
 			if (!is_array($items)) {
 				return;
 			}
@@ -1488,13 +1507,13 @@ if (!class_exists('WP_Object_Cache')) {
 					continue;
 				}
 				$path = $this->cache_dir . DIRECTORY_SEPARATOR . $item;
-				if (!$this->is_cache_path($path)) {
+				if (is_link($path) || !$this->is_cache_path($path)) {
 					continue;
 				}
 				if (is_dir($path)) {
 					$this->recursive_delete($path, true);
 				} else {
-					ucwp_safe_unlink($path);
+					ucwp_dropin_safe_unlink($path);
 				}
 			}
 		}
@@ -1512,10 +1531,10 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function recursive_delete($dir, $remove_root = true) {
-			if (!is_string($dir) || '' === trim($dir) || !is_dir($dir) || !$this->is_cache_path($dir)) {
+			if (!is_string($dir) || '' === trim($dir) || !is_dir($dir) || is_link($dir) || !$this->is_cache_path($dir)) {
 				return;
 			}
-			$items = ucwp_safe_scandir($dir);
+			$items = ucwp_dropin_safe_scandir($dir);
 			if (!is_array($items)) {
 				return;
 			}
@@ -1524,29 +1543,29 @@ if (!class_exists('WP_Object_Cache')) {
 					continue;
 				}
 				$path = $dir . DIRECTORY_SEPARATOR . $item;
-				if (!$this->is_cache_path($path)) {
+				if (is_link($path) || !$this->is_cache_path($path)) {
 					continue;
 				}
 				if (is_dir($path)) {
 					$this->recursive_delete($path, true);
 				} else {
-					ucwp_safe_unlink($path);
+					ucwp_dropin_safe_unlink($path);
 				}
 			}
-			$remaining = ucwp_safe_scandir($dir);
+			$remaining = ucwp_dropin_safe_scandir($dir);
 			if (is_array($remaining)) {
 				foreach ($remaining as $item) {
 					if ('.' === $item || '..' === $item) {
 						continue;
 					}
 					$path = $dir . DIRECTORY_SEPARATOR . $item;
-					if ($this->is_cache_path($path) && is_file($path)) {
-						ucwp_safe_unlink($path);
+					if (!is_link($path) && $this->is_cache_path($path) && is_file($path)) {
+						ucwp_dropin_safe_unlink($path);
 					}
 				}
 			}
 			if ($remove_root) {
-				ucwp_safe_rmdir($dir);
+				ucwp_dropin_safe_rmdir($dir);
 			}
 		}
 	}

@@ -29,11 +29,66 @@ if (!function_exists('ucwp_uninstall_path_is_under')) {
     }
 }
 
+if (!function_exists('ucwp_uninstall_get_wp_filesystem')) {
+    function ucwp_uninstall_get_wp_filesystem()
+    {
+        static $initialized = null;
+        global $wp_filesystem;
+
+        if (true === $initialized && is_object($wp_filesystem)) {
+            return $wp_filesystem;
+        }
+
+        if (false === $initialized || !defined('ABSPATH')) {
+            return false;
+        }
+
+        $initialized = false;
+
+        if (!function_exists('WP_Filesystem')) {
+            $file_api = ABSPATH . 'wp-admin/includes/file.php';
+            if (!file_exists($file_api)) {
+                return false;
+            }
+            require_once $file_api;
+        }
+
+        if (!function_exists('WP_Filesystem') || !WP_Filesystem() || !is_object($wp_filesystem)) {
+            return false;
+        }
+
+        $initialized = true;
+        return $wp_filesystem;
+    }
+}
+
+if (!function_exists('ucwp_uninstall_get_contents')) {
+    function ucwp_uninstall_get_contents($path)
+    {
+        $path = (string) $path;
+        if ('' === $path || !is_readable($path)) {
+            return false;
+        }
+
+        $filesystem = ucwp_uninstall_get_wp_filesystem();
+        if ($filesystem && $filesystem->exists($path) && $filesystem->is_file($path)) {
+            return $filesystem->get_contents($path);
+        }
+
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Guarded uninstall fallback after WP_Filesystem read is unavailable.
+        return file_get_contents($path);
+    }
+}
+
 if (!function_exists('ucwp_uninstall_delete_path')) {
     function ucwp_uninstall_delete_path($path, array $allowed_roots)
     {
         $path = (string) $path;
-        if ('' === $path || !file_exists($path)) {
+        if ('' === $path || (!file_exists($path) && !is_link($path))) {
+            return true;
+        }
+
+        if (is_link($path)) {
             return true;
         }
 
@@ -49,7 +104,7 @@ if (!function_exists('ucwp_uninstall_delete_path')) {
             return false;
         }
 
-        if (is_dir($path) && !is_link($path)) {
+        if (is_dir($path)) {
             $items = scandir($path);
             if (!is_array($items)) {
                 return false;
@@ -59,18 +114,33 @@ if (!function_exists('ucwp_uninstall_delete_path')) {
                 if ('.' === $item || '..' === $item) {
                     continue;
                 }
-                ucwp_uninstall_delete_path($path . DIRECTORY_SEPARATOR . $item, $allowed_roots);
+
+                $child = $path . DIRECTORY_SEPARATOR . $item;
+                if (is_link($child)) {
+                    continue;
+                }
+
+                ucwp_uninstall_delete_path($child, $allowed_roots);
             }
 
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Recursive uninstall cleanup is path-guarded to UltraCache-owned roots.
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Non-recursive rmdir is intentional so uninstall cleanup never traverses symlink directories through filesystem adapters.
             return @rmdir($path) || !file_exists($path);
+        }
+
+        $filesystem = ucwp_uninstall_get_wp_filesystem();
+        if ($filesystem && $filesystem->exists($path) && $filesystem->is_file($path)) {
+            $result = $filesystem->delete($path, false, 'f');
+            clearstatcache(true, $path);
+            if ($result || !file_exists($path)) {
+                return true;
+            }
         }
 
         if (function_exists('wp_delete_file')) {
             wp_delete_file($path);
         }
 
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- Fallback after wp_delete_file() for path-guarded uninstall cleanup.
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- Fallback after WP_Filesystem/wp_delete_file() for path-guarded uninstall cleanup.
         return !file_exists($path) || @unlink($path) || !file_exists($path);
     }
 }
@@ -187,7 +257,7 @@ function ucwp_run_uninstall_cleanup()
         foreach (array('advanced-cache.php', 'object-cache.php') as $ucwp_dropin_name) {
             $ucwp_dropin = trailingslashit(WP_CONTENT_DIR) . $ucwp_dropin_name;
             if (is_readable($ucwp_dropin)) {
-                $ucwp_contents = (string) file_get_contents($ucwp_dropin);
+                $ucwp_contents = (string) ucwp_uninstall_get_contents($ucwp_dropin);
                 if (false !== strpos($ucwp_contents, 'UltraCache')) {
                     ucwp_uninstall_delete_path($ucwp_dropin, array(WP_CONTENT_DIR));
                 }
@@ -196,11 +266,6 @@ function ucwp_run_uninstall_cleanup()
     }
 
     $ucwp_runtime_secret_candidates = array();
-
-    if (defined('WP_CONTENT_DIR')) {
-        $ucwp_runtime_secret_candidates[] = trailingslashit(WP_CONTENT_DIR) . 'ultracache-runtime-secrets.php';
-        $ucwp_runtime_secret_candidates[] = trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-runtime-secrets.php';
-    }
 
     if (defined('ABSPATH')) {
         $ucwp_site_root = wp_basename(untrailingslashit(ABSPATH));
@@ -213,9 +278,8 @@ function ucwp_run_uninstall_cleanup()
     }
 
     if ('' !== $ucwp_cache_root) {
+        $ucwp_runtime_secret_candidates[] = trailingslashit($ucwp_cache_root) . 'runtime-config.php';
         $ucwp_runtime_secret_candidates[] = trailingslashit($ucwp_cache_root) . 'runtime-config.json';
-        $ucwp_runtime_secret_candidates[] = trailingslashit($ucwp_cache_root) . 'runtime-secrets.php';
-        $ucwp_runtime_secret_candidates[] = trailingslashit($ucwp_cache_root) . '.ultracache-runtime-secrets.php';
     }
 
     foreach (array_unique(array_filter($ucwp_runtime_secret_candidates)) as $ucwp_runtime_secret) {
@@ -223,7 +287,7 @@ function ucwp_run_uninstall_cleanup()
             continue;
         }
 
-        $ucwp_contents = (string) file_get_contents($ucwp_runtime_secret);
+        $ucwp_contents = (string) ucwp_uninstall_get_contents($ucwp_runtime_secret);
         if (false === strpos($ucwp_contents, 'UltraCache')) {
             continue;
         }

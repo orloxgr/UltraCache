@@ -488,11 +488,6 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['js_bundle']) && !empty($settings['defer_js'])) {
-                $html = $this->apply_html_rewrite_safely($html, 'safe-deferred-js-bundle', function ($html) use ($settings) {
-                    return $this->apply_safe_deferred_js_bundle_to_html($html, $settings);
-                });
-            }
 
             if (!$safe_mode) {
                 $html = $this->apply_html_rewrite_safely($html, 'safe-html-minify', function ($html) {

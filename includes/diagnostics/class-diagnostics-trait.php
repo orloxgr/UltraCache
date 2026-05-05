@@ -341,8 +341,6 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 array('key' => 'cacheQueryStringAllowlist', 'label' => 'Query-string args whitelist', 'area' => 'Cache query strings', 'kind' => 'Textarea', 'shared' => false),
                 array('key' => 'deferJsForceList', 'label' => 'Defer those scripts', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
                 array('key' => 'deferJsExcludeList', 'label' => 'JS Delay / Defer Exclusions', 'area' => 'JavaScript', 'kind' => 'Shared final override', 'shared' => true),
-                array('key' => 'jsBundleIncludeList', 'label' => 'JS Bundle Include Patterns', 'area' => 'JavaScript bundles', 'kind' => 'Pattern list', 'shared' => false),
-                array('key' => 'jsBundleExcludeList', 'label' => 'JS Bundle Exclude Patterns', 'area' => 'JavaScript bundles', 'kind' => 'Pattern list', 'shared' => false),
                 array('key' => 'delaySafeThirdPartyJsPatterns', 'label' => 'Safe third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
                 array('key' => 'delayFunctionalThirdPartyJsPatterns', 'label' => 'Functional third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
                 array('key' => 'delayThirdPartyJsExcludeList', 'label' => 'Third-Party Delay Exclusions', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
@@ -395,7 +393,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 array('label' => 'Admin/internal paths never cached', 'area' => 'Cache bypass', 'editable' => false, 'reason' => 'WordPress admin/login/API flows must remain uncached even if the visible path list is edited.', 'examples' => array('/wp-admin/', '/wp-login.php', '/wp-json/')),
                 array('label' => 'Logged-in and personalized requests bypass', 'area' => 'Cache poisoning protection', 'editable' => false, 'reason' => 'User cookies, cart/checkout/account flows, and unsafe methods must not be page-cached.', 'examples' => array('logged-in cookies', 'POST', 'cart', 'checkout', 'account')),
                 array('label' => 'CSS bundle stale-ref protection', 'area' => 'CSS bundles', 'editable' => false, 'reason' => 'Main bundle files and delayed-font companion files are retained/validated to protect stale proxy HTML.', 'examples' => array('48h bundle grace period', 'delayed-font pair lifecycle', 'missing bundle invalidation')),
-                array('label' => 'Varnish endpoint safety validation', 'area' => 'Reverse proxy', 'editable' => false, 'reason' => 'Unsafe or non-local purge endpoints are blocked to reduce SSRF and accidental external requests.', 'examples' => array('loopback/local/private hosts only', 'HTTP/admin mode validation')),
+                array('label' => 'Varnish endpoint safety validation', 'area' => 'Reverse proxy', 'editable' => false, 'reason' => 'Obvious public frontend endpoints are blocked while explicitly configured Varnish infrastructure endpoints remain supported.', 'examples' => array('external Varnish infrastructure allowed', 'public frontend :80/:443 blocked')),
             );
 
             $legacy_lists = array(
@@ -933,7 +931,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'recursive' => true,
                 'maxFiles' => 8000,
                 'includeExtensions' => array('html', 'gz', 'br'),
-                'excludePathContains' => array('/css-bundles/', '/js-bundles/', '/google-fonts/', '/font-css/', '/optimized-css/'),
+                'excludePathContains' => array('/css-bundles/', '/google-fonts/', '/font-css/', '/optimized-css/'),
             ));
             $cache_root = self::scan_storage_path_for_diagnostics($cache_dir, array('recursive' => true, 'maxFiles' => 8000));
             $object_cache = self::scan_storage_path_for_diagnostics($object_dir, array('recursive' => true, 'maxFiles' => 8000));
@@ -1349,89 +1347,6 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'message' => 'Security diagnostics are read-only. Sensitive query args are enforced as an engine safety floor even if not present in the visible exclusion list.',
             );
         }
-        private static function get_js_bundle_diagnostics($settings = array())
-        {
-            $settings = is_array($settings) ? $settings : array();
-            $last = get_option('ucwp_last_js_bundle_diagnostics', array());
-            $last = is_array($last) ? $last : array();
-            $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
-            $bundle_dir = trailingslashit($cache_dir) . 'js-bundles/';
-            $files = glob($bundle_dir . '*.js');
-            $file_count = 0;
-            $bytes = 0;
-            $latest = 0;
-            if (is_array($files)) {
-                foreach ($files as $file) {
-                    if (!is_string($file) || !is_file($file)) {
-                        continue;
-                    }
-                    $file_count++;
-                    $size = ucwp_safe_filesize($file, 'js_bundle_diagnostics');
-                    if (false !== $size) {
-                        $bytes += max(0, (int) $size);
-                    }
-                    $mtime = ucwp_safe_filemtime($file, 'js_bundle_diagnostics');
-                    if (false !== $mtime) {
-                        $latest = max($latest, (int) $mtime);
-                    }
-                }
-            }
-
-            $fallback_message = !empty($settings['jsBundleEnabled'])
-                ? 'No JS bundle diagnostics have been recorded yet. Run a warm/store action after enabling Combine safe deferred JS.'
-                : 'Combine safe deferred JS is disabled.';
-
-            $summary = array_merge(array(
-                'enabled' => !empty($settings['jsBundleEnabled']),
-                'deferJsEnabled' => !empty($settings['deferJsEnabled']),
-                'timestamp' => 0,
-                'lastRunHuman' => '',
-                'scriptsScanned' => 0,
-                'deferredScripts' => 0,
-                'eligibleScripts' => 0,
-                'singleEligibleScripts' => 0,
-                'eligibleGroups' => 0,
-                'bundlesGenerated' => 0,
-                'bundledScripts' => 0,
-                'bundleBytes' => 0,
-                'bundleBuildFailures' => 0,
-                'includePatternCount' => 0,
-                'excludePatternCount' => 0,
-                'reasonCounts' => array(),
-                'samples' => array(),
-                'bundles' => array(),
-                'message' => $fallback_message,
-            ), $last);
-
-            $summary['enabled'] = !empty($settings['jsBundleEnabled']);
-            $summary['deferJsEnabled'] = !empty($settings['deferJsEnabled']);
-            $summary['storage'] = array(
-                'dir' => $bundle_dir,
-                'exists' => is_dir($bundle_dir),
-                'writable' => is_dir($bundle_dir) ? ucwp_path_is_writable($bundle_dir) : ucwp_path_is_writable(dirname($bundle_dir)),
-                'files' => (int) $file_count,
-                'bytes' => (int) $bytes,
-                'latestModified' => (int) $latest,
-            );
-            if (empty($summary['reasonCounts']) || !is_array($summary['reasonCounts'])) {
-                $summary['reasonCounts'] = array();
-            }
-            arsort($summary['reasonCounts']);
-            $summary['topReasons'] = array_slice($summary['reasonCounts'], 0, 12, true);
-            if (!empty($summary['samples']) && is_array($summary['samples'])) {
-                $summary['samples'] = array_slice($summary['samples'], 0, 50);
-            } else {
-                $summary['samples'] = array();
-            }
-            if (!empty($summary['bundles']) && is_array($summary['bundles'])) {
-                $summary['bundles'] = array_slice($summary['bundles'], 0, 20);
-            } else {
-                $summary['bundles'] = array();
-            }
-
-            return $summary;
-        }
-
         private static function redact_diagnostics_for_output($value, $key = '', $depth = 0)
         {
             if (function_exists('ucwp_redact_sensitive_debug_value')) {
@@ -1453,14 +1368,110 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             return $value;
         }
 
-        public static function get_dashboard_diagnostics()
+        private static function get_object_cache_status_diagnostic_lite()
         {
-            if (method_exists(__CLASS__, 'is_dashboard_heavy_work_active') && self::is_dashboard_heavy_work_active()) {
-                return method_exists(__CLASS__, 'get_lightweight_dashboard_busy_diagnostics')
-                    ? self::get_lightweight_dashboard_busy_diagnostics()
-                    : array('dashboardWork' => array('active' => true, 'message' => 'Skipped while a heavy dashboard action is running.'));
+            $settings = self::get_dashboard_settings();
+            $object_cache_path = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+            $support = self::get_object_cache_support_status(false);
+            $backend_status = array();
+
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_backend_status')) {
+                $backend_status = Ultra_Cache_Object_Cache_Manager::get_backend_status();
+            }
+            if (!is_array($backend_status)) {
+                $backend_status = array();
             }
 
+            $selected = isset($backend_status['selected']) ? self::sanitize_object_cache_backend($backend_status['selected']) : self::sanitize_object_cache_backend($settings['objectCacheBackend'] ?? 'redis');
+            $active = isset($backend_status['active']) ? strtolower(trim((string) $backend_status['active'])) : $selected;
+            if (!in_array($active, array('redis', 'apcu', 'disk', 'runtime'), true)) {
+                $active = $selected;
+            }
+
+            $configured_fallback = self::sanitize_object_cache_fallback_backend($settings['objectCacheFallbackBackend'] ?? 'apcu');
+            $fallback = isset($backend_status['fallback']) ? strtolower(trim((string) $backend_status['fallback'])) : ('none' === $configured_fallback ? 'runtime' : $configured_fallback);
+            if (!in_array($fallback, array('apcu', 'disk', 'runtime'), true)) {
+                $fallback = 'none' === $configured_fallback ? 'runtime' : $configured_fallback;
+            }
+
+            $fallback_active = isset($backend_status['fallbackActive'])
+                ? (bool) $backend_status['fallbackActive']
+                : ($selected !== $active);
+
+            $active_runtime_only = ('runtime' === $active);
+            $active_persistent = in_array($active, array('redis', 'apcu', 'disk'), true);
+            $active = $active_runtime_only || $active_persistent ? $active : $selected;
+
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'is_dropin_active')) {
+                $dropin_active = (bool) Ultra_Cache_Object_Cache_Manager::is_dropin_active();
+            } else {
+                $dropin_active = (bool) (
+                    function_exists('wp_using_ext_object_cache')
+                    && wp_using_ext_object_cache()
+                    && file_exists($object_cache_path)
+                );
+            }
+
+            $selected_supported = true;
+            if ('redis' === $selected) {
+                $redis_support = self::get_redis_support_status();
+                $selected_supported = !empty($redis_support['available']);
+            } elseif ('apcu' === $selected) {
+                $selected_supported = !empty($support['apcu']['available']);
+            }
+
+            $redis_dropin = isset($backend_status['redis']) && is_array($backend_status['redis']) ? $backend_status['redis'] : array();
+            $apcu_dropin = isset($backend_status['apcu']) && is_array($backend_status['apcu']) ? $backend_status['apcu'] : array();
+
+            return array_merge(
+                $support,
+                array(
+                    'enabled' => !empty($settings['objectCacheEnabled']),
+                    'active' => $dropin_active,
+                    'selectedBackend' => $selected,
+                    'activeBackend' => $active,
+                    'configuredFallbackBackend' => $configured_fallback,
+                    'fallbackBackend' => $fallback_active ? $active : $fallback,
+                    'fallbackActive' => (bool) $fallback_active,
+                    'activeFallbackBackend' => $fallback_active ? $active : '',
+                    'activeFallbackKind' => $fallback_active ? ($active_runtime_only ? 'runtime-only' : 'persistent') : '',
+                    'fallbackPersistent' => $fallback_active && $active_persistent,
+                    'fallbackReason' => (string) ($backend_status['fallbackReason'] ?? ''),
+                    'fallbackMessage' => (string) ($backend_status['fallbackMessage'] ?? ''),
+                    'selectedBackendSupported' => (bool) $selected_supported,
+                    'activeBackendPersistent' => (bool) $active_persistent,
+                    'activeBackendRuntimeOnly' => (bool) $active_runtime_only,
+                    'runtimeStatusUsed' => !empty($backend_status['runtimeStatusUsed']),
+                    'runtimeConfigStale' => !empty($backend_status['runtimeConfigStale']),
+                    'backendStatus' => $backend_status,
+                    'passiveStatusOnly' => true,
+                    'manualTestsOnly' => true,
+                    'redis' => array_merge(
+                        self::get_redis_support_status(),
+                        array(
+                            'host' => self::sanitize_redis_host($settings['redisHost'] ?? '127.0.0.1'),
+                            'port' => self::sanitize_bounded_integer_setting($settings['redisPort'] ?? 6379, 6379, 1, 65535),
+                            'database' => self::sanitize_redis_database($settings['redisDatabase'] ?? 0),
+                            'prefix' => self::sanitize_redis_prefix($settings['redisPrefix'] ?? 'ucwp:'),
+                            'useTls' => !empty($settings['redisUseTls']),
+                            'persistent' => !empty($settings['redisPersistent']),
+                            'dropinEnabled' => !empty($redis_dropin['enabled']),
+                            'dropinError' => (string) ($redis_dropin['error'] ?? ''),
+                        )
+                    ),
+                    'apcu' => array_merge(
+                        isset($support['apcu']) && is_array($support['apcu']) ? $support['apcu'] : array(),
+                        array(
+                            'dropinEnabled' => !empty($apcu_dropin['enabled']),
+                            'dropinAvailable' => isset($apcu_dropin['available']) ? (bool) $apcu_dropin['available'] : (!empty($support['apcu']['available'])),
+                        )
+                    ),
+                )
+            );
+        }
+
+        public static function get_dashboard_diagnostics()
+        {
             $settings             = self::get_dashboard_settings();
             $support              = self::get_media_support_status();
             $compression          = self::get_compression_support_status();
@@ -1470,7 +1481,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $runtime_config_path  = self::get_runtime_config_path();
             $analytics_path       = trailingslashit(UCWP_CACHE_DIR) . 'analytics.json';
             $browser_cache_path   = self::get_browser_cache_htaccess_path();
-            $object_cache_support  = self::get_object_cache_support_status();
+            $object_cache_support  = self::get_object_cache_support_status(false);
             $object_backend_status = array();
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_backend_status')) {
                 $object_backend_status = Ultra_Cache_Object_Cache_Manager::get_backend_status();
@@ -1494,6 +1505,11 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             } elseif ('apcu' === $selected_object_backend) {
                 $selected_object_backend_supported = !empty($object_cache_support['apcu']['available']);
             }
+            $object_fallback_active = isset($object_backend_status['fallbackActive'])
+                ? (bool) $object_backend_status['fallbackActive']
+                : ($selected_object_backend !== $active_object_backend);
+            $object_active_runtime_only = 'runtime' === $active_object_backend;
+            $object_active_persistent = in_array($active_object_backend, array('redis', 'apcu', 'disk'), true);
 
             $css_bundle_summary_diagnostics = self::get_css_bundle_summary_diagnostics($settings);
             $cache_storage_diagnostics = self::get_cache_storage_diagnostics($settings, $css_bundle_summary_diagnostics);
@@ -1516,15 +1532,20 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                                 && file_exists($object_cache_path))
                         ),
                         'selectedBackend' => $selected_object_backend,
-                        'fallbackBackend' => $fallback_object_backend,
+                        'fallbackBackend' => $object_fallback_active ? $active_object_backend : $fallback_object_backend,
                         'configuredFallbackBackend' => $configured_object_fallback,
-                        'fallbackActive'  => !empty($object_backend_status['fallbackActive']),
+                        'fallbackActive'  => (bool) $object_fallback_active,
+                        'activeFallbackBackend' => $object_fallback_active ? $active_object_backend : '',
+                        'activeFallbackKind' => $object_fallback_active ? ($object_active_runtime_only ? 'runtime-only' : 'persistent') : '',
+                        'fallbackPersistent' => $object_fallback_active && $object_active_persistent,
                         'fallbackReason'  => (string) ($object_backend_status['fallbackReason'] ?? ''),
                         'fallbackMessage' => (string) ($object_backend_status['fallbackMessage'] ?? ''),
                         'activeBackend'   => $active_object_backend,
                         'selectedBackendSupported' => (bool) $selected_object_backend_supported,
-                        'activeBackendPersistent' => 'redis' === $active_object_backend,
-                        'activeBackendRuntimeOnly' => 'runtime' === $active_object_backend,
+                        'activeBackendPersistent' => (bool) $object_active_persistent,
+                        'activeBackendRuntimeOnly' => (bool) $object_active_runtime_only,
+                        'passiveStatusOnly' => true,
+                        'manualTestsOnly' => true,
                         'backendStatus'   => $object_backend_status,
                         'redis'           => array_merge(
                             self::get_redis_support_status(),
@@ -1544,12 +1565,10 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                                     'dropinError' => (string) ($object_backend_status['redis']['error'] ?? ''),
                                 )
                                 : array(),
-                            (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_redis_connection'))
-                                ? Ultra_Cache_Object_Cache_Manager::test_redis_connection()
-                                : array(),
-                            (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_runtime_object_cache_payloads'))
-                                ? array('payloadProbe' => Ultra_Cache_Object_Cache_Manager::test_runtime_object_cache_payloads())
-                                : array(),
+                            array(
+                                'passiveStatusOnly' => true,
+                                'manualTestsOnly' => true,
+                            ),
                             (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_last_flush_report'))
                                 ? array('lastFlush' => Ultra_Cache_Object_Cache_Manager::get_last_flush_report())
                                 : array()
@@ -1577,7 +1596,6 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'googleFonts' => self::get_google_fonts_cache_diagnostics(),
                 'fontPipeline' => self::get_font_pipeline_diagnostics($settings),
                 'settingsTransparency' => self::get_settings_transparency_diagnostics($settings),
-                'jsBundle' => self::get_js_bundle_diagnostics($settings),
                 'cssBundleSummary' => $css_bundle_summary_diagnostics,
                 'cacheStorage' => $cache_storage_diagnostics,
                 'securityCorrectness' => self::get_security_cache_correctness_diagnostics($settings),
@@ -1714,21 +1732,18 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $diag['expected'] = self::redact_diagnostics_for_output($expected_public_runtime, 'expected', 0);
 
             if (!empty($diag['exists']) && !empty($diag['readable'])) {
-                $raw = ucwp_safe_file_get_contents($path, 'dashboard runtime config raw diagnostic');
-                if (false === $raw || '' === $raw) {
-                    $diag['readError'] = self::maybe_translate('Read failed');
+                $loaded = self::load_runtime_config_public_file($path);
+                if (is_wp_error($loaded)) {
+                    $diag['readError'] = $loaded->get_error_message();
+                } elseif (!is_array($loaded)) {
+                    $diag['readError'] = self::maybe_translate('Invalid runtime config');
                 } else {
-                    $loaded = json_decode($raw, true);
-                    if (!is_array($loaded)) {
-                        $diag['readError'] = self::maybe_translate('Invalid JSON');
-                    } else {
-                        $normalized_public = self::normalize_runtime_config(array_merge($expected_public_runtime, $loaded));
-                        unset($normalized_public['revalidate_secret'], $normalized_public['redis_password'], $normalized_public['varnish_admin_secret']);
-                        $diag['valid'] = true;
-                        $diag['keys'] = array_values(array_keys($loaded));
-                        $diag['loaded'] = self::redact_diagnostics_for_output($normalized_public, 'loaded', 0);
-                        $diag['inSync'] = ($normalized_public === $expected_public_runtime);
-                    }
+                    $normalized_public = self::normalize_runtime_config(array_merge($expected_public_runtime, $loaded));
+                    unset($normalized_public['revalidate_secret'], $normalized_public['redis_password'], $normalized_public['varnish_admin_secret']);
+                    $diag['valid'] = true;
+                    $diag['keys'] = array_values(array_keys($loaded));
+                    $diag['loaded'] = self::redact_diagnostics_for_output($normalized_public, 'loaded', 0);
+                    $diag['inSync'] = ($normalized_public === $expected_public_runtime);
                 }
             }
 
@@ -1896,7 +1911,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                         continue;
                     }
 
-                    if (in_array($name, array('index.php', 'runtime-config.json', 'analytics.json'), true)) {
+                    if (in_array($name, array('index.php', 'runtime-config.php', 'runtime-config.json', 'analytics.json'), true)) {
                         continue;
                     }
 

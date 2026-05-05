@@ -27,75 +27,74 @@ trait Ultra_Cache_WP_Varnish_Trait
             }
         }
 
-        private static function get_varnish_log_directory()
+        private static function sanitize_varnish_string($value)
         {
-            return trailingslashit(UCWP_CACHE_DIR) . 'logs';
+            $value = (string) $value;
+            if (function_exists('ucwp_redact_sensitive_string')) {
+                $value = ucwp_redact_sensitive_string($value);
+            }
+
+            return $value;
         }
 
-        private static function ensure_varnish_log_directory()
+        private static function sanitize_varnish_result_value($value)
         {
-            $dir = self::get_varnish_log_directory();
-            if ('' === $dir) {
-                return '';
-            }
-
-            if (!file_exists($dir) && !ucwp_safe_mkdir($dir, 0700, true, 'ensure_varnish_log_directory') && !file_exists($dir)) {
-                return '';
-            }
-
-            $index = trailingslashit($dir) . 'index.php';
-            if (!file_exists($index)) {
-                ucwp_safe_file_put_contents($index, "<?php\n// Silence is golden.\n", 0, 'varnish_log index');
-            }
-
-            $htaccess = trailingslashit($dir) . '.htaccess';
-            if (!file_exists($htaccess)) {
-                ucwp_safe_file_put_contents($htaccess, "Deny from all\n", 0, 'varnish_log htaccess');
-            }
-
-            return $dir;
-        }
-
-        private static function get_varnish_log_path()
-        {
-            $dir = self::ensure_varnish_log_directory();
-            if ('' === $dir) {
-                return '';
-            }
-
-            return trailingslashit($dir) . 'varnish-cli.log';
-        }
-
-        private static function varnish_log($line)
-        {
-            $settings = self::get_dashboard_settings();
-            if (empty($settings['varnishCliDebug'])) {
-                return;
-            }
-
-            $file = self::get_varnish_log_path();
-            if ('' === $file) {
-                return;
-            }
-
-            if (file_exists($file) && (int) ucwp_safe_filesize($file, 'varnish_log_rotate') > 1048576) {
-                ucwp_safe_unlink($file . '.1', 'varnish_log_rotate');
-                ucwp_safe_rename($file, $file . '.1', 'varnish_log_rotate');
-            }
-
-            $entry = '[' . gmdate('Y-m-d H:i:s') . "] " . (string) $line . "\n";
-            ucwp_safe_file_put_contents($file, $entry, FILE_APPEND | LOCK_EX, 'varnish_log_append');
-            if (file_exists($file)) {
-                $filesystem = ucwp_get_wp_filesystem();
-                if ($filesystem && method_exists($filesystem, 'chmod')) {
-                    $filesystem->chmod($file, 0600);
+            if (is_array($value)) {
+                $clean = array();
+                foreach ($value as $key => $child) {
+                    $clean[$key] = self::sanitize_varnish_result_value($child);
                 }
+                return $clean;
             }
+
+            if (is_string($value)) {
+                return self::sanitize_varnish_string($value);
+            }
+
+            return $value;
+        }
+
+        private static function sanitize_varnish_result(array $result)
+        {
+            return self::sanitize_varnish_result_value($result);
+        }
+
+        private static function escape_varnish_vcl_string($value)
+        {
+            $value = (string) $value;
+            $value = str_replace(array("\\", '"', "\r", "\n"), array('\\\\', '\"', '', ''), $value);
+
+            return $value;
+        }
+
+        private static function build_varnish_ban_expression($host, $path = '', $all = false)
+        {
+            $host = self::escape_varnish_vcl_string($host);
+            if ('' === $host) {
+                return '';
+            }
+
+            if ($all) {
+                return 'req.http.host == "' . $host . '" && req.url ~ ".*"';
+            }
+
+            $path = (string) $path;
+            if ('' === $path) {
+                $path = '/';
+            }
+            if ('/' !== $path[0]) {
+                $path = '/' . $path;
+            }
+
+            $quoted = preg_quote($path, '/');
+            $quoted = self::escape_varnish_vcl_string($quoted);
+
+            return 'req.http.host == "' . $host . '" && req.url ~ "^' . $quoted . '$"';
         }
 
         private static function set_varnish_last_result(array $result)
         {
-            set_transient('ucwp_varnish_last_result', $result, DAY_IN_SECONDS);
+            set_transient('ucwp_varnish_last_result', self::sanitize_varnish_result($result), DAY_IN_SECONDS);
         }
 
         private static function get_varnish_last_result()
@@ -155,7 +154,6 @@ trait Ultra_Cache_WP_Varnish_Trait
                 'effectiveMethod' => $effective_method,
                 'adminModeUsed' => ('admin' === $mode),
                 'httpEndpointModeUsed' => ('http' === $mode),
-                'debug'        => !empty($settings['varnishCliDebug']),
                 'support'      => self::get_varnish_support_status(),
                 'last'         => self::get_varnish_last_result(),
                 'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($servers_raw, $mode),
@@ -229,16 +227,16 @@ trait Ultra_Cache_WP_Varnish_Trait
                 $headers['X-UltraCache-Token'] = (string) $settings['key'];
             }
 
-            $response = ucwp_safe_loopback_remote_request($target_url, array(
+            $response = ucwp_safe_configured_infrastructure_remote_request($target_url, array(
                 'method'      => (string) $method,
                 'timeout'     => max(1, (int) $timeout_s),
                 'redirection' => 0,
                 'headers'     => $headers,
                 'body'        => '',
-            ), 'varnish_http_request');
+            ), 'configured_varnish_http_request');
 
             if (is_wp_error($response)) {
-                return array('ok' => false, 'detail' => $response->get_error_message());
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string($response->get_error_message()));
             }
 
             $code = (int) wp_remote_retrieve_response_code($response);
@@ -253,13 +251,13 @@ trait Ultra_Cache_WP_Varnish_Trait
                 if ($summary !== '') {
                     $detail .= ' · ' . $summary;
                 }
-                return array('ok' => false, 'detail' => $detail, 'code' => $code);
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string($detail), 'code' => $code);
             }
 
             if ($looks_like_html) {
                 return array(
                     'ok' => false,
-                    'detail' => 'HTTP ' . $code . ' returned an HTML page instead of a Varnish purge response. Check that this endpoint points to a Varnish frontend/listener that accepts ' . strtoupper((string) $method) . '.',
+                    'detail' => self::sanitize_varnish_string('HTTP ' . $code . ' returned an HTML page instead of a Varnish purge response. Check that this endpoint points to a Varnish frontend/listener that accepts ' . strtoupper((string) $method) . '.'),
                     'code' => $code,
                 );
             }
@@ -271,7 +269,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 $detail .= ' ' . strtoupper((string) $method) . ' OK';
             }
 
-            return array('ok' => true, 'detail' => $detail, 'code' => $code);
+            return array('ok' => true, 'detail' => self::sanitize_varnish_string($detail), 'code' => $code);
         }
 
         private static function parse_varnish_terminal($terminal)
@@ -341,20 +339,20 @@ trait Ultra_Cache_WP_Varnish_Trait
             $port = (int) $port;
             $secret = (string) $secret;
 
-            if ('' === $host || $port <= 0 || !ucwp_is_allowed_socket_target($host, $port)) {
-                return array('ok' => false, 'detail' => 'Invalid or blocked Varnish admin endpoint.');
+            if ('' === $host || $port <= 0 || !ucwp_is_allowed_socket_target($host, $port, 'configured_varnish_admin_endpoint')) {
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Invalid or blocked Varnish admin endpoint.'));
             }
 
             if ('' === trim($secret)) {
-                return array('ok' => false, 'detail' => 'Varnish admin secret is required for admin mode.');
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Varnish admin secret is required for admin mode.'));
             }
 
             $connect = static function () use ($host, $port, $timeout_s) {
                 $errno  = 0;
                 $errstr = '';
-                $fp = ucwp_safe_fsockopen($host, $port, $errno, $errstr, max(1, (int) $timeout_s), 'send_varnish_admin_ban');
+                $fp = ucwp_safe_fsockopen($host, $port, $errno, $errstr, max(1, (int) $timeout_s), 'configured_varnish_admin_endpoint');
                 if (!is_resource($fp)) {
-                    return array(false, 'Connection failed: ' . trim($errstr !== '' ? $errstr : ('Error ' . $errno)));
+                    return array(false, self::sanitize_varnish_string('Connection failed: ' . trim($errstr !== '' ? $errstr : ('Error ' . $errno))));
                 }
                 stream_set_timeout($fp, max(1, (int) $timeout_s));
                 return array($fp, '');
@@ -362,20 +360,20 @@ trait Ultra_Cache_WP_Varnish_Trait
 
             list($fp, $connect_error) = $connect();
             if (!is_resource($fp)) {
-                return array('ok' => false, 'detail' => $connect_error);
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string($connect_error));
             }
 
             $hello = self::read_varnish_admin_response($fp);
             if (empty($hello['ok'])) {
                 fclose($fp);
-                return array('ok' => false, 'detail' => (string) ($hello['body'] ?? 'Invalid admin banner.'));
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string((string) ($hello['body'] ?? 'Invalid admin banner.')));
             }
 
             if (107 === (int) $hello['code']) {
                 $challenge = self::extract_varnish_admin_challenge((string) ($hello['body'] ?? ''));
                 if ('' === $challenge) {
                     fclose($fp);
-                    return array('ok' => false, 'detail' => 'Admin auth failed · Missing challenge from Varnish banner.');
+                    return array('ok' => false, 'detail' => self::sanitize_varnish_string('Admin auth failed · Missing challenge from Varnish banner.'));
                 }
 
                 $tokens = array();
@@ -383,7 +381,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 $tokens = array_values(array_unique(array_filter($tokens)));
                 if (empty($tokens)) {
                     fclose($fp);
-                    return array('ok' => false, 'detail' => 'Admin auth failed · Could not build auth token.');
+                    return array('ok' => false, 'detail' => self::sanitize_varnish_string('Admin auth failed · Could not build auth token.'));
                 }
 
                 $auth = array('ok' => false, 'code' => 0, 'body' => '');
@@ -398,12 +396,12 @@ trait Ultra_Cache_WP_Varnish_Trait
                         fclose($fp);
                         list($fp, $connect_error) = $connect();
                         if (!is_resource($fp)) {
-                            return array('ok' => false, 'detail' => $connect_error);
+                            return array('ok' => false, 'detail' => self::sanitize_varnish_string($connect_error));
                         }
                         $hello = self::read_varnish_admin_response($fp);
                         if (empty($hello['ok']) || 107 !== (int) ($hello['code'] ?? 0)) {
                             fclose($fp);
-                            return array('ok' => false, 'detail' => 'Admin auth failed · Could not re-open authenticated session.');
+                            return array('ok' => false, 'detail' => self::sanitize_varnish_string('Admin auth failed · Could not re-open authenticated session.'));
                         }
                     }
                 }
@@ -414,11 +412,11 @@ trait Ultra_Cache_WP_Varnish_Trait
                     if (!empty($auth['body'])) {
                         $detail .= ' · ' . self::summarize_varnish_http_body($auth['body']);
                     }
-                    return array('ok' => false, 'detail' => $detail);
+                    return array('ok' => false, 'detail' => self::sanitize_varnish_string($detail));
                 }
             } elseif (200 !== (int) $hello['code']) {
                 fclose($fp);
-                return array('ok' => false, 'detail' => 'Unexpected admin banner · ' . self::summarize_varnish_http_body((string) ($hello['body'] ?? '')));
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Unexpected admin banner · ' . self::summarize_varnish_http_body((string) ($hello['body'] ?? ''))));
             }
 
             fwrite($fp, 'ban ' . $expr . "
@@ -427,7 +425,7 @@ trait Ultra_Cache_WP_Varnish_Trait
             fclose($fp);
 
             if (empty($resp['ok'])) {
-                return array('ok' => false, 'detail' => (string) ($resp['body'] ?? 'No admin response.'));
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string((string) ($resp['body'] ?? 'No admin response.')));
             }
 
             $detail = 'Admin ' . (int) $resp['code'];
@@ -435,7 +433,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 $detail .= ' · ' . self::summarize_varnish_http_body($resp['body']);
             }
 
-            return array('ok' => (200 === (int) $resp['code']), 'detail' => $detail, 'code' => (int) $resp['code']);
+            return array('ok' => (200 === (int) $resp['code']), 'detail' => self::sanitize_varnish_string($detail), 'code' => (int) $resp['code']);
         }
 
         private static function varnish_command_for_expr($terminal, $secret, $timeout_s, $expr, $method)
@@ -444,18 +442,17 @@ trait Ultra_Cache_WP_Varnish_Trait
             if ('admin' === ($settings['mode'] ?? 'http')) {
                 list($host, $port) = self::parse_varnish_terminal($terminal);
                 $response = self::send_varnish_admin_ban($host, $port, $secret, $timeout_s, $expr);
-                self::varnish_log('ADMIN BAN @ ' . $host . ':' . $port . ' :: ' . trim((string) ($response['detail'] ?? '')));
                 return $response;
             }
 
             $endpoint_check = self::validate_varnish_http_endpoint($terminal);
             if (empty($endpoint_check['valid'])) {
-                return array('ok' => false, 'detail' => (string) ($endpoint_check['message'] ?? 'Invalid or blocked Varnish HTTP endpoint.'));
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string((string) ($endpoint_check['message'] ?? 'Invalid or blocked Varnish HTTP endpoint.')));
             }
 
             $endpoint = self::normalize_varnish_endpoint($terminal);
             if (empty($endpoint)) {
-                return array('ok' => false, 'detail' => 'Invalid or blocked Varnish HTTP endpoint.');
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Invalid or blocked Varnish HTTP endpoint.'));
             }
 
             $home = wp_parse_url(home_url('/'));
@@ -463,7 +460,6 @@ trait Ultra_Cache_WP_Varnish_Trait
             $target_url = self::build_varnish_target_url($endpoint, '/');
 
             $response = self::send_varnish_http_request($endpoint, $target_url, $site_host, $timeout_s, $expr, $method);
-            self::varnish_log('HTTP ' . $method . ' @ ' . $target_url . ' :: ' . trim((string) ($response['detail'] ?? '')));
 
             return $response;
         }
@@ -514,7 +510,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 $details[] = array(
                     'server'  => $server,
                     'success' => !empty($res['ok']),
-                    'detail'  => (string) ($res['detail'] ?? ''),
+                    'detail'  => self::sanitize_varnish_string((string) ($res['detail'] ?? '')),
                 );
             }
 
@@ -553,7 +549,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 return $result;
             }
 
-            $expr = 'req.http.host == "' . $host . '" && req.url ~ ".*"';
+            $expr = self::build_varnish_ban_expression($host, '/', true);
             return self::varnish_send_expr_to_all($expr, 'all');
         }
 
@@ -585,12 +581,11 @@ trait Ultra_Cache_WP_Varnish_Trait
             $details = array();
             $all_ok = true;
             foreach ($settings['servers'] as $terminal) {
-                $expr = 'req.http.host == "' . $host . '" && req.url ~ "^' . str_replace('"', '\"', $path) . '$"';
+                $expr = self::build_varnish_ban_expression($host, $path, false);
                 if ('admin' === ($settings['mode'] ?? 'http')) {
                     list($admin_host, $admin_port) = self::parse_varnish_terminal($terminal);
                     $res = self::send_varnish_admin_ban($admin_host, $admin_port, $settings['key'], $settings['timeout'], $expr);
-                    self::varnish_log('ADMIN BAN @ ' . $admin_host . ':' . $admin_port . ' :: ' . trim((string) ($res['detail'] ?? '')));
-                    $details[] = array('server' => $terminal, 'success' => !empty($res['ok']), 'detail' => (string) ($res['detail'] ?? ''));
+                    $details[] = array('server' => $terminal, 'success' => !empty($res['ok']), 'detail' => self::sanitize_varnish_string((string) ($res['detail'] ?? '')));
                     if (empty($res['ok'])) {
                         $all_ok = false;
                     }
@@ -599,22 +594,21 @@ trait Ultra_Cache_WP_Varnish_Trait
 
                 $endpoint_check = self::validate_varnish_http_endpoint($terminal);
                 if (empty($endpoint_check['valid'])) {
-                    $details[] = array('server' => $terminal, 'success' => false, 'detail' => (string) ($endpoint_check['message'] ?? 'Invalid or blocked Varnish HTTP endpoint.'));
+                    $details[] = array('server' => $terminal, 'success' => false, 'detail' => self::sanitize_varnish_string((string) ($endpoint_check['message'] ?? 'Invalid or blocked Varnish HTTP endpoint.')));
                     $all_ok = false;
                     continue;
                 }
 
                 $endpoint = self::normalize_varnish_endpoint($terminal);
                 if (empty($endpoint)) {
-                    $details[] = array('server' => $terminal, 'success' => false, 'detail' => 'Invalid or blocked Varnish HTTP endpoint.');
+                    $details[] = array('server' => $terminal, 'success' => false, 'detail' => self::sanitize_varnish_string('Invalid or blocked Varnish HTTP endpoint.'));
                     $all_ok = false;
                     continue;
                 }
 
                 $target_url = self::build_varnish_target_url($endpoint, $path);
                 $res = self::send_varnish_http_request($endpoint, $target_url, $host, $settings['timeout'], $expr, $settings['method']);
-                self::varnish_log('HTTP ' . $settings['method'] . ' @ ' . $target_url . ' :: ' . trim((string) ($res['detail'] ?? '')));
-                $details[] = array('server' => $terminal, 'success' => !empty($res['ok']), 'detail' => (string) ($res['detail'] ?? ''));
+                $details[] = array('server' => $terminal, 'success' => !empty($res['ok']), 'detail' => self::sanitize_varnish_string((string) ($res['detail'] ?? '')));
                 if (empty($res['ok'])) {
                     $all_ok = false;
                 }
@@ -651,26 +645,12 @@ trait Ultra_Cache_WP_Varnish_Trait
                 return $result;
             }
 
-            $expr = 'req.http.host == "' . $host . '" && req.url ~ "^/$"';
+            $expr = self::build_varnish_ban_expression($host, '/', false);
             return self::varnish_send_expr_to_all($expr, '/');
         }
 
         private static function get_reverse_proxy_status()
         {
-            if (method_exists(__CLASS__, 'is_dashboard_heavy_work_active') && self::is_dashboard_heavy_work_active()) {
-                return array(
-                    'detected' => false,
-                    'varnish' => false,
-                    'nginx_cache' => false,
-                    'litespeed_cache' => false,
-                    'server_cache' => false,
-                    'provider' => '',
-                    'providers' => array(),
-                    'message' => 'Reverse proxy loopback check skipped while a heavy dashboard action is running.',
-                    'skipped' => true,
-                );
-            }
-
             $cached = get_transient('ucwp_reverse_proxy_status_v2');
             if (is_array($cached)) {
                 return $cached;

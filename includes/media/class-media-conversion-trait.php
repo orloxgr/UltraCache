@@ -597,18 +597,9 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 		private function create_temp_file($prefix) {
 			$prefix = (string) $prefix;
+			$dir = $this->get_managed_media_temp_dir();
 
-			if (function_exists('wp_tempnam')) {
-				$tmp = wp_tempnam($prefix);
-				return (is_string($tmp) && '' !== $tmp) ? $tmp : false;
-			}
-
-			$dir = function_exists('get_temp_dir') ? (string) get_temp_dir() : '';
-			if ('' === $dir && function_exists('sys_get_temp_dir')) {
-				$dir = (string) sys_get_temp_dir();
-			}
-
-			if ('' === $dir || !is_dir($dir) || !ucwp_path_is_writable($dir)) {
+			if ('' === $dir) {
 				return false;
 			}
 
@@ -617,8 +608,71 @@ trait Ultra_Cache_Media_Conversion_Trait
 				$sanitized_prefix = 'ucwp';
 			}
 
-			$tmp = ucwp_safe_tempnam($dir, substr($sanitized_prefix, 0, 32), 'media_converter_tempnam');
+			$this->cleanup_stale_managed_media_temp_files($dir);
+
+			$tmp = ucwp_safe_tempnam($dir, substr($sanitized_prefix, 0, 32), 'media_converter_managed_tempnam');
 			return (is_string($tmp) && '' !== $tmp) ? $tmp : false;
+		}
+
+		private function get_managed_media_temp_dir() {
+			if (!defined('UCWP_CACHE_DIR') || '' === (string) UCWP_CACHE_DIR) {
+				return '';
+			}
+
+			$dir = trailingslashit(UCWP_CACHE_DIR) . 'tmp/media/';
+
+			if (!is_dir($dir) && !ucwp_safe_mkdir($dir, 0755, true, 'media_converter_managed_temp_dir')) {
+				return '';
+			}
+
+			if (!is_dir($dir) || is_link($dir) || !ucwp_path_is_writable($dir)) {
+				return '';
+			}
+
+			return trailingslashit($dir);
+		}
+
+		private function cleanup_stale_managed_media_temp_files($dir) {
+			$dir = trailingslashit((string) $dir);
+			if ('' === $dir || !is_dir($dir) || is_link($dir)) {
+				return;
+			}
+
+			$items = ucwp_safe_scandir($dir, 'media_converter_managed_temp_cleanup scandir');
+			if (!is_array($items)) {
+				return;
+			}
+
+			$cutoff = time() - HOUR_IN_SECONDS;
+			$removed = 0;
+
+			foreach ($items as $item) {
+				if ('.' === $item || '..' === $item) {
+					continue;
+				}
+
+				$path = $dir . $item;
+				if (is_link($path) || !is_file($path)) {
+					continue;
+				}
+
+				if (0 !== strpos(strtolower((string) $item), 'ucwp')) {
+					continue;
+				}
+
+				$mtime = ucwp_safe_filemtime($path, 'media_converter_managed_temp_cleanup filemtime');
+				if (false !== $mtime && $mtime >= $cutoff) {
+					continue;
+				}
+
+				if (ucwp_safe_unlink($path, 'media_converter_managed_temp_cleanup unlink')) {
+					$removed++;
+				}
+
+				if ($removed >= 25) {
+					break;
+				}
+			}
 		}
 
 		private function is_allowed_source_file($source_file) {

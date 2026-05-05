@@ -452,7 +452,10 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     $manifest['entry'] = array();
                 }
                 $this->write_frontpage_css_manifest($manifest);
-                $this->cleanup_orphan_frontpage_css_bundles($manifest);
+                // Do not run orphan cleanup immediately after a single-URL purge.
+                // Reverse proxies or browser caches can still serve stale HTML for that URL
+                // after the local cache file is removed; cleanup will age out retired bundles
+                // through the normal grace-window path instead.
                 return;
             }
 
@@ -1307,8 +1310,27 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $signature = md5($mode . '|' . implode('||', $signature_parts) . '|' . $content_hash);
             $filename = 'bundle-' . $mode . '-' . $signature . '.css';
             $file = $dir . $filename;
-            if (!file_exists($file) || md5_file($file) !== $content_hash) {
-                $this->write_cache_variant_atomically($file, $bundle_content);
+            clearstatcache(true, $file);
+            $existing_hash = (is_readable($file) && filesize($file) > 0) ? md5_file($file) : '';
+            if ($existing_hash !== $content_hash) {
+                if (!$this->write_cache_variant_atomically($file, $bundle_content)) {
+                    return array(
+                        'success' => false,
+                        'skipped' => true,
+                        'message' => 'Could not write the generated CSS bundle file.',
+                        'stats' => $stats,
+                    );
+                }
+            }
+            clearstatcache(true, $file);
+            $verified_hash = (is_readable($file) && filesize($file) > 0) ? md5_file($file) : '';
+            if ($verified_hash !== $content_hash) {
+                return array(
+                    'success' => false,
+                    'skipped' => true,
+                    'message' => 'Generated CSS bundle file failed verification.',
+                    'stats' => $stats,
+                );
             }
 
             $delayed_font_file = '';
@@ -1326,19 +1348,31 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 $delayed_font_hash = md5($delayed_font_content);
                 $delayed_font_filename = 'bundle-' . $mode . '-' . $signature . '-delayed-fonts.css';
                 $delayed_font_file = $dir . $delayed_font_filename;
-                if (!file_exists($delayed_font_file) || md5_file($delayed_font_file) !== $delayed_font_hash) {
-                    $this->write_cache_variant_atomically($delayed_font_file, $delayed_font_content);
+                clearstatcache(true, $delayed_font_file);
+                $existing_delayed_hash = (is_readable($delayed_font_file) && filesize($delayed_font_file) > 0) ? md5_file($delayed_font_file) : '';
+                if ($existing_delayed_hash !== $delayed_font_hash) {
+                    if (!$this->write_cache_variant_atomically($delayed_font_file, $delayed_font_content)) {
+                        return array(
+                            'success' => false,
+                            'skipped' => true,
+                            'message' => 'Could not write the delayed icon-font CSS companion file.',
+                            'stats' => $stats,
+                        );
+                    }
                 }
                 clearstatcache(true, $delayed_font_file);
-                $delayed_font_bytes = is_readable($delayed_font_file) ? (int) filesize($delayed_font_file) : 0;
-                if ($delayed_font_bytes > 0) {
-                    $delayed_font_url = home_url('/wp-content/cache/ultracache/css-bundles/' . rawurlencode($delayed_font_filename));
-                    $delayed_font_url = $this->normalize_public_resource_url($delayed_font_url);
-                } else {
-                    $delayed_font_file = '';
-                    $delayed_font_url = '';
-                    $delayed_font_bytes = 0;
+                $verified_delayed_hash = (is_readable($delayed_font_file) && filesize($delayed_font_file) > 0) ? md5_file($delayed_font_file) : '';
+                if ($verified_delayed_hash !== $delayed_font_hash) {
+                    return array(
+                        'success' => false,
+                        'skipped' => true,
+                        'message' => 'Delayed icon-font CSS companion file failed verification.',
+                        'stats' => $stats,
+                    );
                 }
+                $delayed_font_bytes = (int) filesize($delayed_font_file);
+                $delayed_font_url = home_url('/wp-content/cache/ultracache/css-bundles/' . rawurlencode($delayed_font_filename));
+                $delayed_font_url = $this->normalize_public_resource_url($delayed_font_url);
             }
 
             $stats['delayedFontFamilies'] = array_values(array_unique(array_map('strval', $delayed_font_families)));

@@ -81,11 +81,14 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 if ('' === $host) {
                     $host = '127.0.0.1';
                 }
+                $port = max(1, min(65535, (int) ($settings['redisPort'] ?? 6379)));
+                if (function_exists('ucwp_is_allowed_redis_socket_target') && !ucwp_is_allowed_redis_socket_target($host, $port, 'analytics_redis_connect')) {
+                    return null;
+                }
                 if (!empty($settings['redisUseTls']) && 0 !== strpos($host, 'tls://')) {
                     $host = 'tls://' . ltrim($host, '/');
                 }
 
-                $port = max(1, min(65535, (int) ($settings['redisPort'] ?? 6379)));
                 $database = max(0, (int) ($settings['redisDatabase'] ?? 0));
                 $connect_timeout = max(0.05, ((int) ($settings['redisConnectTimeoutMs'] ?? 200)) / 1000);
                 $read_timeout = max(0.05, ((int) ($settings['redisReadTimeoutMs'] ?? 200)) / 1000);

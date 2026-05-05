@@ -26,7 +26,7 @@
 	const CLEAR_NOTICE_DELAY = 4200;
 	const SYSTEM_NOTICE_DELAY = 7000;
 	const SYSTEM_NOTICE_COOLDOWN = 24 * 60 * 60 * 1000;
-	const STATS_REFRESH_INTERVAL = 60000;
+	const STATS_REFRESH_INTERVAL = 15000;
 	const SETTINGS_SAVE_DEBOUNCE_MS = 700;
 	const ACTION_QUEUE_POLL_DELAY = 750;
 	const ACTION_QUEUE_MAX_POLLS = 480;
@@ -66,9 +66,6 @@
 		'deferAllJsEnabled',
 		'deferJsForceList',
 		'deferJsExcludeList',
-		'jsBundleEnabled',
-		'jsBundleIncludeList',
-		'jsBundleExcludeList',
 		'delaySafeThirdPartyJsEnabled',
 		'lazyMailerliteNonceEnabled',
 		'delaySafeThirdPartyJsPatterns',
@@ -118,7 +115,6 @@
 		'varnishCliServers',
 		'varnishCliTimeoutSeconds',
 		'varnishCliMethod',
-		'varnishCliDebug',
 		'preRenderOnSave',
 		'woocommerceSafeModeEnabled',
 		'cacheCleanupEnabled',
@@ -128,6 +124,9 @@
 		'cronWarmStartAfterManualPurge',
 		'cronWarmPagesPerMinute',
 		'scheduledWarmLimit',
+		'warmMenuLocation',
+		'warmMenuDepth',
+		'warmFullSiteSources',
 		'staleWhileRevalidateEnabled',
 		'cacheCleanupIntervalHours',
 		'cacheFreshTtlMinutes',
@@ -153,7 +152,6 @@
 		'cssBundleScope',
 		'pageCssBundleOnEntryEnabled',
 		'deferJsEnabled',
-		'jsBundleEnabled',
 		'delaySafeThirdPartyJsEnabled',
 		'lazyMailerliteNonceEnabled',
 		'delayFunctionalThirdPartyJsEnabled',
@@ -182,7 +180,7 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: 'All Off', description: 'Disable page cache, object cache, media, CSS, JS, fonts, prefetch, warmup, and scheduled jobs. Best for first install or troubleshooting.', patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, deferAllJsEnabled: false, jsBundleEnabled: false, jsBundleIncludeList: '', delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
+			deferJsEnabled: false, deferAllJsEnabled: false, delaySafeThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false,
@@ -211,9 +209,6 @@
 			deferAllJsEnabled: false,
 			deferJsForceList: "",
 			deferJsExcludeList: "",
-			jsBundleEnabled: false,
-			jsBundleIncludeList: "",
-			jsBundleExcludeList: "jquery\njquery-migrate\n/wp-includes/js/\nwp-hooks\nwp-i18n\nwp-util\nwp-api\napi-fetch\nunderscore\nbackbone\nwoocommerce\nwc-\ncart\ncheckout\nmy-account\nselectWoo\nrevslider\nsliderrevolution\nsr7\ntptools\ntools.js\nelementor\nfrontend-modules\nswiper\nsmartmenus\nmailerlite\ncomplianz\ngoogle-site-kit\ngooglesitekit\ngtag\ngtm",
 			delaySafeThirdPartyJsEnabled: true,
 			lazyMailerliteNonceEnabled: true,
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
@@ -263,7 +258,6 @@
 			varnishCliServers: "127.0.0.1:6082",
 			varnishCliTimeoutSeconds: 2,
 			varnishCliMethod: "BAN",
-			varnishCliDebug: false,
 			preRenderOnSave: true,
 			woocommerceSafeModeEnabled: true,
 			cacheCleanupEnabled: false,
@@ -304,9 +298,6 @@
 			deferAllJsEnabled: false,
 			deferJsForceList: "",
 			deferJsExcludeList: "",
-			jsBundleEnabled: false,
-			jsBundleIncludeList: "",
-			jsBundleExcludeList: "jquery\njquery-migrate\n/wp-includes/js/\nwp-hooks\nwp-i18n\nwp-util\nwp-api\napi-fetch\nunderscore\nbackbone\nwoocommerce\nwc-\ncart\ncheckout\nmy-account\nselectWoo\nrevslider\nsliderrevolution\nsr7\ntptools\ntools.js\nelementor\nfrontend-modules\nswiper\nsmartmenus\nmailerlite\ncomplianz\ngoogle-site-kit\ngooglesitekit\ngtag\ngtm",
 			delaySafeThirdPartyJsEnabled: true,
 			lazyMailerliteNonceEnabled: true,
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
@@ -356,7 +347,6 @@
 			varnishCliServers: "127.0.0.1:6082",
 			varnishCliTimeoutSeconds: 2,
 			varnishCliMethod: "BAN",
-			varnishCliDebug: false,
 			preRenderOnSave: true,
 			woocommerceSafeModeEnabled: true,
 			cacheCleanupEnabled: false,
@@ -397,9 +387,6 @@
 			deferAllJsEnabled: true,
 			deferJsForceList: "",
 			deferJsExcludeList: "wp-i18n\nwp-hooks\njquery\npage-builder.js\nindex.js\ncontact-form-7-js-translations",
-			jsBundleEnabled: false,
-			jsBundleIncludeList: "",
-			jsBundleExcludeList: "jquery\njquery-migrate\n/wp-includes/js/\nwp-hooks\nwp-i18n\nwp-util\nwp-api\napi-fetch\nunderscore\nbackbone\nwoocommerce\nwc-\ncart\ncheckout\nmy-account\nselectWoo\nrevslider\nsliderrevolution\nsr7\ntptools\ntools.js\nelementor\nfrontend-modules\nswiper\nsmartmenus\nmailerlite\ncomplianz\ngoogle-site-kit\ngooglesitekit\ngtag\ngtm",
 			delaySafeThirdPartyJsEnabled: true,
 			lazyMailerliteNonceEnabled: true,
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
@@ -449,7 +436,6 @@
 			varnishCliServers: "127.0.0.1:6082",
 			varnishCliTimeoutSeconds: 2,
 			varnishCliMethod: "BAN",
-			varnishCliDebug: false,
 			preRenderOnSave: true,
 			woocommerceSafeModeEnabled: true,
 			cacheCleanupEnabled: false,
@@ -543,10 +529,6 @@
 	}
 
 	async function probeFrontendCompressionViaBrowser() {
-		if (initialStats && initialStats.dashboardWorkActive) {
-			return { ready: true, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: initialStats.dashboardWorkMessage || 'Skipped while dashboard work action is running.' };
-		}
-
 		const probeUrl = new URL(frontendProbeUrl || '/', window.location.origin);
 		probeUrl.searchParams.set('ucwp_probe_browser', String(Date.now()));
 
@@ -677,6 +659,36 @@
 		return Number.isFinite(num) ? num.toLocaleString() : '0';
 	}
 
+	function hasDashboardStatsCounters(stats) {
+		if (!stats || typeof stats !== 'object') {
+			return false;
+		}
+		return (
+			typeof stats.pageCacheHits !== 'undefined' ||
+			typeof stats.pageCacheMisses !== 'undefined' ||
+			typeof stats.pageCacheFiles !== 'undefined' ||
+			typeof stats.objectCacheHits !== 'undefined' ||
+			typeof stats.objectCacheEntries !== 'undefined' ||
+			typeof stats.cacheSizeBytes !== 'undefined' ||
+			typeof stats.cacheSizeHuman !== 'undefined' ||
+			typeof stats.optimizedImages !== 'undefined' ||
+			typeof stats.avifFiles !== 'undefined' ||
+			typeof stats.webpFiles !== 'undefined'
+		);
+	}
+
+	function formatStatsNumber(stats, value) {
+		return hasDashboardStatsCounters(stats) ? formatNumber(value) : 'Refreshing…';
+	}
+
+	function formatStatsPercent(stats, value) {
+		return hasDashboardStatsCounters(stats) ? formatPercent(value) : 'Refreshing…';
+	}
+
+	function getStatsRefreshHint(stats, fallback) {
+		return hasDashboardStatsCounters(stats) ? fallback : 'Fetching live REST counters…';
+	}
+
 	function formatCount(value, isMinimum) {
 		return formatNumber(value) + (isMinimum ? '+' : '');
 	}
@@ -738,6 +750,53 @@
 		return 'Set the maximum total URLs to process in one scheduled warm queue. Use 0 for unlimited.';
 	}
 
+	function splitWarmSourceList(value) {
+		const seen = {};
+		const items = [];
+		String(value || '').split(/[\r\n,]+/).forEach((item) => {
+			item = String(item || '').trim();
+			if (!item || seen[item]) { return; }
+			seen[item] = true;
+			items.push(item);
+		});
+		return items;
+	}
+
+	function joinWarmSourceList(items) {
+		return (Array.isArray(items) ? items : []).map((item) => String(item || '').trim()).filter(Boolean).join(',');
+	}
+
+	function getWarmMenuOptions() {
+		const options = Array.isArray(crawlScopeSummary.menuOptions) ? crawlScopeSummary.menuOptions : [];
+		return [{ value: '', label: 'Select menu' }].concat(options.map((option) => ({ value: String(option.value || option.location || ''), label: String(option.label || option.value || option.location || 'Menu') })).filter((option) => option.value || option.label));
+	}
+
+	function getWarmMenuDepthOptions() {
+		const options = Array.isArray(crawlScopeSummary.menuDepthOptions) ? crawlScopeSummary.menuDepthOptions : [];
+		return options.length ? options.map((option) => ({ value: String(option.value || ''), label: String(option.label || option.value || '') })) : [
+			{ value: '', label: 'Select depth' },
+			{ value: '1', label: 'Depth 1' },
+			{ value: '2', label: 'Depth 2' },
+			{ value: '3', label: 'Depth 3' },
+			{ value: 'all', label: 'All depths' },
+		];
+	}
+
+	function getFullSiteSourceOptions() {
+		const options = Array.isArray(crawlScopeSummary.fullSiteSourceOptions) ? crawlScopeSummary.fullSiteSourceOptions : [];
+		return options.map((option) => ({ value: String(option.value || ''), label: String(option.label || option.value || '') })).filter((option) => option.value);
+	}
+
+	function hasMenuWarmScope(settingsValue) {
+		const value = settingsValue || settingsRef.current || settings || {};
+		return !!String(value.warmMenuLocation || '').trim() && ['1', '2', '3', 'all'].indexOf(String(value.warmMenuDepth || '').trim()) !== -1;
+	}
+
+	function hasFullSiteWarmScope(settingsValue) {
+		const value = settingsValue || settingsRef.current || settings || {};
+		return splitWarmSourceList(value.warmFullSiteSources).length > 0;
+	}
+
 	function formatEventTime(event) {
 		if (!event || typeof event !== 'object') {
 			return 'No frontend cache event yet';
@@ -782,6 +841,12 @@
 
 
 	function formatObjectEntries(stats) {
+		if (stats && (stats.dashboardStatsDisabled || stats.disabled)) {
+			return 'Disabled';
+		}
+		if (!hasDashboardStatsCounters(stats)) {
+			return 'Refreshing…';
+		}
 		const value = formatNumber(stats && typeof stats.objectCacheEntries !== 'undefined' ? stats.objectCacheEntries : 0);
 		return stats && stats.objectCacheStatsPartial ? value + '+' : value;
 	}
@@ -850,20 +915,23 @@
 			enabled
 				? h('div', { className: 'uc-warning-box mt-4', key: 'warning' }, 'Enabling cache statistics may add a small performance overhead because UltraCache needs to update counters during requests. If you use Varnish, nginx full-page cache, Cloudflare, or another reverse proxy, stats may under-report requests served before WordPress.')
 				: h('div', { className: 'text-xs text-zinc-500 mt-4', key: 'disabled-copy' }, 'Stats are disabled. The dashboard will not refresh or write live request counters until this switch is enabled.'),
+			enabled && !hasDashboardStatsCounters(stats)
+				? h('div', { className: 'text-xs text-sky-300 bg-sky-500/10 rounded-xl px-3 py-2 mt-3', key: 'stats-refreshing-copy' }, 'Stats are ON. Waiting for the authenticated REST refresh; placeholder values are not shown as zeros.')
+				: null,
 			enabled
 				? h('details', { className: 'uc-accordion uc-accordion--card mt-4', open: true, key: 'details' }, [
 					h('summary', { key: 'summary' }, 'Show detailed stats'),
 					h('div', { className: 'uc-summary-grid mt-4', key: 'grid' }, [
 						h(StatCard, {
 							label: 'Cached Pages',
-							value: formatNumber(typeof stats.pagesCached !== 'undefined' ? stats.pagesCached : stats.pageCacheFiles),
-							hint: 'Stored HTML cache files',
+							value: formatStatsNumber(stats, typeof stats.pagesCached !== 'undefined' ? stats.pagesCached : stats.pageCacheFiles),
+							hint: getStatsRefreshHint(stats, 'Stored HTML cache files'),
 							key: 'pages',
 						}),
 						h(StatCard, {
 							label: 'Optimized Images',
-							value: formatNumber(typeof stats.imagesOptimized !== 'undefined' ? stats.imagesOptimized : stats.optimizedImages),
-							hint: formatNumber(typeof stats.avifImagesOptimized !== 'undefined' ? stats.avifImagesOptimized : stats.avifFiles) + ' AVIF · ' + formatNumber(typeof stats.webpImagesOptimized !== 'undefined' ? stats.webpImagesOptimized : stats.webpFiles) + ' WebP',
+							value: formatStatsNumber(stats, typeof stats.imagesOptimized !== 'undefined' ? stats.imagesOptimized : stats.optimizedImages),
+							hint: hasDashboardStatsCounters(stats) ? (formatNumber(typeof stats.avifImagesOptimized !== 'undefined' ? stats.avifImagesOptimized : stats.avifFiles) + ' AVIF · ' + formatNumber(typeof stats.webpImagesOptimized !== 'undefined' ? stats.webpImagesOptimized : stats.webpFiles) + ' WebP') : 'Fetching live REST counters…',
 							key: 'images',
 						}),
 						h(StatCard, {
@@ -878,11 +946,11 @@
 							},
 							key: 'object-cache',
 						}),
-						h(StatCard, { label: 'Cache Size', value: stats.cacheSizeHuman || '0 B', hint: 'Total cache footprint', key: 'size' }),
-						h(StatCard, { key: 'hits', label: 'Cache Hits', value: formatNumber(stats.pageCacheHits), hint: diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache' }),
-						h(StatCard, { key: 'misses', label: 'Render Misses', value: formatNumber(stats.pageCacheMisses), hint: 'Reached WordPress render path' }),
-						h(StatCard, { key: 'bypasses', label: 'Bypasses', value: formatNumber(stats.pageCacheBypasses), hint: 'Skipped before buffering' }),
-						h(StatCard, { key: 'ratio', label: 'Hit Ratio', value: formatPercent(stats.pageCacheHitRatio), hint: 'Hits ÷ (hits + misses)' }),
+						h(StatCard, { label: 'Cache Size', value: hasDashboardStatsCounters(stats) ? (stats.cacheSizeHuman || '0 B') : 'Refreshing…', hint: getStatsRefreshHint(stats, 'Total cache footprint'), key: 'size' }),
+						h(StatCard, { key: 'hits', label: 'Cache Hits', value: formatStatsNumber(stats, stats.pageCacheHits), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache') }),
+						h(StatCard, { key: 'misses', label: 'Render Misses', value: formatStatsNumber(stats, stats.pageCacheMisses), hint: getStatsRefreshHint(stats, 'Reached WordPress render path') }),
+						h(StatCard, { key: 'bypasses', label: 'Bypasses', value: formatStatsNumber(stats, stats.pageCacheBypasses), hint: getStatsRefreshHint(stats, 'Skipped before buffering') }),
+						h(StatCard, { key: 'ratio', label: 'Hit Ratio', value: formatStatsPercent(stats, stats.pageCacheHitRatio), hint: getStatsRefreshHint(stats, 'Hits ÷ (hits + misses)') }),
 					]),
 				])
 				: h('details', { className: 'uc-accordion uc-accordion--card mt-4', key: 'manual-details' }, [
@@ -1528,7 +1596,7 @@
 	function StatCard({ label, value, hint, action }) {
 		return h('div', { className: 'uc-card relative' }, [
 			h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-2 pr-8', key: 'label' }, label),
-			h('div', { className: 'text-3xl font-black tracking-tight text-white pr-8', key: 'value' }, value),
+			h('div', { className: 'ucwp-stat-card-value text-3xl font-black tracking-tight text-white pr-8', key: 'value' }, value),
 			h('div', { className: 'text-xs text-zinc-500 mt-2 pr-8', key: 'hint' }, hint || '\u00A0'),
 			action
 				? h('button', {
@@ -1746,7 +1814,7 @@
 					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Suggested exclusion'),
 					h('div', { className: 'flex flex-wrap items-center gap-2' }, [
 						h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
-						line ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled || present, onClick: () => appendJsExclusionLine(line) }, present ? 'Already in exclusions' : 'Append') : null,
+						line ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled || present || reviewOnly, onClick: () => appendJsExclusionLine(line) }, reviewOnly ? 'Review only' : (present ? 'Already in exclusions' : 'Append')) : null,
 					]),
 				]),
 				h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-2' }, metaRows.map((row, rowIndex) => h('div', { className: 'rounded bg-black/15 px-2 py-1', key: keyPrefix + '-meta-' + index + '-' + rowIndex }, [
@@ -1777,7 +1845,13 @@
 			if (/splide|owl\.carousel|smartslider|n2-ss|layerslider|masterslider|metaslider|soliloquy|royalslider|flickity|glide/.test(text)) {
 				return { key: 'other-slider-carousel', title: 'Other slider / carousel', reason: 'Slider or carousel assets were detected on this page.' };
 			}
-			if (/elementor|frontend-modules|webpack\.runtime/.test(text)) {
+			if (/react|react-dom|wp-element|notes-app-initiator/.test(text)) {
+				return { key: 'react-wp-element', title: 'React / wp-element runtime', reason: 'A browser runtime error points to the WordPress React dependency chain or a dependent script that executed too early.' };
+			}
+			if (/wp-api-fetch|api-fetch|wp-hooks|wp-api-fetch-js-after/.test(text)) {
+				return { key: 'wp-api-fetch', title: 'WordPress apiFetch runtime', reason: 'A WordPress inline-after block or apiFetch configuration ran before its dependency chain was available.' };
+			}
+			if (/elementor|elementormodules|frontend-modules|webpack\.runtime/.test(text)) {
 				return { key: 'elementor', title: 'Elementor runtime', reason: 'Elementor assets or widgets were detected on this page. Keep core runtime dependencies protected unless dependency-safe testing passes.' };
 			}
 			if (/divi|et-core|et-builder/.test(text)) {
@@ -1832,6 +1906,33 @@
 				group.reason ? h('div', { className: 'text-zinc-500 mt-2' }, group.reason) : null,
 				lines.length ? h('div', { className: 'mt-2 flex flex-wrap gap-1' }, lines.map((line, lineIndex) => h('code', { className: 'font-mono text-[11px] text-emerald-300 bg-black/25 rounded px-2 py-1 break-all', key: keyPrefix + '-line-' + index + '-' + lineIndex }, line))) : null,
 				h('div', { className: 'mt-2 space-y-2' }, items.map((item, itemIndex) => renderSuggestionItem(item, keyPrefix + '-detail-' + index, itemIndex))),
+			]);
+		}
+
+		function renderRuntimeErrorItem(error, index) {
+			const message = String(error && error.message ? error.message : 'Unknown browser runtime error');
+			const source = String(error && error.source ? error.source : '');
+			const detail = String(error && error.detail ? error.detail : '');
+			const line = Number(error && error.line ? error.line : 0);
+			const column = Number(error && error.column ? error.column : 0);
+			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-2 text-[11px] text-zinc-300 space-y-1', key: 'runtime-error-' + index }, [
+				h('div', { className: 'text-amber-300 font-semibold break-all' }, message),
+				source ? h('div', { className: 'text-zinc-400 font-mono break-all' }, source + (line ? ':' + line + (column ? ':' + column : '') : '')) : null,
+				detail ? h('pre', { className: 'text-zinc-500 whitespace-pre-wrap break-all bg-black/15 rounded px-2 py-1 max-h-24 overflow-y-auto' }, detail.slice(0, 1200)) : null,
+			]);
+		}
+
+		function renderRuntimeErrorsSection(errors) {
+			if (!errors || !errors.length) {
+				return null;
+			}
+			return h('details', { className: 'mt-3 rounded-lg bg-black/20 px-3 py-3', open: false, key: 'runtime-errors-captured' }, [
+				h('summary', { className: 'cursor-pointer list-none flex flex-wrap items-center justify-between gap-2' }, [
+					h('span', { className: 'text-zinc-200 font-semibold' }, 'Captured browser runtime errors'),
+					h('span', { className: 'text-amber-300 font-mono text-[11px]' }, String(errors.length) + ' error(s)'),
+				]),
+				h('div', { className: 'text-[11px] text-zinc-500 mt-2 mb-2' }, 'Raw captured errors are shown for debugging even when no confident exclusion can be suggested.'),
+				h('div', { className: 'space-y-2' }, errors.slice(0, 20).map((error, index) => renderRuntimeErrorItem(error, index))),
 			]);
 		}
 
@@ -1966,6 +2067,7 @@
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Already listed'), h('div', { className: 'font-mono text-emerald-300' }, String(liveAlreadyListedCount))]),
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Review-only'), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
 				]),
+				renderRuntimeErrorsSection(runtimeErrors),
 				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing recommended exclusions. The visible JS Delay / Defer Exclusions list already covers the appendable scan results.', 'missing-recommended', 'These are the only lines Append Missing Recommended will add.'),
 				renderSuggestionSection('Already listed recommended', liveAlreadyListedCount, alreadyListedAppendableSuggestions, 'No recommended exclusions are already listed yet.', 'already-listed-recommended', 'Grouped and collapsed by default. These scan matches are already covered by your textarea, including broad fragments that cover variant paths.', { grouped: true, collapsed: true }),
 				renderSuggestionSection('Review-only detected', reviewOnlyCount, reviewOnlySuggestions, 'No review-only candidates were detected.', 'review-only-detected', 'Grouped and collapsed by default. Review-only items are shown for awareness and are not appended automatically.', { grouped: true, collapsed: true }),
@@ -2230,6 +2332,54 @@
 		]);
 	}
 
+	function MultiSelectField({ label, description, value, onChange, disabled, options }) {
+		const selected = splitWarmSourceList(value);
+		const availableOptions = Array.isArray(options) ? options : [];
+		const selectedMap = {};
+		selected.forEach((item) => { selectedMap[item] = true; });
+
+		function toggleValue(nextValue, checked) {
+			const cleanValue = String(nextValue || '').trim();
+			if (!cleanValue || disabled) {
+				return;
+			}
+
+			const nextSelected = selected.filter((item) => item !== cleanValue);
+			if (checked) {
+				nextSelected.push(cleanValue);
+			}
+			onChange(joinWarmSourceList(nextSelected));
+		}
+
+		return h('div', { className: 'uc-field-wrap' }, [
+			label ? h('label', { className: 'uc-field-label' }, label) : null,
+			description ? h('div', { className: 'text-xs text-zinc-500 mb-2' }, description) : null,
+			h('details', { className: classNames('uc-switch-dropdown', disabled ? 'opacity-60 pointer-events-none' : '') }, [
+				h('summary', { className: 'uc-switch-dropdown-summary' }, [
+					h('span', { key: 'label' }, selected.length ? (selected.length + ' source' + (selected.length === 1 ? '' : 's') + ' selected') : 'Select full-site sources'),
+					h('span', { key: 'icon', className: 'uc-select-icon', 'aria-hidden': 'true' }, '▾'),
+				]),
+				h('div', { className: 'uc-switch-dropdown-panel' }, availableOptions.length ? availableOptions.map((option) => {
+					const optionValue = String(option.value || '');
+					const checked = !!selectedMap[optionValue];
+					return h('label', { className: 'uc-switch-dropdown-row', key: optionValue }, [
+						h('span', { className: 'uc-switch-dropdown-text' }, option.label),
+						h('span', { className: classNames('uc-toggle', disabled ? 'opacity-60 pointer-events-none' : '') }, [
+							h('input', {
+							type: 'checkbox',
+							checked: checked,
+							disabled: !!disabled,
+							onChange: (event) => toggleValue(optionValue, event.target.checked),
+						}),
+							h('span', { className: 'slider' }),
+						]),
+					]);
+				}) : h('div', { className: 'text-xs text-zinc-500 px-3 py-3' }, 'No sources detected.')),
+			]),
+			h('div', { className: 'text-[11px] text-zinc-500 mt-2' }, selected.length ? ('Selected: ' + selected.length) : 'No sources selected. Full-site warm buttons stay off.'),
+		]);
+	}
+
 	function DetailRow({ label, value, mono }) {
 		if (value === null || typeof value === 'undefined' || value === '') {
 			return null;
@@ -2256,10 +2406,10 @@
 			description: 'Request counters for cache delivery and cache-generation activity. Warm/preload creates misses and writes, not hits.',
 		}, [
 			h('div', { className: 'grid grid-cols-2 xl:grid-cols-4 gap-3', key: 'metrics' }, [
-				h(StatCard, { key: 'hits', label: 'Cache Hits', value: formatNumber(stats.pageCacheHits), hint: diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache' }),
-				h(StatCard, { key: 'misses', label: 'Render Misses', value: formatNumber(stats.pageCacheMisses), hint: 'Reached WordPress render path' }),
-				h(StatCard, { key: 'bypasses', label: 'Bypasses', value: formatNumber(stats.pageCacheBypasses), hint: 'Skipped before buffering' }),
-				h(StatCard, { key: 'ratio', label: 'Hit Ratio', value: formatPercent(stats.pageCacheHitRatio), hint: diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'PHP-level ratio only; reverse proxy hits excluded' : 'Hits ÷ (hits + misses)' }),
+				h(StatCard, { key: 'hits', label: 'Cache Hits', value: formatStatsNumber(stats, stats.pageCacheHits), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache') }),
+				h(StatCard, { key: 'misses', label: 'Render Misses', value: formatStatsNumber(stats, stats.pageCacheMisses), hint: getStatsRefreshHint(stats, 'Reached WordPress render path') }),
+				h(StatCard, { key: 'bypasses', label: 'Bypasses', value: formatStatsNumber(stats, stats.pageCacheBypasses), hint: getStatsRefreshHint(stats, 'Skipped before buffering') }),
+				h(StatCard, { key: 'ratio', label: 'Hit Ratio', value: formatStatsPercent(stats, stats.pageCacheHitRatio), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'PHP-level ratio only; reverse proxy hits excluded' : 'Hits ÷ (hits + misses)') }),
 			]),
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-6 mt-5', key: 'detail-grid' }, [
 				h('div', { key: 'buckets' }, [
@@ -2445,11 +2595,14 @@
 		const pageCacheStatus = diagnostics.pageCache || {};
 		const selectedObjectBackend = objectCacheStatus.selectedBackend || 'redis';
 		const activeObjectBackend = objectCacheStatus.activeBackend || selectedObjectBackend;
-		const fallbackObjectBackend = objectCacheStatus.fallbackBackend || 'apcu';
-		const objectFallbackActive = !!objectCacheStatus.fallbackActive || (selectedObjectBackend === 'redis' && activeObjectBackend === 'apcu');
+		const fallbackObjectBackend = objectCacheStatus.fallbackBackend || (objectCacheStatus.fallbackActive ? activeObjectBackend : 'apcu');
+		const objectRuntimeOnly = activeObjectBackend === 'runtime' || !!objectCacheStatus.activeBackendRuntimeOnly;
+		const objectFallbackActive = !!objectCacheStatus.fallbackActive || (selectedObjectBackend && activeObjectBackend && selectedObjectBackend !== activeObjectBackend);
 		const selectedObjectBackendText = selectedObjectBackend ? String(selectedObjectBackend).toUpperCase() : 'Unavailable';
-		const activeObjectBackendText = activeObjectBackend ? String(activeObjectBackend).toUpperCase() : 'Unavailable';
-		const fallbackObjectBackendText = fallbackObjectBackend ? String(fallbackObjectBackend).toUpperCase() : 'Unavailable';
+		const activeObjectBackendText = objectRuntimeOnly ? 'Runtime only' : (activeObjectBackend ? String(activeObjectBackend).toUpperCase() : 'Unavailable');
+		const fallbackObjectBackendText = fallbackObjectBackend ? (String(fallbackObjectBackend).toLowerCase() === 'runtime' ? 'Runtime only' : String(fallbackObjectBackend).toUpperCase()) : 'Unavailable';
+		const objectCacheActiveTone = !objectCacheStatus.enabled ? 'neutral' : (!objectCacheStatus.active ? 'warning' : (objectFallbackActive || objectRuntimeOnly ? 'warning' : 'success'));
+		const objectCacheFallbackTone = objectFallbackActive ? 'warning' : 'neutral';
 
 		function describeDropIn(diag) {
 			if (!diag || !diag.exists) {
@@ -2467,8 +2620,8 @@
 			['Page cache drop-in active', !!pageCacheStatus.active, pageCacheStatus.active ? 'Active' : (pageCacheStatus.enabled ? 'Configured · drop-in inactive' : 'Disabled')],
 			['Object cache switch', !!objectCacheStatus.enabled, objectCacheStatus.enabled ? 'Enabled' : 'Disabled'],
 			['Selected object cache backend', !!objectCacheStatus.enabled, objectCacheStatus.enabled ? selectedObjectBackendText : 'Disabled'],
-			['Active object cache backend', !!objectCacheStatus.active && !objectFallbackActive, objectCacheStatus.active ? (activeObjectBackendText + (objectFallbackActive ? ' fallback' : '')) : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled')],
-			['Object cache fallback', !objectFallbackActive, objectFallbackActive ? (fallbackObjectBackendText + ' active') : (fallbackObjectBackendText + ' standby')],
+			['Active object cache backend', !!objectCacheStatus.active, objectCacheStatus.active ? (activeObjectBackendText + (objectFallbackActive ? ' fallback' : '')) : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled'), objectCacheActiveTone],
+			['Object cache fallback', !objectFallbackActive, objectFallbackActive ? (fallbackObjectBackendText + ' active') : (fallbackObjectBackendText + ' standby'), objectCacheFallbackTone],
 			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : ('Disabled' + (analyticsBackend.message ? ' · ' + analyticsBackend.message : ''))],
 			['Cron Warm Up', diagnostics.cronWarm && diagnostics.cronWarm.active, diagnostics.cronWarm && diagnostics.cronWarm.active ? ('Running · ' + formatNumber(diagnostics.cronWarm.processed || 0) + '/' + formatNumber(diagnostics.cronWarm.total || 0)) : diagnostics.cronWarm && diagnostics.cronWarm.enabled ? ((diagnostics.cronWarm.completed ? 'Completed' : 'Enabled') + ' · ' + formatNumber(diagnostics.cronWarm.pagesPerMinute || 0) + '/min') : 'Disabled'],
 			['Varnish', diagnostics.varnish && diagnostics.varnish.enabled, diagnostics.varnish && diagnostics.varnish.enabled ? ('Varnish mode: ' + ((diagnostics.varnish.configuredMode || diagnostics.varnish.mode || 'http') === 'admin' ? 'admin-secret' : 'HTTP endpoint') + ' · ' + (diagnostics.varnish.effectiveMethod || (((diagnostics.varnish.mode || 'http') === 'admin') ? 'admin BAN' : (diagnostics.varnish.method || 'BAN'))) + ' · ' + ((diagnostics.varnish.endpointCount || 0) ? (diagnostics.varnish.endpointCount + ' endpoint(s)') : ((diagnostics.varnish.servers || '').trim() || 'No endpoints'))) : 'Disabled'],
@@ -2518,7 +2671,7 @@
 		function renderRows(rows, tone) {
 			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 				h('div', { className: 'text-sm text-white' }, row[0]),
-				h(StatusPill, { ok: !!row[1], text: row[2], tone: tone || (typeof row[1] === 'boolean' ? (row[1] ? 'success' : 'neutral') : 'neutral') }),
+				h(StatusPill, { ok: !!row[1], text: row[2], tone: row[3] || tone || (typeof row[1] === 'boolean' ? (row[1] ? 'success' : 'neutral') : 'neutral') }),
 			])));
 		}
 
@@ -2561,11 +2714,14 @@
 		const objectCacheStatus = diagnostics.objectCache || {};
 		const selectedObjectBackend = objectCacheStatus.selectedBackend || 'redis';
 		const activeObjectBackend = objectCacheStatus.activeBackend || selectedObjectBackend;
-		const fallbackObjectBackend = objectCacheStatus.fallbackBackend || 'apcu';
-		const objectFallbackActive = !!objectCacheStatus.fallbackActive || (selectedObjectBackend === 'redis' && activeObjectBackend === 'apcu');
+		const fallbackObjectBackend = objectCacheStatus.fallbackBackend || (objectCacheStatus.fallbackActive ? activeObjectBackend : 'apcu');
+		const objectRuntimeOnly = activeObjectBackend === 'runtime' || !!objectCacheStatus.activeBackendRuntimeOnly;
+		const objectFallbackActive = !!objectCacheStatus.fallbackActive || (selectedObjectBackend && activeObjectBackend && selectedObjectBackend !== activeObjectBackend);
 		const selectedObjectBackendText = selectedObjectBackend ? String(selectedObjectBackend).toUpperCase() : 'Unavailable';
-		const activeObjectBackendText = activeObjectBackend ? String(activeObjectBackend).toUpperCase() : 'Unavailable';
-		const fallbackObjectBackendText = fallbackObjectBackend ? String(fallbackObjectBackend).toUpperCase() : 'Unavailable';
+		const activeObjectBackendText = objectRuntimeOnly ? 'Runtime only' : (activeObjectBackend ? String(activeObjectBackend).toUpperCase() : 'Unavailable');
+		const fallbackObjectBackendText = fallbackObjectBackend ? (String(fallbackObjectBackend).toLowerCase() === 'runtime' ? 'Runtime only' : String(fallbackObjectBackend).toUpperCase()) : 'Unavailable';
+		const objectCacheActiveTone = !objectCacheStatus.enabled ? 'neutral' : (!objectCacheStatus.active ? 'warning' : (objectFallbackActive || objectRuntimeOnly ? 'warning' : 'success'));
+		const objectCacheFallbackTone = objectFallbackActive ? 'warning' : 'neutral';
 		const compressionStatus = diagnostics.compression || {};
 		const wpCacheStatus = diagnostics.wpCache || {};
 		const pathDiagnostics = diagnostics.paths || {};
@@ -2607,8 +2763,8 @@
 			['Stale hits', false, formatNumber(stats.pageCacheStaleHits || 0)],
 			['Background refreshes', false, formatNumber(stats.pageCacheBackgroundRevalidations || 0)],
 			['Selected object cache backend', false, selectedObjectBackendText],
-			['Active object cache backend', !!objectCacheStatus.active && !objectFallbackActive, objectCacheStatus.active ? (activeObjectBackendText + (objectFallbackActive ? ' fallback' : '')) : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled')],
-			['Object cache fallback', !objectFallbackActive, objectFallbackActive ? (fallbackObjectBackendText + ' active') : (fallbackObjectBackendText + ' standby')],
+			['Active object cache backend', !!objectCacheStatus.active, objectCacheStatus.active ? (activeObjectBackendText + (objectFallbackActive ? ' fallback' : '')) : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled'), objectCacheActiveTone],
+			['Object cache fallback', !objectFallbackActive, objectFallbackActive ? (fallbackObjectBackendText + ' active') : (fallbackObjectBackendText + ' standby'), objectCacheFallbackTone],
 			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : 'Disabled'],
 			['CLS images scanned', false, formatNumber(stats.clsImagesScanned || 0)],
 			['CLS dimensions injected', false, formatNumber(stats.clsDimensionsInjected || 0)],
@@ -2671,7 +2827,7 @@
 		function renderRows(rows, tone) {
 			return h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 				h('div', { className: 'text-sm text-white' }, row[0]),
-				h(StatusPill, { ok: !!row[1], text: row[2], tone: tone || (typeof row[1] === 'boolean' ? (row[1] ? 'success' : 'neutral') : 'neutral') }),
+				h(StatusPill, { ok: !!row[1], text: row[2], tone: row[3] || tone || (typeof row[1] === 'boolean' ? (row[1] ? 'success' : 'neutral') : 'neutral') }),
 			])));
 		}
 
@@ -2726,7 +2882,7 @@
 							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
 								renderPathDetails('advanced-cache.php', advancedCacheDiag),
 								renderPathDetails('object-cache.php', objectCacheDiag),
-								renderPathDetails('runtime-config.json', runtimeConfigDiag, runtimeConfigDiag.keys && runtimeConfigDiag.keys.length ? h(DetailRow, { label: 'Keys', value: runtimeConfigDiag.keys.join(', ') }) : null),
+								renderPathDetails('runtime-config.php', runtimeConfigDiag, runtimeConfigDiag.keys && runtimeConfigDiag.keys.length ? h(DetailRow, { label: 'Keys', value: runtimeConfigDiag.keys.join(', ') }) : null),
 								renderPathDetails('analytics.json', analyticsDiag, analyticsDiag.keys && analyticsDiag.keys.length ? h(DetailRow, { label: 'Top keys', value: analyticsDiag.keys.join(', ') }) : null),
 								renderPathDetails('Cache directory', cacheDirDiag),
 								renderPathDetails('Object cache directory', objectCacheDirDiag),
@@ -2778,7 +2934,6 @@
 						h('div', { className: 'uc-section-title' }, 'Media runtime diagnostics'),
 						renderRows(mediaRuntimeRows, 'neutral'),
 					]),
-					h(JSBundleDiagnosticsPanel, { diagnostics, key: 'js-bundle-diagnostics-panel' }),
 					h(FontPipelineDiagnosticsPanel, { diagnostics, key: 'font-pipeline-diagnostics-panel' }),
 					h('div', { className: 'uc-diagnostic-group', key: 'cache-group' }, [
 						h('div', { className: 'uc-section-title' }, 'Cache diagnostics'),
@@ -3199,7 +3354,9 @@
 		const mode = form.varnishCliMode || 'http';
 		const isAdminMode = mode === 'admin';
 		const formServers = String(form.varnishCliServers || '');
-		const formHasUnsafeEndpoint = !isAdminMode && /:(80|443|8443)(\s|$)/.test(formServers);
+		const currentFrontendHost = (typeof window !== 'undefined' && window.location && window.location.hostname ? String(window.location.hostname).replace(/^www\./i, '') : '');
+		const frontendHostPattern = currentFrontendHost ? new RegExp('(^|\\s)(?:https?:\\/\\/)?(?:www\\.)?' + currentFrontendHost.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?::|\\s|$)', 'i') : null;
+		const formHasUnsafeEndpoint = !isAdminMode && /:(80|443|8443)(\s|$)/.test(formServers) && !!frontendHostPattern && frontendHostPattern.test(formServers);
 		const actionsBlocked = hasUnsafeEndpoints || formHasUnsafeEndpoint;
 		const effectiveMethod = varnish.effectiveMethod || (isAdminMode ? 'admin BAN' : (form.varnishCliMethod || 'BAN'));
 		const endpointCount = typeof varnish.endpointCount !== 'undefined' ? varnish.endpointCount : (formServers.trim() ? formServers.trim().split(/\s+/).length : 0);
@@ -3212,17 +3369,15 @@
 		}, [
 			h(ToggleRow, {
 				label: isAdminMode ? 'Enable Varnish admin-secret purge' : 'Enable Varnish HTTP endpoint purge',
-				description: varnish.available ? (isAdminMode ? 'Saves immediately. Uses the Varnish admin socket and shared secret. HTTP endpoint tests are not used in this mode.' : 'Saves immediately. Sends BAN/PURGE requests to configured local HTTP listener endpoints.') : (supportMessage || 'Unavailable on this server.'),
+				description: varnish.available ? (isAdminMode ? 'Saves immediately. Uses the Varnish admin socket and shared secret. HTTP endpoint tests are not used in this mode.' : 'Saves immediately. Sends BAN/PURGE requests to configured Varnish HTTP listener endpoints, including external infrastructure hosts when intentionally configured.') : (supportMessage || 'Unavailable on this server.'),
 				checked: !!form.varnishCliEnabled,
 				onChange: (value) => onFieldChange('varnishCliEnabled', value),
 				disabled: busy || !varnish.available,
 			}),
-			isAdminMode ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, 'Security warning: Varnish admin mode uses a plain TCP socket. Use localhost/private endpoints only, such as 127.0.0.1:6082, and never expose the Varnish admin port publicly. The saved secret is never shown in diagnostics or REST settings.') : null,
 			
 			!isAdminMode && endpointWarningMessages.length ? h('div', { className: 'space-y-2 mt-4' }, endpointWarningMessages.map((message, index) => h('div', { className: 'text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2', key: 'varnish-endpoint-warning-' + index }, message))) : null,
-			formHasUnsafeEndpoint ? h('div', { className: 'mt-4 text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2' }, 'This unsaved HTTP endpoint is unsafe or unsupported. HTTP mode only allows local Varnish listener ports 82 or 6081. Do not use the public WordPress frontend on :80 or :443.') : null,
+			formHasUnsafeEndpoint ? h('div', { className: 'mt-4 text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2' }, 'This endpoint appears to point at the public WordPress frontend instead of a Varnish listener. External Varnish infrastructure and custom ports are allowed when intentionally configured.') : null,
 			h(CacheHelperConflictNotice, { diagnostics, busy, onRemove: onRemoveConflictingDropins, onRecheck: onRecheckConflicts }),
-			h('div', { className: 'mt-4 text-xs text-zinc-400 bg-zinc-900/60 rounded-xl px-3 py-2' }, isAdminMode ? 'Current mode: admin-secret. HTTP endpoint tests are not used, but HTTP mode remains available for other servers that expose a local Varnish frontend purge listener.' : 'Current mode: HTTP endpoint. Admin-secret mode remains available for hosts that expose the Varnish admin socket and shared secret.'),
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(SelectField, {
 					label: 'Purge mode',
@@ -3238,7 +3393,7 @@
 				}),
 				h(TextField, {
 					label: isAdminMode ? 'Admin endpoints' : 'HTTP endpoints',
-					description: isAdminMode ? 'Space-separated Varnish admin endpoints in host:port format. Example: 127.0.0.1:6082' : 'Space-separated local Varnish HTTP listener endpoints in host:port format. Safe example: 127.0.0.1:82. Public frontend endpoints such as domain.com:443 are blocked.',
+					description: isAdminMode ? 'Space-separated Varnish admin endpoints in host:port format. Example: 127.0.0.1:6082' : 'Space-separated Varnish HTTP listener endpoints in host:port format. Examples: 127.0.0.1:82, varnish.internal:82, or varnish.example.com:8080. Public frontend endpoints such as domain.com:443 are blocked.',
 					value: form.varnishCliServers || '',
 					onChange: (value) => onFieldChange('varnishCliServers', value),
 					disabled: busy,
@@ -3275,14 +3430,6 @@
 					min: 1,
 					step: 1,
 					key: 'timeout',
-				}),
-				h(ToggleRow, {
-					label: 'Debug log',
-					description: 'Saves immediately. Write Varnish request details to wp-content/cache/ultracache/logs/varnish-cli.log',
-					checked: !!form.varnishCliDebug,
-					onChange: (value) => onFieldChange('varnishCliDebug', value),
-					disabled: busy,
-					key: 'debug',
 				}),
 			]),
 			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
@@ -3328,6 +3475,10 @@
 				supportMessage ? h('div', { className: 'text-xs text-zinc-500 mt-4' }, supportMessage) : null,
 				last.time ? h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Last run: ' + formatLooseTime(last.time)) : null,
 				detailLines ? h('div', { className: 'text-xs text-zinc-400 mt-3 whitespace-pre-wrap break-all' }, detailLines) : null,
+			]),
+			h('div', { className: 'mt-5 space-y-2' }, [
+				isAdminMode ? h('p', { className: 'uc-stat-label mt-1 mb-0' }, 'Security warning: Varnish admin mode uses a plain TCP socket. Local/private endpoints are safest, but external infrastructure endpoints are allowed when intentionally configured and firewalled. The saved secret is never shown in diagnostics or REST settings.') : null,
+				h('p', { className: 'uc-stat-label mt-1 mb-0' }, isAdminMode ? 'Current mode: admin-secret. HTTP endpoint tests are not used, but HTTP mode remains available for other servers that expose a local Varnish frontend purge listener.' : 'Current mode: HTTP endpoint. External Varnish infrastructure and custom ports are supported when intentionally configured. Admin-secret mode remains available for hosts that expose the Varnish admin socket and shared secret.'),
 			]),
 		]);
 	}
@@ -3533,7 +3684,7 @@
 			backend === 'redis' ? h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(TextRow, {
 					label: 'Redis host',
-					description: 'Common default: 127.0.0.1',
+					description: 'Common default: 127.0.0.1. External Redis hosts are supported when intentionally configured.',
 					value: form.redisHost || '127.0.0.1',
 					onChange: (value) => onFieldChange('redisHost', value),
 					disabled: busy,
@@ -3542,7 +3693,7 @@
 				}),
 				h(NumberRow, {
 					label: 'Redis port',
-					description: 'Common default: 6379',
+					description: 'Common default: 6379. Custom Redis ports are supported.',
 					value: form.redisPort || 6379,
 					onChange: (value) => onFieldChange('redisPort', value),
 					disabled: busy,
@@ -3686,62 +3837,6 @@
 				]),
 				backend === 'redis' ? h('div', { className: 'text-xs text-zinc-500 mt-4' }, redisSupportText) : null,
 			]),
-		]);
-	}
-
-
-	function JSBundleDiagnosticsPanel({ diagnostics }) {
-		const jsDiag = diagnostics && diagnostics.jsBundle ? diagnostics.jsBundle : {};
-		const storage = jsDiag.storage || {};
-		const topReasons = jsDiag.topReasons || jsDiag.reasonCounts || {};
-		const reasonKeys = Object.keys(topReasons).slice(0, 8);
-		const statusOk = !jsDiag.enabled || (jsDiag.bundlesGenerated || 0) > 0 || (jsDiag.scriptsScanned || 0) > 0;
-		const statusText = !jsDiag.enabled ? 'Disabled' : ((jsDiag.bundlesGenerated || 0) > 0 ? 'Generated' : 'No bundle');
-		const settingLine = [
-			jsDiag.enabled ? 'JS bundle ON' : 'JS bundle OFF',
-			jsDiag.deferJsEnabled ? 'Defer JS ON' : 'Defer JS OFF',
-			'Includes ' + String(jsDiag.includePatternCount || 0),
-			'Excludes ' + String(jsDiag.excludePatternCount || 0),
-		].join(' · ');
-
-		return h('div', { className: 'uc-diagnostic-group', key: 'js-bundle-diagnostics-lite' }, [
-			h('div', { className: 'uc-section-title', key: 'title' }, 'JS Bundle Candidate Diagnostics'),
-			h('div', { className: 'text-xs text-zinc-500 mb-3', key: 'description' }, 'Read-only summary for the experimental Combine safe deferred JS feature. It explains why bundles were or were not generated.'),
-			h('div', { className: 'space-y-3', key: 'rows' }, [
-				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'status' }, [
-					h('div', { className: 'text-sm text-white' }, 'Status'),
-					h(StatusPill, { ok: !!statusOk, text: statusText, tone: !jsDiag.enabled ? 'neutral' : ((jsDiag.bundlesGenerated || 0) > 0 ? 'success' : 'warning') }),
-				]),
-				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'settings' }, [
-					h('div', { className: 'text-sm text-white' }, 'Settings'),
-					h('div', { className: 'text-xs text-zinc-300 text-right break-all' }, settingLine),
-				]),
-				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'scan' }, [
-					h('div', { className: 'text-sm text-white' }, 'Last scan'),
-					h('div', { className: 'text-xs text-zinc-300 text-right' }, formatNumber(jsDiag.scriptsScanned || 0) + ' scanned · ' + formatNumber(jsDiag.deferredScripts || 0) + ' deferred · ' + formatNumber(jsDiag.eligibleScripts || 0) + ' eligible'),
-				]),
-				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'bundles' }, [
-					h('div', { className: 'text-sm text-white' }, 'Bundles'),
-					h('div', { className: 'text-xs text-zinc-300 text-right' }, formatNumber(jsDiag.bundlesGenerated || 0) + ' bundle(s) · ' + formatNumber(jsDiag.bundledScripts || 0) + ' script(s) · ' + formatBytes(jsDiag.bundleBytes || 0)),
-				]),
-				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'storage' }, [
-					h('div', { className: 'text-sm text-white' }, 'Storage'),
-					h('div', { className: 'text-xs text-zinc-300 text-right' }, formatNumber(storage.files || 0) + ' file(s) · ' + formatBytes(storage.bytes || 0)),
-				]),
-			]),
-			jsDiag.message ? h('div', { className: 'mt-2 text-xs text-zinc-400', key: 'message' }, jsDiag.message) : null,
-			reasonKeys.length ? h('div', { className: 'mt-3 rounded bg-black/10 p-4 space-y-2', key: 'reasons' }, [
-				h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400', key: 'reason-title' }, 'Top rejection / eligibility reasons'),
-				reasonKeys.map(function(key) {
-					return h(DetailRow, { key: 'reason-' + key, label: key, value: formatNumber(topReasons[key] || 0), mono: true });
-				}),
-			]) : null,
-			Array.isArray(jsDiag.bundles) && jsDiag.bundles.length ? h('div', { className: 'mt-3 rounded bg-black/10 p-4 space-y-2', key: 'generated' }, [
-				h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400', key: 'generated-title' }, 'Generated JS bundles'),
-				jsDiag.bundles.map(function(item, index) {
-					return h(DetailRow, { key: 'bundle-' + index, label: item.file || ('bundle ' + (index + 1)), value: formatNumber(item.count || 0) + ' scripts · ' + formatBytes(item.bytes || 0), mono: true });
-				}),
-			]) : null,
 		]);
 	}
 
@@ -3928,7 +4023,7 @@
 					h('div', { className: 'mt-4 grid grid-cols-1 md:grid-cols-2 gap-3', key: 'files' }, [
 						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'runtime' }, [
 							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Runtime config protection'),
-							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'runtime-config.json: ' + (runtime.runtimeConfigExists ? 'exists' : 'missing')),
+							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'runtime-config.php: ' + (runtime.runtimeConfigExists ? 'exists' : 'missing')),
 							h('div', { className: 'text-xs text-zinc-300 mt-1' }, '.htaccess: ' + (runtime.htaccessProtectionFile ? 'present' : 'missing') + ' · web.config: ' + (runtime.webConfigProtectionFile ? 'present' : 'missing')),
 						]),
 						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'secrets' }, [
@@ -3945,7 +4040,7 @@
 		const [settings, setSettings] = useState(initialSettings);
 		const [stats, setStats] = useState(initialStats);
 		const [diagnostics, setDiagnostics] = useState(initialDiagnostics);
-		const [browserCompressionProbe, setBrowserCompressionProbe] = useState({ ready: true, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: 'Browser probe is manual-only.' });
+		const [browserCompressionProbe, setBrowserCompressionProbe] = useState({ ready: true, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: 'Browser compression probe is manual-only and does not run on dashboard load.' });
 		const [busy, setBusy] = useState(false);
 		const [asyncActions, setAsyncActions] = useState({});
 		const [toasts, setToasts] = useState([]);
@@ -3971,7 +4066,6 @@
 			varnishCliKey: initialSettings.varnishCliKey || '',
 			varnishCliTimeoutSeconds: initialSettings.varnishCliTimeoutSeconds || 2,
 			varnishCliMethod: initialSettings.varnishCliMethod || 'BAN',
-			varnishCliDebug: !!initialSettings.varnishCliDebug,
 			varnishCliKeyConfigured: !!initialSettings.varnishCliKeyConfigured,
 		});
 		const [redisForm, setRedisForm] = useState({
@@ -3992,8 +4086,6 @@
 		const [inspectUrl, setInspectUrl] = useState('');
 		const [inspectBusy, setInspectBusy] = useState(false);
 		const [inspectResult, setInspectResult] = useState(null);
-		const [homepageCacheBusy, setHomepageCacheBusy] = useState(false);
-		const [homepageCacheStatus, setHomepageCacheStatus] = useState(null);
 		const [performanceProfile, setPerformanceProfile] = useState(null);
 		const [cssDiagnosticsUrl, setCssDiagnosticsUrl] = useState((typeof ucwp !== 'undefined' && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || '') : '');
 		const [cssDiagnosticsBusy, setCssDiagnosticsBusy] = useState(false);
@@ -4005,14 +4097,12 @@
 		const cancelRequestedRef = useRef(false);
 		const importFileInputRef = useRef(null);
 		const statsRefreshInFlightRef = useRef(false);
-		const statsRefreshBackoffUntilRef = useRef(0);
 		const settingsRef = useRef(initialSettings);
 		const committedSettingsRef = useRef(initialSettings);
 		const pendingSettingsPatchRef = useRef({});
 		const settingsSaveTimerRef = useRef(null);
 		const settingsSaveInFlightRef = useRef(false);
 		const queuedActionKeysRef = useRef({});
-		const dashboardQuietModeRef = useRef(!!(initialStats && initialStats.dashboardWorkActive));
 		const compressionSyncRef = useRef('');
 		const compressionLocks = useMemo(() => getCompressionLockState(diagnostics, browserCompressionProbe), [diagnostics, browserCompressionProbe]);
 		const initialMediaQueue = initialDiagnostics && initialDiagnostics.mediaRuntime && initialDiagnostics.mediaRuntime.queue
@@ -4166,25 +4256,21 @@
 
 		useEffect(() => {
 			if (!settings.cacheStatsEnabled) {
+				statsRefreshInFlightRef.current = false;
+				setStats(function(current) { return Object.assign({}, current || {}, getStatsDisabledClientPayload()); });
 				return undefined;
 			}
 
 			let interval = null;
 
 			const runRefresh = async () => {
-				if (document.hidden || statsRefreshInFlightRef.current || dashboardQuietModeRef.current || hasActiveQueuedDashboardAction() || (process && process.active)) {
-					return;
-				}
-				if (Date.now() < statsRefreshBackoffUntilRef.current) {
+				if (document.hidden || statsRefreshInFlightRef.current) {
 					return;
 				}
 				statsRefreshInFlightRef.current = true;
 				try {
-					await refreshStats();
-					statsRefreshBackoffUntilRef.current = 0;
-				} catch (error) {
-					statsRefreshBackoffUntilRef.current = Date.now() + (2 * STATS_REFRESH_INTERVAL);
-				}
+					await refreshStats({ force: true });
+				} catch (error) {}
 				finally {
 					statsRefreshInFlightRef.current = false;
 				}
@@ -4221,7 +4307,7 @@
 				stopInterval();
 				document.removeEventListener('visibilitychange', handleVisibilityChange);
 			};
-		}, [settings.cacheStatsEnabled, asyncActions, process && process.active]);
+		}, [settings.cacheStatsEnabled]);
 
 		useEffect(() => {
 			setAdvancedForm({
@@ -4258,7 +4344,6 @@
 				varnishCliKey: settings.varnishCliKey || '',
 				varnishCliTimeoutSeconds: settings.varnishCliTimeoutSeconds || 2,
 				varnishCliMethod: settings.varnishCliMethod || 'BAN',
-				varnishCliDebug: !!settings.varnishCliDebug,
 				varnishCliKeyConfigured: !!settings.varnishCliKeyConfigured,
 			});
 		}, [
@@ -4268,7 +4353,6 @@
 			settings.varnishCliKey,
 			settings.varnishCliTimeoutSeconds,
 			settings.varnishCliMethod,
-			settings.varnishCliDebug,
 			settings.varnishCliKeyConfigured,
 		]);
 
@@ -4388,7 +4472,7 @@
 		function updateVarnishField(key, value) {
 			setVarnishForm((current) => Object.assign({}, current, { [key]: value }));
 
-			if (key === 'varnishCliEnabled' || key === 'varnishCliDebug') {
+			if (key === 'varnishCliEnabled') {
 				queueSettingsPatch({ [key]: !!value });
 			}
 		}
@@ -4739,22 +4823,40 @@
 			return payload && typeof payload === 'object' ? payload : {};
 		}
 
+		function getStatsDisabledClientPayload() {
+			return {
+				success: true,
+				enabled: false,
+				disabled: true,
+				cacheStatsEnabled: false,
+				message: 'Cache stats are disabled.',
+				impact: 'off',
+				timestamp: Math.floor(Date.now() / 1000),
+				dashboardStatsDisabled: true,
+				dashboardStatsDisabledReason: 'Cache stats are disabled.',
+				dashboardStatsPollingDisabled: true,
+			};
+		}
+
+		function areStatsEnabledInClient() {
+			const currentSettings = settingsRef.current || settings || {};
+			return !!(currentSettings && currentSettings.cacheStatsEnabled);
+		}
+
 		async function refreshStats(options) {
 			const force = !!(options && options.force);
-			if (!force && isDashboardQuietModeActive()) {
+			if (!areStatsEnabledInClient()) {
+				const disabledStats = getStatsDisabledClientPayload();
+				setStats(function(current) { return Object.assign({}, current || {}, disabledStats); });
+				return disabledStats;
+			}
+
+			if (!force && typeof isDashboardQuietModeActive === 'function' && isDashboardQuietModeActive()) {
 				return null;
 			}
 
 			const response = await apiRequest('stats');
 			const freshStats = normalizeStatsResponse(response);
-			if (freshStats && freshStats.dashboardWorkActive) {
-				setStats((current) => Object.assign({}, current || {}, freshStats));
-				if (freshStats.diagnostics && typeof freshStats.diagnostics === 'object') {
-					setDiagnostics((current) => Object.assign({}, current || {}, freshStats.diagnostics));
-				}
-				return freshStats;
-			}
-
 			const hasMeaningfulStats = freshStats && typeof freshStats === 'object' && (
 				typeof freshStats.pageCacheFiles !== 'undefined' ||
 				typeof freshStats.pageCacheHits !== 'undefined' ||
@@ -4783,18 +4885,6 @@
 
 		function hasActiveQueuedDashboardAction() {
 			return Object.keys(queuedActionKeysRef.current || {}).some((key) => !!queuedActionKeysRef.current[key]);
-		}
-
-		function setDashboardQuietMode(active) {
-			dashboardQuietModeRef.current = !!active;
-		}
-
-		function isDashboardQuietModeActive() {
-			return !!(
-				dashboardQuietModeRef.current ||
-				hasActiveQueuedDashboardAction() ||
-				(process && process.active)
-			);
 		}
 
 		function hasDashboardWorkInProgress() {
@@ -5005,7 +5095,6 @@
 				return null;
 			}
 
-			setDashboardQuietMode(true);
 			setBusy(true);
 			setAsyncActionState(actionKey, true, (labels && labels.runningLabel) || 'Processing…');
 			pushToast({ id: toastId, type: 'info', text: (labels && labels.queued) || 'Processing…', persistent: true });
@@ -5045,7 +5134,7 @@
 				}
 				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'object_cache_full_count', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'apcu_flush', 'varnish_flush_all', 'google_fonts_rebuild_cache'].indexOf(action) !== -1) {
 					try {
-						await refreshStats({ force: true });
+						await refreshStats();
 					} catch (error) {}
 				}
 				const ok = completed && completed.status === 'done';
@@ -5063,7 +5152,6 @@
 			} finally {
 				setAsyncActionState(actionKey, false);
 				setBusy(false);
-				setDashboardQuietMode(false);
 			}
 		}
 
@@ -5315,6 +5403,10 @@
 				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
 				return;
 			}
+			if (!hasFullSiteWarmScope(settingsRef.current)) {
+				pushToast({ type: 'warning', text: 'Select at least one full-site warm source first.' });
+				return;
+			}
 
 			const cssScope = getCurrentCssBundleScope();
 			const jobType = getCssWarmJobType('full', cssScope);
@@ -5362,6 +5454,10 @@
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
 				return;
 			}
+			if (!hasMenuWarmScope(settingsRef.current)) {
+				pushToast({ type: 'warning', text: 'Select a frontend menu and depth first.' });
+				return;
+			}
 			const controls = getJobControls('warm_menu');
 			if (!forceRestart && controls.canResume) {
 				await runJob(savedJob, false);
@@ -5396,6 +5492,10 @@
 			}
 			if (!(settingsRef.current && settingsRef.current.homepageCssBundleEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
+				return;
+			}
+			if (!hasMenuWarmScope(settingsRef.current)) {
+				pushToast({ type: 'warning', text: 'Select a frontend menu and depth first.' });
 				return;
 			}
 
@@ -5614,6 +5714,20 @@
 		}
 
 
+		function sanitizeRuntimeJsScanDisplayUrl(url) {
+			let value = String(url || '').trim();
+			if (!value) {
+				return '';
+			}
+			try {
+				const parsed = new URL(value, window.location.origin);
+				['ucwp_runtime_js_scan', 'ucwp_runtime_js_scan_id', 'ucwp_runtime_js_scan_nonce', 'ucwp_rt', 'ucwp_profile_bypass', 'ucwp_store_profile', 'ucwp_callback_profile', 'ucwp_store_profile_verbose', 'ucwp_store_profile_verbose_settings', 'ucwp_profile_run', 'ucwp_revalidate'].forEach((key) => parsed.searchParams.delete(key));
+				return parsed.toString();
+			} catch (error) {
+				return value.replace(/([?&])ucwp_(runtime_js_scan(?:_id|_nonce)?|rt|profile_bypass|store_profile(?:_verbose(?:_settings)?)?|callback_profile|profile_run|revalidate)=[^&#]*/g, '$1').replace(/[?&]$/, '');
+			}
+		}
+
 		function buildRuntimeJsScanUrl(url, scanId) {
 			let target = String(url || '').trim() || ((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/');
 			let parsed;
@@ -5639,13 +5753,13 @@
 					suggestionCount: 0,
 					missingCount: 0,
 					runtimeErrorCount: report && report.errorCount ? report.errorCount : 0,
-					scannedUrl: scanUrl,
+					scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl),
 				};
 			}
 			return Object.assign({}, scan, {
 				available: true,
 				source: 'browser-runtime',
-				scannedUrl: scan.scannedUrl || (report && report.url) || scanUrl,
+				scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scan.scannedUrl || (report && report.url) || scanUrl),
 				scannedAt: new Date().toISOString(),
 			});
 		}
@@ -5660,7 +5774,7 @@
 				const errors = Array.isArray(state.errors) ? state.errors.slice(0, 120) : [];
 				return {
 					scanId,
-					url: String((popup.location && popup.location.href) || scanUrl || ''),
+					url: sanitizeRuntimeJsScanDisplayUrl(String((popup.location && popup.location.href) || scanUrl || '')),
 					completed: false,
 					errors,
 					userAgent: String((popup.navigator && popup.navigator.userAgent) || ''),
@@ -5700,7 +5814,7 @@
 			if (!popup) {
 				setRuntimeStatus('Popup was blocked. Allow popups for this admin page and try again. Diagnostic URL: ' + runtimeUrl);
 				pushToast({ type: 'error', text: 'Browser blocked the runtime scan window. Allow popups for this admin page and try again.' });
-				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl, debugUrl: runtimeUrl };
+				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl), debugUrl: runtimeUrl };
 			}
 
 			try { popup.focus(); } catch (error) {}
@@ -5735,7 +5849,7 @@
 			if (!latestReport) {
 				setRuntimeStatus('No runtime report returned. The diagnostic page may have been served from cache or blocked.');
 				pushToast({ type: 'warning', text: 'Runtime scan did not return a report. Check that the diagnostic page opened and that cache bypass is active.' });
-				return { available: false, source: 'browser-runtime', suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl };
+				return { available: false, source: 'browser-runtime', suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl) };
 			}
 
 			const result = normalizeRuntimeJsScanResult(latestReport, scanUrl);
@@ -5944,54 +6058,6 @@
 				});
 			} finally {
 				setInspectBusy(false);
-			}
-		}
-
-		async function checkHomepageCacheStatus() {
-			if (homepageCacheBusy) {
-				return;
-			}
-
-			setHomepageCacheBusy(true);
-			setHomepageCacheStatus(null);
-			try {
-				const target = new URL(frontendProbeUrl || '/', window.location.origin);
-				const started = Date.now();
-				const response = await window.fetch(target.toString(), {
-					method: 'GET',
-					credentials: 'omit',
-					cache: 'no-store',
-					headers: {
-						'Cache-Control': 'no-cache',
-						'Pragma': 'no-cache',
-						'X-UltraCache-Homepage-Cache-Status': 'browser-manual',
-					},
-				});
-
-				const elapsed = Date.now() - started;
-				const source = response.headers.get('x-ultra-cache-source') || response.headers.get('x-ultracache-source') || '';
-				const status = response.headers.get('x-ultra-cache') || response.headers.get('x-ultracache') || response.headers.get('x-cache') || '';
-				const encoding = response.headers.get('content-encoding') || '';
-				const age = response.headers.get('age') || '';
-				const cacheControl = response.headers.get('cache-control') || '';
-				const contentType = response.headers.get('content-type') || '';
-				setHomepageCacheStatus({
-					ok: response.ok,
-					statusCode: response.status,
-					elapsed,
-					url: target.toString(),
-					source,
-					status,
-					encoding,
-					age,
-					cacheControl,
-					contentType,
-				});
-			} catch (error) {
-				setHomepageCacheStatus({ ok: false, error: error && error.message ? error.message : 'Homepage cache status request failed.' });
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Homepage cache status request failed.' });
-			} finally {
-				setHomepageCacheBusy(false);
 			}
 		}
 
@@ -6231,6 +6297,10 @@
 			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
 				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				return;
+			}
+			if (!hasFullSiteWarmScope(settingsRef.current)) {
+				pushToast({ type: 'warning', text: 'Select at least one full-site warm source first.' });
 				return;
 			}
 			const controls = getJobControls('warm');
@@ -6604,6 +6674,10 @@ async function deleteAllPluginDataAndDeactivate() {
 		const warmDisabledMessage = !pageCacheReady
 			? 'Please enable Page Caching first or select a profile before warming cache.'
 			: (!settings.homepageCssBundleEnabled ? 'CSS bundle warm buttons are disabled until CSS Bundling is enabled.' : '');
+		const menuWarmScopeReady = hasMenuWarmScope(settings);
+		const fullSiteWarmScopeReady = hasFullSiteWarmScope(settings);
+		const menuWarmScopeMessage = menuWarmScopeReady ? '' : 'Select a frontend menu and depth before using menu warm-up.';
+		const fullSiteWarmScopeMessage = fullSiteWarmScopeReady ? '' : 'Select at least one full-site warm source before using full-site warm-up.';
 		const effectiveMediaQueueStatus = mediaQueueStatus || ((diagnostics && diagnostics.mediaRuntime && diagnostics.mediaRuntime.queue) ? diagnostics.mediaRuntime.queue : {});
 		const optimizedImagesTotal = typeof stats.imagesOptimized !== 'undefined' ? stats.imagesOptimized : stats.optimizedImages;
 		const optimizedAvifTotal = typeof stats.avifImagesOptimized !== 'undefined' ? stats.avifImagesOptimized : stats.avifFiles;
@@ -6640,7 +6714,6 @@ async function deleteAllPluginDataAndDeactivate() {
 				key: 'support-modal',
 			}),
 
-			process.type === 'media' ? null : h(ProgressPanel, { process, etaText, onCancel: requestCancel, key: 'progress' }),
 
 			h(CacheStatisticsPanel, {
 				settings,
@@ -6663,7 +6736,7 @@ async function deleteAllPluginDataAndDeactivate() {
 					},
 					[
 						warmDisabledMessage ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', key: 'warm-disabled-message' }, warmDisabledMessage) : null,
-						h('div', { className: 'mt-4 uc-warm-cache-actions', style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, [
+						h('div', { className: 'mt-4 uc-warm-cache-actions', style: { display: 'flex', flexDirection: 'column', gap: '12px' }, key: 'warm-homepage-actions' }, [
 							h(
 								'button',
 								{
@@ -6682,53 +6755,77 @@ async function deleteAllPluginDataAndDeactivate() {
 								},
 								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !homepageHtmlCssBusy ? 'Engine Busy' : (homepageHtmlCssBusy ? 'Warming Homepage HTML + Homepage CSS Bundle…' : homepageCssButtonLabel)))
 							),
+						]),
+						h('div', { className: 'mt-5 grid grid-cols-1 gap-4', key: 'warm-menu-scope-controls' }, [
+							h(SelectField, {
+								label: 'Menu warm-up menu',
+								description: 'Choose any saved WordPress menu. Assigned/frontend menus are listed first; other saved menus run only when selected.',
+								value: settings.warmMenuLocation || '',
+								onChange: (value) => updateSetting('warmMenuLocation', value),
+								disabled: warmBusy,
+								options: getWarmMenuOptions(),
+							}),
+							h(SelectField, {
+								label: 'Menu depth',
+								description: 'Depth 1 = top-level only. All = every child item in the selected menu.',
+								value: settings.warmMenuDepth || '',
+								onChange: (value) => updateSetting('warmMenuDepth', value),
+								disabled: warmBusy,
+								options: getWarmMenuDepthOptions(),
+							}),
+						]),
+						menuWarmScopeMessage ? h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'warm-menu-scope-hint' }, menuWarmScopeMessage) : null,
+						h('div', { className: 'mt-4 uc-warm-cache-actions', style: { display: 'flex', flexDirection: 'column', gap: '12px' }, key: 'warm-menu-actions' }, [
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startMenuWarming(false),
-									disabled: !pageCacheReady || warmBusy,
+									disabled: !pageCacheReady || warmBusy || !menuWarmScopeReady,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm_menu').canResume ? 'Resume Warm Up Menu HTML Cache' : 'Warm Up Menu HTML Cache'))
+								!pageCacheReady ? 'Enable Page Cache First' : (!menuWarmScopeReady ? 'Select Menu + Depth First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm_menu').canResume ? 'Resume Warm Up Menu HTML Cache' : 'Warm Up Menu HTML Cache')))
 							),
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startMenuWarmingWithFrontpageCss(false),
-									disabled: !cssBundleReady || warmBusy,
+									disabled: !cssBundleReady || warmBusy || !menuWarmScopeReady,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !menuUrlsCssBusy ? 'Engine Busy' : (menuUrlsCssBusy ? 'Warming Menu HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(menuCssWarmJobType).canResume ? 'Resume ' + menuCssButtonLabel : menuCssButtonLabel))))
+								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (!menuWarmScopeReady ? 'Select Menu + Depth First' : (warmBusy && !menuUrlsCssBusy ? 'Engine Busy' : (menuUrlsCssBusy ? 'Warming Menu HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(menuCssWarmJobType).canResume ? 'Resume ' + menuCssButtonLabel : menuCssButtonLabel)))))
 							),
+						]),
+						h('div', { className: 'mt-5', key: 'warm-full-scope-controls' }, [
+							h(MultiSelectField, {
+								label: 'Full-site warm-up sources',
+								description: 'Choose exactly which content sources Full Site Warm is allowed to scan. The choice is saved.',
+								value: settings.warmFullSiteSources || '',
+								onChange: (value) => updateSetting('warmFullSiteSources', value),
+								disabled: warmBusy,
+								options: getFullSiteSourceOptions(),
+							}),
+						]),
+						fullSiteWarmScopeMessage ? h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'warm-full-scope-hint' }, fullSiteWarmScopeMessage) : null,
+						h('div', { className: 'mt-4 uc-warm-cache-actions', style: { display: 'flex', flexDirection: 'column', gap: '12px' }, key: 'warm-full-actions' }, [
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startWarming(false),
-									disabled: !pageCacheReady || warmBusy,
+									disabled: !pageCacheReady || warmBusy || !fullSiteWarmScopeReady,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm').canResume ? 'Resume Warm Up Full Site HTML Cache' : 'Warm Up Full Site HTML Cache'))
+								!pageCacheReady ? 'Enable Page Cache First' : (!fullSiteWarmScopeReady ? 'Select Full-Site Sources First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm').canResume ? 'Resume Warm Up Full Site HTML Cache' : 'Warm Up Full Site HTML Cache')))
 							),
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
 									onClick: () => startWarmingAllWithFrontpageCss(false),
-									disabled: !cssBundleReady || warmBusy,
+									disabled: !cssBundleReady || warmBusy || !fullSiteWarmScopeReady,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !allUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Warming Full Site HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(fullCssWarmJobType).canResume ? 'Resume ' + fullCssButtonLabel : fullCssButtonLabel))))
-							)
-						]),
-						h('div', { className: 'uc-diagnostic-group mt-5', key: 'warm-css-bundle-diagnostics' }, [
-							h('div', { className: 'uc-section-title' }, 'CSS Bundle Summary'),
-							h('div', { key: 'fp-css-1' }, 'Bundles built: ' + formatNumber(cssBundleDiagnostics.bundlesBuilt || 0)),
-							h('div', { key: 'fp-css-2' }, 'Styles bundled/scanned: ' + formatNumber(cssBundleDiagnostics.stylesBundled || 0) + ' / ' + formatNumber(cssBundleDiagnostics.stylesScanned || 0)),
-							h('div', { key: 'fp-css-3' }, 'Skipped/unresolved: ' + formatNumber(cssBundleDiagnostics.stylesSkipped || 0) + ' / ' + formatNumber(cssBundleDiagnostics.stylesUnresolved || 0)),
-							h('div', { key: 'fp-css-4' }, 'Last CSS bundle warm: ' + formatLooseTime(cssBundleDiagnostics.lastWarm || null)),
-							h('div', { key: 'fp-css-5' }, 'Bundle files / delayed fonts: ' + formatNumber((cssBundleDiagnostics.files || {}).bundleFiles || 0) + ' / ' + formatNumber((cssBundleDiagnostics.files || {}).delayedFontFiles || 0)),
-							h('div', { key: 'fp-css-6' }, 'Manifest entries / sources: ' + formatNumber((cssBundleDiagnostics.manifest || {}).entries || 0) + ' / ' + formatNumber((cssBundleDiagnostics.manifest || {}).sourceUrls || 0)),
-							h('div', { key: 'fp-css-7', className: ((cssBundleDiagnostics.manifest || {}).missingBundleFiles || (cssBundleDiagnostics.manifest || {}).missingDelayedFontFiles) ? 'text-amber-300' : 'text-emerald-300' }, 'Missing main/delayed files: ' + formatNumber((cssBundleDiagnostics.manifest || {}).missingBundleFiles || 0) + ' / ' + formatNumber((cssBundleDiagnostics.manifest || {}).missingDelayedFontFiles || 0)),
-						]),
+								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (!fullSiteWarmScopeReady ? 'Select Full-Site Sources First' : (warmBusy && !allUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Warming Full Site HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(fullCssWarmJobType).canResume ? 'Resume ' + fullCssButtonLabel : fullCssButtonLabel)))))
+							),
+						])
 					]
 				),
 			h(
@@ -6816,6 +6913,8 @@ async function deleteAllPluginDataAndDeactivate() {
 				]
 			)
 			]),
+
+			process.type === 'media' ? null : h(ProgressPanel, { process, etaText, onCancel: requestCancel, key: 'warm-progress-after-jobs' }),
 
 			h(
 				Card,
@@ -7016,14 +7115,6 @@ h(ToggleRow, {
 									onChange: (value) => updateSetting('deferAllJsEnabled', value),
 									disabled: busy || !settings.deferJsEnabled,
 									key: 'defer-all-js',
-								}),
-h(ToggleRow, {
-									label: 'Combine safe deferred JS',
-									description: 'Experimental. During warm/store, combines only consecutive same-host scripts that are already safe deferred candidates into generated UltraCache JS bundles. Exclusions and inline-script safeguards always win. Default: off.',
-									checked: !!settings.jsBundleEnabled,
-									onChange: (value) => updateSetting('jsBundleEnabled', value),
-									disabled: busy || !settings.deferJsEnabled,
-									key: 'js-bundle-safe-deferred',
 								}),
 h(ToggleRow, {
 									label: 'Delay safe third-party JS',
@@ -7501,26 +7592,6 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											populateWarning: 'Your current delayed font exclusion list will be merged with recommended defaults.',
 											key: 'delay-icon-fonts-exclude-list',
 										}),
-										h(SaveableTextAreaField, {
-											label: 'JS Bundle Include Patterns',
-											description: 'Optional newline-separated handle or URL fragments. When filled, only matching deferred scripts may be combined. Leave empty to let UltraCache use conservative same-host deferred candidates only.',
-											value: settings.jsBundleIncludeList || '',
-											onSave: (value) => updateSetting('jsBundleIncludeList', value),
-											disabled: busy || !settings.jsBundleEnabled,
-											placeholder: 'tooltipster\nplainoverlay\nion.rangeSlider\nlocal-enhancement.js',
-											saveLabel: 'Save JS Bundle Includes',
-											key: 'js-bundle-include-list',
-										}),
-										h(SaveableTextAreaField, {
-											label: 'JS Bundle Exclude Patterns',
-											description: 'Always keep matching scripts separate from generated JS bundles. These exclusions win over include rules and work together with the shared JS Delay / Defer Exclusions list.',
-											value: settings.jsBundleExcludeList || '',
-											onSave: (value) => updateSetting('jsBundleExcludeList', value),
-											disabled: busy || !settings.jsBundleEnabled,
-											placeholder: 'jquery\nwp-includes\nwoocommerce\ncart\ncheckout\nsr7\ntptools\nelementor\nswiper',
-											saveLabel: 'Save JS Bundle Exclusions',
-											key: 'js-bundle-exclude-list',
-										}),
 										h(DeferDelayExclusionsField, {
 											value: settings.deferJsExcludeList || '',
 											onSave: (value) => updateSetting('deferJsExcludeList', value),
@@ -7714,32 +7785,10 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					}),
 					h('div', { className: 'mt-4 flex flex-wrap gap-3 items-center' }, [
 						h(Button, { onClick: inspectCacheDecision, disabled: inspectBusy || !String(inspectUrl || '').trim(), variant: 'primary' }, inspectBusy ? 'Inspecting…' : 'Inspect URL'),
-						h(Button, { onClick: checkHomepageCacheStatus, disabled: homepageCacheBusy, variant: 'light' }, homepageCacheBusy ? 'Checking…' : 'Check Homepage Cache Status'),
 						inspectResult
 							? h(StatusPill, { ok: !!inspectResult.cacheable, text: inspectResult.cacheable ? 'Cacheable' : 'Bypassed' })
 							: null,
-						homepageCacheStatus
-							? h(StatusPill, { ok: !!homepageCacheStatus.ok, text: homepageCacheStatus.ok ? 'Homepage reached' : 'Homepage failed' })
-							: null,
 					]),
-					homepageCacheStatus
-						? h('div', { className: 'mt-4 grid grid-cols-1 md:grid-cols-2 gap-6' }, [
-							h('div', { className: 'space-y-0' }, [
-								h(DetailRow, { label: 'Homepage URL', value: homepageCacheStatus.url || frontendProbeUrl || '/', mono: true }),
-								h(DetailRow, { label: 'HTTP status', value: homepageCacheStatus.statusCode ? String(homepageCacheStatus.statusCode) : (homepageCacheStatus.error || '—') }),
-								h(DetailRow, { label: 'Response time', value: typeof homepageCacheStatus.elapsed !== 'undefined' ? (homepageCacheStatus.elapsed + ' ms') : '—' }),
-								h(DetailRow, { label: 'UltraCache source', value: homepageCacheStatus.source || '—', mono: true }),
-								h(DetailRow, { label: 'Cache status header', value: homepageCacheStatus.status || '—', mono: true }),
-							]),
-							h('div', { className: 'space-y-0' }, [
-								h(DetailRow, { label: 'Age header', value: homepageCacheStatus.age || '—' }),
-								h(DetailRow, { label: 'Content-Encoding', value: homepageCacheStatus.encoding || '—' }),
-								h(DetailRow, { label: 'Cache-Control', value: homepageCacheStatus.cacheControl || '—', mono: true }),
-								h(DetailRow, { label: 'Content-Type', value: homepageCacheStatus.contentType || '—', mono: true }),
-								h(DetailRow, { label: 'Mode', value: 'Manual browser request without admin cookies' }),
-							]),
-						])
-						: null,
 					inspectResult
 						? h('div', { className: 'mt-5 grid grid-cols-1 md:grid-cols-2 gap-6' }, [
 							h('div', { className: 'space-y-0' }, [
@@ -7825,10 +7874,10 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 						h('div', { className: 'space-y-1' }, [
 							h('div', { key: 'w1' }, 'Warm Up Homepage HTML Cache: homepage HTML only.'),
 							h('div', { key: 'w2' }, 'Warm Up Homepage HTML Cache + Homepage CSS Bundle: homepage HTML plus the homepage CSS bundle.'),
-							h('div', { key: 'w3' }, 'Warm Up Menu HTML Cache: URLs found in public menus, HTML only.'),
-							h('div', { key: 'w4' }, 'Warm Up Menu HTML Cache + Homepage/Shared/Separate CSS Bundles: follows the selected CSS Bundling Scope.'),
-							h('div', { key: 'w5' }, 'Warm Up Full Site HTML Cache: crawl all public crawlable URLs, HTML only.'),
-							h('div', { key: 'w6' }, 'Warm Up Full Site HTML Cache + Homepage/Shared/Separate CSS Bundles: follows the selected CSS Bundling Scope.'),
+							h('div', { key: 'w3' }, 'Warm Up Menu HTML Cache: URLs from the selected menu and depth, HTML only.'),
+							h('div', { key: 'w4' }, 'Warm Up Menu HTML Cache + Homepage/Shared/Separate CSS Bundles: uses the selected menu/depth and follows the selected CSS Bundling Scope.'),
+							h('div', { key: 'w5' }, 'Warm Up Full Site HTML Cache: crawls only the selected full-site sources, HTML only.'),
+							h('div', { key: 'w6' }, 'Warm Up Full Site HTML Cache + Homepage/Shared/Separate CSS Bundles: crawls only selected full-site sources and follows the selected CSS Bundling Scope.'),
 						]),
 						h('div', { className: 'space-y-1' }, [
 							h('div', { className: 'text-zinc-300 font-semibold', key: 'cli-title' }, 'WP-CLI examples'),

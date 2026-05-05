@@ -8,22 +8,27 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
     {
         public function get_stats()
         {
-            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'is_dashboard_heavy_work_active') && Ultra_Cache_WP::is_dashboard_heavy_work_active()) {
-                $payload = method_exists('Ultra_Cache_WP', 'get_lightweight_dashboard_busy_stats')
-                    ? Ultra_Cache_WP::get_lightweight_dashboard_busy_stats()
-                    : array('success' => true, 'busy' => true, 'dashboardWorkActive' => true);
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'are_cache_stats_enabled') && !Ultra_Cache_WP::are_cache_stats_enabled()) {
+                $payload = method_exists('Ultra_Cache_WP', 'get_cache_stats_disabled_payload')
+                    ? Ultra_Cache_WP::get_cache_stats_disabled_payload('rest_stats_disabled')
+                    : array(
+                        'success' => true,
+                        'enabled' => false,
+                        'disabled' => true,
+                        'message' => 'Cache stats are disabled.',
+                        'impact' => 'off',
+                        'timestamp' => time(),
+                    );
                 return new WP_REST_Response($payload, 200);
             }
 
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_stats_snapshot')) {
+                // Stats are ON, so the REST refresh must return a real dashboard snapshot.
+                // The hard zero-impact path is handled above when Count cache stats is OFF.
                 return new WP_REST_Response(Ultra_Cache_WP::get_dashboard_stats_snapshot(20, true), 200);
             }
 
-            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
-                return new WP_REST_Response(Ultra_Cache_WP::get_engine_stats(), 200);
-            }
-
-            return new WP_REST_Response($this->resolve_engine_stats(), 200);
+            return new WP_REST_Response(array('success' => true), 200);
         }
 
         public function purge_all()
@@ -41,6 +46,9 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             $success = (bool) $engine->purge_all();
             $response = array('success' => $success);
+            if (!$success) {
+                $response['message'] = 'Flush All Cache is already running or the purge lock could not be acquired.';
+            }
 
             if ($success && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'maybe_start_cron_warmup_after_purge')) {
                 $response['cronWarm'] = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_cron_warm_status') ? Ultra_Cache_WP::get_cron_warm_status() : array();
@@ -66,6 +74,47 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             return new WP_REST_Response(is_array($settings) ? array_diff_key($settings, array_flip(array('redisPassword', 'varnishCliKey'))) : array(), 200);
         }
 
+        private function request_may_mutate_files(WP_REST_Request $request, array $current)
+        {
+            $file_mutating_keys = array(
+                'pageCacheEnabled',
+                'objectCacheEnabled',
+                'objectCacheBackend',
+                'objectCacheFallbackBackend',
+                'browserCacheRulesEnabled',
+            );
+
+            foreach ($file_mutating_keys as $key) {
+                if (null !== $request->get_param($key)) {
+                    return true;
+                }
+
+                if (!empty($current[$key]) && in_array($key, array('pageCacheEnabled', 'objectCacheEnabled', 'browserCacheRulesEnabled'), true)) {
+                    return true;
+                }
+            }
+
+            foreach (array('redisPassword', 'varnishCliKey') as $secret_key) {
+                if (null !== $request->get_param($secret_key) && '' !== trim((string) $request->get_param($secret_key))) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function file_mutation_forbidden_response()
+        {
+            return new WP_REST_Response(
+                array(
+                    'success' => false,
+                    'code'    => 'ucwp_file_mutation_forbidden',
+                    'message' => 'This UltraCache action changes plugin drop-ins, wp-config.php, .htaccess, runtime secrets, or plugin activation state. It requires a full administrator with plugin activation permissions.',
+                ),
+                403
+            );
+        }
+
         public function update_settings(WP_REST_Request $request)
         {
             $allowed_keys = array_keys($this->get_settings_update_args());
@@ -73,6 +122,10 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             $current = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')
                 ? Ultra_Cache_WP::get_dashboard_settings()
                 : (array) get_option(UCWP_SETTINGS_KEY, array());
+
+            if ($this->request_may_mutate_files($request, is_array($current) ? $current : array()) && !$this->check_file_mutation_permission($request)) {
+                return $this->file_mutation_forbidden_response();
+            }
 
             foreach ($allowed_keys as $key) {
                 if (null !== $request->get_param($key)) {
@@ -236,6 +289,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             }
 
             $result = Ultra_Cache_WP::test_redis_connection($settings);
+            $status = !empty($result['blocked']) ? 400 : (!empty($result['success']) ? 200 : 500);
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
                 $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
             }
@@ -246,7 +300,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 $result['stats'] = Ultra_Cache_WP::get_engine_stats();
             }
 
-            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+            return new WP_REST_Response($result, $status);
         }
 
         public function object_cache_backend_test(WP_REST_Request $request)
@@ -272,6 +326,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             }
 
             $result = Ultra_Cache_WP::test_object_cache_backend($backend, $settings);
+            $status = !empty($result['blocked']) ? 400 : (!empty($result['success']) ? 200 : 500);
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
                 $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
             }
@@ -282,7 +337,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 $result['stats'] = Ultra_Cache_WP::get_engine_stats();
             }
 
-            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+            return new WP_REST_Response($result, $status);
         }
 
         public function object_cache_flush(WP_REST_Request $request = null)
