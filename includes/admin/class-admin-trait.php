@@ -48,11 +48,19 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
 
             if (!$cache_stats_enabled && method_exists(__CLASS__, 'get_cache_stats_disabled_payload')) {
                 $dashboard_stats = self::get_cache_stats_disabled_payload('admin_bootstrap_disabled');
-                $dashboard_diagnostics = isset($dashboard_stats['diagnostics']) && is_array($dashboard_stats['diagnostics']) ? $dashboard_stats['diagnostics'] : array();
             } else {
                 $dashboard_stats = method_exists(__CLASS__, 'get_dashboard_stats_snapshot') ? self::get_dashboard_stats_snapshot(20, false) : array('success' => true);
-                $dashboard_diagnostics = isset($dashboard_stats['diagnostics']) && is_array($dashboard_stats['diagnostics']) ? $dashboard_stats['diagnostics'] : array();
             }
+
+            // Cache Statistics OFF must not turn the dashboard into a dummy shell.
+            // Counter/stat collection and polling remain disabled through
+            // $dashboard_stats, but read-only diagnostics are loaded once during
+            // the UltraCache admin bootstrap so boxes such as Advanced Diagnostics,
+            // Server/PHP environment, media runtime, storage, and warm-up source
+            // selectors do not depend on enabling Cache Statistics first.
+            $dashboard_diagnostics = method_exists(__CLASS__, 'get_dashboard_diagnostics')
+                ? self::get_dashboard_diagnostics()
+                : (isset($dashboard_stats['diagnostics']) && is_array($dashboard_stats['diagnostics']) ? $dashboard_stats['diagnostics'] : array());
 
             wp_localize_script(
                 'ucwp-admin-js',

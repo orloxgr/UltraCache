@@ -132,10 +132,11 @@ if (!class_exists('WP_Object_Cache')) {
 		private $redis_connect_timeout = __UCWP_REDIS_CONNECT_TIMEOUT__;
 		private $redis_read_timeout = __UCWP_REDIS_READ_TIMEOUT__;
 		private $redis_error = '';
+		private $redis_payload_skip_reason = '';
 		private $redis_value_max_items = 64;
 		private $redis_value_max_depth = 2;
 		private $redis_value_max_string_bytes = 16384;
-		private $redis_payload_max_bytes = 32768;
+		private $redis_payload_max_bytes = 1048576;
 		private $disk_payload_max_bytes = 8388608;
 		private $signed_envelope_max_bytes = 12582912;
 
@@ -202,6 +203,7 @@ if (!class_exists('WP_Object_Cache')) {
 					'use_tls'  => (bool) $this->redis_use_tls,
 					'persistent' => (bool) $this->redis_persistent,
 					'error'    => (string) $this->redis_error,
+					'payloadSkipReason' => (string) $this->redis_payload_skip_reason,
 				),
 			);
 		}
@@ -1102,7 +1104,7 @@ if (!class_exists('WP_Object_Cache')) {
 
 			$value = $payload['value'] ?? null;
 			if ($this->payload_contains_complex_types($value)) {
-				$this->redis_error = 'Redis payload rejected: unsupported resource/closure or excessive nesting.';
+				$this->redis_payload_skip_reason = 'Redis payload skipped: unsupported resource/closure or excessive nesting.';
 				return false;
 			}
 
@@ -1116,7 +1118,7 @@ if (!class_exists('WP_Object_Cache')) {
 
 				$envelope = $this->build_signed_envelope($serialized);
 				if (!is_array($envelope)) {
-					$this->redis_error = 'Redis payload rejected: envelope signing failed.';
+					$this->redis_payload_skip_reason = 'Redis payload skipped: envelope signing failed.';
 					return false;
 				}
 				$data = serialize($envelope);
@@ -1125,7 +1127,7 @@ if (!class_exists('WP_Object_Cache')) {
 				}
 
 				if (strlen($data) > $this->redis_payload_max_bytes) {
-					$this->redis_error = 'Redis payload rejected: value too large.';
+					$this->redis_payload_skip_reason = 'Redis payload skipped: value too large.';
 					return false;
 				}
 
@@ -1135,6 +1137,7 @@ if (!class_exists('WP_Object_Cache')) {
 					}, false);
 					if ($stored) {
 						$this->redis_error = '';
+						$this->redis_payload_skip_reason = '';
 					}
 					return $stored;
 				}
@@ -1143,6 +1146,7 @@ if (!class_exists('WP_Object_Cache')) {
 				}, false);
 				if ($stored) {
 					$this->redis_error = '';
+					$this->redis_payload_skip_reason = '';
 				}
 				return $stored;
 			} catch (Throwable $e) {
@@ -1165,7 +1169,7 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 
 			if (strlen($serialized) > ($this->redis_payload_max_bytes * 2)) {
-				$this->redis_error = 'Redis payload skipped: serialized value too large.';
+				$this->redis_payload_skip_reason = 'Redis payload skipped: serialized value too large.';
 				return false;
 			}
 

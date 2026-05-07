@@ -644,5 +644,253 @@ trait Ultra_Cache_Media_Queue_Trait
 			return array_merge(array('success' => true, 'cleared' => is_numeric($count) ? (int) $count : 0), $this->get_media_queue_status($format));
 		}
 
+		private function find_attachment_id_for_source_file($source_file) {
+			$source_file = is_string($source_file) ? wp_normalize_path($source_file) : '';
+			if ('' === $source_file || !$this->optimized_storage_readable_source_exists($source_file)) {
+				return 0;
+			}
+
+			$source_real = realpath($source_file);
+			$memo_key = is_string($source_real) && '' !== $source_real ? wp_normalize_path($source_real) : $source_file;
+			if (isset($this->on_demand_source_attachment_memo[$memo_key])) {
+				return max(0, (int) $this->on_demand_source_attachment_memo[$memo_key]);
+			}
+
+			$relative_path = $this->get_uploads_relative_path_from_source($source_file);
+			if (!$relative_path) {
+				$this->on_demand_source_attachment_memo[$memo_key] = 0;
+				return 0;
+			}
+
+			global $wpdb;
+			$attachment_id = (int) $wpdb->get_var($wpdb->prepare(
+				"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id WHERE p.post_type = 'attachment' AND pm.meta_key = '_wp_attached_file' AND pm.meta_value = %s LIMIT 1",
+				$relative_path
+			));
+
+			if ($attachment_id > 0 && wp_attachment_is_image($attachment_id)) {
+				$this->on_demand_source_attachment_memo[$memo_key] = $attachment_id;
+				return $attachment_id;
+			}
+
+			$uploads = wp_get_upload_dir();
+			if (!empty($uploads['baseurl'])) {
+				$public_url = trailingslashit((string) $uploads['baseurl']) . ltrim(str_replace('\\', '/', (string) $relative_path), '/');
+				$attachment_id = function_exists('attachment_url_to_postid') ? absint(attachment_url_to_postid($public_url)) : 0;
+				if ($attachment_id > 0 && wp_attachment_is_image($attachment_id)) {
+					$this->on_demand_source_attachment_memo[$memo_key] = $attachment_id;
+					return $attachment_id;
+				}
+			}
+
+			$directory = trim(str_replace('\\', '/', dirname((string) $relative_path)), '/');
+			$like = ('.' === $directory || '' === $directory)
+				? '%'
+				: $wpdb->esc_like($directory . '/') . '%';
+
+			$candidate_ids = $wpdb->get_col($wpdb->prepare(
+				"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id WHERE p.post_type = 'attachment' AND pm.meta_key = '_wp_attached_file' AND pm.meta_value LIKE %s ORDER BY p.ID DESC LIMIT 75",
+				$like
+			));
+
+			foreach ((array) $candidate_ids as $candidate_id) {
+				$candidate_id = absint($candidate_id);
+				if ($candidate_id <= 0 || !wp_attachment_is_image($candidate_id)) {
+					continue;
+				}
+
+				foreach ($this->get_attachment_source_files($candidate_id) as $candidate_source) {
+					$candidate_real = realpath($candidate_source);
+					if (is_string($candidate_real) && is_string($source_real) && wp_normalize_path($candidate_real) === wp_normalize_path($source_real)) {
+						$this->on_demand_source_attachment_memo[$memo_key] = $candidate_id;
+						return $candidate_id;
+					}
+				}
+			}
+
+			$this->on_demand_source_attachment_memo[$memo_key] = 0;
+			return 0;
+		}
+
+		private function get_on_demand_queue_completion_for_format($attachment_id, $format) {
+			$attachment_id = absint($attachment_id);
+			$format = $this->normalize_media_queue_format($format);
+			$source_files = $this->get_attachment_source_files($attachment_id);
+
+			if ($attachment_id <= 0 || empty($source_files)) {
+				return array(
+					'status' => 'skipped',
+					'message' => 'No supported source files were available for this media item.',
+					'targets' => 0,
+					'completed' => 0,
+				);
+			}
+
+			$targets = 0;
+			$completed = 0;
+
+			foreach ($source_files as $source_file) {
+				$avif_target = (bool) $this->get_avif_path_from_source($source_file);
+				$webp_target = (bool) $this->get_webp_path_from_source($source_file);
+				$avif_done = $avif_target && $this->generated_variant_exists($source_file, 'avif');
+				$webp_done = $webp_target && $this->generated_variant_exists($source_file, 'webp');
+
+				if ('best' === $format) {
+					if (!$avif_target && !$webp_target) {
+						continue;
+					}
+					$targets++;
+					if ($avif_done || $webp_done) {
+						$completed++;
+					}
+					continue;
+				}
+
+				$formats = ('both' === $format) ? array('avif', 'webp') : array($format);
+				foreach ($formats as $single_format) {
+					if ('avif' === $single_format) {
+						if (!$avif_target) {
+							continue;
+						}
+						$targets++;
+						if ($avif_done) {
+							$completed++;
+						}
+					} elseif ('webp' === $single_format) {
+						if (!$webp_target) {
+							continue;
+						}
+						$targets++;
+						if ($webp_done) {
+							$completed++;
+						}
+					}
+				}
+			}
+
+			if ($targets <= 0) {
+				return array(
+					'status' => 'skipped',
+					'message' => 'No supported source files were available for this media format.',
+					'targets' => 0,
+					'completed' => 0,
+				);
+			}
+
+			if ($completed >= $targets) {
+				return array(
+					'status' => 'skipped',
+					'message' => 'Already optimized by on-demand generation.',
+					'targets' => (int) $targets,
+					'completed' => (int) $completed,
+				);
+			}
+
+			return array(
+				'status' => 'pending',
+				'message' => 'Partially optimized by on-demand generation; remaining variants queued.',
+				'targets' => (int) $targets,
+				'completed' => (int) $completed,
+			);
+		}
+
+		private function write_on_demand_queue_status($attachment_id, $format, array $completion) {
+			$attachment_id = absint($attachment_id);
+			$format = $this->normalize_media_queue_format($format);
+			$status = isset($completion['status']) ? (string) $completion['status'] : 'pending';
+			$status = in_array($status, array('pending', 'skipped'), true) ? $status : 'pending';
+			$message = isset($completion['message']) ? (string) $completion['message'] : '';
+
+			if ($attachment_id <= 0 || !$this->ensure_media_queue_table()) {
+				return false;
+			}
+
+			global $wpdb;
+			$table = $this->get_media_queue_table_name();
+			$signature = $this->get_attachment_source_signature($attachment_id);
+			$now = current_time('mysql');
+			$completed = ('skipped' === $status);
+			$existing = $wpdb->get_row($wpdb->prepare("SELECT id, attempts FROM {$table} WHERE attachment_id = %d AND format = %s", $attachment_id, $format), ARRAY_A);
+
+			if (is_array($existing) && !empty($existing['id'])) {
+				$updated = $wpdb->update(
+					$table,
+					array(
+						'source_mtime' => (int) $signature['mtime'],
+						'source_size' => (int) $signature['size'],
+						'status' => $status,
+						'attempts' => max(0, (int) ($existing['attempts'] ?? 0)),
+						'last_error' => $message,
+						'updated_at' => $now,
+						'started_at' => null,
+						'completed_at' => $completed ? $now : null,
+					),
+					array('id' => (int) $existing['id']),
+					array('%d', '%d', '%s', '%d', '%s', '%s', '%s', '%s'),
+					array('%d')
+				);
+
+				return false !== $updated;
+			}
+
+			$inserted = $wpdb->insert(
+				$table,
+				array(
+					'attachment_id' => $attachment_id,
+					'format' => $format,
+					'source_mtime' => (int) $signature['mtime'],
+					'source_size' => (int) $signature['size'],
+					'status' => $status,
+					'attempts' => 0,
+					'last_error' => $message,
+					'created_at' => $now,
+					'updated_at' => $now,
+					'started_at' => null,
+					'completed_at' => $completed ? $now : null,
+				),
+				array('%d', '%s', '%d', '%d', '%s', '%d', '%s', '%s', '%s', '%s', '%s')
+			);
+
+			return false !== $inserted;
+		}
+
+		public function sync_media_queue_after_on_demand_generation($source_file, $generated_format) {
+			$generated_format = strtolower((string) $generated_format);
+			if (!in_array($generated_format, array('avif', 'webp'), true)) {
+				return array('synced' => false, 'reason' => 'invalid_format');
+			}
+
+			$attachment_id = $this->find_attachment_id_for_source_file($source_file);
+			if ($attachment_id <= 0) {
+				return array('synced' => false, 'reason' => 'attachment_not_found');
+			}
+
+			$formats = array_values(array_unique(array('best', 'avif', 'webp', 'both')));
+			$statuses = array();
+			$synced = 0;
+
+			foreach ($formats as $format) {
+				$completion = $this->get_on_demand_queue_completion_for_format($attachment_id, $format);
+				if ($this->write_on_demand_queue_status($attachment_id, $format, $completion)) {
+					$synced++;
+				}
+				$statuses[$format] = array(
+					'status' => (string) ($completion['status'] ?? 'pending'),
+					'targets' => (int) ($completion['targets'] ?? 0),
+					'completed' => (int) ($completion['completed'] ?? 0),
+				);
+			}
+
+			$this->invalidate_media_work_summary_cache();
+
+			return array(
+				'synced' => $synced > 0,
+				'attachment_id' => $attachment_id,
+				'generatedFormat' => $generated_format,
+				'rowsSynced' => (int) $synced,
+				'statuses' => $statuses,
+			);
+		}
+
 	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter
 }

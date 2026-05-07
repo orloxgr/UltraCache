@@ -67,6 +67,14 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		private $optimized_image_url_rewrite_map = array();
 
 		/**
+		 * Per-request memo from upload source file paths to attachment IDs for
+		 * lightweight on-demand queue synchronization.
+		 *
+		 * @var array<string,int>
+		 */
+		private $on_demand_source_attachment_memo = array();
+
+		/**
 		 * Current safe generation context: frontend, warm, cron, stale, or manual.
 		 *
 		 * @var string

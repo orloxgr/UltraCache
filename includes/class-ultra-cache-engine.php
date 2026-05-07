@@ -91,6 +91,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function register_hooks()
         {
+            add_action('init', array($this, 'maybe_apply_runtime_js_scan_anonymous_context'), -999);
             add_action('init', array($this, 'profile_init_checkpoint'), 0);
             add_action('wp_loaded', array($this, 'profile_wp_loaded_checkpoint'), 0);
             add_action('template_redirect', array($this, 'profile_template_redirect_checkpoint'), -1000);

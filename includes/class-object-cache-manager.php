@@ -12,6 +12,10 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		private static $plugin_settings_cache = null;
 		private static $redis_last_error = '';
 
+		private const REDIS_APCU_PAYLOAD_MAX_BYTES = 1048576;
+		private const DISK_PAYLOAD_MAX_BYTES = 8388608;
+		private const DIAGNOSTIC_PAYLOAD_PROBE_MAX_BYTES = 262144;
+
 		public static function sync_dropin() {
 			self::reset_plugin_settings_cache();
 			$enabled = self::is_enabled_in_settings();
@@ -734,6 +738,22 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 
+		private static function get_diagnostic_payload_limit_bytes($backend) {
+			$backend = strtolower((string) $backend);
+			if ('disk' === $backend) {
+				return self::DISK_PAYLOAD_MAX_BYTES;
+			}
+			return self::REDIS_APCU_PAYLOAD_MAX_BYTES;
+		}
+
+		private static function get_diagnostic_payload_probe_size_bytes($backend) {
+			$limit = self::get_diagnostic_payload_limit_bytes($backend);
+			$size = (int) floor($limit / 4);
+			$size = max(1024, $size);
+			return min(self::DIAGNOSTIC_PAYLOAD_PROBE_MAX_BYTES, $size);
+		}
+
+
 		public static function test_runtime_object_cache_payloads() {
 			$backend_status = self::get_backend_status();
 			$result = array(
@@ -767,6 +787,12 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				return $result;
 			}
 
+			$active_backend = isset($backend_status['active']) ? strtolower((string) $backend_status['active']) : 'runtime';
+			$payload_limit_bytes = self::get_diagnostic_payload_limit_bytes($active_backend);
+			$safe_probe_bytes = self::get_diagnostic_payload_probe_size_bytes($active_backend);
+			$result['payloadLimitBytes'] = (int) $payload_limit_bytes;
+			$result['safeProbeBytes'] = (int) $safe_probe_bytes;
+
 			$object = new stdClass();
 			$object->alpha = 1;
 			$object->nested = new stdClass();
@@ -776,6 +802,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'string' => 'ucwp:' . md5((string) microtime(true)),
 				'array' => array('alpha' => 1, 'nested' => array('beta' => 'two')),
 				'object' => $object,
+				'safe_size' => str_repeat('u', $safe_probe_bytes),
 			);
 
 			$group = 'ucwp_diagnostics';
@@ -803,18 +830,28 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 
 				$ok = (bool) $set && (bool) $found && (bool) $matches;
 				$all_ok = $all_ok && $ok;
+				$serialized_size = 0;
+				try {
+					$serialized_probe = serialize($value);
+					$serialized_size = is_string($serialized_probe) ? strlen($serialized_probe) : 0;
+				} catch (Throwable $e) {
+					$serialized_size = 0;
+				}
 				$result['probes'][$type] = array(
 					'set' => (bool) $set,
 					'found' => (bool) $found,
 					'matches' => (bool) $matches,
 					'success' => (bool) $ok,
 					'readType' => is_object($read) ? get_class($read) : gettype($read),
+					'sizeBytes' => (int) $serialized_size,
 				);
 			}
 
 			$result['success'] = (bool) $all_ok;
 			$result['backendStatus'] = self::get_backend_status();
-			$result['message'] = $all_ok ? 'Object cache payload probe passed for string, array, and object values.' : 'Object cache payload probe failed for one or more value types.';
+			$result['message'] = $all_ok
+				? 'Object cache payload probe passed for string, array, object, and safe-size values. Tested safe payload: ' . size_format($safe_probe_bytes) . ' / limit ' . size_format($payload_limit_bytes) . '.'
+				: 'Object cache payload probe failed below the configured payload limit. Tested safe payload: ' . size_format($safe_probe_bytes) . ' / limit ' . size_format($payload_limit_bytes) . '.';
 			return $result;
 		}
 

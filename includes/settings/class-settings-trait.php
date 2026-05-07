@@ -17,9 +17,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             ucwp_request_profile_checkpoint('sanitize_settings_before_media_support');
             $media_support = self::get_media_support_status();
             ucwp_request_profile_checkpoint('sanitize_settings_after_media_support', array('supported' => !empty($media_support['supported']) ? 'true' : 'false'));
-            $crawl_scope_summary = self::get_crawl_scope_summary();
-            $default_scheduled_warm_limit = max(1, (int) ($crawl_scope_summary['defaultScheduledWarmLimit'] ?? 0));
-
             return array(
                 'pageCacheEnabled'           => false,
                 'objectCacheEnabled'         => false,
@@ -44,10 +41,11 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'mediaOutputMode'            => 'auto',
                 'deferJsEnabled'             => false,
                 'deferAllJsEnabled'          => false,
+                'delayAllThirdPartyJsEnabled' => false,
                 'deferJsForceList'           => '',
                 'deferJsExcludeList'         => '',
                 'delaySafeThirdPartyJsEnabled'   => false,
-                'lazyMailerliteNonceEnabled' => true,
+                'lazyMailerliteNonceEnabled' => false,
                 'delaySafeThirdPartyJsPatterns' => implode("\n", self::get_default_safe_third_party_delay_patterns()),
                 'delayFunctionalThirdPartyJsEnabled' => false,
                 'delayFunctionalThirdPartyJsPatterns' => implode("\n", self::get_default_functional_third_party_delay_patterns()),
@@ -59,7 +57,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'homepageCssBundleExcludeList' => '',
                 'homepageCssBundleMode'      => 'safe',
                 'delayIconFontsEnabled'      => false,
-                'delayIconFontsAutoDetectEnabled' => true,
+                'delayIconFontsAutoDetectEnabled' => false,
                 'delayIconFontsList'         => implode("\n", self::get_default_delay_icon_font_patterns()),
                 'delayIconFontsExcludeList'  => implode("\n", self::get_default_delay_icon_font_exclude_patterns()),
                 'cssBundleScope'            => 'homepage',
@@ -74,6 +72,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'delayNonCriticalJsEnabled'  => false,
                 'delayNonCriticalJsExcludeList' => '',
                 'lcpImagePriorityEnabled'    => false,
+                'lazyLoadImagesEnabled'      => false,
                 'lcpBoundaryDeferEnabled'    => false,
                 'lcpImagePriorityOverride'   => '',
                 'manualLcpHeroSelector'      => '',
@@ -111,7 +110,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cronWarmStartAfterCleanup'  => false,
                 'cronWarmStartAfterManualPurge' => false,
                 'cronWarmPagesPerMinute'     => 2,
-                'scheduledWarmLimit'         => $default_scheduled_warm_limit,
+                'scheduledWarmLimit'         => 8,
                 'warmMenuLocation'           => '',
                 'warmMenuDepth'              => '',
                 'warmFullSiteSources'        => '',
@@ -123,6 +122,11 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cacheQueryStringsEnabled'   => false,
                 'cacheQueryStringAllowlist'  => '',
             );
+        }
+
+        private static function get_full_site_warm_source_order_keys()
+        {
+            return array('homepage', 'menus', 'pages', 'posts', 'categories', 'tags', 'woocommerce_products', 'woocommerce_product_taxonomies', 'custom_post_types', 'custom_taxonomies');
         }
 
         private static function get_default_excluded_paths()
@@ -231,7 +235,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             // need to stay blocking when Defer all JS is enabled. Slider/theme
             // protections are not hidden; the admin UI appends slider defaults
             // only when Fix sliders / hero sections is enabled.
-            return array(
+            return array_values(array_unique(array(
                 'jquery',
                 'jquery-core',
                 'jquery-migrate',
@@ -253,8 +257,30 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'jquery-js-after',
                 'wp-i18n-js-after',
                 'wp-api-fetch-js-after',
+                'wp-a11y-js-translations',
+                'media-views-js-translations',
+                'media-views.min.js',
+                'media-editor-js-translations',
+                'media-editor.min.js',
+                'wp-keycodes-js-translations',
+                'wp-date-js-after',
+                'wp-data-js-after',
+                'wp-rich-text-js-translations',
+                'wp-components-js-translations',
                 'js-translations',
                 '-js-translations',
+                'contact-form-7',
+                'mediaelementplayer',
+                'davici-script-js-after',
+                'functions.js',
+                'TreeSixtyImageRotate',
+                'woocommerce-google',
+                'woocommerce-coupon-box',
+                'wcb_params',
+                'wcb.min.js',
+                'complianz',
+                'complianz.min.js',
+                'cmplz',
                 'elementor',
                 'elementor-frontend',
                 'elementor-frontend-modules',
@@ -267,7 +293,126 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'elementor/assets/js/elementor-admin-bar.min.js',
                 'common.min.js',
                 'elementor-admin-bar.min.js',
-            );
+                // Former internal dependency-safety fragments. These are now
+                // visible/editable Populate Defaults only; runtime code must
+                // not silently apply them when the textarea is empty or edited.
+                'googlesitekit',
+                'google-site-kit',
+                'sitekit',
+                'elementor/assets/js/frontend',
+                'elementor-pro/assets/js/frontend',
+                'elementor-pro-frontend',
+                'header-footer-elementor',
+                'hfe-',
+                'smartmenus',
+                'html_types/image',
+                'html_types/color',
+                'html_types/label',
+                'html_types/slide',
+                'html_types/slider',
+                'product-ajax-search',
+                'search-popup',
+                'nav-mobile',
+                'megamenu',
+                'header-cart',
+                'cart-canvas',
+                'off-canvas',
+                'woocommerce-products-filter',
+                'woof_',
+                'dgwt-wcas',
+                'woosq',
+                'wpcbn',
+                'author-arc',
+                'mailerlite',
+                'mc4wp',
+                'sourcebuster',
+                'order-attribution',
+                'eael-general',
+                'jquery/ui',
+                '/plugins/woocommerce/assets/js/frontend/cart-fragments',
+                '/plugins/woocommerce/assets/js/frontend/add-to-cart',
+                '/plugins/woocommerce/assets/js/frontend/checkout',
+                '/plugins/woocommerce/assets/js/frontend/single-product',
+                '/plugins/woocommerce/assets/js/selectwoo',
+                'wc-cart',
+                'wc-checkout',
+                'wc-add-to-cart',
+                'wc-single-product',
+                'wc-country-select',
+                'wc-address-i18n',
+                'wc-credit-card-form',
+                'selectwoo',
+                'mediaelement',
+                'mejs',
+                'mediaelementplayer',
+                'smartslider',
+                'smart-slider',
+                'n2-ss',
+                'splide',
+                'owl.carousel',
+                'owlcarousel',
+                'flickity',
+                'keen-slider',
+                'bxslider',
+                'masterslider',
+                'master-slider',
+                'layerslider',
+                'layer-slider',
+                'metaslider',
+                'soliloquy',
+                'royalslider',
+                'html_types/color',
+                'html_types/label',
+                'smartmenus',
+                'modal',
+                'popup',
+                'lightbox',
+                'fancybox',
+                'photoswipe',
+                'magnific-popup',
+                'video',
+                'plyr',
+                'youtube',
+                'vimeo',
+                'wistia',
+                'bricks',
+                'oxygen',
+                'wpbakery',
+                'visual-composer',
+                'vc_',
+                'wpb_',
+                'jet-',
+                'crocoblock',
+                'elementskit',
+                'eael',
+                'essential-addons',
+                'wpforms',
+                'fluentform',
+                'forminator',
+                'gravityforms',
+                // Site/theme error-derived tokens are still not hidden rules: they
+                // are suggestions the user can Populate, edit, save, or remove.
+                '360imagerotate',
+                '360imagerotate.js',
+                'tree-sixty',
+                'treesixty',
+                'three-sixty',
+                'threesixty',
+                'davici-script-js',
+                'davici-script-js-after',
+                'bootstrap',
+                'bootstrap.min.js',
+                'portfolio.js',
+                'woocommerce-google-analytics-integration',
+                'woocommerce-google-analytics-integration-js',
+                'woocommerce-google-analytics-integration-data-js-after',
+                'woocommerce-google-analytics-integration-gtag',
+                'google_gtagjs',
+                'google-tag-manager',
+                'gtag/js',
+                'gtm.js',
+                'dataLayer',
+            )));
         }
 
         private static function get_default_slider_js_delay_defer_exclusion_patterns()
@@ -427,18 +572,26 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             );
         }
 
-        public static function get_crawl_scope_summary()
+        public static function get_crawl_scope_summary($settings_override = null)
         {
             $fallback = array(
-                'baseUrlCount' => 1,
+                'baseUrlCount' => 0,
                 'menuUrlCount' => 0,
-                'seedUrlCount' => 1,
+                'seedUrlCount' => 0,
                 'postUrlCount' => 0,
                 'termUrlCount' => 0,
                 'contentUrlCount' => 0,
-                'estimatedTotal' => 1,
+                'estimatedTotal' => 0,
                 'maxUrls' => 5000,
-                'defaultScheduledWarmLimit' => 1,
+                'defaultScheduledWarmLimit' => 8,
+                'suggestedScheduledWarmLimit' => 0,
+                'scheduledWarmLimitDerived' => false,
+                'scheduledWarmLimitSource' => 'user_cap',
+                'sourceCounts' => array(),
+                'sourceBreakdown' => array(),
+                'sourceOrder' => self::get_full_site_warm_source_order_keys(),
+                'generatedAt' => 0,
+                'storedAt' => 0,
                 'menuOptions' => array(),
                 'menuDepthOptions' => array(
                     array('value' => '', 'label' => 'Select depth'),
@@ -458,8 +611,14 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             }
 
             $engine = self::get_engine_instance();
-            if ($engine && method_exists($engine, 'get_crawl_scope_summary')) {
-                $summary = $engine->get_crawl_scope_summary();
+            if ($engine) {
+                $summary = null;
+                if (is_array($settings_override) && method_exists($engine, 'get_crawl_scope_summary_for_settings')) {
+                    $summary = $engine->get_crawl_scope_summary_for_settings($settings_override);
+                } elseif (method_exists($engine, 'get_crawl_scope_summary')) {
+                    $summary = $engine->get_crawl_scope_summary();
+                }
+
                 if (is_array($summary)) {
                     return array_merge($fallback, $summary);
                 }
@@ -1295,103 +1454,26 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $defaults = self::get_dashboard_defaults();
             $settings = wp_parse_args($settings, $defaults);
 
-            if (array_key_exists('cronWarmPagesPerMinute', $raw_settings)) {
-                $settings['cronWarmPagesPerMinute'] = $raw_settings['cronWarmPagesPerMinute'];
-            }
-
-            if (array_key_exists('scheduledWarmLimit', $raw_settings)) {
-                $settings['scheduledWarmLimit'] = $raw_settings['scheduledWarmLimit'];
-            }
-
-            if (array_key_exists('cssBundleCleanupGraceHours', $raw_settings)) {
-                $settings['cssBundleCleanupGraceHours'] = $raw_settings['cssBundleCleanupGraceHours'];
-            }
-
-            if (array_key_exists('cssBundleCleanupDeleteLimit', $raw_settings)) {
-                $settings['cssBundleCleanupDeleteLimit'] = $raw_settings['cssBundleCleanupDeleteLimit'];
-            }
-
-            $boolean_keys = array(
-                'pageCacheEnabled',
-                'objectCacheEnabled',
-                'brotliEnabled',
-                'gzipEnabled',
-                'cacheStatsEnabled',
-                'mediaOptimizationEnabled',
-                'mediaGenerateOnUploadEnabled',
-                'mediaGenerateOnDemandEnabled',
-                'deferJsEnabled',
-                'deferAllJsEnabled',
-                'delaySafeThirdPartyJsEnabled',
-                'lazyMailerliteNonceEnabled',
-                'delayFunctionalThirdPartyJsEnabled',
-                'asyncExternalScriptsEnabled',
-                'homepageCssBundleEnabled',
-                'homepageCssBundleInlineEnabled',
-                'leftoverCssBundleEnabled',
-                'delayIconFontsEnabled',
-                'delayIconFontsAutoDetectEnabled',
-                'pageCssBundleOnEntryEnabled',
-                'frontendSafeModeEnabled',
-                'sliderSafeModeEnabled',
-                'clsDimensionsEnabled',
-                'asyncCssEnabled',
-                'aggressiveAsyncCssEnabled',
-                'delayNonCriticalJsEnabled',
-                'lcpImagePriorityEnabled',
-                'lcpBoundaryDeferEnabled',
-                'mainThreadReliefEnabled',
-                'criticalRequestChainReliefEnabled',
-                'assetChainCleanupEnabled',
-                'assetCleanupWooProductAssetsEnabled',
-                'assetCleanupProductFilterAssetsEnabled',
-                'assetCleanupWooBlocksCssEnabled',
-                'googleFontsSwapEnabled',
-                'googleFontsLocalOptimizationEnabled',
-                'selfHostedFontCssOptimizationEnabled',
-                'selfHostedFontRuntimeRewriteEnabled',
-                'speculationRulesEnabled',
-                'browserCacheRulesEnabled',
-                'varnishCliEnabled',
-                'preRenderOnSave',
-                'woocommerceSafeModeEnabled',
-                'cacheCleanupEnabled',
-                'apcuFlushOnScheduledCleanup',
-                'cronWarmEnabled',
-                'cronWarmStartAfterCleanup',
-                'cronWarmStartAfterManualPurge',
-                'staleWhileRevalidateEnabled',
-                'cacheQueryStringsEnabled',
-                'redisUseTls',
-                'redisPersistent',
-            );
-
-            foreach ($boolean_keys as $key) {
-                $default = array_key_exists($key, $defaults) ? $defaults[$key] : false;
-                $settings[$key] = self::normalize_boolean_setting_value($settings[$key], $default);
-            }
-
-            // Defer and Delay controls are intentionally independent. Delay third-party and
-            // delay non-critical/local scripts must not silently enable each other or enable
-            // native defer, because that makes frontend regressions hard to isolate.
-
-            $settings['cacheCleanupIntervalHours'] = max(1, min(720, absint($settings['cacheCleanupIntervalHours'])));
-            $settings['cssBundleCleanupGraceHours'] = self::sanitize_bounded_integer_setting($settings['cssBundleCleanupGraceHours'], $defaults['cssBundleCleanupGraceHours'], 1, 168);
-            $settings['cssBundleCleanupDeleteLimit'] = self::sanitize_bounded_integer_setting($settings['cssBundleCleanupDeleteLimit'], $defaults['cssBundleCleanupDeleteLimit'], 5, 500);
             $settings['cronWarmPagesPerMinute']    = max(0, min(600, absint($settings['cronWarmPagesPerMinute'])));
-            $settings['scheduledWarmLimit']        = max(0, min(5000, absint($settings['scheduledWarmLimit'])));
             $settings['warmMenuLocation']          = sanitize_key((string) $settings['warmMenuLocation']);
             $settings['warmMenuDepth']             = in_array((string) $settings['warmMenuDepth'], array('1', '2', '3', 'all'), true) ? (string) $settings['warmMenuDepth'] : '';
             $warm_full_site_sources = preg_split('/[\r\n,]+/', (string) $settings['warmFullSiteSources']);
-            $warm_full_site_allowed = array('homepage', 'menus', 'pages', 'posts', 'categories', 'tags', 'custom_post_types', 'custom_taxonomies', 'woocommerce_products', 'woocommerce_product_taxonomies');
-            $warm_full_site_clean = array();
+            $warm_full_site_allowed = self::get_full_site_warm_source_order_keys();
+            $warm_full_site_requested = array();
             foreach ((array) $warm_full_site_sources as $warm_full_site_source) {
                 $warm_full_site_source = sanitize_key((string) $warm_full_site_source);
                 if ('' !== $warm_full_site_source && in_array($warm_full_site_source, $warm_full_site_allowed, true)) {
+                    $warm_full_site_requested[$warm_full_site_source] = true;
+                }
+            }
+            $warm_full_site_clean = array();
+            foreach ($warm_full_site_allowed as $warm_full_site_source) {
+                if (isset($warm_full_site_requested[$warm_full_site_source])) {
                     $warm_full_site_clean[$warm_full_site_source] = true;
                 }
             }
             $settings['warmFullSiteSources']       = implode(',', array_keys($warm_full_site_clean));
+            $settings['scheduledWarmLimit']        = max(0, min(5000, absint($settings['scheduledWarmLimit'])));
             $settings['varnishCliTimeoutSeconds']  = max(1, min(30, absint($settings['varnishCliTimeoutSeconds'])));
             $settings['cacheFreshTtlMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1, 1440);
             $settings['cacheMaxStaleMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], (int) $settings['cacheFreshTtlMinutes'], 10080);
@@ -1447,6 +1529,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             // conservative boundary deferral path while keeping slider/runtime assets protected.
             if (!empty($settings['frontendSafeModeEnabled'])) {
                 $settings['lcpBoundaryDeferEnabled'] = false;
+                $settings['lazyLoadImagesEnabled'] = false;
             }
 
             $compression_support = self::get_compression_support_status();
@@ -1683,9 +1766,10 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $defer_all_js_enabled = $defer_js_enabled && !empty($ui['deferAllJsEnabled']);
             $delay_safe_third_party_js_enabled = !empty($ui['delaySafeThirdPartyJsEnabled']);
             $delay_functional_third_party_js_enabled = !empty($ui['delayFunctionalThirdPartyJsEnabled']);
+            $delay_all_third_party_js_enabled = !empty($ui['delayAllThirdPartyJsEnabled']);
             $delay_non_critical_js_enabled = !empty($ui['delayNonCriticalJsEnabled']);
             $defer_stage_aggressive = $delay_non_critical_js_enabled;
-            $defer_stage_balanced = $delay_safe_third_party_js_enabled || $delay_functional_third_party_js_enabled || $defer_stage_aggressive;
+            $defer_stage_balanced = $delay_safe_third_party_js_enabled || $delay_functional_third_party_js_enabled || $delay_all_third_party_js_enabled || $defer_stage_aggressive;
             $defer_stage_safe = $defer_js_enabled || $defer_stage_balanced;
 
             self::$settings_cache = array(
@@ -1718,6 +1802,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'defer_js_force_list'          => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsForceList'])),
                 'defer_js_exclude_list'        => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
                 'delay_safe_third_party_js'         => $delay_safe_third_party_js_enabled,
+                'delay_all_third_party_js'          => $delay_all_third_party_js_enabled,
                 'lazy_mailerlite_nonce'        => !empty($ui['lazyMailerliteNonceEnabled']),
                 'delay_safe_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delaySafeThirdPartyJsPatterns'])),
                 'delay_functional_third_party_js' => $delay_functional_third_party_js_enabled,
@@ -1746,6 +1831,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'delay_non_critical_js_aggressive' => $defer_stage_aggressive,
                 'delay_non_critical_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
                 'lcp_image_priority'           => !empty($ui['lcpImagePriorityEnabled']),
+                'lazy_load_images'            => !empty($ui['lazyLoadImagesEnabled']),
                 'lcp_boundary_defer'           => !empty($ui['lcpBoundaryDeferEnabled']),
                 'lcp_image_priority_override_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['lcpImagePriorityOverride'])),
                 'manual_lcp_hero_selector_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['manualLcpHeroSelector'] ?? '')),

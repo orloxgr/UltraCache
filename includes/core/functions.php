@@ -1852,7 +1852,7 @@ if (!function_exists('ucwp_safe_configured_infrastructure_remote_request')) {
             return new WP_Error('ucwp_empty_remote_url', 'Remote request URL is empty.');
         }
 
-        $parts = function_exists('wp_parse_url') ? wp_parse_url($url) : parse_url($url);
+        $parts = wp_parse_url($url);
         if (!is_array($parts)) {
             return new WP_Error('ucwp_invalid_infrastructure_url', 'Configured infrastructure URL is invalid.');
         }

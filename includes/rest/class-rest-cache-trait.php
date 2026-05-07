@@ -325,8 +325,34 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 unset($settings['redisPassword']);
             }
 
+            $profile_probe = filter_var($request->get_param('profileProbe'), FILTER_VALIDATE_BOOLEAN)
+                || filter_var($request->get_param('skipPayloadProbe'), FILTER_VALIDATE_BOOLEAN);
+
             $result = Ultra_Cache_WP::test_object_cache_backend($backend, $settings);
+            $result['profileProbe'] = (bool) $profile_probe;
+
+            // Profile auto-selection needs backend availability only. Do not mix the
+            // runtime object payload probe into that decision, because the active
+            // runtime backend may still be the previous setting until the profile is
+            // saved and WordPress bootstraps again. Manual backend tests keep the
+            // payload probe so users can explicitly verify object payload storage.
+            if (!$profile_probe && !empty($result['success']) && class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_runtime_object_cache_payloads')) {
+                $payload_probe = Ultra_Cache_Object_Cache_Manager::test_runtime_object_cache_payloads();
+                $result['payloadProbe'] = is_array($payload_probe) ? $payload_probe : array();
+                if (empty($payload_probe['success'])) {
+                    $result['success'] = false;
+                    $result['message'] = !empty($payload_probe['message']) ? (string) $payload_probe['message'] : 'Object cache payload probe failed.';
+                } elseif (!empty($payload_probe['message'])) {
+                    $result['message'] = trim((string) ($result['message'] ?? '') . ' ' . (string) $payload_probe['message']);
+                }
+            }
             $status = !empty($result['blocked']) ? 400 : (!empty($result['success']) ? 200 : 500);
+            if ($profile_probe && empty($result['blocked'])) {
+                // Profile auto-setup treats a determinate unavailable backend as a
+                // normal probe result, not as a browser-level server failure.
+                // Manual backend tests keep strict HTTP status semantics.
+                $status = 200;
+            }
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
                 $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
             }

@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.57.46
+ * Version: 2.57.95
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 7.4
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.57.46');
+    define('UCWP_VERSION', '2.57.95');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -40,6 +40,9 @@ if (!defined('UCWP_CRON_WARM_STATE_KEY')) {
 }
 if (!defined('UCWP_CRON_WARM_LOCK_KEY')) {
     define('UCWP_CRON_WARM_LOCK_KEY', 'ucwp_cron_warm_lock');
+}
+if (!defined('UCWP_CRAWL_SCOPE_SUMMARY_KEY')) {
+    define('UCWP_CRAWL_SCOPE_SUMMARY_KEY', 'ucwp_crawl_scope_summary');
 }
 if (!defined('UCWP_WP_CACHE_MANAGED_KEY')) {
     define('UCWP_WP_CACHE_MANAGED_KEY', 'ucwp_wp_cache_managed');
@@ -516,6 +519,13 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         public static function get_cache_stats_disabled_payload($source = 'stats_disabled')
         {
+            $opcache = method_exists(__CLASS__, 'get_opcache_status_summary')
+                ? self::get_opcache_status_summary()
+                : array();
+            $apcu = method_exists(__CLASS__, 'get_apcu_status_summary')
+                ? self::get_apcu_status_summary()
+                : array();
+
             return array(
                 'success' => true,
                 'enabled' => false,
@@ -531,11 +541,16 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'dashboardStatsSnapshotAge' => 0,
                 'dashboardStatsRefreshInterval' => 0,
                 'dashboardStatsPollingDisabled' => true,
+                // Cache Statistics OFF must hard-stop counters/scans/polling, but it must
+                // not hide unrelated runtime tools. OPcache/APCu status is lightweight
+                // admin runtime visibility and keeps the manual flush buttons usable.
+                'opcache' => $opcache,
+                'apcu' => $apcu,
                 'diagnostics' => array(
                     'cacheStats' => array(
                         'enabled' => false,
                         'disabled' => true,
-                        'message' => 'When disabled, UltraCache does not collect, refresh, scan, or poll cache statistics.',
+                        'message' => 'When disabled, UltraCache does not collect, refresh, scan, or poll cache statistics. OPcache/APCu runtime status and manual flush controls remain available.',
                     ),
                     'objectCache' => method_exists(__CLASS__, 'get_object_cache_status_diagnostic_lite')
                         ? self::get_object_cache_status_diagnostic_lite()
@@ -1119,7 +1134,14 @@ if (!class_exists('Ultra_Cache_WP')) {
             $public_runtime = self::normalize_runtime_config($runtime);
             unset($public_runtime['revalidate_secret'], $public_runtime['redis_password'], $public_runtime['varnish_admin_secret']);
 
-            return "<?php\n/** UltraCache managed runtime config. Secret-free by design. */\nif (!defined('ABSPATH')) {\n    exit;\n}\nreturn " . var_export($public_runtime, true) . ";\n";
+            $json = wp_json_encode($public_runtime, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if (!is_string($json)) {
+                $json = '{}';
+            }
+
+            $encoded_json = str_replace(array('\\', "'"), array('\\\\', "\\'"), $json);
+
+            return "<?php\n/** UltraCache managed runtime config. Secret-free by design. */\nif (!defined('ABSPATH')) {\n    exit;\n}\n\$ucwp_runtime_config = json_decode('" . $encoded_json . "', true);\nreturn is_array(\$ucwp_runtime_config) ? \$ucwp_runtime_config : array();\n";
         }
 
         private static function write_file_atomically($target, $contents, $context)
@@ -2186,6 +2208,7 @@ private static function delete_plugin_options_and_transients()
         UCWP_SETTINGS_KEY,
         UCWP_CRON_WARM_STATE_KEY,
         UCWP_CRON_WARM_LOCK_KEY . '_atomic',
+        defined('UCWP_CRAWL_SCOPE_SUMMARY_KEY') ? UCWP_CRAWL_SCOPE_SUMMARY_KEY : 'ucwp_crawl_scope_summary',
         UCWP_WP_CACHE_MANAGED_KEY,
         UCWP_SETTINGS_KEY . '_action_jobs',
         'ucwp_media_conversion_queue',
@@ -2409,9 +2432,31 @@ public static function delete_all_plugin_data_and_deactivate()
                 );
             }
 
+            $crawl_scope_summary = self::get_crawl_scope_summary($current_settings);
+            $selected_warm_sources_for_summary = array_filter(array_map('trim', preg_split('/[\r\n,]+/', (string) ($current_settings['warmFullSiteSources'] ?? ''))));
+            $crawl_scope_source_counts = isset($crawl_scope_summary['sourceCounts']) && is_array($crawl_scope_summary['sourceCounts']) ? $crawl_scope_summary['sourceCounts'] : array();
+            $crawl_scope_source_breakdown = isset($crawl_scope_summary['sourceBreakdown']) && is_array($crawl_scope_summary['sourceBreakdown']) ? $crawl_scope_summary['sourceBreakdown'] : array();
+            $crawl_scope_selected_sources = isset($crawl_scope_summary['selectedFullSiteSources']) && is_array($crawl_scope_summary['selectedFullSiteSources']) ? $crawl_scope_summary['selectedFullSiteSources'] : array();
+            $should_store_crawl_scope_summary = is_array($crawl_scope_summary);
+            if (!empty($selected_warm_sources_for_summary) && empty($crawl_scope_source_counts) && empty($crawl_scope_source_breakdown) && empty($crawl_scope_selected_sources)) {
+                $should_store_crawl_scope_summary = false;
+            }
+            if (defined('UCWP_CRAWL_SCOPE_SUMMARY_KEY') && $should_store_crawl_scope_summary) {
+                $crawl_scope_summary['storedAt'] = time();
+                update_option(
+                    UCWP_CRAWL_SCOPE_SUMMARY_KEY,
+                    array(
+                        'updatedAt' => time(),
+                        'summary'   => $crawl_scope_summary,
+                    ),
+                    false
+                );
+            }
+
             $payload = array(
                 'success'     => true,
                 'settings'    => self::get_dashboard_settings_for_client(),
+                'crawlScopeSummary' => $crawl_scope_summary,
                 'stats'       => self::get_engine_stats(),
                 'diagnostics' => self::get_dashboard_diagnostics(),
             );

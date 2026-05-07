@@ -423,6 +423,21 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     foreach ($this->extract_google_fonts_stylesheet_urls_from_html($html) as $font_url) {
                         $font_urls[$font_url] = $font_url;
                     }
+
+                    $css_scanned = 0;
+                    foreach ($this->extract_same_origin_stylesheet_urls_from_html($html, $scan_url) as $css_url) {
+                        if ($css_scanned >= 40) {
+                            break;
+                        }
+                        $css_scanned++;
+                        $css = $this->fetch_google_fonts_scan_css($css_url);
+                        if ('' === $css) {
+                            continue;
+                        }
+                        foreach ($this->extract_google_fonts_stylesheet_urls_from_css($css, $css_url) as $font_url) {
+                            $font_urls[$font_url] = $font_url;
+                        }
+                    }
                 }
 
                 $built = 0;
@@ -718,6 +733,124 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                             $urls[md5($url)] = esc_url_raw($url);
                         }
                     }
+                }
+            }
+
+            return array_values($urls);
+        }
+
+        private function extract_same_origin_stylesheet_urls_from_html($html, $base_url = '')
+        {
+            $html = (string) $html;
+            if ('' === $html || false === stripos($html, '<link')) {
+                return array();
+            }
+
+            $base_url = '' !== (string) $base_url ? (string) $base_url : home_url('/');
+            $urls = array();
+            if (!preg_match_all('/<link\b[^>]*>/is', $html, $matches) || empty($matches[0])) {
+                return array();
+            }
+
+            foreach ((array) $matches[0] as $tag) {
+                $tag = (string) $tag;
+                if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
+                    continue;
+                }
+
+                $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'href'), ENT_QUOTES | ENT_HTML5);
+                if ('' === $href || false !== stripos($href, 'fonts.googleapis.com')) {
+                    continue;
+                }
+
+                $absolute = $this->absolutize_public_resource_url($href, $base_url);
+                $normalized = $this->normalize_public_resource_url($absolute);
+                if ('' === $normalized || !$this->is_cacheable_local_url($normalized)) {
+                    continue;
+                }
+
+                $path = strtolower((string) wp_parse_url($normalized, PHP_URL_PATH));
+                if (false === strpos($path, '.css')) {
+                    continue;
+                }
+
+                if (false !== strpos($path, '/cache/ultracache/')) {
+                    continue;
+                }
+
+                $urls[$normalized] = $normalized;
+            }
+
+            return array_values($urls);
+        }
+
+        private function fetch_google_fonts_scan_css($url)
+        {
+            $url = $this->normalize_public_resource_url((string) $url);
+            if ('' === $url || !$this->is_cacheable_local_url($url)) {
+                return '';
+            }
+
+            $response = ucwp_safe_loopback_remote_request(
+                $url,
+                array(
+                    'timeout' => 12,
+                    'redirection' => 3,
+                    'user-agent' => 'UltraCache-GoogleFontsCssScanner/' . (defined('UCWP_VERSION') ? UCWP_VERSION : '1.0') . '; ' . home_url('/'),
+                    'headers' => array(
+                        'Accept' => 'text/css,*/*;q=0.1',
+                        'Cache-Control' => 'no-cache',
+                    ),
+                )
+            );
+
+            if (is_wp_error($response)) {
+                return '';
+            }
+
+            $code = (int) wp_remote_retrieve_response_code($response);
+            if ($code < 200 || $code >= 400) {
+                return '';
+            }
+
+            $body = wp_remote_retrieve_body($response);
+            if (!is_string($body) || '' === $body || false === stripos($body, 'fonts.googleapis.com')) {
+                return '';
+            }
+
+            return $body;
+        }
+
+        private function extract_google_fonts_stylesheet_urls_from_css($css, $css_url)
+        {
+            $css = (string) $css;
+            if ('' === $css || false === stripos($css, 'fonts.googleapis.com')) {
+                return array();
+            }
+
+            $urls = array();
+            $pattern = '/@import\s+(?:url\(\s*"([^"]+)"\s*\)|url\(\s*\'([^\']+)\'\s*\)|url\(\s*([^)]+?)\s*\)|"([^"]+)"|\'([^\']+)\')([^;]*);/i';
+            if (!preg_match_all($pattern, $css, $matches, PREG_SET_ORDER)) {
+                return array();
+            }
+
+            foreach ($matches as $match) {
+                $import_url = '';
+                for ($i = 1; $i <= 5; $i++) {
+                    if (isset($match[$i]) && '' !== trim((string) $match[$i])) {
+                        $import_url = trim((string) $match[$i]);
+                        break;
+                    }
+                }
+
+                if ('' === $import_url) {
+                    continue;
+                }
+
+                $absolute = $this->absolutize_public_resource_url($this->decode_google_fonts_html_url($import_url), $css_url);
+                $absolute = $this->append_google_fonts_display_swap($absolute);
+                if ($this->is_google_fonts_stylesheet_url($absolute)) {
+                    $urls[md5($absolute)] = esc_url_raw($absolute);
                 }
             }
 
@@ -1405,11 +1538,20 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $css = ucwp_safe_file_get_contents($source_path, 'build_optimized_font_css_asset', true);
-            if (!is_string($css) || '' === $css || false === stripos($css, '@font-face')) {
+            if (!is_string($css) || '' === $css) {
                 return array();
             }
 
-            $optimized_css = $this->rewrite_self_hosted_font_css_content($css, $source_url);
+            $has_font_faces = false !== stripos($css, '@font-face');
+            $has_google_imports = false !== stripos($css, 'fonts.googleapis.com');
+            if (!$has_font_faces && !$has_google_imports) {
+                return array();
+            }
+
+            $google_import_stats = array();
+            $optimized_css = $this->rewrite_self_hosted_font_css_content($css, $source_url, $google_import_stats);
+            $google_imports_localized = !empty($google_import_stats['localized']);
+            $google_imports_changed = $optimized_css !== $css && !empty($google_import_stats['found']);
             $settings = $this->get_settings();
             $delayed_font_css = '';
             $delayed_font_families = array();
@@ -1430,7 +1572,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $font_css_optimization_stats = array();
-            if (!$preserve_mixed_css_for_delayed_icon_fonts && function_exists('ucwp_optimize_generated_font_css')) {
+            if (!$preserve_mixed_css_for_delayed_icon_fonts && empty($google_imports_changed) && function_exists('ucwp_optimize_generated_font_css')) {
                 $font_css_optimization = ucwp_optimize_generated_font_css($optimized_css, $source_url);
                 if (is_array($font_css_optimization) && isset($font_css_optimization['stats']) && is_array($font_css_optimization['stats'])) {
                     $font_css_optimization_stats = $font_css_optimization['stats'];
@@ -1472,7 +1614,9 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 ";
             }
 
-            if ('' === trim((string) $optimized_css) || (false === stripos((string) $optimized_css, '@font-face') && '' === trim($delayed_font_css))) {
+            $preserve_mixed_css_for_google_imports = !empty($google_imports_changed);
+
+            if ('' === trim((string) $optimized_css) || (false === stripos((string) $optimized_css, '@font-face') && '' === trim($delayed_font_css) && empty($preserve_mixed_css_for_google_imports))) {
                 return array();
             }
 
@@ -1481,10 +1625,10 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $hash = md5($source_url . '|' . md5($optimized_css));
-            $active_css_is_mixed = !empty($preserve_mixed_css_for_delayed_icon_fonts);
+            $active_css_is_mixed = !empty($preserve_mixed_css_for_delayed_icon_fonts) || !empty($preserve_mixed_css_for_google_imports);
             $asset_dir_slug = $active_css_is_mixed ? 'optimized-css' : 'font-css';
             $asset_file_prefix = $active_css_is_mixed ? 'active-' : '';
-            $write_reason = $active_css_is_mixed ? 'optimized active css without delayed icon font-face blocks' : 'optimized font css';
+            $write_reason = !empty($preserve_mixed_css_for_google_imports) ? 'optimized active css with localized Google Fonts imports' : ($active_css_is_mixed ? 'optimized active css without delayed icon font-face blocks' : 'optimized font css');
 
             /*
              * 2.56.198: /font-css/ is reserved for actual font-only or delayed
@@ -1524,6 +1668,17 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             if ($active_css_is_mixed) {
                 $asset['activeCssIsMixed'] = true;
                 $asset['activeCssBucket'] = $asset_dir_slug;
+            }
+            if (!empty($preserve_mixed_css_for_google_imports)) {
+                $asset['googleFontsImportOptimization'] = array(
+                    'sourceUrl' => $source_url,
+                    'found' => (int) ($google_import_stats['found'] ?? 0),
+                    'localized' => (int) ($google_import_stats['localized'] ?? 0),
+                    'remainingRemote' => (int) ($google_import_stats['remainingRemote'] ?? 0),
+                    'displaySwapOnly' => (int) ($google_import_stats['displaySwapOnly'] ?? 0),
+                    'beforeBytes' => strlen($css),
+                    'afterBytes' => strlen((string) $optimized_css),
+                );
             }
             if (!empty($font_css_optimization_stats)) {
                 $asset['fontCssOptimization'] = $font_css_optimization_stats;
@@ -2833,10 +2988,78 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             );
         }
 
-        private function rewrite_self_hosted_font_css_content($css, $source_url)
+        private function rewrite_self_hosted_font_css_content($css, $source_url, array &$google_import_stats = null)
         {
             $css = $this->normalize_protocol_relative_urls_in_css($css, $source_url);
+            $css = $this->rewrite_google_fonts_imports_in_css($css, $source_url, $google_import_stats);
             return $this->normalize_font_face_display_in_css($css);
+        }
+
+        private function rewrite_google_fonts_imports_in_css($css, $source_url, array &$stats = null)
+        {
+            $css = (string) $css;
+            if ('' === $css || false === stripos($css, 'fonts.googleapis.com')) {
+                return $css;
+            }
+
+            if (null === $stats) {
+                $stats = array();
+            }
+
+            foreach (array('found', 'localized', 'displaySwapOnly', 'unchanged', 'remainingRemote') as $key) {
+                if (!isset($stats[$key])) {
+                    $stats[$key] = 0;
+                }
+            }
+
+            $settings = $this->get_settings();
+            $localize = !empty($settings['google_fonts_local_optimization']);
+            $swap = !empty($settings['google_fonts_swap']) || $localize;
+
+            $updated = $this->safe_google_fonts_preg_replace_callback('/@import\s+(?:url\(\s*"([^"]+)"\s*\)|url\(\s*\'([^\']+)\'\s*\)|url\(\s*([^)]+?)\s*\)|"([^"]+)"|\'([^\']+)\')([^;]*);/i', function ($matches) use ($source_url, $localize, $swap, &$stats) {
+                $import_url = '';
+                for ($i = 1; $i <= 5; $i++) {
+                    if (isset($matches[$i]) && '' !== trim((string) $matches[$i])) {
+                        $import_url = trim((string) $matches[$i]);
+                        break;
+                    }
+                }
+
+                if ('' === $import_url) {
+                    return (string) $matches[0];
+                }
+
+                $absolute = $this->absolutize_public_resource_url($this->decode_google_fonts_html_url($import_url), $source_url);
+                if ('' === $absolute || !$this->is_google_fonts_stylesheet_url($absolute)) {
+                    return (string) $matches[0];
+                }
+
+                $stats['found']++;
+                $suffix = isset($matches[6]) ? trim((string) $matches[6]) : '';
+                $rewritten_url = $swap ? $this->append_google_fonts_display_swap($absolute) : $absolute;
+                $localized_url = '';
+
+                if ($localize) {
+                    $localized_url = $this->get_google_fonts_url_for_current_request($rewritten_url, true);
+                    if (is_string($localized_url) && '' !== $localized_url) {
+                        $rewritten_url = $localized_url;
+                        $stats['localized']++;
+                    } else {
+                        $stats['remainingRemote']++;
+                    }
+                } elseif ($rewritten_url !== $absolute) {
+                    $stats['displaySwapOnly']++;
+                }
+
+                if ($rewritten_url === $import_url) {
+                    $stats['unchanged']++;
+                    return (string) $matches[0];
+                }
+
+                return '@import url("' . esc_url_raw($rewritten_url) . '")' . ('' !== $suffix ? ' ' . $suffix : '') . ';';
+            }, $css);
+
+            return is_string($updated) && '' !== $updated ? $updated : $css;
         }
 
         private function normalize_font_face_display_in_css($css)

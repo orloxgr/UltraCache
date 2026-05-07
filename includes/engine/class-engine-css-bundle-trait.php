@@ -1484,7 +1484,16 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 return trim((string) $fallback_rule);
             }
 
-            return '@import url("' . esc_url_raw($absolute) . '")' . ('' !== $suffix ? ' ' . $suffix : '') . ';';
+            $rule = '@import url("' . esc_url_raw($absolute) . '")' . ('' !== $suffix ? ' ' . $suffix : '') . ';';
+            if (false !== stripos($absolute, 'fonts.googleapis.com') && method_exists($this, 'rewrite_google_fonts_imports_in_css')) {
+                $google_import_stats = array();
+                $rewritten_rule = $this->rewrite_google_fonts_imports_in_css($rule, $source_url, $google_import_stats);
+                if (is_string($rewritten_rule) && '' !== $rewritten_rule) {
+                    return trim($rewritten_rule);
+                }
+            }
+
+            return $rule;
         }
 
         private function rewrite_frontpage_css_urls_for_bundle($css, $source_url)

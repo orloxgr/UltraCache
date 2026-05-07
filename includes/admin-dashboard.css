@@ -310,7 +310,11 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 }
 
 #uc-dashboard .bg-cyan-500\/5 {
-	background: rgba(71, 207, 255, 0.05);
+	background: transparent !important;
+}
+
+#uc-dashboard .bg-cyan-500\/10 {
+	background: transparent !important;
 }
 
 #uc-dashboard .bg-emerald-500 {
@@ -543,6 +547,35 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 .uc-btn--primary:active:not(:disabled) {
 	background: var(--uc-success-active);
 	border-color: var(--uc-success-active);
+}
+
+
+#uc-dashboard .uc-object-cache-backend-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 14px;
+	align-items: start;
+}
+
+#uc-dashboard .uc-object-cache-backend-choice {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+#uc-dashboard .uc-object-cache-backend-button {
+	min-height: 54px;
+}
+
+#uc-dashboard .uc-object-cache-backend-description {
+	padding: 0 1px;
+}
+
+@media (max-width: 640px) {
+	#uc-dashboard .uc-object-cache-backend-grid {
+		grid-template-columns: 1fr;
+	}
 }
 
 .uc-btn:focus-visible {
@@ -911,6 +944,8 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 }
 
 #uc-dashboard .rounded.border.border-cyan-500\/20.bg-cyan-500\/5.px-4.py-3.text-xs.text-cyan-200 {
+	background: transparent !important;
+	border-color: transparent !important;
 	padding: 24px;
 }
 

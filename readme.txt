@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.57.46
+Stable tag: 2.57.95
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -221,10 +221,141 @@ Disable the last risky optimization, confirm the issue disappears, then add visi
 
 == Changelog ==
 
-= 2.57.46 =
-* Final public-readiness packaging polish after the 2.57 hardening cycle.
-* Updated WordPress readme changelog and upgrade notice for the current public package.
-* Replaced private-build source wording with neutral public wording and added directory index guards.
+= 2.57.95 =
+* Move dependency-safety recommendations into the existing visible JS Delay / Defer Exclusions Populate Defaults flow instead of applying hidden runtime exclusion lists.
+* Expand Populate Defaults with the former internal JS dependency floor plus Davici 360-view and WooCommerce Google Analytics/GTag/GTM order-sensitive tokens.
+* Honor empty/custom JS Delay / Defer Exclusions without silently supplementing them with built-in delay/defer exclusion fragments.
+
+= 2.57.94 =
+* Strengthen JS exclusion group protection for public-release debugging: user exclusions can now protect related defining scripts for function/global tokens such as TreeSixtyImageRotate, and legacy jQuery/jQuery Migrate clusters are kept ordered when dependency-sensitive exclusions are present.
+
+= 2.57.93 =
+* Strengthen JS Delay / Defer Exclusions enforcement so matched console-error exclusions protect the whole related script dependency group, including WordPress inline before/extra/after/translation blocks and nearby external dependencies.
+* Improve exclusion matching for camelCase vs dashed script/plugin fragments, so values such as TreeSixtyImageRotate can match equivalent script URL fragments.
+* No new switches or exclusion boxes; this is a JS optimizer safety fix for anonymous optimized HTML.
+
+= 2.57.92 =
+* Tighten Console Error Handler suggestions by filtering browser stack noise and keeping targeted script path fragments.
+* Make the Console Error Handler use the same Runtime JS Scan suggestion engine used by live scans.
+* Avoid broad pasted-console false positives such as same-origin domains, jquery.min.js, main.js, functions.js, generic functions, and broad WooCommerce fragments.
+* Improve targeted suggestions for missing globals, jQuery plugin method errors, WooCommerce Coupon Box params, Complianz globals, WooCommerce Google Analytics inline-after errors, and targeted theme/plugin path fragments.
+
+= 2.57.90 =
+* Add a Console Error Handler helper under JS Delay / Defer Exclusions.
+* Keep one shared JS Delay / Defer Exclusions field; no new exclusion box is added.
+* Expand recommended JS Delay / Defer defaults with additional WordPress inline translation/config handles and common dependency-sensitive plugin fragments.
+
+= 2.57.89 =
+* Protect WordPress inline script dependency groups during Defer all JS so localized `*-js-extra`, `*-js-before`, and `*-js-after` snippets are not separated from their external script handle in anonymous optimized HTML.
+* Strip native async/defer from dependency-sensitive script groups instead of forcing a defer that can make plugin globals unavailable.
+
+= 2.57.87 =
+* Add visible Delay all third-party JS switch using existing Third-Party Delay Exclusions and JS Delay / Defer Exclusions.
+* Clarify the functional delay label as Delay known functional third-party JS.
+* Delay all third-party matched scripts with data-ucwp-delay-reason="all-third-party" and keep known safe/functional reasons when pattern-matched.
+* Open Top CSS bundle sources by bytes automatically after Run CSS Diagnostics.
+
+= 2.57.86 =
+* Improve manual LCP override selector support for simple CSS selectors such as `#hero > div.mask > img`, direct image selectors, and container selectors.
+* Match Single LCP Image URL values against equivalent original/optimized image variants so manual AVIF/WebP URLs can still boost the matching rendered `<img>` tag.
+* Force selected manual LCP images from lazy loading to eager/high priority and add explicit manual LCP reason markers.
+
+= 2.57.84 =
+* Strengthen LCP Image Priority fallback detection for first/main featured images in homepage, archive, and singular layouts.
+* Keep manual, SR7, and hero detection ahead of the featured-image fallback.
+* Add LCP reason/score markers for selected non-SR7 featured-image candidates.
+
+= 2.57.82 =
+* Remove Critical Request Chain Relief and LCP Boundary Defer from the Balanced profile while keeping both features available as manual options.
+* Add a guarded first/main `.wp-post-image` fallback to LCP Image Priority for homepage, archive, and blog layouts without replacing existing manual hero, SR7, or slider detection.
+
+= 2.57.81 =
+* Extend Local Google Fonts Optimization to rewrite Google Fonts @import rules found in loaded same-origin CSS.
+* Include loaded same-origin CSS files in manual Google Fonts rebuild scans so CSS-level @import URLs can be discovered without scanning entire plugin/theme directories.
+* Localize Google Fonts @import rules hoisted by CSS bundle generation and report local/remote Google @import rewrite counts in Font Pipeline diagnostics.
+
+= 2.57.80 =
+* Synchronize successful Generate on Demand AVIF/WebP conversions into the persistent media conversion queue.
+* Map on-demand source files back to attachment IDs and update best/avif/webp/both queue rows as skipped when fully optimized or pending when partially optimized.
+* Keep on-demand queue synchronization best-effort and scoped to successful generation so frontend/warm-up rewrites are not blocked by queue mapping failures.
+
+= 2.57.79 =
+* Apply profiles in two passes so Object Cache setup cannot block the rest of a profile from being saved.
+* Profile object-cache probes return clean unavailable results instead of browser-level HTTP 500 for expected backend failures.
+* Improve dashboard REST failure diagnostics with action/method/route/status details.
+
+= 2.57.78 =
+* Load real read-only Advanced Diagnostics during the dashboard bootstrap even when Cache Statistics are OFF.
+* Keep stats polling and counter collection hard-disabled when Cache Statistics are OFF.
+* Revert dashboard settings saves to the existing POST /settings REST route and remove the short-lived /settings/save route introduced in 2.57.77.
+
+= 2.57.75 =
+* Changed fresh-install defaults so Lazy MailerLite nonce refresh and Delay icon font auto-detect start OFF, matching the All Off profile and preventing a new install from being shown as Custom before a profile is applied.
+
+= 2.57.74 =
+* Fix Object Cache backend selector to use a dedicated three-column layout.
+* Keep each Redis/APCu/Disk description inside its own column under the button.
+* Preserve the race-safe exclusive selector behavior.
+
+= 2.57.72 =
+* Polished the Object Cache backend selector into compact Redis/APCu/Disk buttons.
+* Selected backend now uses the green primary action style; unselected backends use the standard dark action style.
+* Moved backend explanations outside the selector buttons and removed the selected-state badge text.
+
+= 2.57.71 =
+* Replace Object Cache backend switches with an exclusive Redis/APCu/Disk selector so rapid clicks cannot leave the backend on a stale toggle state.
+* Pass dashboard work-in-progress state into the Object Cache card so backend/settings actions are blocked while saves are queued.
+* Rewrite Quick start & examples as a concise best-results guide, with Balanced profile onboarding, CSS/JS testing guidance, scheduled warm-up cap notes, and multiline media WP-CLI commands.
+
+= 2.57.70 =
+* Keep OPcache and APCu runtime status visible when Cache Statistics are disabled.
+* Keep OPcache/APCu manual flush controls usable while cache counters, scans, polling, and dashboard stat collection remain hard-disabled.
+
+= 2.57.69 =
+* Fix Scheduled warm source-count refresh so freshly saved Full-site warm-up sources/menu/depth are used when generating the stored summary.
+* Preserve already-normalized warm-scope arrays during summary generation to prevent selected sources from being dropped and shown as 0 discovered URLs.
+
+= 2.57.66 =
+* Fixed a dashboard crash in Scheduled warm limit helper text caused by reading the advanced settings form outside the React component scope.
+* Clarified Cron Warm Up copy: cron warms HTML first, and when CSS Bundling is enabled missing bundles may be prepared before HTML is cached.
+
+= 2.57.63 =
+* Corrected the Scheduled warm limit helper text so detected menu/content/base URL totals add up correctly and the global crawl cap is labelled clearly.
+* Performance profiles preserve user-maintained visible lists/textareas, including CSS bundle exclusions, JS delay/defer exclusions, CSS async exclusions, preload lists, cache exception lists, query allowlists, manual LCP selectors, and other editable safeguard lists.
+* Performance profiles also preserve Redis connection infrastructure while still auto-detecting the active Object Cache backend/fallback from the configured infrastructure.
+* Runtime Scan context control spacing was polished with a 10px gap between the label and dropdown.
+
+= 2.57.60 =
+* Runtime Scan now reports blocked/failed resources separately from JavaScript dependency errors.
+* Resource load failures such as extension-blocked tracking/ads scripts are shown as “Blocked / failed resources” and are not counted as missing JS Delay / Defer exclusions.
+* The displayed scan URL now removes ucwp_runtime_js_scan_context along with the other internal scan query args.
+* Polished the Runtime Scan context dropdown to use the normal dashboard select styling and spacing.
+
+= 2.57.55 =
+* AVIF/WebP Batch UI polish: action buttons now display in a single column, helper descriptions are plain text, and media conversion progress now appears in the shared job-progress position below the Warm Cache / AVIF-WebP row.
+
+= 2.57.54 =
+* Dashboard layout polish: Profiles now sit directly below Stats, Custom is full-width, presets use a two-column grid, and the main flow puts Warm Cache and AVIF/WebP Batch before Cache Engine and Media Optimization.
+
+= 2.57.53 =
+* Fixed performance profile object-cache auto-detection so Redis, APCu, and Disk probes run in deterministic FIFO order.
+* Profile object-cache detection now skips the runtime payload probe and uses backend availability only, preventing accidental Disk fallback from pending/indeterminate probe results.
+* All Off no longer runs object-cache or query allowlist detection; it simply disables the profile-controlled features.
+
+= 2.57.52 =
+* Dashboard action lifecycle cleanup: switches, buttons, manual tests, and queued dashboard actions now enter a single FIFO UI operation pipeline.
+* Persistent per-operation processing toasts remain visible until each queued operation completes.
+* Dashboard stats/diagnostics refresh is deferred until the operation queue is empty, preventing out-of-order refresh races.
+
+= 2.57.49 =
+* Polished object-cache dashboard passive status so manual test/probe rows are not shown as “Not tested yet” before a user test.
+* Kept Redis payload guard details out of passive status.
+* Rendered dashboard status values without background/pill styling.
+
+= 2.57.47 =
+* Final PHPCS public-readiness polish after the 2.57 hardening cycle.
+* Replaced the remaining production-scan `parse_url()` fallback with `wp_parse_url()`.
+* Rendered managed runtime config without `var_export()` so production scans no longer flag debug/development output helpers.
 
 = 2.57.45 =
 * Polished Varnish admin-mode UI copy placement and styling.
@@ -281,8 +412,41 @@ Release notes are maintained in `changelog.txt`.
 
 == Upgrade Notice ==
 
-= 2.57.46 =
-Final public-readiness packaging polish after the 2.57 hardening cycle. Update, purge cache, warm important pages, and review diagnostics.
+= 2.57.70 =
+OPcache/APCu runtime boxes and manual flush buttons remain available when Cache Statistics are disabled.
+
+= 2.57.69 =
+Scheduled warm limit source counts are generated from the freshly saved Full-site warm-up settings.
+
+= 2.57.66 =
+Fixes a Scheduled warm limit dashboard crash and clarifies that cron warm-up may prepare missing CSS bundles when CSS Bundling is enabled.
+
+= 2.57.63 =
+Scheduled warm limit helper text now reports detected URL totals accurately and labels the global crawl cap clearly. Performance profiles continue to preserve user-maintained visible exclusion/safeguard lists and Redis connection infrastructure.
+
+= 2.57.60 =
+Runtime Scan now shows extension/client-blocked resources separately from JavaScript dependency errors and cleans the displayed anonymous scan URL.
+
+= 2.57.55 =
+AVIF/WebP Batch layout polish only. Media batch controls now match the Warm Cache style and media conversion progress appears in the shared job-progress area.
+
+= 2.57.54 =
+Dashboard layout polish only. Profiles now appear immediately below Stats, followed by Warm Cache, AVIF/WebP Batch, Cache Engine, and Media Optimization.
+
+= 2.57.53 =
+Performance profile object-cache detection now waits for deterministic Redis > APCu > Disk backend probes before saving profile settings, preventing fast-click races and accidental Disk fallback.
+
+= 2.57.52 =
+Fixes the Lazy MailerLite nonce refresh switch persistence so All Off and manual toggles save correctly.
+
+= 2.57.52 =
+Dashboard action lifecycle cleanup: queued switches, buttons, manual tests, and warm/profile actions run in strict FIFO order with persistent processing toasts and final dashboard refresh after the queue drains.
+
+= 2.57.49 =
+Object-cache dashboard polish after backend truth hardening. Update, purge cache, warm important pages, and review diagnostics.
+
+= 2.57.47 =
+Final PHPCS polish for the public package. Update, purge cache, warm important pages, and review diagnostics.
 
 = 2.57.45 =
 Varnish UI copy polish after Varnish debug-log removal and endpoint/secret hardening.

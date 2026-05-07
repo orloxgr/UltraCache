@@ -87,6 +87,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $settings = is_array($settings) ? $settings : array();
             $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
             $font_css_dir = trailingslashit($cache_dir) . 'font-css/';
+            $optimized_css_dir = trailingslashit($cache_dir) . 'optimized-css/';
             $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
             $google_fonts_dir = trailingslashit($cache_dir) . 'google-fonts/';
             $manifest_file = $css_bundle_dir . 'manifest.json';
@@ -135,6 +136,10 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'fontDisplayPatchBytes' => 0,
                     'fontDisplayPatchFontFaces' => 0,
                     'fontDisplaySwapDeclarations' => 0,
+                    'googleImportRules' => 0,
+                    'localGoogleImportRules' => 0,
+                    'remoteGoogleImportRules' => 0,
+                    'filesWithGoogleImportRules' => 0,
                     'largestFiles' => array(),
                 );
                 if (!is_array($files)) {
@@ -153,10 +158,19 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     $woff = preg_match_all('/\.woff(?!2)(?:[\?#][^"\')\s]*)?/i', $css);
                     $ttf = preg_match_all('/\.ttf(?:[\?#][^"\')\s]*)?/i', $css);
                     $font_display_swap = preg_match_all('/font-display\s*:\s*swap\b/i', $css);
+                    $google_imports = preg_match_all('/@import[^;]+(?:google-fonts|fonts\.googleapis\.com)[^;]*;/i', $css);
+                    $remote_google_imports = preg_match_all('/@import[^;]+fonts\.googleapis\.com[^;]*;/i', $css);
+                    $local_google_imports = max(0, (int) $google_imports - (int) $remote_google_imports);
                     $summary['fontFaceBlocks'] += max(0, (int) $font_faces);
                     $summary['woff2Sources'] += max(0, (int) $woff2);
                     $summary['woffSources'] += max(0, (int) $woff);
                     $summary['ttfSources'] += max(0, (int) $ttf);
+                    $summary['googleImportRules'] += max(0, (int) $google_imports);
+                    $summary['localGoogleImportRules'] += max(0, (int) $local_google_imports);
+                    $summary['remoteGoogleImportRules'] += max(0, (int) $remote_google_imports);
+                    if ($google_imports > 0) {
+                        $summary['filesWithGoogleImportRules']++;
+                    }
                     $file_bytes = max(0, (int) ucwp_safe_filesize($file, 'font_pipeline_source_diagnostics'));
                     $basename = basename($file);
                     $is_font_display_patch = (0 === strpos((string) $basename, 'font-display-'));
@@ -187,6 +201,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                         'fontFaceBlocks' => max(0, (int) $font_faces),
                         'woff2Sources' => max(0, (int) $woff2),
                         'ttfSources' => max(0, (int) $ttf),
+                        'googleImportRules' => max(0, (int) $google_imports),
+                        'remoteGoogleImportRules' => max(0, (int) $remote_google_imports),
                         'nonFontCss' => ($font_faces <= 0 && $file_bytes > 0 && !$is_delayed_icon_active_css),
                         'delayedIconActiveCss' => (bool) $is_delayed_icon_active_css,
                     );
@@ -198,6 +214,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 return $summary;
             };
             $font_css_source_stats = $scan_css_font_sources($font_css_dir . '*.css');
+            $optimized_css_source_stats = $scan_css_font_sources($optimized_css_dir . '*.css');
+            $optimized_css_files = $count_files($optimized_css_dir . '*.css');
             $bundle_css = $count_files($css_bundle_dir . 'bundle-*.css');
             $bundle_delayed = $count_files($css_bundle_dir . 'bundle-*-delayed-fonts.css');
             $google_font_css = $count_files($google_fonts_dir . '*.css');
@@ -296,7 +314,20 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'fontDisplayPatchFontFaces' => (int) ($font_css_source_stats['fontDisplayPatchFontFaces'] ?? 0),
                     'fontDisplaySwapDeclarations' => (int) ($font_css_source_stats['fontDisplaySwapDeclarations'] ?? 0),
                     'largestFiles' => isset($font_css_source_stats['largestFiles']) && is_array($font_css_source_stats['largestFiles']) ? $font_css_source_stats['largestFiles'] : array(),
+                    'googleImportRules' => (int) ($font_css_source_stats['googleImportRules'] ?? 0),
+                    'localGoogleImportRules' => (int) ($font_css_source_stats['localGoogleImportRules'] ?? 0),
+                    'remoteGoogleImportRules' => (int) ($font_css_source_stats['remoteGoogleImportRules'] ?? 0),
+                    'filesWithGoogleImportRules' => (int) ($font_css_source_stats['filesWithGoogleImportRules'] ?? 0),
                     'cleanupMode' => 'font-face-only-generated-css-skip-mixed-sources-except-delayed-icon-active-css',
+                ),
+                'optimizedCss' => array(
+                    'dirExists' => is_dir($optimized_css_dir),
+                    'files' => (int) $optimized_css_files['count'],
+                    'bytes' => (int) $optimized_css_files['bytes'],
+                    'googleImportRules' => (int) ($optimized_css_source_stats['googleImportRules'] ?? 0),
+                    'localGoogleImportRules' => (int) ($optimized_css_source_stats['localGoogleImportRules'] ?? 0),
+                    'remoteGoogleImportRules' => (int) ($optimized_css_source_stats['remoteGoogleImportRules'] ?? 0),
+                    'filesWithGoogleImportRules' => (int) ($optimized_css_source_stats['filesWithGoogleImportRules'] ?? 0),
                 ),
                 'cssBundles' => array(
                     'dirExists' => is_dir($css_bundle_dir),
@@ -342,7 +373,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 array('key' => 'deferJsForceList', 'label' => 'Defer those scripts', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
                 array('key' => 'deferJsExcludeList', 'label' => 'JS Delay / Defer Exclusions', 'area' => 'JavaScript', 'kind' => 'Shared final override', 'shared' => true),
                 array('key' => 'delaySafeThirdPartyJsPatterns', 'label' => 'Safe third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
-                array('key' => 'delayFunctionalThirdPartyJsPatterns', 'label' => 'Functional third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
+                array('key' => 'delayFunctionalThirdPartyJsPatterns', 'label' => 'Known functional third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
                 array('key' => 'delayThirdPartyJsExcludeList', 'label' => 'Third-Party Delay Exclusions', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
                 array('key' => 'criticalRequestChainDelayList', 'label' => 'Delay Non-Critical Request Chains', 'area' => 'JavaScript/CSS', 'kind' => 'Textarea', 'shared' => false),
                 array('key' => 'criticalResourcePreloadList', 'label' => 'Manual Priority Preloads', 'area' => 'Critical chain', 'kind' => 'Textarea', 'shared' => false),
@@ -1457,6 +1488,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                             'persistent' => !empty($settings['redisPersistent']),
                             'dropinEnabled' => !empty($redis_dropin['enabled']),
                             'dropinError' => (string) ($redis_dropin['error'] ?? ''),
+                            'payloadSkipReason' => (string) ($redis_dropin['payloadSkipReason'] ?? ''),
                         )
                     ),
                     'apcu' => array_merge(
@@ -1563,6 +1595,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                                 ? array(
                                     'dropinEnabled' => !empty($object_backend_status['redis']['enabled']),
                                     'dropinError' => (string) ($object_backend_status['redis']['error'] ?? ''),
+                                    'payloadSkipReason' => (string) ($object_backend_status['redis']['payloadSkipReason'] ?? ''),
                                 )
                                 : array(),
                             array(

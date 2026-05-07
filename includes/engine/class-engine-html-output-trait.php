@@ -462,7 +462,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js'])) {
+            if (!empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js']) || !empty($settings['delay_all_third_party_js'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'delay-third-party-pattern-scripts', function ($html) use ($settings) {
                     return $this->delay_third_party_analytics_scripts_in_html($html, $settings);
                 });
@@ -475,6 +475,12 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             }
 
             $html = $this->apply_lcp_priority_pipeline($html, $settings, $frontend_safe_mode, $slider_safe_mode);
+
+            if (empty($frontend_safe_mode) && !empty($settings['lazy_load_images'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'lazy-load-async-images', function ($html) use ($settings) {
+                    return $this->apply_lazy_load_images_to_html($html, $settings);
+                });
+            }
 
             if ($this->should_apply_lcp_boundary_defer($settings, $frontend_safe_mode, $slider_safe_mode)) {
                 $html = $this->apply_html_rewrite_safely($html, 'lcp-boundary-defer', function ($html) use ($settings) {

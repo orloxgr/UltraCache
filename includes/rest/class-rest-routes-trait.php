@@ -354,6 +354,20 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         ),
                     ),
                 ),
+                '/runtime-js-scan/parse-console' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'parse_runtime_js_scan_console_errors'),
+                        'permission_callback' => array($this, 'check_permission'),
+                        'args'                => array(
+                            'text' => array(
+                                'type'              => 'string',
+                                'required'          => true,
+                                'sanitize_callback' => 'sanitize_textarea_field',
+                            ),
+                        ),
+                    ),
+                ),
                 '/action-queue' => array(
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,

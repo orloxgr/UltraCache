@@ -2,9 +2,17 @@
 
 UltraCache is a WordPress performance plugin for site owners and operators who want practical caching controls, visible safeguards, cache warm-up, object cache support, media optimization, CSS/font optimization, Varnish-aware purge tools, and diagnostics that explain what is happening.
 
-Current version: **2.57.46**
+Current version: **2.57.95**
 
-2.57.46 is a final public-readiness polish release: package metadata/readme cleanup, neutral public source wording, and directory index guards after the 2.57.33–2.57.45 hardening cycle.
+2.57.95 moves dependency-safety behavior into the existing visible JS Delay / Defer Exclusions Populate Defaults flow. Previously internal JS dependency fragments are now recommended defaults that users can add, edit, or remove from the existing textarea; empty/custom-edited lists are not silently supplemented by hidden runtime exclusion lists.
+
+2.57.87 adds a visible Delay all third-party JS mode that reuses the existing third-party and JS delay/defer exclusions, clarifies the known functional third-party delay label, and opens Top CSS bundle sources by bytes after running CSS diagnostics.
+
+2.57.75 aligns fresh-install defaults with the All Off profile by keeping Lazy MailerLite nonce refresh and Delay icon font auto-detect OFF until a profile enables them, so first install no longer appears as Custom.
+
+2.57.74 makes the Object Cache backend selector use a real three-column layout with each backend description inside its column, while preserving the race-safe exclusive selector behavior.
+
+2.57.72 polishes the Object Cache backend selector as compact Redis/APCu/Disk buttons, using the same selected/unselected button colors as existing dashboard actions while keeping the race-safe exclusive selector behavior.
 
 Release notes are maintained in [`changelog.txt`](changelog.txt).
 

@@ -1066,9 +1066,15 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				// the original JPG/PNG in cached HTML when WebP can be generated immediately.
 				$this->on_demand_conversions_started++;
 
-				return ('avif' === $format)
+				$generated = ('avif' === $format)
 					? (bool) $this->to_avif($source_file)
 					: (bool) $this->to_webp($source_file);
+
+				if ($generated && method_exists($this, 'sync_media_queue_after_on_demand_generation')) {
+					$this->sync_media_queue_after_on_demand_generation($source_file, $format);
+				}
+
+				return $generated;
 			} finally {
 				$this->release_on_demand_image_lock($lock_file);
 			}
