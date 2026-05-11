@@ -23,6 +23,9 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 'varnish_flush_all',
                 'opcache_flush',
                 'apcu_flush',
+                'litespeed_flush',
+                'nginx_flush',
+                'external_caches_redetect',
                 'redis_test',
                 'google_fonts_rebuild_cache',
                 'performance_profile',
@@ -332,6 +335,25 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             }
 
             if (is_array($value)) {
+                $lower_key = strtolower((string) $key);
+                if (in_array($lower_key, array('sourcedetails', 'source_details'), true)) {
+                    return array(
+                        '_truncated' => true,
+                        'count' => count($value),
+                        'items' => array_slice($value, 0, 10),
+                    );
+                }
+                if (in_array($lower_key, array('sourceurls', 'source_urls'), true) && count($value) > 25) {
+                    return array_merge(array_slice($value, 0, 25), array('... ' . (count($value) - 25) . ' more'));
+                }
+                if ($depth >= 4 && count($value) > 50) {
+                    return array(
+                        '_truncated' => true,
+                        'count' => count($value),
+                        'items' => array_slice($value, 0, 20),
+                    );
+                }
+
                 $scrubbed = array();
                 foreach ($value as $child_key => $child_value) {
                     $scrubbed[$child_key] = $this->scrub_action_queue_payload($child_value, (string) $child_key, $depth + 1);
@@ -587,6 +609,12 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                         return $this->unwrap_rest_payload($this->opcache_flush());
                     case 'apcu_flush':
                         return $this->unwrap_rest_payload($this->apcu_flush());
+                    case 'litespeed_flush':
+                        return $this->unwrap_rest_payload($this->litespeed_flush());
+                    case 'nginx_flush':
+                        return $this->unwrap_rest_payload($this->nginx_flush());
+                    case 'external_caches_redetect':
+                        return $this->unwrap_rest_payload($this->external_caches_redetect());
                     case 'redis_test':
                         $redis_request = new WP_REST_Request('POST', '/');
                         foreach ($params as $key => $value) {

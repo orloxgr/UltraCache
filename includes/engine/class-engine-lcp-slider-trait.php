@@ -670,7 +670,6 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
 
             $links = array();
             $resource_lines = isset($settings['critical_resource_preload_list']) && is_array($settings['critical_resource_preload_list']) ? $settings['critical_resource_preload_list'] : array();
-            $fetch_lines = isset($settings['critical_fetch_preload_list']) && is_array($settings['critical_fetch_preload_list']) ? $settings['critical_fetch_preload_list'] : array();
 
             foreach ($resource_lines as $line) {
                 $candidate = $this->parse_critical_preload_line($line, '');
@@ -678,13 +677,6 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                     if ($this->should_skip_sr7_generated_manual_preload($candidate, $html, $settings)) {
                         continue;
                     }
-                    $links[] = $candidate;
-                }
-            }
-
-            foreach ($fetch_lines as $line) {
-                $candidate = $this->parse_critical_preload_line($line, 'fetch');
-                if (!empty($candidate['url'])) {
                     $links[] = $candidate;
                 }
             }

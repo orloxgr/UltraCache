@@ -408,16 +408,35 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             }
             $bytes = isset($detail['bytes']) ? max(0, (int) $detail['bytes']) : 0;
             $prepared_bytes = isset($detail['preparedBytes']) ? max(0, (int) $detail['preparedBytes']) : 0;
-            $normalized[] = array(
+            $css_image_urls_scanned = isset($detail['cssImageUrlsScanned']) ? max(0, (int) $detail['cssImageUrlsScanned']) : 0;
+            $css_image_urls_rewritten = isset($detail['cssImageUrlsRewritten']) ? max(0, (int) $detail['cssImageUrlsRewritten']) : 0;
+            $css_image_urls_image_set = isset($detail['cssImageUrlsImageSet']) ? max(0, (int) $detail['cssImageUrlsImageSet']) : 0;
+            $css_image_urls_skipped = isset($detail['cssImageUrlsSkipped']) ? max(0, (int) $detail['cssImageUrlsSkipped']) : 0;
+            $key = $url;
+            if (isset($normalized[$key])) {
+                $normalized[$key]['bytes'] = max((int) $normalized[$key]['bytes'], $bytes);
+                $normalized[$key]['preparedBytes'] = max((int) $normalized[$key]['preparedBytes'], $prepared_bytes);
+                $normalized[$key]['cssImageUrlsScanned'] = max(0, (int) ($normalized[$key]['cssImageUrlsScanned'] ?? 0)) + $css_image_urls_scanned;
+                $normalized[$key]['cssImageUrlsRewritten'] = max(0, (int) ($normalized[$key]['cssImageUrlsRewritten'] ?? 0)) + $css_image_urls_rewritten;
+                $normalized[$key]['cssImageUrlsImageSet'] = max(0, (int) ($normalized[$key]['cssImageUrlsImageSet'] ?? 0)) + $css_image_urls_image_set;
+                $normalized[$key]['cssImageUrlsSkipped'] = max(0, (int) ($normalized[$key]['cssImageUrlsSkipped'] ?? 0)) + $css_image_urls_skipped;
+                continue;
+            }
+            $normalized[$key] = array(
                 'url' => $url,
                 'bytes' => $bytes,
                 'preparedBytes' => $prepared_bytes,
                 'type' => isset($detail['type']) ? sanitize_key((string) $detail['type']) : $this->get_css_bundle_source_type($url),
                 'suggestedExclusion' => $this->get_css_bundle_source_exclusion_suggestion($url),
                 'largeSourceWarning' => ($bytes > 51200),
+                'cssImageUrlsScanned' => $css_image_urls_scanned,
+                'cssImageUrlsRewritten' => $css_image_urls_rewritten,
+                'cssImageUrlsImageSet' => $css_image_urls_image_set,
+                'cssImageUrlsSkipped' => $css_image_urls_skipped,
             );
         }
 
+        $normalized = array_values($normalized);
         usort($normalized, function ($a, $b) {
             $a_bytes = isset($a['bytes']) ? (int) $a['bytes'] : 0;
             $b_bytes = isset($b['bytes']) ? (int) $b['bytes'] : 0;

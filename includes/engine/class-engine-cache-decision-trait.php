@@ -80,6 +80,101 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             return array_values(array_unique(array_merge($excluded_paths, $this->get_hard_security_excluded_paths())));
         }
 
+        private function get_hard_security_unsafe_cookie_patterns()
+        {
+            return array(
+                'wordpress_logged_in_',
+                'wordpress_sec_',
+                'wp-postpass_',
+                'comment_author_',
+                'woocommerce_items_in_cart',
+                'woocommerce_cart_hash',
+                'wp_woocommerce_session_',
+            );
+        }
+
+        private function normalize_cookie_pattern_list($patterns)
+        {
+            $normalized = array();
+            foreach ((array) $patterns as $pattern) {
+                if (is_array($pattern) || is_object($pattern)) {
+                    continue;
+                }
+
+                $pattern = trim((string) $pattern);
+                if ('' === $pattern) {
+                    continue;
+                }
+
+                $pattern = preg_replace('/[\x00-\x1F\x7F]/', '', $pattern);
+                $pattern = is_string($pattern) ? preg_replace('/[^A-Za-z0-9_\-.\*]/', '', $pattern) : '';
+                $pattern = trim((string) $pattern);
+                if ('' === $pattern || '*' === $pattern) {
+                    continue;
+                }
+
+                $normalized[strtolower($pattern)] = $pattern;
+            }
+
+            return array_values($normalized);
+        }
+
+        private function get_unsafe_cache_cookie_patterns(array $settings)
+        {
+            $configured = !empty($settings['unsafe_cache_cookie_patterns']) && is_array($settings['unsafe_cache_cookie_patterns'])
+                ? $settings['unsafe_cache_cookie_patterns']
+                : array();
+
+            return $this->normalize_cookie_pattern_list(array_merge($configured, $this->get_hard_security_unsafe_cookie_patterns()));
+        }
+
+        private function get_safe_tracking_cookie_patterns(array $settings)
+        {
+            return $this->normalize_cookie_pattern_list(!empty($settings['safe_tracking_cookie_patterns']) && is_array($settings['safe_tracking_cookie_patterns']) ? $settings['safe_tracking_cookie_patterns'] : array());
+        }
+
+        private function cookie_name_matches_pattern($cookie_name, $pattern)
+        {
+            $cookie_name = strtolower(trim((string) $cookie_name));
+            $pattern = strtolower(trim((string) $pattern));
+            if ('' === $cookie_name || '' === $pattern || '*' === $pattern) {
+                return false;
+            }
+
+            if (false !== strpos($pattern, '*')) {
+                $regex = '/^' . str_replace('\*', '.*', preg_quote($pattern, '/')) . '$/i';
+                return 1 === preg_match($regex, $cookie_name);
+            }
+
+            return false !== strpos($cookie_name, $pattern);
+        }
+
+        private function cookie_name_matches_any_pattern($cookie_name, array $patterns)
+        {
+            foreach ($patterns as $pattern) {
+                if ($this->cookie_name_matches_pattern($cookie_name, $pattern)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function all_cookie_names_match_patterns(array $cookie_names, array $patterns)
+        {
+            if (empty($cookie_names) || empty($patterns)) {
+                return false;
+            }
+
+            foreach ($cookie_names as $cookie_name) {
+                if (!$this->cookie_name_matches_any_pattern($cookie_name, $patterns)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private function get_internal_control_query_args()
         {
             return array(
@@ -638,21 +733,13 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             }
             $this->profile_request_checkpoint('should_bypass_after_user_check');
 
-            $cookies_to_bypass = array(
-                'wordpress_logged_in_',
-                'wordpress_sec_',
-                'comment_author_',
-                'wp-postpass_',
-                'woocommerce_items_in_cart',
-                'woocommerce_cart_hash',
-                'wp_woocommerce_session_',
-            );
+            $cookies_to_bypass = $this->get_unsafe_cache_cookie_patterns($settings);
 
-            $this->profile_request_checkpoint('should_bypass_before_cookie_checks', array('cookie_count' => count((array) $_COOKIE)));
+            $this->profile_request_checkpoint('should_bypass_before_cookie_checks', array('cookie_count' => count((array) $_COOKIE), 'unsafe_cookie_rule_count' => count($cookies_to_bypass)));
             foreach ((array) $_COOKIE as $cookie_name => $cookie_value) {
                 foreach ($cookies_to_bypass as $needle) {
-                    if (false !== strpos((string) $cookie_name, $needle)) {
-                        $this->last_bypass_reason = 'cookie-' . $needle;
+                    if ($this->cookie_name_matches_pattern($cookie_name, $needle)) {
+                        $this->last_bypass_reason = 'cookie-' . preg_replace('/[^A-Za-z0-9_\-.]/', '', (string) $needle);
                         $this->profile_request_checkpoint('should_bypass_return', array('reason' => $this->last_bypass_reason));
                         return true;
                     }

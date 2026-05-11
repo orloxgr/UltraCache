@@ -94,7 +94,11 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		}
 
 		public function maybe_schedule_pending_background_generation() {
-			if ($this->get_media_queue_pending_count() <= 0 && empty($this->get_background_generation_queue())) {
+			if (method_exists($this, 'retire_on_demand_partial_media_queue_rows')) {
+				$this->retire_on_demand_partial_media_queue_rows();
+			}
+
+			if ($this->get_media_queue_pending_count('best') <= 0 && empty($this->get_background_generation_queue())) {
 				return;
 			}
 
@@ -113,6 +117,10 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 			set_transient(self::BACKGROUND_QUEUE_LOCK, 1, 5 * MINUTE_IN_SECONDS);
 
 			try {
+				if (method_exists($this, 'retire_on_demand_partial_media_queue_rows')) {
+					$this->retire_on_demand_partial_media_queue_rows();
+				}
+
 				$legacy_queue = $this->get_background_generation_queue();
 				foreach (array_keys($legacy_queue) as $attachment_id) {
 					$attachment_id = absint($attachment_id);
@@ -122,13 +130,18 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				}
 				$this->persist_background_generation_queue(array());
 
-				$batch_size = (int) apply_filters('ucwp_media_queue_batch_size', 2);
-				$batch_size = max(1, min(10, $batch_size));
+				if ($this->get_media_queue_pending_count('best') <= 0) {
+					return;
+				}
+
+				$batch_size = (int) apply_filters('ucwp_media_queue_batch_size', 1);
+				$batch_size = max(1, min(2, $batch_size));
 
 				$result = $this->process_media_queue_batch(array(
 					'limit' => $batch_size,
 					'format' => 'best',
 					'only_missing' => true,
+					'time_budget' => 3,
 				));
 
 				if (!empty($result['remaining'])) {

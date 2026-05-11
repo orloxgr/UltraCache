@@ -128,11 +128,9 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                         continue;
                     }
 
-                    if (null !== $processor->get_attribute('data-ucwp-frontpage-css') || null !== $processor->get_attribute('data-ucwp-page-css-bundle')) {
-                        $stats['skipped']++;
-                        $this->add_safe_async_css_diagnostic_item($stats, $href_for_diag, 'skipped', 'css_bundle_link');
-                        continue;
-                    }
+                    $is_ucwp_generated_css_link = null !== $processor->get_attribute('data-ucwp-frontpage-css')
+                        || null !== $processor->get_attribute('data-ucwp-page-css-bundle')
+                        || null !== $processor->get_attribute('data-ucwp-leftover-css-bundle');
 
                     if (!is_string($href) || '' === $href) {
                         $stats['unresolved']++;
@@ -160,10 +158,20 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                         continue;
                     }
 
-                    $decision = $this->get_async_css_stylesheet_decision($absolute_url, '');
+                    $tag_context = $this->build_async_css_processor_tag_context($processor);
+                    $decision = $this->get_async_css_stylesheet_decision($absolute_url, $tag_context);
+                    $role = isset($decision['role']) ? (string) $decision['role'] : $this->get_ultracache_generated_stylesheet_role($absolute_url, $tag_context);
+                    if ('' !== $role) {
+                        $processor->set_attribute('data-ucwp-css-role', $role);
+                    }
                     if (empty($decision['eligible'])) {
                         $stats['skipped']++;
-                        $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'skipped', isset($decision['reason']) ? (string) $decision['reason'] : 'not_eligible');
+                        $reason = isset($decision['reason']) ? (string) $decision['reason'] : 'not_eligible';
+                        if ('' !== $role && $this->is_generated_css_blocking_reason($reason)) {
+                            $processor->set_attribute('data-ucwp-css-blocking-reason', $this->normalize_css_decision_attribute_value($reason));
+                            $changed = true;
+                        }
+                        $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'skipped', $reason, '' !== $role ? ('role=' . $role) : '');
                         continue;
                     }
 
@@ -173,10 +181,17 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                     $processor->set_attribute('media', 'print');
                     $processor->set_attribute('onload', "this.media='all'");
                     $processor->set_attribute('data-ucwp-async-css', '1');
+                    if (!empty($is_ucwp_generated_css_link) || '' !== $role) {
+                        $processor->set_attribute('data-ucwp-generated-css-async', '1');
+                    }
+                    if ('' !== $role) {
+                        $processor->set_attribute('data-ucwp-css-role', $role);
+                    }
+                    $processor->set_attribute('data-ucwp-css-async-reason', $this->normalize_css_decision_attribute_value(isset($decision['reason']) ? (string) $decision['reason'] : 'eligible'));
                     $processor->set_attribute('data-ucwp-noscript-token', $marker);
 
                     $stats['rewritten']++;
-                    $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'applied', isset($decision['reason']) ? (string) $decision['reason'] : 'eligible');
+                    $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'applied', isset($decision['reason']) ? (string) $decision['reason'] : 'eligible', '' !== $role ? ('role=' . $role) : '');
                     $changed = true;
                 }
 
@@ -236,11 +251,9 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 return $tag;
             }
 
-            if (false !== stripos($tag, 'data-ucwp-frontpage-css=') || false !== stripos($tag, 'data-ucwp-page-css-bundle=')) {
-                $stats['skipped']++;
-                $this->add_safe_async_css_diagnostic_item($stats, $absolute_for_diag, 'skipped', 'css_bundle_link');
-                return $tag;
-            }
+            $is_ucwp_generated_css_link = false !== stripos($tag, 'data-ucwp-frontpage-css=')
+                || false !== stripos($tag, 'data-ucwp-page-css-bundle=')
+                || false !== stripos($tag, 'data-ucwp-leftover-css-bundle=');
 
             if ('' === $href) {
                 $stats['unresolved']++;
@@ -269,10 +282,13 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             }
 
             $decision = $this->get_async_css_stylesheet_decision($absolute_url, $tag);
+            $role = isset($decision['role']) ? (string) $decision['role'] : $this->get_ultracache_generated_stylesheet_role($absolute_url, $tag);
             if (empty($decision['eligible'])) {
                 $stats['skipped']++;
-                $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'skipped', isset($decision['reason']) ? (string) $decision['reason'] : 'not_eligible');
-                return $tag;
+                $reason = isset($decision['reason']) ? (string) $decision['reason'] : 'not_eligible';
+                $annotated = $this->annotate_generated_css_link_tag_with_decision($tag, $role, $reason, false);
+                $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'skipped', $reason, '' !== $role ? ('role=' . $role) : '');
+                return $annotated;
             }
 
             $rewritten = $this->remove_html_tag_attribute($tag, 'media');
@@ -280,10 +296,17 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'media', 'print');
             $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'onload', "this.media='all'");
             $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-async-css', '1');
+            if (!empty($is_ucwp_generated_css_link) || '' !== $role) {
+                $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-generated-css-async', '1');
+            }
+            if ('' !== $role) {
+                $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-css-role', $role);
+            }
+            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-css-async-reason', $this->normalize_css_decision_attribute_value(isset($decision['reason']) ? (string) $decision['reason'] : 'eligible'));
             $rewritten .= '<noscript>' . $tag . '</noscript>';
 
             $stats['rewritten']++;
-            $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'applied', isset($decision['reason']) ? (string) $decision['reason'] : 'eligible');
+            $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'applied', isset($decision['reason']) ? (string) $decision['reason'] : 'eligible', '' !== $role ? ('role=' . $role) : '');
             return $rewritten;
         }
 
@@ -360,6 +383,77 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
         }
 
 
+        private function normalize_css_decision_attribute_value($value)
+        {
+            $value = strtolower(trim((string) $value));
+            if ('' === $value) {
+                return '';
+            }
+            $value = str_replace('_', '-', $value);
+            $value = preg_replace('/[^a-z0-9\-]+/', '-', $value);
+            $value = trim((string) $value, '-_');
+            return '' !== $value ? $value : '';
+        }
+
+        private function is_generated_css_blocking_reason($reason)
+        {
+            $reason = $this->normalize_css_decision_attribute_value($reason);
+            return in_array($reason, array(
+                'main-layout-risk',
+                'optimized-css-layout-risk',
+                'font-css-text-metric-risk',
+                'generated-css-unclassified',
+                'async-css-disabled',
+                'async-exclude-list',
+                'aggressive-async-exclude-list',
+            ), true);
+        }
+
+        private function annotate_generated_css_link_tag_with_decision($tag, $role, $reason, $async = false)
+        {
+            $tag = (string) $tag;
+            $role = $this->normalize_css_decision_attribute_value($role);
+            $reason = $this->normalize_css_decision_attribute_value($reason);
+            if ('' === $tag || '' === $role) {
+                return $tag;
+            }
+
+            $tag = $this->set_or_add_html_tag_attribute($tag, 'data-ucwp-css-role', $role);
+            if ($async) {
+                if ('' !== $reason) {
+                    $tag = $this->set_or_add_html_tag_attribute($tag, 'data-ucwp-css-async-reason', $reason);
+                }
+                return $tag;
+            }
+
+            if ('' !== $reason && $this->is_generated_css_blocking_reason($reason)) {
+                $tag = $this->set_or_add_html_tag_attribute($tag, 'data-ucwp-css-blocking-reason', $reason);
+            }
+
+            return $tag;
+        }
+
+        private function build_async_css_processor_tag_context($processor)
+        {
+            $parts = array();
+            foreach (array(
+                'id',
+                'href',
+                'data-ucwp-frontpage-css',
+                'data-ucwp-page-css-bundle',
+                'data-ucwp-leftover-css-bundle',
+                'data-ucwp-delayed-icon-fonts',
+                'data-ucwp-css-role',
+            ) as $attribute) {
+                $value = $processor->get_attribute($attribute);
+                if (null !== $value && false !== $value) {
+                    $parts[] = $attribute . '="' . (is_scalar($value) ? (string) $value : '1') . '"';
+                }
+            }
+
+            return implode(' ', $parts);
+        }
+
         private function should_exclude_stylesheet_url_by_fragments($url, array $fragments)
         {
             $haystacks = array(
@@ -393,11 +487,8 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
 
         private function get_aggressive_async_css_exclude_fragments()
         {
-            $settings = $this->get_settings();
-            $list = isset($settings['aggressive_async_css_exclude_list']) && is_array($settings['aggressive_async_css_exclude_list']) ? $settings['aggressive_async_css_exclude_list'] : array();
-            return array_values(array_filter(array_map('strval', $list), static function ($item) {
-                return '' !== trim((string) $item);
-            }));
+            // Aggressive Async CSS now uses the same visible Async CSS Exclude List.
+            return $this->get_async_css_exclude_fragments();
         }
 
 
@@ -463,6 +554,102 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             return 'css' === $extension;
         }
 
+        private function is_ultracache_generated_stylesheet_url($url)
+        {
+            $path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
+            if ('' === $path || 'css' !== strtolower((string) pathinfo($path, PATHINFO_EXTENSION))) {
+                return false;
+            }
+
+            return false !== strpos($path, '/wp-content/cache/ultracache/css-bundles/')
+                || false !== strpos($path, '/wp-content/cache/ultracache/optimized-css/')
+                || false !== strpos($path, '/wp-content/cache/ultracache/font-css/');
+        }
+
+        private function get_generated_css_bundle_role_from_mode($mode)
+        {
+            $mode = strtolower(trim((string) $mode));
+            if ('leftover' === $mode) {
+                return 'leftover-bundle';
+            }
+            if ('aggressive' === $mode) {
+                return 'aggressive-bundle';
+            }
+            if ('full' === $mode) {
+                return 'full-bundle';
+            }
+            return 'safe-bundle';
+        }
+
+        private function get_ultracache_generated_stylesheet_role($url, $tag = '')
+        {
+            $path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
+            $tag = strtolower((string) $tag);
+
+            if (false !== strpos($path, '-delayed-fonts.css') || false !== strpos($path, '/font-css/delayed-') || false !== strpos($tag, 'delayed-icon-fonts') || false !== strpos($tag, 'data-ucwp-css-role="delayed-fonts-css"')) {
+                return 'delayed-fonts-css';
+            }
+
+            if (false !== strpos($path, 'bundle-leftover-') || false !== strpos($tag, 'data-ucwp-leftover-css-bundle=') || false !== strpos($tag, 'data-ucwp-css-role="leftover-bundle"')) {
+                return 'leftover-bundle';
+            }
+
+            if (false !== strpos($path, '/wp-content/cache/ultracache/optimized-css/') || false !== strpos($tag, 'data-ucwp-css-role="optimized-css"')) {
+                return 'optimized-css';
+            }
+
+            if (false !== strpos($path, '/wp-content/cache/ultracache/font-css/') || false !== strpos($tag, 'data-ucwp-css-role="font-css"')) {
+                return 'font-css';
+            }
+
+            if (false !== strpos($path, 'bundle-full-') || false !== strpos($tag, 'data-ucwp-css-role="full-bundle"')) {
+                return 'full-bundle';
+            }
+
+            if (false !== strpos($path, 'bundle-aggressive-') || false !== strpos($tag, 'data-ucwp-css-role="aggressive-bundle"')) {
+                return 'aggressive-bundle';
+            }
+
+            if (false !== strpos($path, 'bundle-safe-') || false !== strpos($tag, 'data-ucwp-page-css-bundle=') || false !== strpos($tag, 'data-ucwp-frontpage-css=') || false !== strpos($tag, 'data-ucwp-css-role="safe-bundle"')) {
+                return 'safe-bundle';
+            }
+
+            if ($this->is_ultracache_generated_stylesheet_url($url)) {
+                return 'generated-css';
+            }
+
+            return '';
+        }
+
+        private function get_ultracache_generated_stylesheet_async_decision($url, $tag = '')
+        {
+            $role = $this->get_ultracache_generated_stylesheet_role($url, $tag);
+            switch ($role) {
+                case 'leftover-bundle':
+                    return array('eligible' => true, 'reason' => 'leftover-noncritical', 'role' => $role);
+
+                case 'delayed-fonts-css':
+                    return array('eligible' => true, 'reason' => 'delayed-fonts', 'role' => $role);
+
+                case 'safe-bundle':
+                case 'aggressive-bundle':
+                case 'full-bundle':
+                    return array('eligible' => false, 'reason' => 'main-layout-risk', 'role' => $role);
+
+                case 'optimized-css':
+                    return array('eligible' => false, 'reason' => 'optimized-css-layout-risk', 'role' => $role);
+
+                case 'font-css':
+                    return array('eligible' => false, 'reason' => 'font-css-text-metric-risk', 'role' => $role);
+
+                case 'generated-css':
+                    return array('eligible' => false, 'reason' => 'generated-css-unclassified', 'role' => $role);
+            }
+
+            return array('eligible' => false, 'reason' => 'not_generated_css');
+        }
+
+
         private function should_async_css_stylesheet_url($url, $tag = '')
         {
             $decision = $this->get_async_css_stylesheet_decision($url, $tag);
@@ -482,6 +669,16 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 return array('eligible' => false, 'reason' => 'async_exclude_list');
             }
 
+            $is_generated_css = $this->is_ultracache_generated_stylesheet_url($url);
+            if ($is_generated_css) {
+                $generated_decision = $this->get_ultracache_generated_stylesheet_async_decision($url, $tag);
+                if (empty($settings['async_css']) && empty($settings['aggressive_async_css'])) {
+                    $generated_decision['eligible'] = false;
+                    $generated_decision['reason'] = 'async-css-disabled';
+                }
+                return $generated_decision;
+            }
+
             $aggressive_enabled = !empty($settings['aggressive_async_css']);
             if ($aggressive_enabled) {
                 $aggressive_exclude_fragments = $this->get_aggressive_async_css_exclude_fragments();
@@ -492,7 +689,7 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 /*
                  * Aggressive Async CSS means almost all remaining local stylesheet
                  * links are eligible. CSS Bundle Exclusions must not silently
-                 * disable this pass; use the visible Aggressive Async CSS
+                 * disable this pass; use the visible Async CSS
                  * Exclude List for styles that must remain blocking.
                  */
                 $hard_block_patterns = array(

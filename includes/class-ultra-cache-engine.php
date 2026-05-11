@@ -74,6 +74,12 @@ if (!class_exists('Ultra_Cache_Engine')) {
         /** @var string */
         private $page_cache_generation_lock_name = '';
 
+        /** @var string */
+        private $page_cache_generation_global_lock_name = '';
+
+        /** @var string */
+        private $page_cache_generation_lock_denied_reason = '';
+
         public static function get_instance()
         {
             if (null === self::$instance) {
@@ -126,6 +132,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_end_checkpoint'), PHP_INT_MAX);
             add_action('wp_enqueue_scripts', array($this, 'cleanup_asset_chain_enqueue_assets'), 9999);
             add_action('shutdown', array($this, 'run_deferred_store_post_response_actions'), PHP_INT_MAX - 2);
+            add_action('shutdown', array($this, 'release_page_generation_lock_on_shutdown'), PHP_INT_MAX - 1);
             add_action('shutdown', array($this, 'update_store_profile_after_shutdown'), PHP_INT_MAX);
             add_filter('script_loader_tag', array($this, 'defer_scripts'), 10, 3);
             add_filter('style_loader_src', array($this, 'add_display_swap_to_google_fonts'), 20, 2);
@@ -163,7 +170,17 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
             $this->profile_request_checkpoint('page_generation_lock_before');
             $this->maybe_acquire_page_generation_lock();
-            $this->profile_request_checkpoint('page_generation_lock_checked', array('has_lock' => '' !== (string) $this->page_cache_generation_lock_name ? 'true' : 'false'));
+            $this->profile_request_checkpoint('page_generation_lock_checked', array(
+                'has_lock' => '' !== (string) $this->page_cache_generation_lock_name ? 'true' : 'false',
+                'global_lock' => '' !== (string) $this->page_cache_generation_global_lock_name ? 'true' : 'false',
+                'denied_reason' => (string) $this->page_cache_generation_lock_denied_reason,
+            ));
+            if ('' !== (string) $this->page_cache_generation_lock_denied_reason) {
+                $skip_reason = (string) $this->page_cache_generation_lock_denied_reason;
+                $this->record_analytics_store_skip($skip_reason);
+                $this->send_debug_headers('SKIP', $skip_reason);
+                return;
+            }
 
             $this->profile_request_checkpoint('record_analytics_miss_start');
             $this->record_analytics_miss();
@@ -200,6 +217,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function maybe_acquire_page_generation_lock()
         {
+            $this->page_cache_generation_lock_denied_reason = '';
             $this->profile_request_checkpoint('page_generation_lock_before_current_url');
             $url = $this->get_current_request_url();
             $this->profile_request_checkpoint('page_generation_lock_after_current_url', array('url_empty' => '' === (string) $url ? 'yes' : 'no'));
@@ -214,6 +232,22 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
+            $this->cleanup_stale_page_generation_locks(10 * MINUTE_IN_SECONDS, 50);
+
+            if (!$this->acquire_page_generation_global_slot()) {
+                if ($this->wait_for_page_cache_file($file_path, $this->get_page_generation_global_slot_wait_seconds())) {
+                    $this->profile_request_checkpoint('page_generation_global_slot_wait_hit_ready');
+                    $this->maybe_serve_cache_file_path($file_path, 'HIT', 'build-slot-wait');
+                    exit;
+                }
+
+                $this->page_cache_generation_lock_denied_reason = 'build-concurrency-limit';
+                if (!headers_sent()) {
+                    header('X-Ultra-Cache-Build-Concurrency: limited');
+                }
+                return false;
+            }
+
             $lock_name = 'page-cache-build-' . md5($file_path);
             $this->profile_request_checkpoint('page_generation_lock_acquire_start');
             if ($this->acquire_runtime_lock($lock_name, 45)) {
@@ -222,14 +256,17 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return true;
             }
 
+            $this->release_page_generation_global_lock();
+
             $this->profile_request_checkpoint('page_generation_lock_wait_start');
-            if ($this->wait_for_page_cache_file($file_path, 18.0)) {
+            if ($this->wait_for_page_cache_file($file_path, 6.0)) {
                 $this->profile_request_checkpoint('page_generation_lock_wait_hit_ready');
                 $this->maybe_serve_cache_file_path($file_path, 'HIT', 'stampede-wait');
                 exit;
             }
 
             $this->profile_request_checkpoint('page_generation_lock_wait_timeout');
+            $this->page_cache_generation_lock_denied_reason = 'stampede-timeout';
             if (!headers_sent()) {
                 header('X-Ultra-Cache-Stampede: timeout');
             }
@@ -237,15 +274,137 @@ if (!class_exists('Ultra_Cache_Engine')) {
             return false;
         }
 
-        private function release_page_generation_lock()
+        private function get_page_cache_build_concurrency_limit()
         {
-            if ('' === $this->page_cache_generation_lock_name) {
+            $default = $this->is_ultracache_internal_loopback_request() ? 2 : 1;
+            if (defined('UCWP_PAGE_CACHE_BUILD_CONCURRENCY')) {
+                $default = (int) UCWP_PAGE_CACHE_BUILD_CONCURRENCY;
+            }
+
+            $limit = (int) apply_filters('ucwp_page_cache_build_concurrency_limit', $default, $this->is_ultracache_internal_loopback_request() ? 'internal' : 'frontend');
+            return max(0, min(8, $limit));
+        }
+
+        private function get_page_generation_global_slot_wait_seconds()
+        {
+            $default = $this->is_ultracache_internal_loopback_request() ? 3.0 : 0.75;
+            if (defined('UCWP_PAGE_CACHE_BUILD_SLOT_WAIT_SECONDS')) {
+                $default = (float) UCWP_PAGE_CACHE_BUILD_SLOT_WAIT_SECONDS;
+            }
+
+            $wait = (float) apply_filters('ucwp_page_cache_build_slot_wait_seconds', $default, $this->is_ultracache_internal_loopback_request() ? 'internal' : 'frontend');
+            return max(0.0, min(10.0, $wait));
+        }
+
+        private function acquire_page_generation_global_slot()
+        {
+            $limit = $this->get_page_cache_build_concurrency_limit();
+            if ($limit <= 0) {
+                return true;
+            }
+
+            $deadline = microtime(true) + $this->get_page_generation_global_slot_wait_seconds();
+            do {
+                for ($slot = 1; $slot <= $limit; $slot++) {
+                    $lock_name = 'page-cache-build-slot-' . (string) $slot;
+                    if ($this->acquire_runtime_lock($lock_name, 120)) {
+                        $this->page_cache_generation_global_lock_name = $lock_name;
+                        return true;
+                    }
+                }
+
+                if (microtime(true) >= $deadline) {
+                    break;
+                }
+
+                usleep(150000);
+            } while (true);
+
+            return false;
+        }
+
+        private function release_page_generation_global_lock()
+        {
+            if ('' === $this->page_cache_generation_global_lock_name) {
                 return;
             }
 
-            $lock_name = $this->page_cache_generation_lock_name;
-            $this->page_cache_generation_lock_name = '';
+            $lock_name = $this->page_cache_generation_global_lock_name;
+            $this->page_cache_generation_global_lock_name = '';
             $this->release_runtime_lock($lock_name);
+        }
+
+        private function cleanup_stale_page_generation_locks($age_seconds = 600, $max_delete = 50)
+        {
+            $dir = $this->get_runtime_locks_dir();
+            if (!is_dir($dir) || !is_readable($dir)) {
+                return 0;
+            }
+
+            $age_seconds = max(120, (int) $age_seconds);
+            $max_delete = max(1, min(200, (int) $max_delete));
+            $now = time();
+            $deleted = 0;
+            $files = (array) glob(trailingslashit($dir) . 'page-cache-build-*.lock');
+
+            foreach ($files as $file) {
+                $file = wp_normalize_path((string) $file);
+                if (!$this->is_runtime_lock_file_path($file) || !is_file($file)) {
+                    continue;
+                }
+
+                $mtime = function_exists('ucwp_safe_filemtime') ? ucwp_safe_filemtime($file, 'page_generation_lock_cleanup') : @filemtime($file);
+                if (!$mtime || ($now - (int) $mtime) < $age_seconds) {
+                    continue;
+                }
+
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native flock probe avoids deleting an active build lock marker.
+                $handle = @fopen($file, 'c+');
+                if (!$handle) {
+                    continue;
+                }
+
+                $locked = !@flock($handle, LOCK_EX | LOCK_NB);
+                if ($locked) {
+                    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle.
+                    @fclose($handle);
+                    continue;
+                }
+
+                @flock($handle, LOCK_UN);
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle before WP-safe deletion.
+                @fclose($handle);
+
+                if ($this->delete_runtime_lock_file($file, 'page_generation_lock_cleanup')) {
+                    $deleted++;
+                }
+
+                if ($deleted >= $max_delete) {
+                    break;
+                }
+            }
+
+            return $deleted;
+        }
+
+        private function release_page_generation_lock()
+        {
+            if ('' !== $this->page_cache_generation_lock_name) {
+                $lock_name = $this->page_cache_generation_lock_name;
+                $this->page_cache_generation_lock_name = '';
+                $this->release_runtime_lock($lock_name);
+            }
+
+            $this->release_page_generation_global_lock();
+        }
+
+        public function release_page_generation_lock_on_shutdown()
+        {
+            if ('' === $this->page_cache_generation_lock_name && '' === $this->page_cache_generation_global_lock_name) {
+                return;
+            }
+
+            $this->release_page_generation_lock();
         }
 
 
@@ -278,6 +437,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 if ($this->is_internal_revalidate_request()) {
                     $this->clear_revalidate_lock($current_request_url);
                 }
+                $this->send_set_cookie_skip_diagnostic_header($skip_reason);
                 $this->send_debug_headers('SKIP', $skip_reason);
                 $this->finalize_store_profile('SKIP', $skip_reason, '');
                 $this->release_page_generation_lock();
@@ -557,8 +717,22 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return 'fragile-revslider-shell';
             }
 
+            $response_cookie_names = array();
+            $checked_response_cookies = false;
             foreach (headers_list() as $header) {
                 if (0 === stripos($header, 'Set-Cookie:')) {
+                    if (!$checked_response_cookies) {
+                        $response_cookie_names = $this->get_response_set_cookie_names();
+                        $checked_response_cookies = true;
+                    }
+
+                    if (!empty($settings['cache_safe_tracking_cookies']) && !empty($response_cookie_names) && $this->all_cookie_names_match_patterns($response_cookie_names, $this->get_safe_tracking_cookie_patterns($settings))) {
+                        continue;
+                    }
+
+                    if (!empty($response_cookie_names)) {
+                        return 'set-cookie:' . implode(',', array_slice($response_cookie_names, 0, 6));
+                    }
                     return 'set-cookie';
                 }
 
@@ -568,6 +742,48 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             return '';
+        }
+
+        private function get_response_set_cookie_names()
+        {
+            $names = array();
+            foreach (headers_list() as $header) {
+                $header = (string) $header;
+                if (0 !== stripos($header, 'Set-Cookie:')) {
+                    continue;
+                }
+                $value = trim(substr($header, strlen('Set-Cookie:')));
+                if ('' === $value) {
+                    continue;
+                }
+                $pair = explode(';', $value, 2);
+                $name = trim((string) ($pair[0] ?? ''));
+                $name = explode('=', $name, 2)[0];
+                $name = preg_replace('/[^A-Za-z0-9_\-.]/', '', (string) $name);
+                if ('' !== $name) {
+                    $names[] = $name;
+                }
+            }
+
+            return array_values(array_unique($names));
+        }
+
+        private function send_set_cookie_skip_diagnostic_header($skip_reason)
+        {
+            if (headers_sent() || 0 !== strpos((string) $skip_reason, 'set-cookie')) {
+                return;
+            }
+
+            $cookie_names = $this->get_response_set_cookie_names();
+            if (empty($cookie_names)) {
+                return;
+            }
+
+            $value = implode(',', array_slice($cookie_names, 0, 12));
+            $value = substr((string) preg_replace('/[^A-Za-z0-9_,.\-]/', '', $value), 0, 180);
+            if ('' !== $value) {
+                header('X-Ultra-Cache-Set-Cookie-Names: ' . $value);
+            }
         }
 
         private function should_send_source_debug_header()

@@ -1185,10 +1185,13 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 "\t\t\tvar scripts = document.getElementsByTagName('script');\n" .
                 "\t\t\tfor (var i = 0; i < scripts.length && list.length < 240; i++) {\n" .
                 "\t\t\t\tvar s = scripts[i];\n" .
-                "\t\t\t\tvar src = s && s.getAttribute ? String(s.getAttribute('src') || '') : '';\n" .
+                "\t\t\t\tvar src = s && s.getAttribute ? String(s.getAttribute('src') || s.getAttribute('data-ucwp-src') || s.getAttribute('data-ucwp-original-src') || '') : '';\n" .
+                "\t\t\t\tvar id = s && s.getAttribute ? String((s.id || '') || s.getAttribute('data-ucwp-id') || s.getAttribute('data-ucwp-handle') || '') : '';\n" .
+                "\t\t\t\tvar handle = s && s.getAttribute ? String(s.getAttribute('data-ucwp-handle') || '') : '';\n" .
+                "\t\t\t\tvar delayed = !!(s && (s.type === 'text/ucwp-delayed-js' || (s.hasAttribute && (s.hasAttribute('data-ucwp-src') || s.hasAttribute('data-ucwp-inline') || s.hasAttribute('data-ucwp-delayed')))));\n" .
                 "\t\t\t\tvar text = '';\n" .
-                "\t\t\t\tif (!src && s && s.textContent) { text = trimText(s.textContent, 1200); }\n" .
-                "\t\t\t\tlist.push({ id: trimText(s && s.id ? s.id : '', 160), src: trimText(src, 1200), type: trimText(s && s.type ? s.type : '', 120), defer: !!(s && s.defer), async: !!(s && s.async), strategy: trimText(s && s.getAttribute ? (s.getAttribute('data-wp-strategy') || '') : '', 80), delayed: !!(s && (s.type === 'text/ucwp-delayed-js' || (s.hasAttribute && (s.hasAttribute('data-ucwp-src') || s.hasAttribute('data-ucwp-delayed'))))), text: text });\n" .
+                "\t\t\t\tif ((!src || delayed) && s && s.textContent) { text = trimText(s.textContent, 60000); }\n" .
+                "\t\t\t\tlist.push({ id: trimText(id, 160), handle: trimText(handle, 160), src: trimText(src, 1200), type: trimText(s && s.type ? s.type : '', 120), defer: !!(s && s.defer), async: !!(s && s.async), strategy: trimText(s && s.getAttribute ? (s.getAttribute('data-wp-strategy') || '') : '', 80), delayed: delayed, text: text });\n" .
                 "\t\t\t}\n" .
                 "\t\t} catch (e) {}\n" .
                 "\t\treturn list;\n" .
@@ -1428,6 +1431,155 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             return $out . substr($html, $last);
         }
 
+        private function restore_user_excluded_delayed_scripts_in_html($html, array $settings = array())
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, 'text/ucwp-delayed-js')) {
+                return $html;
+            }
+
+            $records = $this->collect_script_dependency_records_from_html($html);
+            if (empty($records)) {
+                return $html;
+            }
+
+            $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
+            $replacements = array();
+
+            foreach ($records as $index => $record) {
+                if (empty($record['delayed']) || empty($record['tag'])) {
+                    continue;
+                }
+
+                $group = isset($record['group']) ? (string) $record['group'] : '';
+                if (!$this->script_record_matches_user_defer_exclusion($record, $settings) && ('' === $group || empty($protected_groups[$group]))) {
+                    continue;
+                }
+
+                $restored = $this->restore_delayed_script_record_tag($record);
+                if (is_string($restored) && '' !== $restored && $restored !== $record['tag']) {
+                    $replacements[(int) $index] = $restored;
+                }
+            }
+
+            if (empty($replacements)) {
+                return $html;
+            }
+
+            ksort($replacements);
+            $out = '';
+            $last = 0;
+            foreach ($replacements as $index => $replacement) {
+                if (!isset($records[$index])) {
+                    continue;
+                }
+                $record = $records[$index];
+                $offset = isset($record['offset']) ? (int) $record['offset'] : -1;
+                $tag = isset($record['tag']) ? (string) $record['tag'] : '';
+                if ($offset < 0 || '' === $tag) {
+                    continue;
+                }
+                $out .= substr($html, $last, $offset - $last) . $replacement;
+                $last = $offset + strlen($tag);
+            }
+
+            return $out . substr($html, $last);
+        }
+
+        private function restore_delayed_script_record_tag(array $record)
+        {
+            $tag = isset($record['tag']) ? (string) $record['tag'] : '';
+            if ('' === $tag || false === stripos($tag, 'text/ucwp-delayed-js')) {
+                return $tag;
+            }
+
+            if (!preg_match('/^<script\b[^>]*>(.*?)<\/script>$/is', $tag, $content_match) || !preg_match('/^<script\b[^>]*>/i', $tag, $open_match)) {
+                return $tag;
+            }
+
+            $open = (string) $open_match[0];
+            $content = isset($content_match[1]) ? (string) $content_match[1] : '';
+            $attrs = $this->extract_html_tag_attributes($open);
+            $preserved = $this->decode_delayed_script_preserved_attributes($attrs);
+
+            foreach (array('id', 'nonce', 'crossorigin', 'referrerpolicy', 'integrity') as $attr) {
+                $data_key = 'data-ucwp-' . $attr;
+                if (!isset($preserved[$attr]) && isset($attrs[$data_key]) && '' !== $attrs[$data_key]) {
+                    $preserved[$attr] = (string) $attrs[$data_key];
+                }
+            }
+
+            $is_inline = !empty($record['inline_delayed']) || (isset($attrs['data-ucwp-inline']) && '1' === (string) $attrs['data-ucwp-inline']);
+            if (!$is_inline) {
+                $src = isset($record['src']) ? (string) $record['src'] : '';
+                if ('' === $src && isset($attrs['data-ucwp-src'])) {
+                    $src = (string) $attrs['data-ucwp-src'];
+                }
+                if ('' === $src && isset($attrs['data-ucwp-original-src'])) {
+                    $src = (string) $attrs['data-ucwp-original-src'];
+                }
+                if ('' === $src) {
+                    return $tag;
+                }
+                $preserved['src'] = $src;
+            } else {
+                unset($preserved['src']);
+            }
+
+            unset($preserved['type'], $preserved['async'], $preserved['defer'], $preserved['data-wp-strategy']);
+            foreach (array_keys($preserved) as $name) {
+                if (0 === strpos(strtolower((string) $name), 'data-ucwp-')) {
+                    unset($preserved[$name]);
+                }
+            }
+
+            $compiled = array();
+            foreach ($preserved as $name => $value) {
+                $name = strtolower(trim((string) $name));
+                if ('' === $name || !preg_match('/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/', $name)) {
+                    continue;
+                }
+                if (true === $value || $value === $name) {
+                    $compiled[] = esc_attr($name);
+                    continue;
+                }
+                $compiled[] = esc_attr($name) . '="' . esc_attr((string) $value) . '"';
+            }
+
+            $open_restored = '<script' . (!empty($compiled) ? ' ' . implode(' ', $compiled) : '') . '>';
+            return $open_restored . ($is_inline ? $content : '') . '</script>';
+        }
+
+        private function decode_delayed_script_preserved_attributes(array $attrs)
+        {
+            $encoded = isset($attrs['data-ucwp-attrs']) ? (string) $attrs['data-ucwp-attrs'] : '';
+            if ('' === $encoded) {
+                return array();
+            }
+
+            $decoded = base64_decode($encoded, true);
+            if (!is_string($decoded) || '' === $decoded) {
+                return array();
+            }
+
+            $json = json_decode($decoded, true);
+            if (!is_array($json)) {
+                return array();
+            }
+
+            $out = array();
+            foreach ($json as $name => $value) {
+                $name = strtolower(trim((string) $name));
+                if ('' === $name || 0 === strpos($name, 'data-ucwp-')) {
+                    continue;
+                }
+                if (is_scalar($value)) {
+                    $out[$name] = (string) $value;
+                }
+            }
+
+            return $out;
+        }
+
         private function collect_script_dependency_records_from_html($html)
         {
             if (!is_string($html) || '' === $html || false === stripos($html, '<script')) {
@@ -1448,10 +1600,37 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
                 $open = (string) $open_match[0];
                 $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                if ('' === $src) {
+                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                }
+                if ('' === $src) {
+                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-original-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                }
+
                 $id = (string) $this->extract_attribute_from_html_tag($open, 'id');
+                if ('' === $id) {
+                    $id = (string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-id');
+                }
+
+                $type = strtolower((string) $this->extract_attribute_from_html_tag($open, 'type'));
+                $is_delayed = (false !== stripos($type, 'ucwp-delayed') || false !== stripos($open, 'data-ucwp-src=') || false !== stripos($open, 'data-ucwp-inline=') || false !== stripos($open, 'data-ucwp-delayed'));
+
+                $code = (string) preg_replace('/^<script\b[^>]*>|<\/script>$/is', '', $tag);
+                if ('' === $id && '' !== trim($code) && preg_match('/#\s*sourceURL\s*=\s*([^\s\r\n<]+)/i', $code, $source_url_match)) {
+                    $source_id = trim((string) $source_url_match[1]);
+                    $source_id = preg_replace('/[?#].*$/', '', $source_id);
+                    $source_id = basename((string) $source_id);
+                    if (is_string($source_id) && '' !== $source_id) {
+                        $id = sanitize_text_field(substr($source_id, 0, 160));
+                    }
+                }
+
                 $handle = $this->infer_script_handle_from_tag($open, $src);
                 if ('' === $handle && '' !== $src) {
                     $handle = $src;
+                }
+                if ('' === $handle && '' !== $id) {
+                    $handle = $id;
                 }
 
                 $records[$index] = array(
@@ -1463,7 +1642,9 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'handle' => $handle,
                     'group' => $this->normalize_delayed_script_group_handle($handle),
                     'has_src' => ('' !== $src),
-                    'code' => ('' === $src) ? (string) preg_replace('/^<script\b[^>]*>|<\/script>$/is', '', $tag) : '',
+                    'delayed' => (bool) $is_delayed,
+                    'inline_delayed' => (bool) (false !== stripos($open, 'data-ucwp-inline=') || false !== stripos($open, 'data-ucwp-inline="1"') || false !== stripos($open, "data-ucwp-inline='1'")),
+                    'code' => ('' === $src) ? $code : '',
                 );
             }
 
@@ -1622,12 +1803,6 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     $candidates[$plain] = $plain;
                 }
 
-                if (false !== strpos($normalized, 'treesixty')) {
-                    $candidates['tree-sixty'] = 'tree-sixty';
-                    $candidates['treesixty'] = 'treesixty';
-                    $candidates['three-sixty'] = 'three-sixty';
-                    $candidates['threesixty'] = 'threesixty';
-                }
             }
 
             return array_values(array_unique(array_filter($candidates, static function ($candidate) {
@@ -1677,10 +1852,6 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             $legacy_markers = array(
                 'jquery',
                 'jquery-migrate',
-                'treesix',
-                'tree-sixty',
-                'threesixty',
-                'three-sixty',
                 'functions.js',
                 'themes/',
                 '/wp-content/themes/',
@@ -1705,7 +1876,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     (isset($record['tag']) ? (string) $record['tag'] : '') . ' ' .
                     (isset($record['code']) ? (string) $record['code'] : '')
                 );
-                if (false !== strpos($haystack, '/wp-content/themes/') || false !== strpos($haystack, 'jquery') || false !== strpos($haystack, 'treesix') || false !== strpos($haystack, 'threesixty')) {
+                if (false !== strpos($haystack, '/wp-content/themes/') || false !== strpos($haystack, 'jquery')) {
                     return true;
                 }
             }
@@ -2845,10 +3016,6 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
         {
             $list = $this->get_defer_stage_user_exclude_fragments($settings);
 
-            if (isset($settings['delay_third_party_js_exclude_list']) && is_array($settings['delay_third_party_js_exclude_list'])) {
-                $list = array_merge($list, $settings['delay_third_party_js_exclude_list']);
-            }
-
             return array_values(array_unique(array_filter(array_map('strval', $list), static function ($item) {
                 return '' !== trim((string) $item);
             })));
@@ -3398,7 +3565,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
             $main_thread_relief = !empty($settings['main_thread_relief']) ? '1' : '0';
             $loader = <<<'UCWP_DELAY_LOADER'
-<script id="ucwp-delayed-loader">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var relief=__UCWP_RELIEF__;var timeoutMs=8000;var regularAutoDone=false;var safeAutoDone=false;var allDone=false;function qa(){return Array.prototype.slice.call(document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src],script[type="text/ucwp-delayed-js"][data-ucwp-inline="1"]'));}function c(n,a){var v=n.getAttribute('data-ucwp-'+a);return v||'';}function isSafe(n){return c(n,'delay-reason')==='safe-third-party';}function q(mode){return qa().filter(function(n){if(!n||n.getAttribute('data-ucwp-loading')==='1'){return false;}if(mode==='safe'){return isSafe(n);}if(mode==='regular'){return !isSafe(n);}return true;});}function decodeAttrs(node){var raw=c(node,'attrs');var attrs={};if(raw){try{attrs=JSON.parse(atob(raw))||{};}catch(e){attrs={};}}['id','crossorigin','referrerpolicy','integrity','nonce'].forEach(function(attr){var val=c(node,attr);if(val&&!attrs[attr]){attrs[attr]=val;}});return attrs;}function applyAttrs(s,node){var attrs=decodeAttrs(node);Object.keys(attrs).forEach(function(attr){var val=attrs[attr];if(!attr||attr==='src'||attr==='async'||attr==='defer'||attr==='data-wp-strategy'||val===null||typeof val==='undefined'){return;}try{s.setAttribute(attr,String(val));}catch(e){}});}function idle(cb){if(!relief){cb();return;}if('requestIdleCallback' in window){window.requestIdleCallback(cb,{timeout:1500});return;}setTimeout(cb,80);}function wait(ms,cb){if(!relief||ms<=0){cb();return;}setTimeout(cb,ms);}function insertAndRemove(node,s){if(node.parentNode){node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);}else{document.head.appendChild(s);}}function loadOne(node,done){if(!node||node.getAttribute('data-ucwp-loading')==='1'){done();return;}node.setAttribute('data-ucwp-loading','1');var isInline=node.getAttribute('data-ucwp-inline')==='1';var src=node.getAttribute('data-ucwp-src');var s=document.createElement('script');applyAttrs(s,node);s.async=false;if(isInline){try{s.text=node.textContent||'';}catch(e){s.text='';}insertAndRemove(node,s);done();return;}if(!src){done();return;}var finished=false;function finish(){if(finished){return;}finished=true;done();}s.onload=finish;s.onerror=finish;setTimeout(finish,timeoutMs);s.src=src;insertAndRemove(node,s);}function load(list,i){if(i>=list.length){return;}idle(function(){loadOne(list[i],function(){wait(relief?120:0,function(){load(list,i+1);});});});}function run(mode){var list=q(mode);if(!list.length){return;}load(list,0);}function triggerAll(){if(allDone){return;}allDone=true;regularAutoDone=true;safeAutoDone=true;run('all');}function triggerRegular(){if(allDone||regularAutoDone){return;}regularAutoDone=true;run('regular');}function triggerSafe(){if(allDone||safeAutoDone){return;}safeAutoDone=true;run('safe');}['scroll','mousemove','touchstart','keydown','click','pointerdown'].forEach(function(evt){window.addEventListener(evt,triggerAll,{passive:true,once:true});});window.addEventListener('load',function(){setTimeout(triggerRegular,relief?2500:2000);setTimeout(triggerSafe,relief?25000:22000);},{once:true});setTimeout(triggerRegular,relief?7000:6000);setTimeout(triggerSafe,relief?30000:26000);}());</script>
+<script id="ucwp-delayed-loader" data-ucwp-loader-policy="third-party-after-load" data-ucwp-relief="__UCWP_RELIEF__">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var relief=__UCWP_RELIEF__;var timeoutMs=8000;var localAutoDone=false;var thirdPartyAutoDone=false;var allDone=false;var started=Date.now?Date.now():0;function root(){return document.documentElement||document.body||document.head;}function mark(k,v){try{var r=root();if(r){r.setAttribute('data-ucwp-delay-'+k,String(v));}}catch(e){}}function qa(){return Array.prototype.slice.call(document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src],script[type="text/ucwp-delayed-js"][data-ucwp-inline="1"]'));}function c(n,a){var v=n&&n.getAttribute?n.getAttribute('data-ucwp-'+a):'';return v||'';}function reason(n){return c(n,'delay-reason');}function isThirdPartyDelayed(n){var r=reason(n);return r==='safe-third-party'||r==='functional-third-party'||r==='all-third-party';}function q(mode){return qa().filter(function(n){if(!n||n.getAttribute('data-ucwp-loading')==='1'||n.getAttribute('data-ucwp-loaded')==='1'){return false;}if(mode==='thirdparty'){return isThirdPartyDelayed(n);}if(mode==='local'){return !isThirdPartyDelayed(n);}return true;});}function counts(){var all=qa(),tp=0,local=0;for(var i=0;i<all.length;i++){if(isThirdPartyDelayed(all[i])){tp++;}else{local++;}}mark('queued',all.length);mark('queued-local',local);mark('queued-thirdparty',tp);}function decodeAttrs(node){var raw=c(node,'attrs');var attrs={};if(raw){try{attrs=JSON.parse(atob(raw))||{};}catch(e){attrs={};}}['id','crossorigin','referrerpolicy','integrity','nonce'].forEach(function(attr){var val=c(node,attr);if(val&&!attrs[attr]){attrs[attr]=val;}});return attrs;}function applyAttrs(s,node){var attrs=decodeAttrs(node);Object.keys(attrs).forEach(function(attr){var val=attrs[attr];if(!attr||attr==='src'||attr==='async'||attr==='defer'||attr==='data-wp-strategy'||val===null||typeof val==='undefined'){return;}try{s.setAttribute(attr,String(val));}catch(e){}});}function idle(cb){if(!relief){cb();return;}if('requestIdleCallback' in window){window.requestIdleCallback(cb,{timeout:1200});return;}setTimeout(cb,60);}function wait(ms,cb){if(!relief||ms<=0){cb();return;}setTimeout(cb,ms);}function emit(name,detail){try{window.dispatchEvent(new CustomEvent(name,{detail:detail||{}}));}catch(e){}}function insertAndRemove(node,s){if(node.parentNode){node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);}else{(document.head||document.body||document.documentElement).appendChild(s);}}function loadOne(node,done){if(!node||node.getAttribute('data-ucwp-loading')==='1'||node.getAttribute('data-ucwp-loaded')==='1'){done();return;}node.setAttribute('data-ucwp-loading','1');var isInline=node.getAttribute('data-ucwp-inline')==='1';var src=node.getAttribute('data-ucwp-src');var s=document.createElement('script');applyAttrs(s,node);s.async=false;if(isInline){try{s.text=node.textContent||'';}catch(e){s.text='';}insertAndRemove(node,s);node.setAttribute('data-ucwp-loaded','1');done();return;}if(!src){done();return;}var finished=false;function finish(){if(finished){return;}finished=true;node.setAttribute('data-ucwp-loaded','1');done();}s.onload=finish;s.onerror=finish;setTimeout(finish,timeoutMs);s.src=src;insertAndRemove(node,s);}function load(list,i,mode){if(i>=list.length){mark(mode+'-done','1');emit('ucwp:delayed-scripts-done',{mode:mode,count:list.length});return;}idle(function(){loadOne(list[i],function(){wait(relief?80:0,function(){load(list,i+1,mode);});});});}function run(mode){counts();var list=q(mode);if(!list.length){mark(mode+'-done','empty');return;}mark(mode+'-started','1');mark(mode+'-count',list.length);emit('ucwp:delayed-scripts-start',{mode:mode,count:list.length});load(list,0,mode);}function triggerAll(){if(allDone){return;}allDone=true;localAutoDone=true;thirdPartyAutoDone=true;run('all');}function triggerLocal(){if(allDone||localAutoDone){return;}localAutoDone=true;run('local');}function triggerThirdParty(){if(allDone||thirdPartyAutoDone){return;}thirdPartyAutoDone=true;run('thirdparty');}function afterDomReady(cb,delay){if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',function(){setTimeout(cb,delay||0);},{once:true});}else{setTimeout(cb,delay||0);}}function afterLoad(cb,delay){if(document.readyState==='complete'){setTimeout(cb,delay||0);return;}window.addEventListener('load',function(){setTimeout(cb,delay||0);},{once:true});}counts();mark('loader','active');mark('policy','third-party-after-load');mark('started-ms',started);['scroll','mousemove','touchstart','keydown','click','pointerdown'].forEach(function(evt){window.addEventListener(evt,triggerAll,{passive:true,once:true});});afterDomReady(triggerLocal,relief?1800:900);setTimeout(function(){if(document.readyState==='complete'){triggerLocal();}},relief?6500:4500);afterLoad(triggerThirdParty,relief?4500:2500);setTimeout(function(){if(document.readyState==='complete'){triggerThirdParty();}},relief?18000:12000);}());</script>
 UCWP_DELAY_LOADER;
             $loader = str_replace('__UCWP_RELIEF__', $main_thread_relief, $loader);
             // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Static inline loader script with a validated numeric placeholder.
@@ -3424,11 +3591,36 @@ UCWP_DELAY_LOADER;
                 }
 
                 $open = (string) $open_match[0];
-                $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'src'), ENT_QUOTES | ENT_HTML5);
+                $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                if ('' === $src) {
+                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                }
+                if ('' === $src) {
+                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-original-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                }
+
                 $id = (string) $this->extract_attribute_from_html_tag($open, 'id');
+                if ('' === $id) {
+                    $id = (string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-id');
+                }
+                $code = (string) preg_replace('/^<script\b[^>]*>|<\/script>$/is', '', $tag);
+                if ('' === $id && '' !== trim($code) && preg_match('/#\s*sourceURL\s*=\s*([^\s\r\n<]+)/i', $code, $source_url_match)) {
+                    $source_id = trim((string) $source_url_match[1]);
+                    $source_id = preg_replace('/[?#].*$/', '', $source_id);
+                    $source_id = basename((string) $source_id);
+                    if (is_string($source_id) && '' !== $source_id) {
+                        $id = sanitize_text_field(substr($source_id, 0, 160));
+                    }
+                }
+
+                $type = strtolower((string) $this->extract_attribute_from_html_tag($open, 'type'));
+                $is_delayed = (false !== stripos($type, 'ucwp-delayed') || false !== stripos($open, 'data-ucwp-src=') || false !== stripos($open, 'data-ucwp-inline=') || false !== stripos($open, 'data-ucwp-delayed'));
                 $handle = $this->infer_script_handle_from_tag($open, $src);
                 if ('' === $handle && '' !== $src) {
                     $handle = $src;
+                }
+                if ('' === $handle && '' !== $id) {
+                    $handle = $id;
                 }
 
                 $records[$index] = array(
@@ -3440,7 +3632,9 @@ UCWP_DELAY_LOADER;
                     'handle'  => $handle,
                     'group'   => $this->normalize_delayed_script_group_handle($handle),
                     'has_src' => ('' !== $src),
-                    'code'    => ('' === $src) ? (string) preg_replace('/^<script\b[^>]*>|<\/script>$/is', '', $tag) : '',
+                    'delayed' => (bool) $is_delayed,
+                    'inline_delayed' => (bool) (false !== stripos($open, 'data-ucwp-inline=') || false !== stripos($open, 'data-ucwp-inline="1"') || false !== stripos($open, "data-ucwp-inline='1'")),
+                    'code'    => ('' === $src) ? $code : '',
                 );
             }
 
@@ -3501,6 +3695,19 @@ UCWP_DELAY_LOADER;
                 if (!$this->is_delayable_inline_script_tag($inline_record['tag'])) {
                     continue;
                 }
+
+                /*
+                 * WordPress attached inline scripts must not be delayed as
+                 * standalone snippets. They are handle-bound config/data blocks
+                 * (for example {handle}-js-before / {handle}-js-after) and must
+                 * follow the parent external script decision. Delaying only the
+                 * inline block while the parent remains parser-loaded breaks
+                 * ordered loaders such as WooCommerce Google Analytics.
+                 */
+                if ($this->is_wp_inline_dependency_script_record($inline_record)) {
+                    continue;
+                }
+
                 $inline_match = $this->get_inline_third_party_delay_match($inline_record['handle'], $inline_record['tag'], $settings);
                 if (empty($inline_match['matched'])) {
                     continue;
@@ -3530,8 +3737,17 @@ UCWP_DELAY_LOADER;
 
         private function infer_script_handle_from_tag($tag, $src = '')
         {
+            $handle = $this->extract_attribute_from_html_tag($tag, 'data-ucwp-handle');
+            $handle = trim((string) $handle);
+            if ('' !== $handle) {
+                return $handle;
+            }
+
             $id = $this->extract_attribute_from_html_tag($tag, 'id');
             $id = trim((string) $id);
+            if ('' === $id) {
+                $id = trim((string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-id'));
+            }
             if ('' !== $id) {
                 $id = preg_replace('/-js(?:-extra|-before|-after|-translations)?$/', '', $id);
                 return is_string($id) ? $id : '';

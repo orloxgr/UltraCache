@@ -44,6 +44,27 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
+                '/external-caches/redetect' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'external_caches_redetect'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
+                '/litespeed/flush' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'litespeed_flush'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
+                '/nginx/flush' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'nginx_flush'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/apcu/flush' => array(
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
@@ -227,6 +248,13 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
+                '/font-patterns/scan-frontpage' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'scan_frontpage_font_patterns'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/media-ids' => array(
                     array(
                         'methods'             => WP_REST_Server::READABLE,
@@ -364,6 +392,11 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                                 'type'              => 'string',
                                 'required'          => true,
                                 'sanitize_callback' => 'sanitize_textarea_field',
+                            ),
+                            'url'  => array(
+                                'type'              => 'string',
+                                'required'          => false,
+                                'sanitize_callback' => 'esc_url_raw',
                             ),
                         ),
                     ),
@@ -525,6 +558,337 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'items'   => $items,
                 'sources' => $sources,
             );
+        }
+
+        private function ucwp_font_scan_add_item(&$items, $value, $source = '')
+        {
+            $value = trim((string) $value);
+            $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5);
+            $value = trim($value, " \t\r\n\0\x0B\"'");
+            $value = preg_replace('/\s+/', ' ', $value);
+            if ('' === $value) {
+                return;
+            }
+
+            $lower = strtolower($value);
+            $generic = array('serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', '-apple-system', 'blinkmacsystemfont', 'inherit', 'initial', 'unset', 'var');
+            if (in_array($lower, $generic, true) || 1 === strlen($lower)) {
+                return;
+            }
+
+            if (strlen($value) > 120) {
+                return;
+            }
+
+            $items[$lower] = array(
+                'value'  => $value,
+                'source' => (string) $source,
+            );
+        }
+
+        private function ucwp_font_scan_add_font_family_list(&$items, $value, $source = '')
+        {
+            $value = trim((string) $value);
+            if ('' === $value) {
+                return;
+            }
+
+            $value = preg_replace('/\b!important\b/i', '', $value);
+            foreach (preg_split('/,/', $value) as $part) {
+                $part = trim((string) $part);
+                if ('' === $part || false !== strpos($part, 'var(')) {
+                    continue;
+                }
+                $this->ucwp_font_scan_add_item($items, $part, $source);
+            }
+        }
+
+        private function ucwp_font_scan_is_likely_icon_text($text)
+        {
+            $text = strtolower((string) $text);
+            if ('' === $text) {
+                return false;
+            }
+
+            $patterns = array(
+                ' icon', '-icon', '_icon', 'icons', 'fontawesome', 'font awesome', 'font-awesome',
+                'fa-solid', 'fa-regular', 'fa-brands', 'dashicons', 'eicons', 'icomoon', 'flaticon',
+                'themify', 'simple-line-icons', 'linearicons', 'material-icons', 'materialicons',
+                'ionicons', 'feather', 'glyphicons', 'dripicons', 'et-line', 'socicon', 'typicons',
+                'woocommerce star', 'star.ttf', '/webfonts/', '/icons/', 'iconfont', 'porto-icon',
+                'xstore-icons', 'woodmart-font', 'revicons', 'sr7icons', 'tinvwl-webfont'
+            );
+
+            foreach ($patterns as $pattern) {
+                if (false !== strpos($text, $pattern)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function ucwp_font_scan_basename_from_url($url)
+        {
+            $url = html_entity_decode((string) $url, ENT_QUOTES | ENT_HTML5);
+            $path = (string) wp_parse_url($url, PHP_URL_PATH);
+            if ('' === $path) {
+                $path = $url;
+            }
+            $base = basename($path);
+            $base = preg_replace('/\.(woff2?|ttf|otf|eot|svg)(?:\?.*)?$/i', '', (string) $base);
+            return trim((string) $base);
+        }
+
+        private function ucwp_font_scan_parse_google_fonts_url($url, &$never_delay)
+        {
+            $url = html_entity_decode((string) $url, ENT_QUOTES | ENT_HTML5);
+            if (false === stripos($url, 'fonts.googleapis.com') && false === stripos($url, 'fonts.gstatic.com') && false === stripos($url, 'google-fonts')) {
+                return;
+            }
+
+            $query = (string) wp_parse_url($url, PHP_URL_QUERY);
+            if ('' === $query) {
+                return;
+            }
+
+            $params = array();
+            parse_str($query, $params);
+            if (empty($params['family'])) {
+                return;
+            }
+
+            foreach ((array) $params['family'] as $family) {
+                $family = preg_replace('/:.+$/', '', (string) $family);
+                $family = str_replace('+', ' ', $family);
+                $this->ucwp_font_scan_add_item($never_delay, $family, 'google-fonts-url');
+            }
+        }
+
+        private function ucwp_font_scan_resolve_local_stylesheet_path($url)
+        {
+            $url = html_entity_decode((string) $url, ENT_QUOTES | ENT_HTML5);
+            if ('' === trim($url)) {
+                return '';
+            }
+
+            $absolute = wp_http_validate_url($url) ? $url : home_url('/' . ltrim($url, '/'));
+            $url_host = strtolower((string) wp_parse_url($absolute, PHP_URL_HOST));
+            $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+            if ('' === $url_host || '' === $home_host || $url_host !== $home_host) {
+                return '';
+            }
+
+            $path = (string) wp_parse_url($absolute, PHP_URL_PATH);
+            if ('' === $path) {
+                return '';
+            }
+
+            $home_path = (string) wp_parse_url(home_url('/'), PHP_URL_PATH);
+            $home_path = '/' . trim($home_path, '/');
+            if ('/' !== $home_path && 0 === strpos($path, $home_path . '/')) {
+                $path = substr($path, strlen($home_path));
+            }
+
+            $relative = ltrim($path, '/');
+            if ('' === $relative || false !== strpos($relative, '..')) {
+                return '';
+            }
+
+            $candidate = wp_normalize_path(ABSPATH . $relative);
+            $abspath = wp_normalize_path(ABSPATH);
+            if (0 !== strpos($candidate, $abspath) || !is_readable($candidate) || !is_file($candidate)) {
+                return '';
+            }
+
+            return $candidate;
+        }
+
+        private function ucwp_font_scan_collect_css_from_frontpage_html($html, $base_url, &$stylesheet_urls, &$never_delay)
+        {
+            $html = (string) $html;
+            $css_blocks = array();
+            $stylesheet_urls = array();
+
+            if (preg_match_all('/<style\b[^>]*>(.*?)<\/style>/is', $html, $matches)) {
+                foreach ((array) $matches[1] as $css) {
+                    $css = trim((string) $css);
+                    if ('' !== $css) {
+                        $css_blocks[] = array('css' => $css, 'source' => 'inline-style');
+                    }
+                }
+            }
+
+            if (preg_match_all('/<link\b[^>]*>/is', $html, $links)) {
+                foreach ((array) $links[0] as $tag) {
+                    $tag = (string) $tag;
+                    $rel = '';
+                    $as = '';
+                    $href = '';
+                    if (preg_match('/\brel\s*=\s*(["\'])(.*?)\1/is', $tag, $m)) {
+                        $rel = strtolower((string) $m[2]);
+                    }
+                    if (preg_match('/\bas\s*=\s*(["\'])(.*?)\1/is', $tag, $m)) {
+                        $as = strtolower((string) $m[2]);
+                    }
+                    if (preg_match('/\bhref\s*=\s*(["\'])(.*?)\1/is', $tag, $m)) {
+                        $href = html_entity_decode((string) $m[2], ENT_QUOTES | ENT_HTML5);
+                    }
+                    if ('' === $href || (false === strpos($rel, 'stylesheet') && !('preload' === $rel && 'style' === $as))) {
+                        continue;
+                    }
+
+                    $absolute = wp_http_validate_url($href) ? $href : wp_make_link_relative($href);
+                    if (!wp_http_validate_url($absolute)) {
+                        $absolute = rtrim((string) $base_url, '/') . '/' . ltrim($href, '/');
+                    }
+                    $stylesheet_urls[] = $absolute;
+                    $this->ucwp_font_scan_parse_google_fonts_url($absolute, $never_delay);
+                }
+            }
+
+            $stylesheet_urls = array_values(array_unique(array_filter(array_map('strval', $stylesheet_urls))));
+            foreach (array_slice($stylesheet_urls, 0, 80) as $url) {
+                $path = $this->ucwp_font_scan_resolve_local_stylesheet_path($url);
+                if ('' === $path) {
+                    continue;
+                }
+                $css = function_exists('ucwp_safe_file_get_contents') ? ucwp_safe_file_get_contents($path, 'font_pattern_frontpage_scan', true) : file_get_contents($path); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+                if (!is_string($css) || '' === trim($css)) {
+                    continue;
+                }
+                $css_blocks[] = array('css' => $css, 'source' => $url);
+            }
+
+            return $css_blocks;
+        }
+
+        private function ucwp_font_scan_analyze_css($css, $source, &$delay_icons, &$never_delay)
+        {
+            $css = (string) $css;
+            $source = (string) $source;
+            if ('' === $css) {
+                return;
+            }
+
+            if (preg_match_all('/font-family\s*:\s*([^;}]+)/i', $css, $families)) {
+                foreach ((array) $families[1] as $family_list) {
+                    $family_list_string = (string) $family_list;
+                    if ($this->ucwp_font_scan_is_likely_icon_text($family_list_string)) {
+                        $this->ucwp_font_scan_add_font_family_list($delay_icons, $family_list_string, $source . ' font-family');
+                    } else {
+                        $this->ucwp_font_scan_add_font_family_list($never_delay, $family_list_string, $source . ' font-family');
+                    }
+                }
+            }
+
+            if (!preg_match_all('/@font-face\s*\{.*?\}/is', $css, $blocks)) {
+                return;
+            }
+
+            foreach ((array) $blocks[0] as $block) {
+                $block = (string) $block;
+                $family = '';
+                if (preg_match('/font-family\s*:\s*([^;]+);/i', $block, $m)) {
+                    $family = trim(trim((string) $m[1]), " \t\r\n\0\x0B\"'");
+                }
+
+                $src_basenames = array();
+                if (preg_match_all('/url\(([^\)]+)\)/i', $block, $urls)) {
+                    foreach ((array) $urls[1] as $font_url) {
+                        $font_url = trim(trim((string) $font_url), " \t\r\n\0\x0B\"'");
+                        $basename = $this->ucwp_font_scan_basename_from_url($font_url);
+                        if ('' !== $basename) {
+                            $src_basenames[] = $basename;
+                        }
+                    }
+                }
+
+                $combined = $source . "\n" . $block . "\n" . implode("\n", $src_basenames);
+                $is_icon = $this->ucwp_font_scan_is_likely_icon_text($combined);
+                if (!$is_icon && '' !== $family) {
+                    $family_pattern = preg_quote($family, '/');
+                    if (preg_match('/font-family\s*:\s*[^;]*' . $family_pattern . '[^;]*;[\s\S]{0,240}?content\s*:\s*[\'\"]\\\\[a-f0-9]{3,6}/i', $css)
+                        || preg_match('/content\s*:\s*[\'\"]\\\\[a-f0-9]{3,6}[\s\S]{0,240}?font-family\s*:\s*[^;]*' . $family_pattern . '[^;]*;/i', $css)) {
+                        $is_icon = true;
+                    }
+                }
+
+                if ($is_icon) {
+                    if ('' !== $family) {
+                        $this->ucwp_font_scan_add_item($delay_icons, $family, $source . ' @font-face');
+                    }
+                    foreach ($src_basenames as $basename) {
+                        $this->ucwp_font_scan_add_item($delay_icons, $basename, $source . ' font-file');
+                    }
+                } elseif ('' !== $family) {
+                    $this->ucwp_font_scan_add_item($never_delay, $family, $source . ' @font-face');
+                }
+            }
+        }
+
+        public function scan_frontpage_font_patterns($request = null)
+        {
+            unset($request);
+
+            $url = home_url('/');
+            $response = wp_remote_get($url, array(
+                'timeout'     => 10,
+                'redirection' => 3,
+                'sslverify'   => false,
+                'headers'     => array(
+                    'Cache-Control' => 'no-cache',
+                    'Pragma'        => 'no-cache',
+                    'User-Agent'    => 'UltraCache-FontPatternScanner/' . (defined('UCWP_VERSION') ? UCWP_VERSION : '1.0') . '; ' . home_url('/'),
+                ),
+            ));
+
+            if (is_wp_error($response)) {
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'message' => 'Front page font scan failed: ' . $response->get_error_message(),
+                    'delayIconFontsList' => array(),
+                    'delayIconFontsExcludeList' => array(),
+                ), 500);
+            }
+
+            $html = (string) wp_remote_retrieve_body($response);
+            if ('' === trim($html)) {
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'message' => 'Front page font scan returned empty HTML.',
+                    'delayIconFontsList' => array(),
+                    'delayIconFontsExcludeList' => array(),
+                ), 500);
+            }
+
+            $delay_icons = array();
+            $never_delay = array();
+            $stylesheet_urls = array();
+            $css_blocks = $this->ucwp_font_scan_collect_css_from_frontpage_html($html, $url, $stylesheet_urls, $never_delay);
+            foreach ($css_blocks as $entry) {
+                $this->ucwp_font_scan_analyze_css((string) ($entry['css'] ?? ''), (string) ($entry['source'] ?? 'frontpage'), $delay_icons, $never_delay);
+            }
+
+            $delay_values = array_values(array_map(static function ($item) { return $item['value']; }, $delay_icons));
+            $never_values = array_values(array_map(static function ($item) { return $item['value']; }, $never_delay));
+
+            sort($delay_values, SORT_NATURAL | SORT_FLAG_CASE);
+            sort($never_values, SORT_NATURAL | SORT_FLAG_CASE);
+            $delay_values = array_slice(array_values(array_unique($delay_values)), 0, 80);
+            $never_values = array_slice(array_values(array_unique($never_values)), 0, 80);
+
+            return new WP_REST_Response(array(
+                'success' => true,
+                'url' => $url,
+                'stylesheetsScanned' => count($stylesheet_urls),
+                'cssBlocksScanned' => count($css_blocks),
+                'delayIconFontsList' => $delay_values,
+                'delayIconFontsExcludeList' => $never_values,
+                'iconCount' => count($delay_values),
+                'nonIconCount' => count($never_values),
+                'message' => sprintf('Detected %d likely icon font pattern(s) and %d non-icon font pattern(s) on the front page.', count($delay_values), count($never_values)),
+            ), 200);
         }
 
         public function populate_query_string_allowlist($request = null)

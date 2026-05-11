@@ -426,11 +426,20 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['self_hosted_font_css_optimization'])) {
+
+            $html = $this->apply_html_rewrite_safely($html, 'central-inline-font-display-normalize', function ($html) {
+                return $this->normalize_inline_style_font_display_in_html($html);
+            });
+
+            if (!empty($settings['self_hosted_font_css_optimization']) || !empty($settings['delay_icon_fonts']) || !empty($settings['google_fonts_swap'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'self-hosted-font-css-links', function ($html) {
                     return $this->optimize_self_hosted_font_css_links($html);
                 });
             }
+
+            $html = $this->apply_html_rewrite_safely($html, 'central-linked-font-display-normalize', function ($html) {
+                return $this->normalize_linked_local_stylesheet_font_display_in_html($html);
+            });
 
             if (!empty($settings['google_fonts_swap'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'local-font-display-patches', function ($html) {
@@ -438,18 +447,27 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['self_hosted_font_css_optimization']) && false !== stripos((string) $html, '.ttf')) {
+            if ((!empty($settings['self_hosted_font_css_optimization']) || !empty($settings['delay_icon_fonts']) || !empty($settings['google_fonts_swap'])) && false !== stripos((string) $html, '.ttf')) {
                 $html = $this->apply_html_rewrite_safely($html, 'final-generic-ttf-font-face-cleanup', function ($html) {
                     return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($html);
                 });
             }
 
-            if (empty($settings['frontend_safe_mode']) && !empty($settings['self_hosted_font_runtime_rewrite'])) {
+            if (empty($settings['frontend_safe_mode']) && (!empty($settings['self_hosted_font_runtime_rewrite']) || !empty($settings['google_fonts_swap']))) {
                 // Runtime font CSS rewrites are intentionally allowed during slider/hero safe mode.
                 // The helper only rewrites late stylesheet href attributes via MutationObserver and
                 // does not alter slider markup, script ordering, or LCP preload selection.
                 $html = $this->apply_html_rewrite_safely($html, 'runtime-font-css-map', function ($html) {
                     return $this->inject_runtime_font_css_url_map($html);
+                });
+
+
+                // Some plugins/themes register @font-face rules dynamically through JS/CSSOM
+                // after the server-side HTML/CSS rewrite stage. Keep this generic and tiny:
+                // patch only @font-face font-display declarations, without changing URLs,
+                // selectors, script order, or layout markup.
+                $html = $this->apply_html_rewrite_safely($html, 'runtime-font-display-cssom-patch', function ($html) {
+                    return $this->inject_runtime_font_display_cssom_patch($html);
                 });
             }
 
@@ -494,14 +512,148 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-
-            if (!$safe_mode) {
-                $html = $this->apply_html_rewrite_safely($html, 'safe-html-minify', function ($html) {
-                    return $this->minify_html_output_safely($html);
+            if (!empty($settings['defer_js']) || !empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js']) || !empty($settings['delay_all_third_party_js']) || !empty($settings['delay_non_critical_js'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'restore-user-excluded-delayed-js', function ($html) use ($settings) {
+                    return $this->restore_user_excluded_delayed_scripts_in_html($html, $settings);
                 });
             }
 
+            $html = $this->apply_html_rewrite_safely($html, 'dedupe-ucwp-stylesheet-links', function ($html) {
+                return $this->dedupe_ultracache_stylesheet_links_in_html($html);
+            });
+
+
             return $html;
+        }
+
+        private function dedupe_ultracache_stylesheet_links_in_html($html)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return $html;
+            }
+
+            $outer_seen = array();
+            $noscript_seen = array();
+            $noscript_blocks = array();
+            $placeholder_prefix = '%%UCWP_NOSCRIPT_CSS_DEDUPE_' . md5((string) strlen($html) . '|' . (defined('UCWP_VERSION') ? (string) UCWP_VERSION : '')) . '_';
+
+            $without_noscript = preg_replace_callback('/<noscript\b[^>]*>.*?<\/noscript>/is', function ($matches) use (&$noscript_blocks, &$noscript_seen, $placeholder_prefix) {
+                $index = count($noscript_blocks);
+                $placeholder = $placeholder_prefix . $index . '%%';
+                $block = isset($matches[0]) ? (string) $matches[0] : '';
+                $noscript_blocks[$placeholder] = $this->dedupe_ultracache_stylesheet_links_in_fragment($block, true, $noscript_seen);
+                return $placeholder;
+            }, $html);
+
+            if (!is_string($without_noscript) || '' === $without_noscript) {
+                return $html;
+            }
+
+            $deduped = $this->dedupe_ultracache_stylesheet_links_in_fragment($without_noscript, false, $outer_seen);
+            if (!is_string($deduped) || '' === $deduped) {
+                return $html;
+            }
+
+            if (!empty($noscript_blocks)) {
+                $deduped = strtr($deduped, $noscript_blocks);
+            }
+
+            return $deduped;
+        }
+
+        private function dedupe_ultracache_stylesheet_links_in_fragment($html, $inside_noscript, array &$seen)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return $html;
+            }
+
+            $updated = preg_replace_callback('/<link\b[^>]*>/i', function ($matches) use ($inside_noscript, &$seen) {
+                $tag = isset($matches[0]) ? (string) $matches[0] : '';
+                if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
+                    return $tag;
+                }
+
+                $href = $this->extract_attribute_from_html_tag($tag, 'href');
+                if ('' === $href || false === stripos($href, '.css')) {
+                    return $tag;
+                }
+
+                if (!$this->is_ultracache_stylesheet_dedupe_candidate($tag, $href, (bool) $inside_noscript)) {
+                    return $tag;
+                }
+
+                $key = $this->build_ultracache_stylesheet_dedupe_key($tag, $href, (bool) $inside_noscript);
+                if ('' === $key) {
+                    return $tag;
+                }
+
+                if (isset($seen[$key])) {
+                    return '';
+                }
+
+                $seen[$key] = true;
+                return $tag;
+            }, $html);
+
+            return is_string($updated) ? $updated : $html;
+        }
+
+        private function is_ultracache_stylesheet_dedupe_candidate($tag, $href, $inside_noscript = false)
+        {
+            $tag = (string) $tag;
+            $href = (string) $href;
+            $tag_lc = strtolower($tag);
+            $href_lc = strtolower(html_entity_decode($href, ENT_QUOTES | ENT_HTML5));
+
+            if (false !== strpos($tag_lc, 'data-ucwp-')) {
+                return true;
+            }
+
+            if (false !== strpos($href_lc, '/wp-content/cache/ultracache/')) {
+                return true;
+            }
+
+            if ($inside_noscript && false !== strpos($tag_lc, 'data-ucwp-async-css-fallback')) {
+                return true;
+            }
+
+            return false;
+        }
+
+        private function build_ultracache_stylesheet_dedupe_key($tag, $href, $inside_noscript = false)
+        {
+            $tag = (string) $tag;
+            $href = trim(html_entity_decode((string) $href, ENT_QUOTES | ENT_HTML5));
+            if ('' === $href) {
+                return '';
+            }
+
+            $absolute = $this->absolutize_public_resource_url($href, home_url('/'));
+            if (!is_string($absolute) || '' === $absolute) {
+                $absolute = $href;
+            }
+
+            $absolute = strtolower($absolute);
+            $absolute = preg_replace('/#.*$/', '', $absolute);
+            $absolute = is_string($absolute) ? $absolute : strtolower($href);
+
+            if ($inside_noscript) {
+                return 'noscript|' . $absolute;
+            }
+
+            $tag_lc = strtolower($tag);
+            $media = strtolower(trim((string) $this->extract_attribute_from_html_tag($tag, 'media')));
+            $is_async = false !== strpos($tag_lc, 'data-ucwp-async-css')
+                || false !== strpos($tag_lc, 'data-ucwp-delayed-icon-fonts')
+                || false !== strpos($tag_lc, 'data-ucwp-css-async-reason')
+                || false !== strpos($tag_lc, 'onload=')
+                || 'print' === $media;
+
+            if ($is_async) {
+                return 'async|' . $absolute;
+            }
+
+            return 'blocking|' . $absolute;
         }
 
         private function inject_mailerlite_lazy_nonce_refresh($html)
@@ -1160,27 +1312,6 @@ JS;
             }
 
             return $path . '*';
-        }
-
-        private function minify_html_output_safely($html)
-        {
-            if (!is_string($html) || '' === $html) {
-                return $html;
-            }
-
-            $html = str_replace("
-", '', $html);
-            $tokens = array();
-            $html = $this->protect_html_regions_from_safe_minify($html, $tokens);
-            $html = $this->remove_noncritical_html_comments_for_safe_minify($html);
-            $html = $this->minify_head_html_safely($html);
-            $html = trim($html);
-
-            if (!empty($tokens)) {
-                $html = strtr($html, $tokens);
-            }
-
-            return $html;
         }
 
         private function should_use_safe_frontend_optimization_mode($html)

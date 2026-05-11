@@ -357,7 +357,6 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'lcp-image-markup' => 'LCP image markup optimization',
                 'lcp-boundary-defer' => 'LCP Boundary Defer',
                 'defer-all-js-final-pass' => 'Defer all JS final pass',
-                'safe-html-minify' => 'Safe HTML minify',
             );
             if (isset($labels[$stage])) {
                 return $labels[$stage];
@@ -992,6 +991,45 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             return sanitize_text_field($fragment);
         }
 
+        private function runtime_js_scan_service_fragment_from_source($source, $global = '')
+        {
+            $source = html_entity_decode((string) $source, ENT_QUOTES, 'UTF-8');
+            $source = preg_replace('/(?::\d+){1,2}$/', '', $source);
+            $source = trim((string) $source);
+            if ('' === $source) {
+                return '';
+            }
+
+            $parts = wp_parse_url($source);
+            $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+            $path = isset($parts['path']) ? trim(strtolower((string) $parts['path']), '/') : '';
+            if ('' === $host || '' === $path || false !== stripos($path, '.css')) {
+                return '';
+            }
+
+            $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+            $site_host = strtolower((string) wp_parse_url(site_url('/'), PHP_URL_HOST));
+            if ($host === $home_host || $host === $site_host) {
+                return '';
+            }
+
+            $global = strtolower(trim((string) $global));
+            if ('' !== $global && !$this->runtime_js_scan_is_generic_token($global)) {
+                $haystack = $host . '/' . $path;
+                if (false === strpos($haystack, $global)) {
+                    return '';
+                }
+            }
+
+            $segments = array_values(array_filter(explode('/', $path), 'strlen'));
+            if (empty($segments)) {
+                return '';
+            }
+            $path_fragment = implode('/', array_slice($segments, -1 * min(3, count($segments))));
+            $fragment = $host . '/' . $path_fragment;
+            return sanitize_text_field(substr($fragment, 0, 220));
+        }
+
         private function runtime_js_scan_sanitize_source($source)
         {
             $source = $this->runtime_js_scan_clean_console_candidate($source);
@@ -1223,9 +1261,19 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
                 $src = isset($script['src']) ? $this->runtime_js_scan_sanitize_source((string) $script['src']) : '';
                 $id = isset($script['id']) ? sanitize_text_field(substr((string) $script['id'], 0, 160)) : '';
+                $handle = isset($script['handle']) ? sanitize_text_field(substr((string) $script['handle'], 0, 160)) : '';
+                if ('' === $id && '' !== $handle) {
+                    $id = $handle;
+                }
                 $type = isset($script['type']) ? sanitize_text_field(substr((string) $script['type'], 0, 120)) : '';
                 $strategy = isset($script['strategy']) ? sanitize_text_field(substr((string) $script['strategy'], 0, 80)) : '';
-                $text = isset($script['text']) ? sanitize_textarea_field(substr((string) $script['text'], 0, 1200)) : '';
+                $text = isset($script['text']) ? sanitize_textarea_field(substr((string) $script['text'], 0, 60000)) : '';
+                if ('' === $id && '' !== $text) {
+                    $source_url_id = $this->runtime_js_scan_source_url_id_from_inline_text($text);
+                    if ('' !== $source_url_id) {
+                        $id = $source_url_id;
+                    }
+                }
 
                 if ('' === $src && '' === $id && '' === $text) {
                     continue;
@@ -1233,6 +1281,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
                 $out[] = array(
                     'id'       => $id,
+                    'handle'   => $handle,
                     'src'      => $src,
                     'type'     => $type,
                     'defer'    => !empty($script['defer']),
@@ -1248,6 +1297,819 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
 
             return $out;
+        }
+
+        private function runtime_js_scan_inventory_summary(array $scripts)
+        {
+            $summary = array(
+                'total'      => count($scripts),
+                'external'   => 0,
+                'inline'     => 0,
+                'delayed'    => 0,
+                'sourceUrl'  => 0,
+            );
+
+            foreach ($scripts as $script) {
+                if (!is_array($script)) {
+                    continue;
+                }
+                if (!empty($script['src'])) {
+                    $summary['external']++;
+                } else {
+                    $summary['inline']++;
+                }
+                if (!empty($script['delayed'])) {
+                    $summary['delayed']++;
+                }
+                $text = isset($script['text']) ? (string) $script['text'] : '';
+                if ('' !== $text && '' !== $this->runtime_js_scan_source_url_id_from_inline_text($text)) {
+                    $summary['sourceUrl']++;
+                }
+            }
+
+            return $summary;
+        }
+
+        private function runtime_js_scan_attribute_from_tag($attributes, $name)
+        {
+            $attributes = (string) $attributes;
+            $name = preg_quote((string) $name, '/');
+            if (preg_match('/\\b' . $name . '\\s*=\\s*(["\\\'])(.*?)\\1/is', $attributes, $match)) {
+                return html_entity_decode((string) $match[2], ENT_QUOTES, 'UTF-8');
+            }
+            if (preg_match('/\\b' . $name . '\\s*=\\s*([^\\s>]+)/is', $attributes, $match)) {
+                return html_entity_decode((string) $match[1], ENT_QUOTES, 'UTF-8');
+            }
+            return '';
+        }
+
+        private function runtime_js_scan_url_to_absolute($url, $base_url = '')
+        {
+            $url = trim(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
+            if ('' === $url) {
+                return '';
+            }
+            if (preg_match('#^https?://#i', $url)) {
+                return esc_url_raw($url);
+            }
+            if (0 === strpos($url, '//')) {
+                $scheme = (string) wp_parse_url(home_url('/'), PHP_URL_SCHEME);
+                return esc_url_raw(($scheme ? $scheme : 'https') . ':' . $url);
+            }
+            if (0 === strpos($url, '/')) {
+                return esc_url_raw(home_url($url));
+            }
+
+            $base_url = '' !== (string) $base_url ? (string) $base_url : home_url('/');
+            $parts = wp_parse_url($base_url);
+            if (empty($parts['host'])) {
+                return esc_url_raw(home_url('/' . ltrim($url, '/')));
+            }
+
+            $scheme = !empty($parts['scheme']) ? (string) $parts['scheme'] : 'https';
+            $host = (string) $parts['host'];
+            $port = !empty($parts['port']) ? ':' . (int) $parts['port'] : '';
+            $path = !empty($parts['path']) ? (string) $parts['path'] : '/';
+            $dir = rtrim(str_replace('\\\\', '/', dirname($path)), '/');
+            if ('.' === $dir || '' === $dir) {
+                $dir = '';
+            }
+
+            $combined = $dir . '/' . ltrim($url, '/');
+            $segments = array();
+            foreach (explode('/', $combined) as $segment) {
+                if ('' === $segment || '.' === $segment) {
+                    continue;
+                }
+                if ('..' === $segment) {
+                    array_pop($segments);
+                    continue;
+                }
+                $segments[] = $segment;
+            }
+
+            return esc_url_raw($scheme . '://' . $host . $port . '/' . implode('/', $segments));
+        }
+
+        private function runtime_js_scan_source_url_id_from_inline_text($text)
+        {
+            $text = (string) $text;
+            if ('' === $text) {
+                return '';
+            }
+            if (preg_match('/#\s*sourceURL\s*=\s*([^\s\r\n<]+)/i', $text, $match)) {
+                $id = trim((string) $match[1]);
+                $id = preg_replace('/[?#].*$/', '', $id);
+                $id = basename($id);
+                $id = sanitize_text_field(substr((string) $id, 0, 160));
+                if ('' !== $id && !$this->runtime_js_scan_is_generic_token($id)) {
+                    return $id;
+                }
+            }
+            return '';
+        }
+
+        private function runtime_js_scan_find_scripts_with_symbol_text($symbol, array $scripts)
+        {
+            $symbol = trim((string) $symbol);
+            if ('' === $symbol || $this->runtime_js_scan_is_generic_token($symbol)) {
+                return array();
+            }
+            $matches = array();
+            $seen = array();
+            $symbol_regex = preg_quote($symbol, '/');
+            foreach ($scripts as $script) {
+                if (!is_array($script)) {
+                    continue;
+                }
+                $content = $this->runtime_js_scan_script_content($script);
+                if ('' === $content || !preg_match('/\b' . $symbol_regex . '\b/', $content)) {
+                    continue;
+                }
+                $src = isset($script['src']) ? (string) $script['src'] : '';
+                $id = isset($script['id']) ? (string) $script['id'] : '';
+                $key = strtolower($src . '|' . $id);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $matches[] = array('src' => $src, 'id' => $id);
+                if (count($matches) >= 12) {
+                    break;
+                }
+            }
+            return $matches;
+        }
+
+        private function runtime_js_scan_find_scripts_by_global_source_hint($global, array $scripts)
+        {
+            $global = strtolower(trim((string) $global));
+            if ('' === $global || $this->runtime_js_scan_is_generic_token($global)) {
+                return array();
+            }
+
+            $matches = array();
+            $seen = array();
+            foreach ($scripts as $script) {
+                if (!is_array($script)) {
+                    continue;
+                }
+
+                $src = isset($script['src']) ? (string) $script['src'] : '';
+                $id = isset($script['id']) ? (string) $script['id'] : '';
+                $handle = isset($script['handle']) ? (string) $script['handle'] : '';
+                $haystack = strtolower(html_entity_decode($src . ' ' . $id . ' ' . $handle, ENT_QUOTES, 'UTF-8'));
+                if ('' === trim($haystack)) {
+                    continue;
+                }
+
+                $matched = false;
+                if (preg_match('/(?:^|[^a-z0-9_$])' . preg_quote($global, '/') . '(?:[^a-z0-9_$]|$)/i', $haystack)) {
+                    $matched = true;
+                } elseif ('' !== $src && '' !== $this->runtime_js_scan_service_fragment_from_source($src, $global)) {
+                    $matched = true;
+                }
+
+                if (!$matched) {
+                    continue;
+                }
+
+                $key = strtolower($src . '|' . $id . '|' . $handle);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $matches[] = array(
+                    'src'    => $src,
+                    'id'     => $id,
+                    'handle' => $handle,
+                );
+                if (count($matches) >= 12) {
+                    break;
+                }
+            }
+
+            return $matches;
+        }
+
+        private function runtime_js_scan_dynamic_callback_globals_from_text($text)
+        {
+            $text = (string) $text;
+            if ('' === trim($text)) {
+                return array();
+            }
+            $out = array();
+            $identifier = '[A-Za-z_$][A-Za-z0-9_$]*';
+            if (preg_match_all('/["\']?([A-Za-z0-9_$.-]*(?:function|callback|handler|method)[A-Za-z0-9_$.-]*)["\']?\s*:\s*["\'](' . $identifier . ')["\']/i', $text, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $match) {
+                    $value = isset($match[2]) ? sanitize_text_field((string) $match[2]) : '';
+                    if ('' !== $value && !$this->runtime_js_scan_is_generic_token($value)) {
+                        $out[$value] = $value;
+                    }
+                }
+            }
+            if (preg_match_all('/["\'](' . $identifier . ')["\']\s*,\s*["\'](?:event|config|consent|set|js)["\']/i', $text, $call_matches, PREG_SET_ORDER)) {
+                foreach ($call_matches as $match) {
+                    $value = isset($match[1]) ? sanitize_text_field((string) $match[1]) : '';
+                    if ('' !== $value && !$this->runtime_js_scan_is_generic_token($value)) {
+                        $out[$value] = $value;
+                    }
+                }
+            }
+            return array_values($out);
+        }
+
+        private function runtime_js_scan_add_script_identity_suggestions(&$suggestions, &$seen, array $script, $label, $source, $message, $reason, array $exclusions, $confidence = 'review', $global = '')
+        {
+            $script_src = isset($script['src']) ? (string) $script['src'] : '';
+            $script_id = isset($script['id']) ? (string) $script['id'] : '';
+            $source_for_display = '' !== $script_src ? $script_src : ('' !== $script_id ? $script_id : $source);
+            $fragment = $this->runtime_js_scan_path_fragment_from_source($script_src, 4);
+            if ('' !== $fragment) {
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $fragment, $label, $source_for_display, $message, $reason, $exclusions, $confidence);
+            } else {
+                $service_fragment = $this->runtime_js_scan_service_fragment_from_source($script_src, $global);
+                if ('' !== $service_fragment) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $service_fragment, $label . ' service endpoint', $source_for_display, $message, $reason, $exclusions, 'review');
+                }
+            }
+            if ('' !== $script_id) {
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $script_id, $label . ' handle/id', $source_for_display, $message, $reason, $exclusions, $confidence);
+                $related_id = $this->runtime_js_scan_related_external_id_for_inline_id($script_id);
+                if ('' !== $related_id && isset($GLOBALS['ucwp_runtime_js_scan_scripts'])) {
+                    $related = $this->runtime_js_scan_find_script_by_id((array) $GLOBALS['ucwp_runtime_js_scan_scripts'], $related_id);
+                    if (!empty($related)) {
+                        $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $related, $label . ' related external', $source_for_display, $message, $reason, $exclusions, $confidence, $global);
+                    }
+                }
+            }
+        }
+
+        private function runtime_js_scan_add_dynamic_window_global_suggestions(&$suggestions, &$seen, array $scripts, $source, $message, $detail, array $exclusions)
+        {
+            $reason = 'A dynamic window[callbackName]() call failed. UltraCache resolved possible callback globals from scanned inline config, sourceURL markers, and stack-frame context. It only shows actual symbols and script ids/paths found in that scanned page.';
+            $context_ids = $this->runtime_js_scan_inline_frame_ids_from_text((string) $detail . "
+" . (string) $message);
+            $context_scripts = array();
+            foreach ($context_ids as $inline_id) {
+                $script = $this->runtime_js_scan_find_script_by_id($scripts, $inline_id);
+                if (!empty($script)) {
+                    $context_scripts[] = $script;
+                }
+            }
+            foreach ($this->runtime_js_scan_find_scripts_by_source_hint($source, $scripts) as $script) {
+                if (!empty($script)) {
+                    $context_scripts[] = $script;
+                }
+            }
+            if (empty($context_scripts)) {
+                $context_scripts = $scripts;
+            }
+
+            $globals = array();
+            foreach ($context_scripts as $script) {
+                $content = $this->runtime_js_scan_script_content($script);
+                foreach ($this->runtime_js_scan_dynamic_callback_globals_from_text($content) as $global) {
+                    $globals[$global] = $global;
+                }
+            }
+
+            $GLOBALS['ucwp_runtime_js_scan_scripts'] = $scripts;
+            foreach ($globals as $global) {
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $global, 'resolved dynamic window callback global', $source, $message, $reason, $exclusions, 'review');
+                foreach ($this->runtime_js_scan_find_scripts_with_symbol_text($global, $scripts) as $provider) {
+                    $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $provider, 'resolved dynamic callback context script', $source, $message, $reason, $exclusions, 'review', $global);
+                }
+                foreach ($this->runtime_js_scan_find_scripts_by_global_source_hint($global, $scripts) as $provider) {
+                    $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $provider, 'resolved dynamic callback source/provider hint', $source, $message, $reason, $exclusions, 'review', $global);
+                }
+            }
+            unset($GLOBALS['ucwp_runtime_js_scan_scripts']);
+        }
+
+        private function runtime_js_scan_fetch_script_inventory_for_url($url = '')
+        {
+            $url = trim((string) $url);
+            if ('' === $url) {
+                $url = home_url('/');
+            }
+
+            $normalized = $this->normalize_performance_profile_url($url);
+            if (is_wp_error($normalized)) {
+                return array();
+            }
+
+            $request_url = add_query_arg(array(
+                'ucwp_js_inventory' => '1',
+                'ucwp_rt'           => time(),
+            ), $normalized);
+
+            $response = wp_remote_get($request_url, array(
+                'timeout'     => 8,
+                'redirection' => 3,
+                'headers'     => array(
+                    'User-Agent' => 'UltraCache JS inventory/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown'),
+                    'Accept'     => 'text/html,application/xhtml+xml',
+                ),
+            ));
+            if (is_wp_error($response)) {
+                return array();
+            }
+
+            $code = (int) wp_remote_retrieve_response_code($response);
+            if ($code < 200 || $code >= 400) {
+                return array();
+            }
+
+            $html = (string) wp_remote_retrieve_body($response);
+            if ('' === $html || !preg_match_all('/<script\\b([^>]*)>(.*?)<\\/script>/is', $html, $matches, PREG_SET_ORDER)) {
+                return array();
+            }
+
+            $scripts = array();
+            foreach ($matches as $match) {
+                $attributes = isset($match[1]) ? (string) $match[1] : '';
+                $body = isset($match[2]) ? (string) $match[2] : '';
+                $src = $this->runtime_js_scan_attribute_from_tag($attributes, 'src');
+                if ('' === $src) {
+                    $src = $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-src');
+                }
+                if ('' === $src) {
+                    $src = $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-original-src');
+                }
+                $id = $this->runtime_js_scan_attribute_from_tag($attributes, 'id');
+                if ('' === $id) {
+                    $id = $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-id');
+                }
+                if ('' === $id) {
+                    $source_url_id = $this->runtime_js_scan_source_url_id_from_inline_text($body);
+                    if ('' !== $source_url_id) {
+                        $id = $source_url_id;
+                    }
+                }
+                if ('' === $id) {
+                    $handle_id = $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-handle');
+                    if ('' !== $handle_id) {
+                        $id = $handle_id;
+                    }
+                }
+                $type = $this->runtime_js_scan_attribute_from_tag($attributes, 'type');
+                $is_delayed = (bool) preg_match('/\bdata-ucwp-(?:src|inline|delayed)\b/i', $attributes) || false !== stripos($type, 'ucwp-delayed');
+
+                $scripts[] = array(
+                    'id'       => sanitize_text_field(substr($id, 0, 160)),
+                    'handle'   => sanitize_text_field(substr((string) $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-handle'), 0, 160)),
+                    'src'      => '' !== $src ? $this->runtime_js_scan_url_to_absolute($src, $normalized) : '',
+                    'type'     => sanitize_text_field(substr($type, 0, 120)),
+                    'defer'    => (bool) preg_match('/\bdefer(?:\s|=|>|$)/i', $attributes),
+                    'async'    => (bool) preg_match('/\basync(?:\s|=|>|$)/i', $attributes),
+                    'strategy' => $this->runtime_js_scan_attribute_from_tag($attributes, 'data-wp-strategy'),
+                    'delayed'  => $is_delayed,
+                    'text'     => '' === $src || $is_delayed ? sanitize_textarea_field(substr($body, 0, 60000)) : '',
+                );
+
+                if (count($scripts) >= 240) {
+                    break;
+                }
+            }
+
+            return $this->runtime_js_scan_normalize_script_inventory($scripts);
+        }
+
+        private function runtime_js_scan_local_file_path_from_script_src($src)
+        {
+            $src = $this->runtime_js_scan_clean_console_candidate($src);
+            if ('' === $src) {
+                return '';
+            }
+
+            $src = html_entity_decode($src, ENT_QUOTES, 'UTF-8');
+            $absolute = $this->runtime_js_scan_url_to_absolute($src);
+            if ('' === $absolute) {
+                return '';
+            }
+
+            $parts = wp_parse_url($absolute);
+            $home_parts = wp_parse_url(home_url('/'));
+            $site_parts = wp_parse_url(site_url('/'));
+            $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+            $allowed_hosts = array_filter(array(
+                isset($home_parts['host']) ? strtolower((string) $home_parts['host']) : '',
+                isset($site_parts['host']) ? strtolower((string) $site_parts['host']) : '',
+            ));
+            if ('' === $host || !in_array($host, $allowed_hosts, true)) {
+                return '';
+            }
+
+            $url_path = isset($parts['path']) ? rawurldecode((string) $parts['path']) : '';
+            $url_path = '/' . ltrim(str_replace('\\\\', '/', $url_path), '/');
+            if (!preg_match('/\\.(?:js|mjs)$/i', $url_path)) {
+                return '';
+            }
+
+            $candidates = array();
+            $content_url_path = (string) wp_parse_url(content_url('/'), PHP_URL_PATH);
+            $content_url_path = '/' . trim(str_replace('\\\\', '/', $content_url_path), '/') . '/';
+            if ('//' === $content_url_path) {
+                $content_url_path = '/wp-content/';
+            }
+            if (0 === strpos($url_path, $content_url_path)) {
+                $relative = ltrim(substr($url_path, strlen($content_url_path)), '/');
+                $candidates[] = trailingslashit(WP_CONTENT_DIR) . $relative;
+            }
+
+            $includes_url_path = (string) wp_parse_url(includes_url('/'), PHP_URL_PATH);
+            $includes_url_path = '/' . trim(str_replace('\\\\', '/', $includes_url_path), '/') . '/';
+            if (0 === strpos($url_path, $includes_url_path)) {
+                $relative = ltrim(substr($url_path, strlen($includes_url_path)), '/');
+                $candidates[] = trailingslashit(ABSPATH . WPINC) . $relative;
+            }
+
+            $home_path = isset($home_parts['path']) ? '/' . trim((string) $home_parts['path'], '/') : '';
+            if ('' !== $home_path && '/' !== $home_path && 0 === strpos($url_path, trailingslashit($home_path))) {
+                $relative = ltrim(substr($url_path, strlen(trailingslashit($home_path))), '/');
+                $candidates[] = trailingslashit(ABSPATH) . $relative;
+            } elseif (0 === strpos($url_path, '/wp-content/') || 0 === strpos($url_path, '/wp-includes/')) {
+                $candidates[] = trailingslashit(ABSPATH) . ltrim($url_path, '/');
+            }
+
+            $allowed_roots = array_filter(array(
+                function_exists('wp_normalize_path') ? wp_normalize_path(WP_CONTENT_DIR) : str_replace('\\\\', '/', WP_CONTENT_DIR),
+                function_exists('wp_normalize_path') ? wp_normalize_path(ABSPATH . WPINC) : str_replace('\\\\', '/', ABSPATH . WPINC),
+            ));
+
+            foreach ($candidates as $candidate) {
+                $candidate = function_exists('wp_normalize_path') ? wp_normalize_path($candidate) : str_replace('\\\\', '/', $candidate);
+                $real = realpath($candidate);
+                if (false === $real) {
+                    continue;
+                }
+                $real_norm = function_exists('wp_normalize_path') ? wp_normalize_path($real) : str_replace('\\\\', '/', $real);
+                $allowed = false;
+                foreach ($allowed_roots as $root) {
+                    $root = rtrim($root, '/');
+                    if (0 === strpos($real_norm, $root . '/')) {
+                        $allowed = true;
+                        break;
+                    }
+                }
+                if (!$allowed || !is_file($real_norm) || !is_readable($real_norm)) {
+                    continue;
+                }
+                $size = filesize($real_norm);
+                if (false === $size || $size <= 0 || $size > 786432) {
+                    continue;
+                }
+                return $real_norm;
+            }
+
+            return '';
+        }
+
+        private function runtime_js_scan_read_local_script_content($src)
+        {
+            static $cache = array();
+            $src_key = md5((string) $src);
+            if (array_key_exists($src_key, $cache)) {
+                return $cache[$src_key];
+            }
+
+            $path = $this->runtime_js_scan_local_file_path_from_script_src($src);
+            if ('' === $path) {
+                $cache[$src_key] = '';
+                return '';
+            }
+
+            $content = '';
+            global $wp_filesystem;
+            if (!function_exists('WP_Filesystem')) {
+                require_once ABSPATH . 'wp-admin/includes/file.php';
+            }
+            if (function_exists('WP_Filesystem') && WP_Filesystem(false, false, true) && is_object($wp_filesystem) && method_exists($wp_filesystem, 'get_contents')) {
+                $content = (string) $wp_filesystem->get_contents($path);
+            }
+            if ('' === $content && function_exists('file_get_contents')) {
+                $raw = @file_get_contents($path);
+                if (is_string($raw)) {
+                    $content = $raw;
+                }
+            }
+
+            if (strlen($content) > 786432) {
+                $content = '';
+            }
+            $cache[$src_key] = $content;
+            return $content;
+        }
+
+        private function runtime_js_scan_script_content($script)
+        {
+            if (!is_array($script)) {
+                return '';
+            }
+            $text = isset($script['text']) ? (string) $script['text'] : '';
+            if ('' !== trim($text)) {
+                return $text;
+            }
+            $src = isset($script['src']) ? (string) $script['src'] : '';
+            if ('' === $src) {
+                return '';
+            }
+            return $this->runtime_js_scan_read_local_script_content($src);
+        }
+
+        private function runtime_js_scan_find_jquery_plugin_provider_scripts($method, array $scripts)
+        {
+            $method = trim((string) $method);
+            if ('' === $method || empty($scripts)) {
+                return array();
+            }
+
+            $providers = array();
+            $seen = array();
+            $method_regex = preg_quote($method, '/');
+            foreach ($scripts as $script) {
+                if (!is_array($script)) {
+                    continue;
+                }
+                $src = isset($script['src']) ? (string) $script['src'] : '';
+                $id = isset($script['id']) ? (string) $script['id'] : '';
+                $content = $this->runtime_js_scan_script_content($script);
+                if ('' === $content) {
+                    continue;
+                }
+
+                $matched = false;
+                if (preg_match('/(?:jQuery|\\$)\\s*\\.\\s*fn\\s*\\.\\s*' . $method_regex . '\\s*=|(?:jQuery|\\$)\\s*\\.\\s*fn\\s*\\[\\s*["\\\']' . $method_regex . '["\\\']\\s*\\]\\s*=/i', $content)) {
+                    $matched = true;
+                } elseif (preg_match('/(?:jQuery|\\$)\\s*\\.\\s*fn\\s*\\.\\s*extend\\s*\\(/i', $content) && preg_match('/["\\\']?' . $method_regex . '["\\\']?\\s*:/i', $content)) {
+                    $matched = true;
+                } elseif (false !== stripos($content, $method) && preg_match('/(?:jQuery|\\$)\\s*\\.\\s*fn\\b|\\.fn\\b/i', $content)) {
+                    $matched = true;
+                }
+
+                if (!$matched) {
+                    continue;
+                }
+
+                $key = strtolower($src . '|' . $id);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $providers[] = array(
+                    'src' => $src,
+                    'id'  => $id,
+                );
+
+                if (count($providers) >= 8) {
+                    break;
+                }
+            }
+
+            return $providers;
+        }
+
+        private function runtime_js_scan_find_symbol_provider_scripts($symbol, array $scripts)
+        {
+            $symbol = trim((string) $symbol);
+            if ('' === $symbol || $this->runtime_js_scan_is_generic_token($symbol) || empty($scripts)) {
+                return array();
+            }
+
+            $providers = array();
+            $seen = array();
+            $symbol_regex = preg_quote($symbol, '/');
+            foreach ($scripts as $script) {
+                if (!is_array($script)) {
+                    continue;
+                }
+                $src = isset($script['src']) ? (string) $script['src'] : '';
+                $id = isset($script['id']) ? (string) $script['id'] : '';
+                $content = $this->runtime_js_scan_script_content($script);
+                if ('' === $content) {
+                    continue;
+                }
+
+                $matched = false;
+                if (preg_match('/(?:function|class|var|let|const)\\s+' . $symbol_regex . '\\b/i', $content)) {
+                    $matched = true;
+                } elseif (preg_match('/(?:window|globalThis)\\s*\\.\\s*' . $symbol_regex . '\\b\\s*=/i', $content)) {
+                    $matched = true;
+                } elseif (preg_match('/\\b' . $symbol_regex . '\\s*=\\s*(?:function|\\(|\\{|new\\s+|class\\b)/i', $content)) {
+                    $matched = true;
+                } elseif (false !== stripos($content, $symbol) && false !== stripos((string) $src . ' ' . (string) $id, strtolower($symbol))) {
+                    $matched = true;
+                }
+
+                if (!$matched) {
+                    continue;
+                }
+
+                $key = strtolower($src . '|' . $id);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $providers[] = array(
+                    'src' => $src,
+                    'id'  => $id,
+                );
+
+                if (count($providers) >= 8) {
+                    break;
+                }
+            }
+
+            return $providers;
+        }
+
+        private function runtime_js_scan_find_scripts_by_source_hint($source, array $scripts)
+        {
+            $source = $this->runtime_js_scan_sanitize_source((string) $source);
+            if ('' === $source || empty($scripts)) {
+                return array();
+            }
+
+            $source_lc = strtolower(html_entity_decode((string) $source, ENT_QUOTES, 'UTF-8'));
+            $source_lc = preg_replace('/(?::\d+){1,2}$/', '', $source_lc);
+            $source_base = strtolower($this->runtime_js_scan_basename_from_source($source_lc));
+            $source_fragment = strtolower($this->runtime_js_scan_path_fragment_from_source($source_lc, 6));
+            $source_path = (string) wp_parse_url($source_lc, PHP_URL_PATH);
+            if ('' === $source_path) {
+                $source_path = preg_replace('/[?#].*$/', '', $source_lc);
+            }
+            $source_path = trim(strtolower((string) $source_path), '/');
+
+            $matches = array();
+            $seen = array();
+            foreach ($scripts as $script) {
+                if (!is_array($script)) {
+                    continue;
+                }
+
+                $script_src = isset($script['src']) ? $this->runtime_js_scan_sanitize_source((string) $script['src']) : '';
+                $script_id = isset($script['id']) ? sanitize_text_field((string) $script['id']) : '';
+                $script_src_lc = strtolower(html_entity_decode((string) $script_src, ENT_QUOTES, 'UTF-8'));
+                $script_id_lc = strtolower((string) $script_id);
+                $script_base = strtolower($this->runtime_js_scan_basename_from_source($script_src_lc));
+                $script_fragment = strtolower($this->runtime_js_scan_path_fragment_from_source($script_src_lc, 6));
+                $script_path = (string) wp_parse_url($script_src_lc, PHP_URL_PATH);
+                if ('' === $script_path) {
+                    $script_path = preg_replace('/[?#].*$/', '', $script_src_lc);
+                }
+                $script_path = trim(strtolower((string) $script_path), '/');
+
+                $matched = false;
+                $score = 0;
+                if ('' !== $source_fragment && '' !== $script_fragment && (false !== strpos($script_fragment, $source_fragment) || false !== strpos($source_fragment, $script_fragment))) {
+                    $matched = true;
+                    $score = 100;
+                } elseif ('' !== $source_path && '' !== $script_path && (false !== strpos($script_path, $source_path) || false !== strpos($source_path, $script_path))) {
+                    $matched = true;
+                    $score = 90;
+                } elseif ('' !== $source_base && '' !== $script_base && $source_base === $script_base) {
+                    $matched = true;
+                    $score = $this->runtime_js_scan_is_generic_script_basename($source_base) ? 55 : 75;
+                } elseif ('' !== $source_lc && '' !== $script_id_lc && false !== strpos($source_lc, $script_id_lc)) {
+                    $matched = true;
+                    $score = 60;
+                }
+
+                if (!$matched) {
+                    continue;
+                }
+
+                $key = strtolower($script_src . '|' . $script_id);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $script['_ucwp_match_score'] = $score;
+                $matches[] = $script;
+            }
+
+            usort($matches, static function ($a, $b) {
+                $a_score = isset($a['_ucwp_match_score']) ? (int) $a['_ucwp_match_score'] : 0;
+                $b_score = isset($b['_ucwp_match_score']) ? (int) $b['_ucwp_match_score'] : 0;
+                if ($a_score === $b_score) {
+                    return 0;
+                }
+                return ($a_score > $b_score) ? -1 : 1;
+            });
+
+            return array_slice($matches, 0, 12);
+        }
+
+        private function runtime_js_scan_find_script_by_id(array $scripts, $id)
+        {
+            $id = trim((string) $id);
+            if ('' === $id) {
+                return array();
+            }
+            foreach ($scripts as $script) {
+                if (!is_array($script)) {
+                    continue;
+                }
+                $script_id = isset($script['id']) ? trim((string) $script['id']) : '';
+                $script_handle = isset($script['handle']) ? trim((string) $script['handle']) : '';
+                if ($script_id === $id || $script_handle === $id) {
+                    return $script;
+                }
+            }
+            return array();
+        }
+
+        private function runtime_js_scan_add_existing_inline_companion_suggestions(&$suggestions, &$seen, array $scripts, $script_id, $source, $message, $reason, array $exclusions)
+        {
+            $script_id = trim((string) $script_id);
+            if ('' === $script_id || !preg_match('/-js$/i', $script_id)) {
+                return;
+            }
+
+            foreach (array($script_id . '-before' => 'inline-before config block', $script_id . '-after' => 'inline-after config block') as $companion_id => $label) {
+                $companion = $this->runtime_js_scan_find_script_by_id($scripts, $companion_id);
+                if (empty($companion)) {
+                    continue;
+                }
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $companion_id, $label, $source, $message, $reason, $exclusions, 'recommended');
+            }
+        }
+
+
+        private function runtime_js_scan_inline_frame_ids_from_text($text)
+        {
+            $text = (string) $text;
+            if ('' === trim($text)) {
+                return array();
+            }
+
+            $ids = array();
+            if (preg_match_all('/\b([A-Za-z0-9_.-]+-js-(?:before|after|extra|translations))(?::\d+(?::\d+)?)?/i', $text, $matches)) {
+                foreach ((array) $matches[1] as $id) {
+                    $id = sanitize_text_field(substr((string) $id, 0, 160));
+                    if ('' !== $id) {
+                        $ids[strtolower($id)] = $id;
+                    }
+                }
+            }
+
+            return array_values($ids);
+        }
+
+        private function runtime_js_scan_related_external_id_for_inline_id($inline_id)
+        {
+            $inline_id = trim((string) $inline_id);
+            if ('' === $inline_id) {
+                return '';
+            }
+            if (preg_match('/^(.*-js)-(?:before|after|extra|translations)$/i', $inline_id, $match)) {
+                return sanitize_text_field((string) $match[1]);
+            }
+            return '';
+        }
+
+        private function runtime_js_scan_add_inline_stack_frame_suggestions(&$suggestions, &$seen, array $scripts, $text, $message, $reason, array $exclusions, $confidence = 'review')
+        {
+            foreach ($this->runtime_js_scan_inline_frame_ids_from_text($text) as $inline_id) {
+                $script = $this->runtime_js_scan_find_script_by_id($scripts, $inline_id);
+                $source = !empty($script['src']) ? (string) $script['src'] : $inline_id;
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $inline_id, 'inline stack-frame handle/id', $source, $message, $reason, $exclusions, $confidence);
+
+                $related_id = $this->runtime_js_scan_related_external_id_for_inline_id($inline_id);
+                if ('' === $related_id) {
+                    continue;
+                }
+
+                $related = $this->runtime_js_scan_find_script_by_id($scripts, $related_id);
+                if (!empty($related)) {
+                    $related_src = isset($related['src']) ? (string) $related['src'] : '';
+                    $related_fragment = $this->runtime_js_scan_path_fragment_from_source($related_src, 4);
+                    if ('' !== $related_fragment) {
+                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $related_fragment, 'inline stack-frame related external script', $related_src, $message, $reason, $exclusions, $confidence);
+                    }
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $related_id, 'inline stack-frame related handle/id', $related_src, $message, $reason, $exclusions, $confidence);
+                }
+            }
+        }
+
+        private function runtime_js_scan_add_script_source_resolution_suggestions(&$suggestions, &$seen, array $scripts, $source, $message, $reason, array $exclusions, $label = 'resolved error source script', $confidence = 'review', $include_existing_inline_companions = false)
+        {
+            foreach ($this->runtime_js_scan_find_scripts_by_source_hint($source, $scripts) as $script) {
+                $script_src = isset($script['src']) ? (string) $script['src'] : '';
+                $script_id = isset($script['id']) ? (string) $script['id'] : '';
+                $fragment = $this->runtime_js_scan_path_fragment_from_source($script_src, 4);
+                if ('' !== $fragment) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $fragment, $label, $script_src, $message, $reason, $exclusions, $confidence);
+                }
+
+                if ('' !== $script_id) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $script_id, $label . ' handle/id', $script_src, $message, $reason, $exclusions, $confidence);
+                    if ($include_existing_inline_companions) {
+                        $this->runtime_js_scan_add_existing_inline_companion_suggestions($suggestions, $seen, $scripts, $script_id, $script_src, $message, 'The scanned page contains an inline companion script next to this external script. Keep existing inline companion ids ordered with their dependent external script.', $exclusions);
+                    }
+                }
+            }
         }
 
         private function runtime_js_scan_find_callback_dependency_context($function_name, array $scripts)
@@ -1270,7 +2132,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 $src = isset($script['src']) ? (string) $script['src'] : '';
                 $id = isset($script['id']) ? (string) $script['id'] : '';
                 $text = isset($script['text']) ? (string) $script['text'] : '';
-                $haystack = strtolower($src . ' ' . $id . ' ' . $text);
+                $content = $this->runtime_js_scan_script_content($script);
+                $provider_text = '' !== $content ? $content : $text;
+                $haystack = strtolower($src . ' ' . $id . ' ' . $text . ' ' . substr($content, 0, 24000));
 
                 $is_consumer = false;
                 if ('' !== $src) {
@@ -1287,7 +2151,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
 
                 $is_provider = false;
-                if ('' !== $text && preg_match('/(?:function\s+' . preg_quote($function_name, '/') . '\b|window\s*\.\s*' . preg_quote($function_name, '/') . '\b|' . preg_quote($function_name, '/') . '\s*=)/i', $text)) {
+                if ('' !== $provider_text && preg_match('/(?:function\s+' . preg_quote($function_name, '/') . '\b|window\s*\.\s*' . preg_quote($function_name, '/') . '\b|' . preg_quote($function_name, '/') . '\s*=)/i', $provider_text)) {
                     $is_provider = true;
                 }
 
@@ -1390,7 +2254,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
         }
 
-        private function runtime_js_scan_add_jquery_plugin_dependency_suggestions(&$suggestions, &$seen, $method, $source, $message, $detail, array $exclusions)
+        private function runtime_js_scan_add_jquery_plugin_dependency_suggestions(&$suggestions, &$seen, $method, $source, $message, $detail, array $exclusions, array $scripts = array())
         {
             $method = trim((string) $method);
             if ('' === $method) {
@@ -1400,6 +2264,22 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $reason = 'A runtime error says a jQuery plugin method was called before it was registered. Suggestions are derived by the Runtime Scan engine from the failing script path and the missing method name; broad generic files are kept out of automatic append suggestions.';
             $source_base = $this->runtime_js_scan_basename_from_source($source);
             $stack_text = (string) $source . "\n" . (string) $detail . "\n" . (string) $message;
+
+            foreach ($this->runtime_js_scan_find_jquery_plugin_provider_scripts($method, $scripts) as $provider) {
+                $provider_src = isset($provider['src']) ? (string) $provider['src'] : '';
+                $provider_id = isset($provider['id']) ? (string) $provider['id'] : '';
+                $provider_fragment = $this->runtime_js_scan_path_fragment_from_source($provider_src, 4);
+                if ('' !== $provider_fragment) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_fragment, 'jQuery plugin provider script', $provider_src, $message, 'Runtime Scan read the local JS files loaded by this page and found the file that registers the missing jQuery plugin method. Exclude the provider script so it executes before dependent callers.', $exclusions, 'recommended');
+                }
+                $provider_base = $this->runtime_js_scan_basename_from_source($provider_src);
+                if ('' !== $provider_base && !$this->runtime_js_scan_is_generic_script_basename($provider_base)) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_base, 'jQuery plugin provider basename', $provider_src, $message, 'Fallback basename for the JS file that registers the missing jQuery plugin method. Prefer the path-based suggestion when available.', $exclusions, 'high');
+                }
+                if ('' !== $provider_id) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_id, 'jQuery plugin provider handle/id', $provider_src, $message, 'The loaded script id/handle belongs to the file that registers the missing jQuery plugin method.', $exclusions, 'recommended');
+                }
+            }
 
             if (preg_match_all('#https?://[^\s\)\]\}"\'<>]+\.js(?:\?[^\s\)\]\}"\'<>]*)?#i', $stack_text, $url_matches)) {
                 foreach ((array) $url_matches[0] as $url) {
@@ -1449,102 +2329,32 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
         }
 
-        private function runtime_js_scan_add_known_dependency_suggestions(&$suggestions, &$seen, $source, $message, $detail, array $exclusions)
+        private function runtime_js_scan_add_known_dependency_suggestions(&$suggestions, &$seen, $source, $message, $detail, array $exclusions, array $scripts = array())
         {
             $text = strtolower((string) $message . ' ' . (string) $source . ' ' . (string) $detail);
             $source_base = $this->runtime_js_scan_basename_from_source($source);
             $matched = false;
 
-            if (false !== strpos($text, 'wcb_params') || false !== strpos($text, 'woocommerce-coupon-box')) {
+            if (false !== strpos($text, 'wp is not defined') || false !== strpos($text, 'wp.')) {
                 $matched = true;
-                $reason = 'Runtime Scan found a WooCommerce Coupon Box dependency error. Keep the localized wcb_params block and the coupon-box runtime script ordered together by excluding the smallest matching fragments.';
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wcb_params', 'WooCommerce Coupon Box params', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'woocommerce-coupon-box', 'WooCommerce Coupon Box plugin path', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wcb.min.js', 'WooCommerce Coupon Box script', $source, $message, $reason, $exclusions, 'recommended');
-            }
-
-            if (false !== strpos($text, 'complianz is not defined') || false !== strpos($text, 'complianz.min.js') || false !== strpos($text, 'cmplz')) {
-                $matched = true;
-                $reason = 'Runtime Scan found a Complianz dependency error. Keep the Complianz configuration object and runtime script ordered together by excluding the smallest matching fragments.';
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'complianz', 'Complianz global/config', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'complianz.min.js', 'Complianz runtime script', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'cmplz', 'Complianz short prefix', $source, $message, $reason, $exclusions, 'recommended');
-            }
-
-            if (false !== strpos($text, 'woocommerce-google-analytics-integration') || (false !== strpos($text, 'window[o] is not a function') && false !== strpos($text, 'woocommerce-google'))) {
-                $matched = true;
-                $reason = 'Runtime Scan found a WooCommerce Google Analytics inline-after/order error. Keep the integration data inline block and its runtime script outside unsafe defer/delay ordering.';
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'woocommerce-google-analytics-integration', 'WooCommerce Google Analytics integration', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'woocommerce-google-analytics-integration-data-js-after', 'WooCommerce Google Analytics inline-after block', $source, $message, $reason, $exclusions, 'recommended');
-            }
-
-            if ($matched) {
-                return true;
-            }
-
-            if (false !== strpos($text, 'react is not defined') || false !== strpos($text, "react' is not defined") || false !== strpos($text, "can't find variable: react")) {
-                $matched = true;
-                $reason = 'Browser runtime error says React was unavailable when a dependent script executed. Keep the WordPress React dependency chain and the failing dependent script out of Defer/Delay until the page scans cleanly.';
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react', 'React global', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react-dom', 'ReactDOM global', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-element', 'WordPress React wrapper', $source, $message, $reason, $exclusions, 'recommended');
-                if ('' !== $source_base) {
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'React dependent script', $source, $message, 'This script threw while React was missing. Excluding the dependency chain is the primary fix; this filename is the targeted dependent script to review.', $exclusions, 'high');
+                $reason = 'Browser runtime error points to a WordPress core JS dependency/global that executed out of order. These are generic WordPress dependency handles, not plugin/theme-specific rules.';
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-i18n', 'WordPress core dependency', $source, $message, $reason, $exclusions, 'recommended');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-hooks', 'WordPress core dependency', $source, $message, $reason, $exclusions, 'recommended');
+                if (false !== strpos($text, 'api-fetch') || false !== strpos($text, 'apifetch')) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-api-fetch', 'WordPress apiFetch dependency', $source, $message, $reason, $exclusions, 'recommended');
+                }
+                if ('' !== $source_base && !$this->runtime_js_scan_is_generic_script_basename($source_base)) {
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'wp-dependent source script', $source, $message, $reason, $exclusions, 'review');
                 }
             }
 
-            if (false !== strpos($text, 'reactdom is not defined') || false !== strpos($text, 'react-dom')) {
+            if (false !== strpos($text, 'react is not defined') || false !== strpos($text, "react' is not defined") || false !== strpos($text, "can't find variable: react") || false !== strpos($text, 'reactdom is not defined')) {
                 $matched = true;
-                $reason = 'Browser runtime error points to the ReactDOM dependency. Keep React, ReactDOM, and wp-element outside Defer/Delay before dependent blocks execute.';
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react', 'ReactDOM dependency', $source, $message, $reason, $exclusions, 'recommended');
+                $reason = 'Browser runtime error points to a React/ReactDOM dependency that executed out of order. Suggestions are limited to generic React/WordPress dependency handles and the resolved failing script, where available.';
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react', 'React dependency', $source, $message, $reason, $exclusions, 'recommended');
                 $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'react-dom', 'ReactDOM dependency', $source, $message, $reason, $exclusions, 'recommended');
                 $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-element', 'WordPress React wrapper', $source, $message, $reason, $exclusions, 'recommended');
-                if ('' !== $source_base) {
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'ReactDOM dependent script', $source, $message, $reason, $exclusions, 'high');
-                }
-            }
-
-            if (false !== strpos($text, 'elementormodules is not defined') || false !== strpos($text, 'elementor modules is not defined')) {
-                $matched = true;
-                $reason = 'Browser runtime error says Elementor modules were unavailable. Keep Elementor module/runtime providers and the failing Elementor dependent script in the visible JS Delay / Defer Exclusions list, then scan again.';
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor-frontend-modules', 'Elementor modules dependency', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'frontend-modules', 'Elementor modules dependency', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementorModules', 'Elementor modules global', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor-webpack-runtime', 'Elementor webpack runtime', $source, $message, $reason, $exclusions, 'recommended');
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor-pro-webpack-runtime', 'Elementor Pro webpack runtime', $source, $message, $reason, $exclusions, 'recommended');
-
-                $source_fragment = $this->runtime_js_scan_path_fragment_from_source($source, 4);
-                if ('' !== $source_fragment && false !== strpos(strtolower($source_fragment), 'elementor')) {
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_fragment, 'Elementor dependent script path', $source, $message, 'This targeted Elementor script path is safer than excluding a broad basename such as common.min.js when fixing the missing elementorModules order.', $exclusions, 'recommended');
-                }
-
-                if (false !== strpos($text, 'common.min.js')) {
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor/assets/js/common.min.js', 'Elementor common script path', $source, $message, 'Elementor common.min.js executed before elementorModules existed. Exclude the Elementor common path or its exact basename only if the path is unavailable.', $exclusions, 'recommended');
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'common.min.js', 'Elementor common script basename', $source, $message, 'Fallback basename for Elementor common.min.js. Prefer the path-based suggestion when possible because common.min.js can be broad.', $exclusions, 'review');
-                }
-
-                if (false !== strpos($text, 'elementor-admin-bar.min.js')) {
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor/assets/js/elementor-admin-bar.min.js', 'Elementor admin-bar script path', $source, $message, 'Elementor admin-bar script executed before elementorModules existed. Keep this dependent admin-bar script ordered with Elementor modules.', $exclusions, 'recommended');
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'elementor-admin-bar.min.js', 'Elementor admin-bar script basename', $source, $message, 'Fallback basename for Elementor admin-bar. Use only if the path-based suggestion is not present in the final HTML.', $exclusions, 'high');
-                }
-
-                if ('' !== $source_base) {
-                    $source_base_confidence = in_array(strtolower($source_base), array('common.min.js'), true) ? 'review' : 'high';
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'Elementor dependent script', $source, $message, 'This Elementor script executed before elementorModules existed. Keep its module dependency chain protected and review this script as the failing dependent source.', $exclusions, $source_base_confidence);
-                }
-            }
-
-            if (false !== strpos($text, 'wp-api-fetch-js-after') || false !== strpos($text, 'wp.apifetch') || false !== strpos($text, 'api-fetch') || false !== strpos($text, "reading 'use'") || false !== strpos($text, 'reading \"use\"')) {
-                if (false !== strpos($text, 'wp-api-fetch') || false !== strpos($text, 'api-fetch') || false !== strpos($text, "reading 'use'") || false !== strpos($text, 'reading \"use\"')) {
-                    $matched = true;
-                    $reason = 'Browser runtime error points to the WordPress apiFetch inline-after block. Keep wp-api-fetch and its hook dependency available before inline-after configuration runs.';
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-api-fetch', 'wp.apiFetch dependency', $source, $message, $reason, $exclusions, 'recommended');
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-hooks', 'wp.apiFetch hook dependency', $source, $message, $reason, $exclusions, 'recommended');
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, 'wp-api-fetch-js-after', 'wp-api-fetch inline-after block', $source, $message, $reason, $exclusions, 'recommended');
-                    if ('' !== $source_base && false !== strpos(strtolower($source_base), 'api-fetch') && 'wp-api-fetch-js-after' !== strtolower($source_base)) {
-                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'wp-api-fetch pseudo-source', $source, $message, $reason, $exclusions, 'recommended');
-                    }
-                }
+                $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'React dependent resolved source', 'review', true);
             }
 
             return $matched;
@@ -1569,7 +2379,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 $text = strtolower($message . ' ' . $source . ' ' . $detail);
                 $source_base = $this->runtime_js_scan_basename_from_source($source);
 
-                if ($this->runtime_js_scan_add_known_dependency_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions)) {
+                if ($this->runtime_js_scan_add_known_dependency_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions, $scripts)) {
                     continue;
                 }
 
@@ -1605,6 +2415,57 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     if ('' !== $missing_symbol && !$this->runtime_js_scan_is_generic_token($missing_symbol)) {
                         $reason = 'Runtime Scan found a missing global/config object. The full missing symbol is suggested; broad source files such as jquery.min.js, main.js, and functions.js are intentionally ignored unless a more targeted path is available.';
                         $this->runtime_js_scan_add_suggestion($suggestions, $seen, $missing_symbol, 'missing global/config object', $source, $message, $reason, $exclusions, 'recommended');
+                        foreach ($this->runtime_js_scan_find_symbol_provider_scripts($missing_symbol, $scripts) as $provider) {
+                            $provider_src = isset($provider['src']) ? (string) $provider['src'] : '';
+                            $provider_id = isset($provider['id']) ? (string) $provider['id'] : '';
+                            $provider_fragment = $this->runtime_js_scan_path_fragment_from_source($provider_src, 4);
+                            if ('' !== $provider_fragment) {
+                                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_fragment, 'missing global provider script', $provider_src, $message, 'Runtime Scan read the local JS files loaded by this page and found the file that defines the missing global/config object. Exclude the provider script so it executes before dependent callers.', $exclusions, 'recommended');
+                            }
+                            $provider_base = $this->runtime_js_scan_basename_from_source($provider_src);
+                            if ('' !== $provider_base && !$this->runtime_js_scan_is_generic_script_basename($provider_base)) {
+                                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_base, 'missing global provider basename', $provider_src, $message, 'Fallback basename for the JS file that defines the missing global/config object. Prefer the path-based suggestion when available.', $exclusions, 'high');
+                            }
+                            if ('' !== $provider_id) {
+                                $provider_confidence = ('' === $provider_src && preg_match('/-js-(?:before|after|extra|translations)$/i', $provider_id)) ? 'review' : 'recommended';
+                                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_id, 'missing global provider handle/id', $provider_src, $message, 'The scanned page contains an inline or external script id/handle that defines the missing global/config object.', $exclusions, $provider_confidence);
+
+                                $related_id = $this->runtime_js_scan_related_external_id_for_inline_id($provider_id);
+                                if ('' !== $related_id) {
+                                    $related = $this->runtime_js_scan_find_script_by_id($scripts, $related_id);
+                                    if (!empty($related)) {
+                                        $related_src = isset($related['src']) ? (string) $related['src'] : '';
+                                        $related_fragment = $this->runtime_js_scan_path_fragment_from_source($related_src, 4);
+                                        if ('' !== $related_fragment) {
+                                            $this->runtime_js_scan_add_suggestion($suggestions, $seen, $related_fragment, 'missing global related external script', $related_src, $message, 'The missing global was found in an inline companion script. This is the related external script id/path from the same scanned page inventory.', $exclusions, 'review');
+                                        }
+                                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $related_id, 'missing global related handle/id', $related_src, $message, 'The missing global was found in an inline companion script. This is the related WordPress script handle/id from the same scanned page inventory.', $exclusions, 'review');
+                                    }
+                                }
+                            }
+                        }
+                        $this->runtime_js_scan_add_inline_stack_frame_suggestions(
+                            $suggestions,
+                            $seen,
+                            $scripts,
+                            (string) $detail . "\n" . (string) $message,
+                            $message,
+                            'The browser stack references a WordPress inline script handle. UltraCache shows that exact inline id and any related external handle/path found in the scanned page inventory as review-only candidates.',
+                            $exclusions,
+                            'review'
+                        );
+                        $this->runtime_js_scan_add_script_source_resolution_suggestions(
+                            $suggestions,
+                            $seen,
+                            $scripts,
+                            $source,
+                            $message,
+                            'A script failed because a global/config object was unavailable. UltraCache resolves the failing browser source against the scanned page script inventory and suggests exact loaded script ids/paths instead of broad basenames.',
+                            $exclusions,
+                            'missing global dependent resolved source',
+                            'review',
+                            true
+                        );
                         foreach ($this->runtime_js_scan_url_fragments_from_text((string) $detail . "
 " . (string) $message) as $fragment) {
                             $fragment = trim((string) $fragment);
@@ -1621,7 +2482,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
 
                 if (preg_match('/\$\(\.\.\.\)\.([A-Za-z_$][A-Za-z0-9_$-]*)\s+is\s+not\s+a\s+function/i', $message . ' ' . $detail, $method_match)) {
-                    $this->runtime_js_scan_add_jquery_plugin_dependency_suggestions($suggestions, $seen, (string) $method_match[1], $source, $message, $detail, $exclusions);
+                    $this->runtime_js_scan_add_jquery_plugin_dependency_suggestions($suggestions, $seen, (string) $method_match[1], $source, $message, $detail, $exclusions, $scripts);
                     continue;
                 }
 
@@ -1630,15 +2491,74 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
 
+                if (preg_match('/window\s*\[\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\]\s+is\s+not\s+a\s+function/i', $message . ' ' . $detail)) {
+                    $dynamic_reason = 'A script made a dynamic window[callbackName]() call, but the callback name is not visible in the browser error. UltraCache resolves the failing browser source, sourceURL inline stack frames, and matching inline config from the scanned page inventory. It shows exact loaded ids/paths and any resolved callback global as review-only candidates.';
+                    $this->runtime_js_scan_add_dynamic_window_global_suggestions($suggestions, $seen, $scripts, $source, $message, $detail, $exclusions);
+                    $this->runtime_js_scan_add_script_source_resolution_suggestions(
+                        $suggestions,
+                        $seen,
+                        $scripts,
+                        $source,
+                        $message,
+                        $dynamic_reason,
+                        $exclusions,
+                        'dynamic callback caller resolved source',
+                        'review',
+                        true
+                    );
+                    $this->runtime_js_scan_add_inline_stack_frame_suggestions(
+                        $suggestions,
+                        $seen,
+                        $scripts,
+                        (string) $detail . "\n" . (string) $message,
+                        $message,
+                        $dynamic_reason,
+                        $exclusions,
+                        'review'
+                    );
+                    continue;
+                }
+
                 if (false !== strpos($text, ' is not a function') || false !== strpos($text, 'c is not a function')) {
-                    if ('' !== $source_base && preg_match('/\.js$/i', $source_base)) {
-                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'runtime function error source', $source, $message, 'A function call failed at runtime. The failing script is shown as a targeted exclusion candidate. If the error names a missing jQuery plugin method, Runtime Scan will also derive method/token suggestions from the message and stack trace.', $exclusions, 'review');
-                    }
+                    $function_reason = 'A function call failed at runtime. UltraCache resolves the failing browser source and any inline stack-frame handles against the scanned page script inventory and shows exact loaded ids/paths as review-only candidates.';
+                    $this->runtime_js_scan_add_script_source_resolution_suggestions(
+                        $suggestions,
+                        $seen,
+                        $scripts,
+                        $source,
+                        $message,
+                        $function_reason,
+                        $exclusions,
+                        'runtime function error resolved source',
+                        'review',
+                        true
+                    );
+                    $this->runtime_js_scan_add_inline_stack_frame_suggestions(
+                        $suggestions,
+                        $seen,
+                        $scripts,
+                        (string) $detail . "\n" . (string) $message,
+                        $message,
+                        $function_reason,
+                        $exclusions,
+                        'review'
+                    );
                     continue;
                 }
 
                 if ('' !== $source_base && preg_match('/\.js$/i', $source_base)) {
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'runtime error source', $source, $message, 'This script produced a browser runtime error during the Defer all JS scan. Review it and add this filename to exclusions if the error is caused by defer order.', $exclusions, 'review');
+                    $this->runtime_js_scan_add_script_source_resolution_suggestions(
+                        $suggestions,
+                        $seen,
+                        $scripts,
+                        $source,
+                        $message,
+                        'This script produced a browser runtime error. UltraCache resolves the console source against the scanned page script inventory where possible.',
+                        $exclusions,
+                        'runtime error resolved source',
+                        'review',
+                        true
+                    );
                 }
             }
 
@@ -1757,30 +2677,53 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $lines = preg_split('/\n/', $text);
             $blocks = array();
             $current = array();
+            $in_error = false;
+
             foreach ((array) $lines as $line) {
                 $line = trim((string) $line);
                 if ('' === $line) {
                     if (!empty($current)) {
                         $blocks[] = $current;
                         $current = array();
+                        $in_error = false;
                     }
                     continue;
                 }
-                if (preg_match('/^Understand this (?:error|warning)$/i', $line)) {
+
+                if (preg_match('/^(?:Understand this (?:error|warning)|JQMIGRATE:\s*Migrate is installed.*|opt-in)$/i', $line)) {
                     continue;
                 }
-                $starts_error = (bool) preg_match('/(?:Uncaught\s+)?(?:ReferenceError|TypeError|SyntaxError|Error):|jQuery\.Deferred exception|\bis not defined\b|\bis not a function\b|Cannot read properties|window\[[^\]]+\]\s+is\s+not\s+a\s+function/i', $line);
-                if ($starts_error && !empty($current)) {
+
+                $starts_error = (bool) preg_match('/(?:Uncaught\s+)?(?:ReferenceError|TypeError|SyntaxError|RangeError|EvalError|URIError|Error):|jQuery\.Deferred exception|\bis not defined\b|\bis not a function\b|Cannot read properties|window\[[^\]]+\]\s+is\s+not\s+a\s+function/i', $line);
+                $is_stack_line = (bool) (preg_match('/^at\s+/i', $line) || preg_match('/\.(?:m?js)(?:\?[^\s\)]*)?(?::\d+(?::\d+)?)?/i', $line));
+
+                if ($starts_error) {
+                    if (!empty($current)) {
+                        $blocks[] = $current;
+                    }
+                    $current = array($line);
+                    $in_error = true;
+                    continue;
+                }
+
+                if ($in_error && $is_stack_line) {
+                    $current[] = $line;
+                    continue;
+                }
+
+                if (!empty($current)) {
                     $blocks[] = $current;
                     $current = array();
                 }
-                $current[] = $line;
+                $in_error = false;
             }
+
             if (!empty($current)) {
                 $blocks[] = $current;
             }
+
             if (empty($blocks)) {
-                $blocks[] = array($text);
+                return array();
             }
 
             $errors = array();
@@ -1842,8 +2785,10 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 ), 400);
             }
 
+            $url = (string) $request->get_param('url');
+            $scripts = $this->runtime_js_scan_fetch_script_inventory_for_url($url);
             $errors = $this->runtime_js_scan_console_text_to_errors($text);
-            $scan = $this->build_runtime_js_scan_suggestions($errors, array());
+            $scan = $this->build_runtime_js_scan_suggestions($errors, $scripts);
             $response = array(
                 'available'            => true,
                 'source'               => 'console-paste-runtime-engine',
@@ -1855,6 +2800,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'suggestions'          => isset($scan['suggestions']) && is_array($scan['suggestions']) ? array_slice($scan['suggestions'], 0, 80) : array(),
                 'errors'               => array_slice($errors, 0, 40),
                 'resourceErrors'       => array(),
+                'scannedUrl'           => '' !== $url ? $this->runtime_js_scan_sanitize_display_url($url) : home_url('/'),
+                'scriptInventoryCount' => count($scripts),
+                'scriptInventorySummary' => $this->runtime_js_scan_inventory_summary($scripts),
                 'scanContext'          => 'console-paste',
                 'completed'            => true,
             );

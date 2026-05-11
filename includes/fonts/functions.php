@@ -142,14 +142,6 @@ if (!function_exists('ucwp_optimize_font_face_block')) {
                 return $matches[0];
             }
 
-            $has_woff2 = false;
-            foreach ($items as $item) {
-                if (preg_match('/\.woff2(?:[\?#][^\"\'\)\s]*)?/i', $item) || preg_match('/format\(\s*[\"\']?woff2[\"\']?\s*\)/i', $item)) {
-                    $has_woff2 = true;
-                    break;
-                }
-            }
-
             $seen = array();
             $kept = array();
             foreach ($items as $item) {
@@ -161,11 +153,6 @@ if (!function_exists('ucwp_optimize_font_face_block')) {
                 $item_key = strtolower(preg_replace('/\s+/', '', $item));
                 if (isset($seen[$item_key])) {
                     $stats['duplicateSrcRemoved']++;
-                    continue;
-                }
-
-                if ($has_woff2 && (preg_match('/\.ttf(?:[\?#][^\"\'\)\s]*)?/i', $item) || preg_match('/format\(\s*[\"\']?truetype[\"\']?\s*\)/i', $item))) {
-                    $stats['ttfSourcesRemoved']++;
                     continue;
                 }
 

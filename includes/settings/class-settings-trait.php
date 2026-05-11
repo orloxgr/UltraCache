@@ -49,7 +49,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'delaySafeThirdPartyJsPatterns' => implode("\n", self::get_default_safe_third_party_delay_patterns()),
                 'delayFunctionalThirdPartyJsEnabled' => false,
                 'delayFunctionalThirdPartyJsPatterns' => implode("\n", self::get_default_functional_third_party_delay_patterns()),
-                'delayThirdPartyJsExcludeList' => '',
                 'asyncExternalScriptsEnabled'=> false,
                 'homepageCssBundleEnabled'   => false,
                 'homepageCssBundleInlineEnabled' => false,
@@ -58,8 +57,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'homepageCssBundleMode'      => 'safe',
                 'delayIconFontsEnabled'      => false,
                 'delayIconFontsAutoDetectEnabled' => false,
-                'delayIconFontsList'         => implode("\n", self::get_default_delay_icon_font_patterns()),
-                'delayIconFontsExcludeList'  => implode("\n", self::get_default_delay_icon_font_exclude_patterns()),
+                'delayIconFontsList'         => '',
+                'delayIconFontsExcludeList'  => '',
                 'cssBundleScope'            => 'homepage',
                 'pageCssBundleOnEntryEnabled' => false,
                 'frontendSafeModeEnabled'    => false,
@@ -68,18 +67,15 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'asyncCssEnabled'            => false,
                 'asyncCssExcludeList'        => '',
                 'aggressiveAsyncCssEnabled'  => false,
-                'aggressiveAsyncCssExcludeList' => '',
                 'delayNonCriticalJsEnabled'  => false,
                 'delayNonCriticalJsExcludeList' => '',
                 'lcpImagePriorityEnabled'    => false,
                 'lazyLoadImagesEnabled'      => false,
                 'lcpBoundaryDeferEnabled'    => false,
-                'lcpImagePriorityOverride'   => '',
                 'manualLcpHeroSelector'      => '',
                 'mainThreadReliefEnabled'    => false,
                 'criticalRequestChainReliefEnabled' => false,
                 'criticalResourcePreloadList' => '',
-                'criticalFetchPreloadList'    => '',
                 'criticalRequestChainDelayList' => '',
                 'assetChainCleanupEnabled'    => false,
                 'assetCleanupWooProductAssetsEnabled' => false,
@@ -103,6 +99,11 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'woocommerceSafeModeEnabled' => false,
                 'cacheCleanupEnabled'        => false,
                 'apcuFlushOnScheduledCleanup'=> false,
+                'flushAllIncludeOpcache'     => false,
+                'flushAllIncludeApcu'        => false,
+                'flushAllIncludeLiteSpeed'   => false,
+                'flushAllIncludeNginx'       => false,
+                'flushAllIncludeVarnish'     => false,
                 'cacheCleanupIntervalHours'  => 24,
                 'cssBundleCleanupGraceHours' => 48,
                 'cssBundleCleanupDeleteLimit' => 60,
@@ -121,6 +122,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cacheExceptionQueryArgs'    => implode("\n", self::get_default_excluded_query_args()),
                 'cacheQueryStringsEnabled'   => false,
                 'cacheQueryStringAllowlist'  => '',
+                'cacheSafeTrackingCookiesEnabled' => true,
+                'safeTrackingCookieList'     => implode("\n", self::get_default_safe_tracking_cookie_patterns()),
+                'unsafeCacheCookieList'      => implode("\n", self::get_default_unsafe_cache_cookie_patterns()),
             );
         }
 
@@ -183,6 +187,78 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             );
         }
 
+        private static function get_default_safe_tracking_cookie_patterns()
+        {
+            return array(
+                '_fbp',
+                '_fbc',
+                '_ga',
+                '_gid',
+                '_gat',
+                '_gac_',
+                '_gcl_au',
+                '_gcl_aw',
+                '_gcl_dc',
+                '_dc_gtm_',
+                '_clck',
+                '_clsk',
+                'CLID',
+                '_uetvid',
+                '_uetsid',
+                '_ttp',
+                '_tt_enable_cookie',
+                'ttcsid',
+                '_pin_unauth',
+                '_pinterest_ct_ua',
+            );
+        }
+
+        private static function get_default_unsafe_cache_cookie_patterns()
+        {
+            return array(
+                'wordpress_logged_in_',
+                'wordpress_sec_',
+                'wp-postpass_',
+                'comment_author_',
+                'woocommerce_items_in_cart',
+                'woocommerce_cart_hash',
+                'wp_woocommerce_session_',
+                'woocommerce_recently_viewed',
+                'yith_wcwl_session_',
+                'yith_woocompare_',
+            );
+        }
+
+        private static function sanitize_cookie_pattern_line($line)
+        {
+            $line = trim((string) $line);
+            if ('' === $line) {
+                return '';
+            }
+
+            $line = preg_replace('/[\x00-\x1F\x7F]/', '', $line);
+            $line = is_string($line) ? trim($line) : '';
+            if ('' === $line) {
+                return '';
+            }
+
+            // Cookie names are case-sensitive in the browser, but matching here
+            // is intentionally case-insensitive and pattern-like. Keep only
+            // characters valid for cookie names plus '*' as a visible wildcard.
+            $line = preg_replace('/[^A-Za-z0-9_\-.\*]/', '', $line);
+            $line = is_string($line) ? trim($line) : '';
+            if ('' === $line || '*' === $line) {
+                return '';
+            }
+
+            return $line;
+        }
+
+        private static function sanitize_cookie_pattern_setting($value, $limit = 200)
+        {
+            return self::normalize_multiline_setting_with_callback($value, array(__CLASS__, 'sanitize_cookie_pattern_line'), $limit);
+        }
+
         private static function get_default_delay_icon_font_patterns()
         {
             return array(
@@ -231,14 +307,21 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
 
         private static function get_default_js_delay_defer_exclusion_patterns()
         {
-            // Populate Defaults should expose only the dependency floor that may
-            // need to stay blocking when Defer all JS is enabled. Slider/theme
-            // protections are not hidden; the admin UI appends slider defaults
-            // only when Fix sliders / hero sections is enabled.
+            /*
+             * Populate Defaults must expose only the hard dependency floor.
+             * Broad theme/plugin/slider/tracking fragments are intentionally
+             * excluded from this default payload because they can neutralize
+             * Defer all JS, Delay third-party JS, Main Thread Relief, and the
+             * LCP/dependency optimizers. If a specific site needs more
+             * protection, Runtime Scan / JS Delay-Defer Scan can suggest
+             * targeted lines and the user can save them in the visible textarea.
+             */
             return array_values(array_unique(array(
                 'jquery',
                 'jquery-core',
+                'jquery.min.js',
                 'jquery-migrate',
+                'jquery-migrate.min.js',
                 '/wp-includes/js/',
                 'wp-hooks',
                 'wp-i18n',
@@ -269,167 +352,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'wp-components-js-translations',
                 'js-translations',
                 '-js-translations',
-                'contact-form-7',
-                'mediaelementplayer',
-                'davici-script-js-after',
-                'functions.js',
-                'TreeSixtyImageRotate',
-                'woocommerce-google',
-                'woocommerce-coupon-box',
-                'wcb_params',
-                'wcb.min.js',
-                'complianz',
-                'complianz.min.js',
-                'cmplz',
-                'elementor',
-                'elementor-frontend',
-                'elementor-frontend-modules',
-                'frontend-modules',
-                'elementor-webpack-runtime',
-                'elementor-pro-webpack-runtime',
-                'elementorModules',
-                'elementor/assets/js/frontend-modules',
-                'elementor/assets/js/common.min.js',
-                'elementor/assets/js/elementor-admin-bar.min.js',
-                'common.min.js',
-                'elementor-admin-bar.min.js',
-                // Former internal dependency-safety fragments. These are now
-                // visible/editable Populate Defaults only; runtime code must
-                // not silently apply them when the textarea is empty or edited.
-                'googlesitekit',
-                'google-site-kit',
-                'sitekit',
-                'elementor/assets/js/frontend',
-                'elementor-pro/assets/js/frontend',
-                'elementor-pro-frontend',
-                'header-footer-elementor',
-                'hfe-',
-                'smartmenus',
-                'html_types/image',
-                'html_types/color',
-                'html_types/label',
-                'html_types/slide',
-                'html_types/slider',
-                'product-ajax-search',
-                'search-popup',
-                'nav-mobile',
-                'megamenu',
-                'header-cart',
-                'cart-canvas',
-                'off-canvas',
-                'woocommerce-products-filter',
-                'woof_',
-                'dgwt-wcas',
-                'woosq',
-                'wpcbn',
-                'author-arc',
-                'mailerlite',
-                'mc4wp',
-                'sourcebuster',
-                'order-attribution',
-                'eael-general',
-                'jquery/ui',
-                '/plugins/woocommerce/assets/js/frontend/cart-fragments',
-                '/plugins/woocommerce/assets/js/frontend/add-to-cart',
-                '/plugins/woocommerce/assets/js/frontend/checkout',
-                '/plugins/woocommerce/assets/js/frontend/single-product',
-                '/plugins/woocommerce/assets/js/selectwoo',
-                'wc-cart',
-                'wc-checkout',
-                'wc-add-to-cart',
-                'wc-single-product',
-                'wc-country-select',
-                'wc-address-i18n',
-                'wc-credit-card-form',
-                'selectwoo',
-                'mediaelement',
-                'mejs',
-                'mediaelementplayer',
-                'smartslider',
-                'smart-slider',
-                'n2-ss',
-                'splide',
-                'owl.carousel',
-                'owlcarousel',
-                'flickity',
-                'keen-slider',
-                'bxslider',
-                'masterslider',
-                'master-slider',
-                'layerslider',
-                'layer-slider',
-                'metaslider',
-                'soliloquy',
-                'royalslider',
-                'html_types/color',
-                'html_types/label',
-                'smartmenus',
-                'modal',
-                'popup',
-                'lightbox',
-                'fancybox',
-                'photoswipe',
-                'magnific-popup',
-                'video',
-                'plyr',
-                'youtube',
-                'vimeo',
-                'wistia',
-                'bricks',
-                'oxygen',
-                'wpbakery',
-                'visual-composer',
-                'vc_',
-                'wpb_',
-                'jet-',
-                'crocoblock',
-                'elementskit',
-                'eael',
-                'essential-addons',
-                'wpforms',
-                'fluentform',
-                'forminator',
-                'gravityforms',
-                // Site/theme error-derived tokens are still not hidden rules: they
-                // are suggestions the user can Populate, edit, save, or remove.
-                '360imagerotate',
-                '360imagerotate.js',
-                'tree-sixty',
-                'treesixty',
-                'three-sixty',
-                'threesixty',
-                'davici-script-js',
-                'davici-script-js-after',
-                'bootstrap',
-                'bootstrap.min.js',
-                'portfolio.js',
-                'woocommerce-google-analytics-integration',
-                'woocommerce-google-analytics-integration-js',
-                'woocommerce-google-analytics-integration-data-js-after',
-                'woocommerce-google-analytics-integration-gtag',
-                'google_gtagjs',
-                'google-tag-manager',
-                'gtag/js',
-                'gtm.js',
-                'dataLayer',
             )));
-        }
-
-        private static function get_default_slider_js_delay_defer_exclusion_patterns()
-        {
-            return array(
-                'revslider',
-                'sliderrevolution',
-                'slider-revolution',
-                'sr7',
-                'tptools',
-                'tp-tools',
-                'rs-module',
-                'wp-block-themepunch-revslider',
-                'swiper',
-                'swiper-bundle',
-                'slick',
-            );
         }
 
         private static function get_defer_all_js_legacy_conservative_exclusion_patterns()
@@ -804,6 +727,63 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             }
 
             return array_values(array_unique(array_filter(array_map('trim', explode("\n", $normalized)))));
+        }
+
+        private static function manual_lcp_selector_line_is_image($line)
+        {
+            $line = trim((string) $line);
+            if ('' === $line) {
+                return false;
+            }
+
+            if (preg_match('/^image\s+\S+/i', $line)) {
+                return true;
+            }
+
+            if (preg_match('#^(?:https?:)?//#i', $line) || preg_match('#^/#', $line)) {
+                return true;
+            }
+
+            return (bool) preg_match('/\.(?:avif|webp|png|jpe?g|gif|svg)(?:[?#].*)?$/i', $line);
+        }
+
+        private static function normalize_manual_lcp_image_entry($line)
+        {
+            $line = trim((string) $line);
+            if (preg_match('/^image\s+(.+)$/i', $line, $matches)) {
+                $line = trim((string) $matches[1]);
+            }
+
+            return $line;
+        }
+
+        private static function split_manual_lcp_selector_setting($value)
+        {
+            $lines = self::parse_textarea_setting($value);
+            $selectors = array();
+            $images = array();
+
+            foreach ($lines as $line) {
+                $line = trim((string) $line);
+                if ('' === $line) {
+                    continue;
+                }
+
+                if (self::manual_lcp_selector_line_is_image($line)) {
+                    $image = self::normalize_manual_lcp_image_entry($line);
+                    if ('' !== $image) {
+                        $images[$image] = $image;
+                    }
+                    continue;
+                }
+
+                $selectors[$line] = $line;
+            }
+
+            return array(
+                'selectors' => array_values($selectors),
+                'images'    => array_values($images),
+            );
         }
 
 
@@ -1480,6 +1460,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['cacheExceptionPaths']       = self::sanitize_excluded_paths_setting($settings['cacheExceptionPaths']);
             $settings['cacheExceptionQueryArgs']   = self::sanitize_setting_key_list($settings['cacheExceptionQueryArgs']);
             $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
+            $settings['cacheSafeTrackingCookiesEnabled'] = self::normalize_boolean_setting_value($settings['cacheSafeTrackingCookiesEnabled'] ?? true, true);
+            $settings['safeTrackingCookieList']    = self::sanitize_cookie_pattern_setting($settings['safeTrackingCookieList']);
+            $settings['unsafeCacheCookieList']     = self::sanitize_cookie_pattern_setting($settings['unsafeCacheCookieList']);
             $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
             $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
             // Defer all JS is intentionally aggressive/manual. An empty visible
@@ -1490,21 +1473,18 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['delayNonCriticalJsExcludeList'] = '';
             $settings['delaySafeThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delaySafeThirdPartyJsPatterns']);
             $settings['delayFunctionalThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delayFunctionalThirdPartyJsPatterns']);
-            $settings['delayThirdPartyJsExcludeList'] = self::normalize_textarea_setting($settings['delayThirdPartyJsExcludeList']);
             $settings['homepageCssBundleExcludeList'] = self::normalize_textarea_setting($settings['homepageCssBundleExcludeList']);
             $settings['delayIconFontsList'] = self::normalize_textarea_setting($settings['delayIconFontsList']);
             $settings['delayIconFontsExcludeList'] = self::normalize_textarea_setting($settings['delayIconFontsExcludeList']);
             $settings['homepageCssBundleMode'] = self::sanitize_homepage_css_bundle_mode($settings['homepageCssBundleMode']);
             $settings['cssBundleScope'] = self::sanitize_css_bundle_scope($settings['cssBundleScope'] ?? 'homepage');
             $settings['asyncCssExcludeList']       = self::normalize_textarea_setting($settings['asyncCssExcludeList']);
-            $settings['aggressiveAsyncCssExcludeList'] = self::normalize_textarea_setting($settings['aggressiveAsyncCssExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = self::normalize_textarea_setting($settings['delayNonCriticalJsExcludeList']);
             $settings['assetCleanupExcludeList'] = self::normalize_textarea_setting($settings['assetCleanupExcludeList']);
             $settings['googleFontsAdditionalScanUrls'] = self::normalize_textarea_setting($settings['googleFontsAdditionalScanUrls']);
-            $settings['lcpImagePriorityOverride'] = self::normalize_textarea_setting($settings['lcpImagePriorityOverride']);
             $settings['manualLcpHeroSelector'] = self::normalize_textarea_setting($settings['manualLcpHeroSelector']);
+            unset($settings['lcpImagePriorityOverride']);
             $settings['criticalResourcePreloadList'] = self::normalize_textarea_setting($settings['criticalResourcePreloadList']);
-            $settings['criticalFetchPreloadList'] = self::normalize_textarea_setting($settings['criticalFetchPreloadList']);
             $settings['criticalRequestChainDelayList'] = self::normalize_textarea_setting($settings['criticalRequestChainDelayList']);
             $settings['mediaOutputMode']           = self::sanitize_media_output_mode($settings['mediaOutputMode']);
             $settings['objectCacheBackend']        = self::sanitize_object_cache_backend($settings['objectCacheBackend']);
@@ -1757,10 +1737,14 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             }
 
             $query_allowlist = self::parse_textarea_setting(self::sanitize_setting_key_list($ui['cacheQueryStringAllowlist']));
+            $safe_tracking_cookie_patterns = self::parse_textarea_setting(self::sanitize_cookie_pattern_setting($ui['safeTrackingCookieList'] ?? ''));
+            $unsafe_cache_cookie_patterns = self::parse_textarea_setting(self::sanitize_cookie_pattern_setting($ui['unsafeCacheCookieList'] ?? ''));
             ucwp_request_profile_settings_checkpoint('wp_get_settings_after_runtime_textareas', array(
                 'excluded_paths_count' => count($excluded_paths),
                 'excluded_query_args_count' => count($excluded_query_args),
                 'query_allowlist_count' => count($query_allowlist),
+                'safe_tracking_cookie_count' => count($safe_tracking_cookie_patterns),
+                'unsafe_cache_cookie_count' => count($unsafe_cache_cookie_patterns),
             ));
             $defer_js_enabled = !empty($ui['deferJsEnabled']);
             $defer_all_js_enabled = $defer_js_enabled && !empty($ui['deferAllJsEnabled']);
@@ -1771,6 +1755,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $defer_stage_aggressive = $delay_non_critical_js_enabled;
             $defer_stage_balanced = $delay_safe_third_party_js_enabled || $delay_functional_third_party_js_enabled || $delay_all_third_party_js_enabled || $defer_stage_aggressive;
             $defer_stage_safe = $defer_js_enabled || $defer_stage_balanced;
+            $manual_lcp_selector_split = self::split_manual_lcp_selector_setting($ui['manualLcpHeroSelector'] ?? '');
 
             self::$settings_cache = array(
                 'enabled'                      => !empty($ui['pageCacheEnabled']),
@@ -1790,6 +1775,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cache_logged_in_users'        => false,
                 'cache_query_strings'          => !empty($ui['cacheQueryStringsEnabled']),
                 'cache_query_allowlist'        => $query_allowlist,
+                'cache_safe_tracking_cookies'  => !empty($ui['cacheSafeTrackingCookiesEnabled']),
+                'safe_tracking_cookie_patterns'=> $safe_tracking_cookie_patterns,
+                'unsafe_cache_cookie_patterns' => $unsafe_cache_cookie_patterns,
                 'gzip_enabled'                 => !empty($ui['gzipEnabled']),
                 'brotli_enabled'               => !empty($ui['brotliEnabled']),
                 'cache_stats_enabled'          => !empty($ui['cacheStatsEnabled']),
@@ -1807,7 +1795,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'delay_safe_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delaySafeThirdPartyJsPatterns'])),
                 'delay_functional_third_party_js' => $delay_functional_third_party_js_enabled,
                 'delay_functional_third_party_js_patterns' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayFunctionalThirdPartyJsPatterns'])),
-                'delay_third_party_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayThirdPartyJsExcludeList'])),
                 'async_external_scripts'       => !empty($ui['asyncExternalScriptsEnabled']),
                 'homepage_css_bundle'         => !empty($ui['homepageCssBundleEnabled']),
                 'homepage_css_bundle_inline'  => !empty($ui['homepageCssBundleInlineEnabled']),
@@ -1826,19 +1813,17 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'async_css'                    => !empty($ui['asyncCssEnabled']),
                 'async_css_exclude_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['asyncCssExcludeList'])),
                 'aggressive_async_css'         => !empty($ui['aggressiveAsyncCssEnabled']),
-                'aggressive_async_css_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['aggressiveAsyncCssExcludeList'])),
                 'delay_non_critical_js'        => $delay_non_critical_js_enabled,
                 'delay_non_critical_js_aggressive' => $defer_stage_aggressive,
                 'delay_non_critical_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
                 'lcp_image_priority'           => !empty($ui['lcpImagePriorityEnabled']),
                 'lazy_load_images'            => !empty($ui['lazyLoadImagesEnabled']),
                 'lcp_boundary_defer'           => !empty($ui['lcpBoundaryDeferEnabled']),
-                'lcp_image_priority_override_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['lcpImagePriorityOverride'])),
-                'manual_lcp_hero_selector_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['manualLcpHeroSelector'] ?? '')),
+                'lcp_image_priority_override_list' => $manual_lcp_selector_split['images'],
+                'manual_lcp_hero_selector_list' => $manual_lcp_selector_split['selectors'],
                 'main_thread_relief'          => !empty($ui['mainThreadReliefEnabled']),
                 'critical_request_chain_relief' => !empty($ui['criticalRequestChainReliefEnabled']),
                 'critical_resource_preload_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalResourcePreloadList'])),
-                'critical_fetch_preload_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalFetchPreloadList'])),
                 'critical_request_chain_delay_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['criticalRequestChainDelayList'])),
                 'asset_chain_cleanup'          => !empty($ui['assetChainCleanupEnabled']),
                 'asset_cleanup_woo_product_assets' => !empty($ui['assetCleanupWooProductAssetsEnabled']),
@@ -1865,6 +1850,11 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'woo_safe_mode'                => !empty($ui['woocommerceSafeModeEnabled']),
                 'cache_cleanup_enabled'        => !empty($ui['cacheCleanupEnabled']),
                 'apcu_flush_on_scheduled_cleanup' => !empty($ui['apcuFlushOnScheduledCleanup']),
+                'flush_all_include_opcache'   => !empty($ui['flushAllIncludeOpcache']),
+                'flush_all_include_apcu'      => !empty($ui['flushAllIncludeApcu']),
+                'flush_all_include_litespeed' => !empty($ui['flushAllIncludeLiteSpeed']),
+                'flush_all_include_nginx'     => !empty($ui['flushAllIncludeNginx']),
+                'flush_all_include_varnish'   => !empty($ui['flushAllIncludeVarnish']),
                 'cache_cleanup_interval_hours' => max(1, absint($ui['cacheCleanupIntervalHours'])),
                 'css_bundle_cleanup_grace_seconds' => HOUR_IN_SECONDS * self::sanitize_bounded_integer_setting($ui['cssBundleCleanupGraceHours'] ?? 48, 48, 1, 168),
                 'css_bundle_cleanup_delete_limit' => self::sanitize_bounded_integer_setting($ui['cssBundleCleanupDeleteLimit'] ?? 60, 60, 5, 500),

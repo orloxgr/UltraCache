@@ -75,7 +75,6 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                     'settings'     => $settings_for_client,
                     'defaults'     => self::get_dashboard_defaults_for_client(),
                     'jsDelayDeferRecommendedExclusions' => implode("\n", self::get_default_js_delay_defer_exclusion_patterns()),
-                    'jsDelayDeferSliderExclusions'      => implode("\n", self::get_default_slider_js_delay_defer_exclusion_patterns()),
                     'avifSupport'  => self::get_media_support_status(),
                     'diagnostics'  => $dashboard_diagnostics,
                     'crawlScopeSummary' => self::get_crawl_scope_summary(),

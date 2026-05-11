@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.57.95
+ * Version: 2.57.134
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 7.4
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.57.95');
+    define('UCWP_VERSION', '2.57.134');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -546,6 +546,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 // admin runtime visibility and keeps the manual flush buttons usable.
                 'opcache' => $opcache,
                 'apcu' => $apcu,
+                'externalCaches' => method_exists(__CLASS__, 'get_external_cache_detection') ? self::get_external_cache_detection(false) : array(),
                 'diagnostics' => array(
                     'cacheStats' => array(
                         'enabled' => false,
@@ -1052,6 +1053,9 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'excluded_query_args'             => array_values(array_unique(array_merge((array) $settings['excluded_query_args'], array('ucwp_runtime_js_scan', 'ucwp_runtime_js_scan_id', 'ucwp_runtime_js_scan_nonce')))),
                 'cache_query_strings'             => !empty($settings['cache_query_strings']),
                 'cache_query_allowlist'           => !empty($settings['cache_query_allowlist']) ? self::parse_textarea_setting(self::sanitize_setting_key_list((array) $settings['cache_query_allowlist'])) : array(),
+                'cache_safe_tracking_cookies'      => !empty($settings['cache_safe_tracking_cookies']),
+                'safe_tracking_cookie_patterns'   => !empty($settings['safe_tracking_cookie_patterns']) ? self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) $settings['safe_tracking_cookie_patterns'])) : array(),
+                'unsafe_cache_cookie_patterns'    => !empty($settings['unsafe_cache_cookie_patterns']) ? self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) $settings['unsafe_cache_cookie_patterns'])) : array(),
                 'woo_safe_mode'                   => !empty($settings['woo_safe_mode']),
                 'cache_stats_enabled'             => !empty($settings['cache_stats_enabled']),
                 'object_cache_enabled'            => !empty($settings['object_cache_enabled']),
@@ -1232,6 +1236,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'excluded_query_args'            => self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($runtime['excluded_query_args'] ?? array()))),
                 'cache_query_strings'            => !empty($runtime['cache_query_strings']),
                 'cache_query_allowlist'          => self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($runtime['cache_query_allowlist'] ?? array()))),
+                'safe_tracking_cookie_patterns' => self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) ($runtime['safe_tracking_cookie_patterns'] ?? array()))),
+                'unsafe_cache_cookie_patterns'  => self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) ($runtime['unsafe_cache_cookie_patterns'] ?? array()))),
                 'woo_safe_mode'                  => !empty($runtime['woo_safe_mode']),
                 'cache_stats_enabled'            => !empty($runtime['cache_stats_enabled']),
                 'object_cache_enabled'           => !empty($runtime['object_cache_enabled']),
@@ -1258,6 +1264,8 @@ if (!class_exists('Ultra_Cache_WP')) {
             sort($normalized['excluded_paths']);
             sort($normalized['excluded_query_args']);
             sort($normalized['cache_query_allowlist']);
+            sort($normalized['safe_tracking_cookie_patterns']);
+            sort($normalized['unsafe_cache_cookie_patterns']);
 
             return $normalized;
         }
@@ -1634,12 +1642,13 @@ if (!class_exists('Ultra_Cache_WP')) {
                     continue;
                 }
 
-                $deleted = function_exists('ucwp_safe_unlink') ? ucwp_safe_unlink($path, 'runtime_artifact_cleanup') : false;
                 if ($handle) {
                     @flock($handle, LOCK_UN);
-                    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle after delete attempt.
+                    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle before WP-safe deletion.
                     @fclose($handle);
                 }
+
+                $deleted = function_exists('ucwp_safe_unlink') ? ucwp_safe_unlink($path, 'runtime_artifact_cleanup') : false;
 
                 if ($deleted) {
                     $result['deleted']++;
@@ -3239,6 +3248,296 @@ public static function delete_all_plugin_data_and_deactivate()
             return self::clear_apcu_user_cache(true);
         }
 
+        private static function get_external_cache_detection_option_key()
+        {
+            return 'ucwp_external_cache_detection';
+        }
+
+        public static function get_external_cache_detection($force = false)
+        {
+            if (!$force) {
+                $saved = get_option(self::get_external_cache_detection_option_key(), array());
+                if (is_array($saved) && !empty($saved['layers']) && !empty($saved['detectedAt']) && !empty($saved['schemaVersion']) && (int) $saved['schemaVersion'] >= 3) {
+                    return $saved;
+                }
+            }
+
+            return self::redetect_external_caches();
+        }
+
+        public static function redetect_external_caches()
+        {
+            $opcache = self::get_opcache_status_summary();
+            $apcu = self::get_apcu_status_summary();
+            $server_software = '';
+            if (isset($_SERVER['SERVER_SOFTWARE'])) {
+                $server_software = sanitize_text_field(wp_unslash($_SERVER['SERVER_SOFTWARE']));
+            }
+            $reverse_proxy = method_exists(__CLASS__, 'get_reverse_proxy_status') ? self::get_reverse_proxy_status() : array();
+            $reverse_server = isset($reverse_proxy['server']) ? (string) $reverse_proxy['server'] : '';
+            $reverse_x_litespeed_cache = isset($reverse_proxy['x_litespeed_cache']) ? (string) $reverse_proxy['x_litespeed_cache'] : '';
+            $reverse_x_qc_cache = isset($reverse_proxy['x_qc_cache']) ? (string) $reverse_proxy['x_qc_cache'] : '';
+
+            $litespeed_class = class_exists('LiteSpeed_Cache_API');
+            $litespeed_class_purge = $litespeed_class && method_exists('LiteSpeed_Cache_API', 'purge_all');
+            $litespeed_namespaced_purge = class_exists('\LiteSpeed\Purge') && method_exists('\LiteSpeed\Purge', 'purge_all');
+            $litespeed_action = function_exists('has_action') && has_action('litespeed_purge_all');
+            $litespeed_function = function_exists('litespeed_purge_all');
+            $litespeed_defined = defined('LSCWP_V') || defined('LITESPEED_STATIC_DIR');
+            $litespeed_server = false !== stripos($server_software, 'LiteSpeed')
+                || false !== stripos($server_software, 'OpenLiteSpeed')
+                || false !== stripos($reverse_server, 'LiteSpeed')
+                || false !== stripos($reverse_server, 'OpenLiteSpeed');
+            $litespeed_cache_header = '' !== trim($reverse_x_litespeed_cache) || '' !== trim($reverse_x_qc_cache) || (!empty($reverse_proxy['litespeed_cache']));
+            $litespeed_server_purge = $litespeed_server || $litespeed_cache_header;
+            $litespeed_detected = $litespeed_class || $litespeed_namespaced_purge || $litespeed_action || $litespeed_function || $litespeed_defined || $litespeed_server_purge;
+            $litespeed_flushable = $litespeed_class_purge || $litespeed_namespaced_purge || $litespeed_action || $litespeed_function || $litespeed_server_purge;
+            if ($litespeed_class_purge) {
+                $litespeed_method = 'LiteSpeed_Cache_API::purge_all';
+            } elseif ($litespeed_namespaced_purge) {
+                $litespeed_method = '\LiteSpeed\Purge::purge_all';
+            } elseif ($litespeed_action) {
+                $litespeed_method = 'do_action(litespeed_purge_all)';
+            } elseif ($litespeed_function) {
+                $litespeed_method = 'litespeed_purge_all';
+            } elseif ($litespeed_server_purge) {
+                $litespeed_method = 'X-LiteSpeed-Purge response header';
+            } else {
+                $litespeed_method = 'not_detected';
+            }
+
+            $nginx_action = function_exists('has_action') && has_action('rt_nginx_helper_purge_all');
+            $nginx_class = class_exists('Nginx_Helper') || class_exists('Nginx_Helper_Admin');
+            $nginx_server = false !== stripos($server_software, 'nginx');
+            $nginx_cache_integration = $nginx_action || $nginx_class;
+            $nginx_detected = (bool) $nginx_cache_integration;
+            $nginx_flushable = (bool) $nginx_action;
+            $nginx_method = $nginx_action ? 'do_action(rt_nginx_helper_purge_all)' : ($nginx_server ? 'nginx_server_detected_no_cache_purge_hook' : 'not_detected');
+
+            $varnish_settings = method_exists(__CLASS__, 'get_varnish_cli_settings') ? self::get_varnish_cli_settings() : array();
+            $varnish_detected = !empty($varnish_settings['enabled']) && !empty($varnish_settings['endpointCount']);
+            $varnish_flushable = $varnish_detected;
+            $varnish_method = !empty($varnish_settings['effectiveMethod']) ? (string) $varnish_settings['effectiveMethod'] : 'configured_ultracache_varnish';
+
+            $detection = array(
+                'success'    => true,
+                'schemaVersion' => 3,
+                'detectedAt' => time(),
+                'detectedAtHuman' => gmdate('Y-m-d H:i:s') . ' UTC',
+                'serverSoftware' => $server_software,
+                'layers' => array(
+                    'opcache' => array(
+                        'label' => 'OPcache',
+                        'detected' => !empty($opcache['available']) && !empty($opcache['enabled']),
+                        'flushable' => function_exists('opcache_reset') && !empty($opcache['available']) && !empty($opcache['enabled']),
+                        'enabled' => !empty($opcache['enabled']),
+                        'method' => function_exists('opcache_reset') ? 'opcache_reset' : 'unavailable',
+                        'message' => isset($opcache['message']) ? (string) $opcache['message'] : '',
+                    ),
+                    'apcu' => array(
+                        'label' => 'APCu',
+                        'detected' => !empty($apcu['available']) && !empty($apcu['enabled']),
+                        'flushable' => function_exists('apcu_clear_cache') && !empty($apcu['available']) && !empty($apcu['enabled']),
+                        'enabled' => !empty($apcu['enabled']),
+                        'method' => function_exists('apcu_clear_cache') ? 'apcu_clear_cache' : 'unavailable',
+                        'message' => isset($apcu['message']) ? (string) $apcu['message'] : '',
+                    ),
+                    'litespeed' => array(
+                        'label' => 'LiteSpeed Cache',
+                        'detected' => (bool) $litespeed_detected,
+                        'flushable' => (bool) $litespeed_flushable,
+                        'enabled' => (bool) $litespeed_detected,
+                        'method' => $litespeed_method,
+                        'serverDetected' => (bool) $litespeed_server,
+                        'cacheHeaderDetected' => (bool) $litespeed_cache_header,
+                        'pluginDetected' => (bool) ($litespeed_class || $litespeed_namespaced_purge || $litespeed_action || $litespeed_function || $litespeed_defined),
+                        'message' => $litespeed_flushable
+                            ? ($litespeed_server_purge && !$litespeed_class_purge && !$litespeed_namespaced_purge && !$litespeed_action && !$litespeed_function
+                                ? 'LiteSpeed/OpenLiteSpeed detected. UltraCache can request a server-level purge with the X-LiteSpeed-Purge response header; effect depends on LSCache being enabled for this vhost.'
+                                : 'LiteSpeed WordPress purge integration detected.')
+                            : ($litespeed_detected ? 'LiteSpeed was detected, but no safe purge method is available.' : 'LiteSpeed Cache was not detected.'),
+                    ),
+                    'nginx' => array(
+                        'label' => 'Nginx Cache',
+                        'detected' => (bool) $nginx_detected,
+                        'flushable' => (bool) $nginx_flushable,
+                        'enabled' => (bool) $nginx_detected,
+                        'method' => $nginx_method,
+                        'message' => $nginx_flushable ? 'Nginx Helper purge hook detected.' : ($nginx_detected ? 'Nginx was detected, but no safe purge hook/endpoint is configured.' : 'Nginx Cache was not detected.'),
+                    ),
+                    'varnish' => array(
+                        'label' => 'Varnish Cache',
+                        'detected' => (bool) $varnish_detected,
+                        'flushable' => (bool) $varnish_flushable,
+                        'enabled' => !empty($varnish_settings['enabled']),
+                        'method' => $varnish_method,
+                        'message' => $varnish_flushable ? 'UltraCache Varnish endpoint is configured.' : ($varnish_detected ? 'Varnish settings exist, but flushing is not enabled/configured.' : 'Varnish Cache was not detected.'),
+                    ),
+                ),
+            );
+
+            update_option(self::get_external_cache_detection_option_key(), $detection, false);
+            return $detection;
+        }
+
+        private static function send_litespeed_purge_header($value = '*')
+        {
+            $value = is_string($value) ? trim($value) : '*';
+            if ('' === $value) {
+                $value = '*';
+            }
+
+            // Keep the public helper intentionally narrow. UltraCache currently issues full public-cache purge only.
+            if ('*' !== $value && !preg_match('/^(?:url|tag|private|public)=[A-Za-z0-9_:\/.,?&=%+~#@!$;*()\[\]\-]+$/', $value)) {
+                return array(
+                    'success' => false,
+                    'message' => 'Invalid LiteSpeed purge header value.',
+                    'method' => 'X-LiteSpeed-Purge response header',
+                );
+            }
+
+            if (PHP_SAPI === 'cli') {
+                return array(
+                    'success' => false,
+                    'message' => 'LiteSpeed server-level purge needs an HTTP response; it cannot be sent from WP-CLI.',
+                    'method' => 'X-LiteSpeed-Purge response header',
+                );
+            }
+
+            if (headers_sent($file, $line)) {
+                return array(
+                    'success' => false,
+                    'message' => sprintf('LiteSpeed purge header could not be sent because headers were already sent at %s:%s.', (string) $file, (string) $line),
+                    'method' => 'X-LiteSpeed-Purge response header',
+                );
+            }
+
+            header('X-LiteSpeed-Purge: ' . $value, false);
+            header('X-UltraCache-LiteSpeed-Purge: requested', false);
+
+            return array(
+                'success' => true,
+                'message' => 'LiteSpeed server-level purge header queued on this HTTP response.',
+                'method' => 'X-LiteSpeed-Purge response header',
+            );
+        }
+
+        public static function flush_litespeed_cache()
+        {
+            $detection = self::get_external_cache_detection(false);
+            $layer = isset($detection['layers']['litespeed']) && is_array($detection['layers']['litespeed']) ? $detection['layers']['litespeed'] : array();
+            if (empty($layer['flushable'])) {
+                return array('success' => false, 'message' => 'LiteSpeed Cache purge is not available.', 'externalCaches' => $detection);
+            }
+
+            $success = false;
+            $method = 'unknown';
+            $message = 'LiteSpeed Cache flush failed.';
+            if (class_exists('LiteSpeed_Cache_API') && method_exists('LiteSpeed_Cache_API', 'purge_all')) {
+                $method = 'LiteSpeed_Cache_API::purge_all';
+                $result = @LiteSpeed_Cache_API::purge_all();
+                $success = (false !== $result);
+                $message = $success ? 'LiteSpeed Cache purge triggered through LiteSpeed_Cache_API.' : 'LiteSpeed_Cache_API purge failed.';
+            } elseif (class_exists('\LiteSpeed\Purge') && method_exists('\LiteSpeed\Purge', 'purge_all')) {
+                $method = '\LiteSpeed\Purge::purge_all';
+                $result = @call_user_func(array('\LiteSpeed\Purge', 'purge_all'));
+                $success = (false !== $result);
+                $message = $success ? 'LiteSpeed Cache purge triggered through \LiteSpeed\Purge.' : '\LiteSpeed\Purge purge failed.';
+            } elseif (function_exists('has_action') && has_action('litespeed_purge_all')) {
+                $method = 'do_action(litespeed_purge_all)';
+                // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- External LiteSpeed Cache hook intentionally invoked for interoperability.
+                do_action('litespeed_purge_all');
+                $success = true;
+                $message = 'LiteSpeed Cache purge hook triggered.';
+            } elseif (function_exists('litespeed_purge_all')) {
+                $method = 'litespeed_purge_all';
+                $result = @litespeed_purge_all();
+                $success = (false !== $result);
+                $message = $success ? 'LiteSpeed Cache purge function triggered.' : 'LiteSpeed purge function failed.';
+            } elseif (!empty($layer['method']) && 'X-LiteSpeed-Purge response header' === (string) $layer['method']) {
+                $header_result = self::send_litespeed_purge_header('*');
+                $success = !empty($header_result['success']);
+                $method = isset($header_result['method']) ? (string) $header_result['method'] : 'X-LiteSpeed-Purge response header';
+                $message = isset($header_result['message']) ? (string) $header_result['message'] : ($success ? 'LiteSpeed server-level purge header queued.' : 'LiteSpeed server-level purge header failed.');
+            }
+
+            return array(
+                'success' => (bool) $success,
+                'message' => $message,
+                'method' => $method,
+                'externalCaches' => self::get_external_cache_detection(true),
+            );
+        }
+
+        public static function flush_nginx_cache()
+        {
+            $detection = self::get_external_cache_detection(false);
+            $layer = isset($detection['layers']['nginx']) && is_array($detection['layers']['nginx']) ? $detection['layers']['nginx'] : array();
+            if (empty($layer['flushable'])) {
+                return array('success' => false, 'message' => 'Nginx Cache purge is not available. Configure Nginx Helper or a safe purge integration first.', 'externalCaches' => $detection);
+            }
+
+            $success = false;
+            $method = 'unknown';
+            if (function_exists('has_action') && has_action('rt_nginx_helper_purge_all')) {
+                $method = 'do_action(rt_nginx_helper_purge_all)';
+                // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- External Nginx Helper hook intentionally invoked for interoperability.
+                do_action('rt_nginx_helper_purge_all');
+                $success = true;
+            }
+
+            return array(
+                'success' => (bool) $success,
+                'message' => $success ? 'Nginx Cache flush triggered.' : 'Nginx Cache flush failed.',
+                'method' => $method,
+                'externalCaches' => self::get_external_cache_detection(true),
+            );
+        }
+
+        public static function maybe_flush_external_caches_after_purge()
+        {
+            $settings = self::get_dashboard_settings();
+            $detection = self::get_external_cache_detection(false);
+            $layers = isset($detection['layers']) && is_array($detection['layers']) ? $detection['layers'] : array();
+            $results = array();
+
+            if (!empty($settings['flushAllIncludeOpcache']) && !empty($layers['opcache']['flushable'])) {
+                $results['opcache'] = self::flush_opcache();
+            } else {
+                $results['opcache'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeOpcache']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+            }
+
+            if (!empty($settings['flushAllIncludeApcu']) && !empty($layers['apcu']['flushable'])) {
+                $results['apcu'] = self::flush_apcu();
+            } else {
+                $results['apcu'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeApcu']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+            }
+
+            if (!empty($settings['flushAllIncludeLiteSpeed']) && !empty($layers['litespeed']['flushable'])) {
+                $results['litespeed'] = self::flush_litespeed_cache();
+            } else {
+                $results['litespeed'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeLiteSpeed']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+            }
+
+            if (!empty($settings['flushAllIncludeNginx']) && !empty($layers['nginx']['flushable'])) {
+                $results['nginx'] = self::flush_nginx_cache();
+            } else {
+                $results['nginx'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeNginx']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+            }
+
+            if (!empty($settings['flushAllIncludeVarnish']) && !empty($layers['varnish']['flushable'])) {
+                $results['varnish'] = array('success' => true, 'handled' => true, 'message' => 'Handled by the Flush All Cache purge hook.');
+            } else {
+                $results['varnish'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeVarnish']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+            }
+
+            return array(
+                'success' => true,
+                'results' => $results,
+                'externalCaches' => self::get_external_cache_detection(true),
+            );
+        }
+
         public static function get_engine_stats($full_object_count = false, $force = false)
         {
             if (!$force && method_exists(__CLASS__, 'are_cache_stats_enabled') && !self::are_cache_stats_enabled()) {
@@ -3277,6 +3576,7 @@ public static function delete_all_plugin_data_and_deactivate()
             $stats['cronWarm'] = self::get_cron_warm_status();
             $stats['opcache'] = self::get_opcache_status_summary();
             $stats['apcu'] = self::get_apcu_status_summary();
+            $stats['externalCaches'] = self::get_external_cache_detection(false);
             $stats['diagnostics'] = self::get_dashboard_diagnostics();
             return $stats;
         }

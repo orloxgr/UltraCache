@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.57.95
+Stable tag: 2.57.134
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -221,10 +221,121 @@ Disable the last risky optimization, confirm the issue disappears, then add visi
 
 == Changelog ==
 
+= 2.57.134 =
+* Stops frontend/on-demand media generation from creating automatic pending AVIF/WebP/Both background queue rows. Missing variants remain for explicit bulk or WP-CLI conversion.
+* Retires old partial on-demand queue rows so they no longer keep `ucwp_process_media_conversion_queue` due-now.
+* Limits the automatic background media hook to the `best` upload queue with a small batch/time budget; manual UI bulk and WP-CLI media conversion remain unrestricted.
+
+= 2.57.133 =
+* Removed the hidden automatic safe-html-minify pass from frontend/cache HTML output.
+* Removed the removed minify stage from profiler labels and updated the safe frontend mode UI wording.
+* Keeps stylesheet de-duplication and the recent JS/runtime-scan fixes unchanged.
+
+= 2.57.131 =
+* Keeps WordPress attached inline scripts with their parent handle decision so `-js-before`/`-js-after` config blocks are not delayed standalone while their parent script remains parser-loaded.
+* Filters console-paste suggestions so harmless console output such as JQMIGRATE notices and Complianz opt-in messages are not treated as runtime errors.
+
+= 2.57.130 =
+- Normalizes bad local `@font-face` values such as `font-display: block` and `font-display: auto` to `font-display: swap` while preserving all existing `src()` entries.
+
+= 2.57.129 =
+- Preserves existing `@font-face` blocks and normalizes relative font URLs when writing cached CSS copies.
+
+= 2.57.128 =
+- Adds a final UltraCache stylesheet de-duplication pass so generated/injected CSS, delayed font-css links, and async CSS noscript fallbacks are emitted once per href.
+- Keeps one async link and one noscript fallback per generated CSS href.
+- Does not change async eligibility, font-display normalization behavior, or theme/layout CSS handling.
+
+= 2.57.127 =
+- Adds a central server-side font-display normalization layer for local linked stylesheets, inline `@font-face` CSS, generated CSS bundles, optimized-css assets, font-css assets, delayed-font CSS, and localized Google Fonts CSS.
+- Adds `font-display: swap` only when a `@font-face` block is missing `font-display`, so changing CSS Bundling or Async CSS settings should not reintroduce the same missing font-display audit through another CSS path.
+- Writes normalized mixed/layout stylesheets to `optimized-css/active-font-display-*.css` with visible markers while preserving the stylesheet as blocking/render-path, avoiding another async/layout experiment.
+
+= 2.57.125 =
+- Extends Async Remaining CSS to UltraCache-generated external CSS links, including page/frontpage CSS bundles, leftover bundles, optimized-css files, and delayed/font CSS files.
+- Generated CSS links now keep noscript fallbacks but can load with the existing print+onload async strategy when the existing Async CSS switch is enabled.
+- Adds data-ucwp-generated-css-async markers and clearer async CSS diagnostic reasons for generated bundle, leftover, optimized, and delayed font CSS.
+
+= 2.57.124 =
+- Extends Media Optimization to generated/local CSS delivery by rewriting eligible local upload background-image URLs inside CSS bundles and optimized CSS.
+- Automatic media mode now emits original fallback declarations plus `image-set()` optimized candidates for CSS backgrounds, so modern browsers can choose AVIF/WebP while older browsers keep the original image.
+- Adds CSS background image rewrite counters to CSS bundle stats/source details.
+
+= 2.57.123 =
+* Delayed JS loader: tracking/third-party delayed scripts now auto-run after window load unless the visitor interacts first. Local/non-third-party delayed scripts can still run after DOMContentLoaded.
+* Added delayed-loader diagnostic markers for queued/local/third-party counts and run states.
+* Bounded runtime font-display CSSOM patching with capped stylesheet/rule scans and a short-lived observer.
+* Bounded the advanced runtime font CSS rewrite observer to reduce frontend main-thread pressure on large pages.
+
+= 2.57.122 =
+* Font Display Swap now routes same-origin theme/plugin stylesheet links through preserved optimized-css copies when their @font-face blocks are missing font-display.
+* Keeps non-font CSS rules intact while preventing Lighthouse/Chromium from still seeing the original missing font-display declarations.
+* Keeps the runtime CSSOM fallback for dynamically inserted @font-face rules.
+* Leaves the existing icon-font delay and cookie UI placement unchanged.
+
+= 2.57.118 =
+* Fixed reported WordPress Coding Standards findings for wp_rand(), SERVER_SOFTWARE sanitization, intentional external purge hooks, and the runtime JS scan global key.
+
+= 2.57.117 =
+* Kept the Cache Pages with Safe Tracking Cookies switch in Cache Engine.
+* Moved the Safe Tracking Cookies and Never Cache When These Cookies Exist editors to Advanced Settings & Exclusions, immediately after Never Delay These Fonts / Patterns.
+
+= 2.57.113 =
+* Runtime: Release any remaining page-cache-build generation lock during shutdown so Set-Cookie/bypass or aborted output-buffer paths cannot leave fresh build-lock markers behind.
+* Runtime: Stop refreshing another worker's runtime lock marker when acquisition fails; failed lock probes no longer make old page-cache-build locks look newly created.
+* Diagnostics: Add Set-Cookie skip diagnostics that report the response cookie names responsible for STORE skip decisions without adding cookie-ignore behavior.
+
+= 2.57.112 =
+* Audit and tighten the 2.57.111 filesystem changes for WordPress-safe public-plugin behavior.
+* Fix runtime lock release order so lock handles are unlocked/closed before WP-safe marker deletion is attempted.
+* Route runtime lock marker deletion through a strict UltraCache locks/ path validator and the centralized wp_delete_file/WP_Filesystem-safe deletion helper.
+* Make stale runtime-lock cleanup skip active locks with a flock probe, remove raw unlink fallback, and log delete failures for debugging.
+* Keep CSS bundle manifest writes on schema v3 when adding/updating entries.
+
+= 2.57.111 =
+* Slim CSS bundle manifest entries so per-page CSS bundles no longer store heavy sourceDetails or repeated font diagnostic arrays in the runtime manifest.
+* Delete runtime lock files on normal lock release and add guarded stale-lock maintenance for orphaned lock artifacts.
+* Clean aged orphan manifest.json.tmp-* files during manifest writes and cap CSS manifest entries to prevent runaway manifest/tmp growth.
+* Cap oversized dashboard action-job payload arrays so completed jobs do not keep huge CSS diagnostic payloads in options.
+
+= 2.57.110 =
+* Improve generic JS Runtime Scan / Extract Suggestions resolution for public-plugin use: script inventory now reads UltraCache-delayed script metadata (`data-ucwp-id`, `data-ucwp-src`, `data-ucwp-handle`) and inline `sourceURL` markers so delayed inline WordPress config blocks can still be mapped back to actual ids.
+* Add generic dynamic `window[callbackName]()` analysis. When a minified script throws `window[o] is not a function`, UltraCache now scans related inline config/stack-frame sourceURL context for callback/function-name fields and surfaces resolved globals plus exact script ids/paths as review-only suggestions. No plugin/theme-specific mappings are used.
+
+= 2.57.107 =
+* Remove checkbox selection controls and the “Append selected review-only” buttons from JS Delay / Defer review-only suggestions. Review-only candidates remain visible and can be appended one by one after manual review.
+
+= 2.57.106 =
+* Allow manually reviewed JS Delay / Defer review-only candidates to be selected and appended from Runtime Scan and pasted Console Extract Suggestions. Review-only items remain opt-in and are never appended automatically.
+
+= 2.57.105 =
+* Runtime/Admin: Rebuild JS Delay / Defer Runtime Scan and Extract Suggestions on the clean 2.57.102 base, excluding the rejected 2.57.103 build.
+* Runtime/Admin: Resolve dynamic `window[o] is not a function` and generic runtime function errors against the scanned page script inventory, suggesting exact loaded script paths/ids as review-only candidates instead of broad basenames.
+* Runtime/Admin: Resolve missing globals through actual local same-site JS content and inline/external script ids found on the scanned page, including existing `*-js-before` / `*-js-after` companions only when present.
+* Runtime/Admin: Remove the old Runtime Scan ElementorModules special-case suggestion block and TreeSixty/ThreeSixty special matching from JS dependency protection.
+
+= 2.57.101 =
+* UI: Move Delay These Fonts / Patterns and Never Delay These Fonts / Patterns above CSS Bundle Exclusions.
+* UI: Replace fixed font list defaults with Scan Front Page buttons for detected font patterns.
+* Runtime/Admin: Add a front-page font scanner that detects likely icon font families/files and non-icon text/brand font families from loaded stylesheets and inline CSS.
+* Runtime/Admin: Auto-detect likely icon fonts now scans the front page when enabled and appends detected icon patterns to the visible Delay These Fonts / Patterns list.
+
+= 2.57.100 =
+* UI: Rename Manual LCP Hero / Slider selector to Manual LCP selector.
+* UI: Merge the former Single LCP Image URL behavior into Manual LCP selector; the field now accepts CSS selectors, plain IDs, image URLs, and image URL fragments.
+* UI: Render Delay These Fonts / Patterns and Never Delay These Fonts / Patterns in the same two-column sizing used by the other Advanced Settings & Exclusions textareas.
+* Runtime: Split Manual LCP selector entries internally so image-like lines become manual LCP image overrides, while CSS/plain-ID lines continue to scope hero/slider LCP discovery.
+
+= 2.57.99 =
+* Tightened external cache card visibility so Varnish, OPcache, APCu, Nginx, and LiteSpeed cards/switches appear only when a real detected flush path exists.
+* Fixed Varnish detection so the default endpoint alone no longer makes Varnish appear detected on servers without Varnish.
+* Fixed OPcache/APCu detection so loaded-but-disabled or unavailable runtimes no longer show active flush cards.
+* Kept LiteSpeed server-level purge support through the X-LiteSpeed-Purge response header when no LiteSpeed WordPress plugin API/hook exists.
+
 = 2.57.95 =
-* Move dependency-safety recommendations into the existing visible JS Delay / Defer Exclusions Populate Defaults flow instead of applying hidden runtime exclusion lists.
-* Expand Populate Defaults with the former internal JS dependency floor plus Davici 360-view and WooCommerce Google Analytics/GTag/GTM order-sensitive tokens.
-* Honor empty/custom JS Delay / Defer Exclusions without silently supplementing them with built-in delay/defer exclusion fragments.
+* Moved dependency-safety recommendations into the existing visible JS Delay / Defer Exclusions Populate Defaults flow instead of applying hidden runtime exclusion lists.
+* Expanded Populate Defaults with the previously internal JS dependency floor plus PrinceFrog/Davici 360-view and WooCommerce Google Analytics/GTag/GTM order-sensitive tokens.
+* Defer/delay protection now honors the visible JS Delay / Defer Exclusions list; empty/custom-edited lists are no longer silently supplemented by built-in delay/defer exclusion fragments.
 
 = 2.57.94 =
 * Strengthen JS exclusion group protection for public-release debugging: user exclusions can now protect related defining scripts for function/global tokens such as TreeSixtyImageRotate, and legacy jQuery/jQuery Migrate clusters are kept ordered when dependency-sensitive exclusions are present.

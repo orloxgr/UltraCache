@@ -84,16 +84,26 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 
         private function apply_final_google_fonts_rewrite_before_cache_store($html)
         {
-            if (!is_string($html) || '' === $html || false === stripos($html, 'fonts.googleapis.com')) {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            $has_google_fonts_stylesheet = false !== stripos($html, 'fonts.googleapis.com');
+            $has_google_fonts_hint = false !== stripos($html, 'fonts.gstatic.com');
+            if (!$has_google_fonts_stylesheet && !$has_google_fonts_hint) {
                 return $html;
             }
 
             $settings = $this->get_settings();
             if (!empty($settings['google_fonts_local_optimization'])) {
-                return $this->rewrite_google_fonts_links_to_local_in_html($html);
+                if ($has_google_fonts_stylesheet) {
+                    return $this->rewrite_google_fonts_links_to_local_in_html($html);
+                }
+
+                return $this->remove_google_fonts_remote_resource_hints($html);
             }
 
-            if (!empty($settings['google_fonts_swap'])) {
+            if ($has_google_fonts_stylesheet && !empty($settings['google_fonts_swap'])) {
                 return $this->rewrite_google_fonts_display_swap_in_html($html);
             }
 
@@ -116,8 +126,12 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 
         private function rewrite_google_fonts_links_to_local_in_html($html)
         {
-            if (!is_string($html) || '' === $html || false === stripos($html, 'fonts.googleapis.com')) {
+            if (!is_string($html) || '' === $html) {
                 return $html;
+            }
+
+            if (false === stripos($html, 'fonts.googleapis.com')) {
+                return false !== stripos($html, 'fonts.gstatic.com') ? $this->remove_google_fonts_remote_resource_hints($html) : $html;
             }
 
             $processed = $this->rewrite_google_fonts_link_hrefs_with_processor($html, true);
@@ -139,7 +153,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
         private function remove_google_fonts_remote_resource_hints($html)
         {
             $html = (string) $html;
-            if ('' === $html || false === stripos($html, 'fonts.googleapis.com')) {
+            if ('' === $html || (false === stripos($html, 'fonts.googleapis.com') && false === stripos($html, 'fonts.gstatic.com'))) {
                 return $html;
             }
 
@@ -1279,6 +1293,8 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $normalized = $this->normalize_google_fonts_cache_urls_in_css($css);
+            $font_display_stats = array();
+            $normalized = $this->normalize_font_face_display_in_css($normalized, $font_display_stats);
             if (function_exists('ucwp_strip_source_mapping_url_comments')) {
                 $normalized = ucwp_strip_source_mapping_url_comments($normalized);
             }
@@ -1292,6 +1308,18 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
         private function get_google_fonts_remote_user_agent()
         {
             return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
+        }
+
+        private function get_generated_font_css_asset_role(array $asset)
+        {
+            $css_url = isset($asset['css_url']) ? strtolower((string) $asset['css_url']) : '';
+            if (!empty($asset['activeCssIsMixed']) || false !== strpos($css_url, '/cache/ultracache/optimized-css/')) {
+                return 'optimized-css';
+            }
+            if (false !== strpos($css_url, '/cache/ultracache/font-css/')) {
+                return 'font-css';
+            }
+            return '';
         }
 
         private function optimize_self_hosted_font_css_links($html)
@@ -1353,7 +1381,17 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     }
 
                     $replacement_url = esc_url($asset['css_url']);
-                    return $this->set_or_add_html_tag_attribute($tag, 'href', $replacement_url);
+                    $asset_role = $this->get_generated_font_css_asset_role($asset);
+                    $rewritten_tag = $this->set_or_add_html_tag_attribute($tag, 'href', $replacement_url);
+                    if ('' !== $asset_role) {
+                        $rewritten_tag = $this->set_or_add_html_tag_attribute($rewritten_tag, 'data-ucwp-css-role', $asset_role);
+                        if ('optimized-css' === $asset_role) {
+                            $rewritten_tag = $this->set_or_add_html_tag_attribute($rewritten_tag, 'data-ucwp-css-blocking-reason', 'optimized-css-layout-risk');
+                        } elseif ('font-css' === $asset_role) {
+                            $rewritten_tag = $this->set_or_add_html_tag_attribute($rewritten_tag, 'data-ucwp-css-blocking-reason', 'font-css-text-metric-risk');
+                        }
+                    }
+                    return $rewritten_tag;
                 },
                 $html
             );
@@ -1367,6 +1405,153 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($html);
+        }
+
+        private function normalize_linked_local_stylesheet_font_display_in_html($html)
+        {
+            $html = (string) $html;
+            if ('' === $html || false === stripos($html, '<link') || false === stripos($html, '.css')) {
+                return $html;
+            }
+
+            $changed = false;
+            $updated = (string) preg_replace_callback(
+                '/<link\b[^>]*\bhref=("|\')(.*?)\1[^>]*>/is',
+                function ($matches) use (&$changed) {
+                    $tag = (string) $matches[0];
+                    if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
+                        return $tag;
+                    }
+
+                    if (false !== stripos($tag, 'data-ucwp-font-display-patch=') || false !== stripos($tag, 'data-ucwp-delayed-icon-fonts=')) {
+                        return $tag;
+                    }
+
+                    $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'href'), ENT_QUOTES | ENT_HTML5);
+                    $asset = $this->get_font_display_normalized_css_asset_for_current_request($href);
+                    if (empty($asset['css_url'])) {
+                        return $tag;
+                    }
+
+                    $rewritten = $this->set_or_add_html_tag_attribute($tag, 'href', esc_url((string) $asset['css_url']));
+                    $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-css-role', 'optimized-css');
+                    $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-font-display-normalized', '1');
+                    $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-css-blocking-reason', 'font-display-normalized-preserve-layout');
+                    $changed = true;
+                    return $rewritten;
+                },
+                $html
+            );
+
+            return $changed && is_string($updated) && '' !== $updated ? $updated : $html;
+        }
+
+        private function get_font_display_normalized_css_asset_for_current_request($url)
+        {
+            static $request_assets = array();
+
+            $source_url = $this->normalize_public_resource_url($url);
+            if ('' === $source_url) {
+                return array();
+            }
+
+            if (array_key_exists($source_url, $request_assets)) {
+                return is_array($request_assets[$source_url]) ? $request_assets[$source_url] : array();
+            }
+
+            $normalized_path = strtolower((string) wp_parse_url($source_url, PHP_URL_PATH));
+            if (false !== strpos($normalized_path, '/cache/ultracache/css-bundles/') || false !== strpos($normalized_path, '/cache/ultracache/font-css/') || false !== strpos($normalized_path, '/cache/ultracache/optimized-css/')) {
+                $request_assets[$source_url] = array();
+                return array();
+            }
+
+            if (!$this->is_cacheable_local_url($source_url)) {
+                $request_assets[$source_url] = array();
+                return array();
+            }
+
+            $source_path = $this->resolve_local_path_from_public_url($source_url);
+            if ('' === $source_path || !is_readable($source_path)) {
+                $request_assets[$source_url] = array();
+                return array();
+            }
+
+            $source_path_lc = strtolower(str_replace('\\', '/', $source_path));
+            if (false !== strpos($source_path_lc, '/cache/ultracache/')) {
+                $request_assets[$source_url] = array();
+                return array();
+            }
+
+            $css = ucwp_safe_file_get_contents($source_path, 'font_display_normalized_css_asset', true);
+            if (!is_string($css) || '' === $css || false === stripos($css, '@font-face') || !$this->css_has_font_face_requiring_display_normalization($css)) {
+                $request_assets[$source_url] = array();
+                return array();
+            }
+
+            /*
+             * Keep this path as an extension of the existing font-face CSS
+             * normalization pipeline: preserve the full source stylesheet, preserve
+             * every src() entry (woff2/woff/ttf/eot/svg), only add font-display:
+             * swap to existing @font-face blocks that miss it, and normalize
+             * relative url(...) references before writing the copy under
+             * /optimized-css/. Without URL normalization, theme CSS such as
+             * css/wpbingo.css would be copied to the cache directory with
+             * ../fonts/... paths pointing at the wrong location.
+             */
+            $stats = array();
+            $google_import_stats = array();
+            $normalized_css = $this->normalize_protocol_relative_urls_in_css($css, $source_url);
+            $normalized_css = $this->rewrite_google_fonts_imports_in_css($normalized_css, $source_url, $google_import_stats);
+            $normalized_css = $this->normalize_font_face_display_in_css($normalized_css, $stats);
+            if (!is_string($normalized_css) || '' === trim($normalized_css) || $normalized_css === $css || empty($stats['fontFaceBlocksChanged'])) {
+                $request_assets[$source_url] = array();
+                return array();
+            }
+
+            if (function_exists('ucwp_strip_source_mapping_url_comments')) {
+                $normalized_css = trim(ucwp_strip_source_mapping_url_comments($normalized_css)) . "\n";
+            }
+
+            $dir = trailingslashit(UCWP_CACHE_DIR) . 'optimized-css/';
+            if (!is_dir($dir)) {
+                wp_mkdir_p($dir);
+            }
+            $index_file = $dir . 'index.php';
+            if (!file_exists($index_file)) {
+                ucwp_safe_file_put_contents($index_file, "<?php\n// Silence is golden.\n");
+            }
+
+            $hash = md5($source_url . '|font-display|' . (string) ucwp_safe_filemtime($source_path, 'font_display_normalized_signature') . '|' . md5($normalized_css));
+            $filename = 'active-font-display-' . $hash . '.css';
+            $file = $dir . $filename;
+            $content_hash = md5($normalized_css);
+            $existing_hash = (is_readable($file) && filesize($file) > 0) ? md5_file($file) : '';
+            if ($existing_hash !== $content_hash) {
+                if (!$this->write_cache_variant_atomically($file, $normalized_css)) {
+                    $request_assets[$source_url] = array();
+                    return array();
+                }
+            }
+
+            clearstatcache(true, $file);
+            $verified_hash = (is_readable($file) && filesize($file) > 0) ? md5_file($file) : '';
+            if ($verified_hash !== $content_hash) {
+                $request_assets[$source_url] = array();
+                return array();
+            }
+
+            $asset = array(
+                'css_url' => content_url('cache/ultracache/optimized-css/' . $filename),
+                'file' => $file,
+                'sourceUrl' => $source_url,
+                'sourceBytes' => strlen($css),
+                'cssBytes' => strlen($normalized_css),
+                'fontDisplayAdded' => max(0, (int) ($stats['fontDisplayAdded'] ?? 0)),
+                'fontFaceBlocksScanned' => max(0, (int) ($stats['fontFaceBlocksScanned'] ?? 0)),
+            );
+
+            $request_assets[$source_url] = $asset;
+            return $asset;
         }
 
         private function optimize_self_hosted_font_css_links_with_processor($html)
@@ -1434,6 +1619,15 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     }
 
                     $processor->set_attribute('href', esc_url($asset['css_url']));
+                    $asset_role = $this->get_generated_font_css_asset_role($asset);
+                    if ('' !== $asset_role) {
+                        $processor->set_attribute('data-ucwp-css-role', $asset_role);
+                        if ('optimized-css' === $asset_role) {
+                            $processor->set_attribute('data-ucwp-css-blocking-reason', 'optimized-css-layout-risk');
+                        } elseif ('font-css' === $asset_role) {
+                            $processor->set_attribute('data-ucwp-css-blocking-reason', 'font-css-text-metric-risk');
+                        }
+                    }
                     $changed = true;
                 }
 
@@ -1548,6 +1742,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return array();
             }
 
+            $has_missing_font_display = $this->css_has_font_face_requiring_display_normalization($css);
             $google_import_stats = array();
             $optimized_css = $this->rewrite_self_hosted_font_css_content($css, $source_url, $google_import_stats);
             $google_imports_localized = !empty($google_import_stats['localized']);
@@ -1558,6 +1753,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             $delayed_font_patterns = array();
             $delayed_font_count = 0;
             $preserve_mixed_css_for_delayed_icon_fonts = false;
+            $preserve_mixed_css_for_font_display = false;
 
             if (!empty($settings['delay_icon_fonts'])) {
                 $font_split = $this->split_delayed_icon_font_faces_from_css($optimized_css, $source_url, $settings);
@@ -1580,17 +1776,22 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 if (!empty($font_css_optimization_stats['nonFontCssDetected'])) {
                     /*
                      * Public-release safety: do not replace a mixed layout/theme stylesheet
-                     * with a font-only generated copy. Keep the original stylesheet intact.
-                     *
-                     * Exception: when Delay icon font-face blocks matched a standalone mixed
-                     * stylesheet, the matching @font-face blocks were already removed above and
-                     * moved to a delayed stylesheet. In that case preserving the remaining mixed
-                     * CSS in a generated copy is intentional and keeps the visible non-font CSS
-                     * active while preventing the original icon font from staying render-blocking.
+                     * with a font-only generated copy. However, if the only safe optimization
+                     * needed is adding font-display to @font-face declarations, keep the full
+                     * mixed stylesheet content and write it under /optimized-css/. This removes
+                     * the original render-path stylesheet that Lighthouse/Chromium still sees
+                     * as missing font-display, while preserving all non-font CSS rules.
                      */
-                    return array();
+                    if ($has_missing_font_display && $optimized_css !== $css && false !== stripos((string) $optimized_css, '@font-face')) {
+                        $preserve_mixed_css_for_font_display = true;
+                        $font_css_optimization_stats['mixedCssPreservedForFontDisplay'] = true;
+                        $font_css_optimization_stats['beforeBytes'] = strlen($css);
+                        $font_css_optimization_stats['afterBytes'] = strlen((string) $optimized_css);
+                    } else {
+                        return array();
+                    }
                 }
-                if (is_array($font_css_optimization) && isset($font_css_optimization['css']) && is_string($font_css_optimization['css'])) {
+                if (empty($preserve_mixed_css_for_font_display) && is_array($font_css_optimization) && isset($font_css_optimization['css']) && is_string($font_css_optimization['css'])) {
                     $optimized_css = $font_css_optimization['css'];
                 }
             }
@@ -1614,9 +1815,14 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 ";
             }
 
+            $css_image_rewrite_stats = array();
+            if (method_exists($this, 'rewrite_stylesheet_css_image_urls_for_media_optimization')) {
+                $optimized_css = $this->rewrite_stylesheet_css_image_urls_for_media_optimization((string) $optimized_css, $source_url, $css_image_rewrite_stats);
+            }
+
             $preserve_mixed_css_for_google_imports = !empty($google_imports_changed);
 
-            if ('' === trim((string) $optimized_css) || (false === stripos((string) $optimized_css, '@font-face') && '' === trim($delayed_font_css) && empty($preserve_mixed_css_for_google_imports))) {
+            if ('' === trim((string) $optimized_css) || (false === stripos((string) $optimized_css, '@font-face') && '' === trim($delayed_font_css) && empty($preserve_mixed_css_for_google_imports) && empty($css_image_rewrite_stats['cssImageUrlsRewritten']))) {
                 return array();
             }
 
@@ -1625,10 +1831,10 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $hash = md5($source_url . '|' . md5($optimized_css));
-            $active_css_is_mixed = !empty($preserve_mixed_css_for_delayed_icon_fonts) || !empty($preserve_mixed_css_for_google_imports);
+            $active_css_is_mixed = !empty($preserve_mixed_css_for_delayed_icon_fonts) || !empty($preserve_mixed_css_for_google_imports) || !empty($preserve_mixed_css_for_font_display);
             $asset_dir_slug = $active_css_is_mixed ? 'optimized-css' : 'font-css';
             $asset_file_prefix = $active_css_is_mixed ? 'active-' : '';
-            $write_reason = !empty($preserve_mixed_css_for_google_imports) ? 'optimized active css with localized Google Fonts imports' : ($active_css_is_mixed ? 'optimized active css without delayed icon font-face blocks' : 'optimized font css');
+            $write_reason = !empty($preserve_mixed_css_for_google_imports) ? 'optimized active css with localized Google Fonts imports' : (!empty($preserve_mixed_css_for_font_display) ? 'optimized active css with font-display patches' : ($active_css_is_mixed ? 'optimized active css without delayed icon font-face blocks' : 'optimized font css'));
 
             /*
              * 2.56.198: /font-css/ is reserved for actual font-only or delayed
@@ -1683,6 +1889,15 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             if (!empty($font_css_optimization_stats)) {
                 $asset['fontCssOptimization'] = $font_css_optimization_stats;
             }
+            if (!empty($css_image_rewrite_stats['cssImageUrlsRewritten'])) {
+                $asset['cssImageUrlOptimization'] = array(
+                    'sourceUrl' => $source_url,
+                    'scanned' => max(0, (int) ($css_image_rewrite_stats['cssImageUrlsScanned'] ?? 0)),
+                    'rewritten' => max(0, (int) ($css_image_rewrite_stats['cssImageUrlsRewritten'] ?? 0)),
+                    'imageSet' => max(0, (int) ($css_image_rewrite_stats['cssImageUrlsImageSet'] ?? 0)),
+                    'skipped' => max(0, (int) ($css_image_rewrite_stats['cssImageUrlsSkipped'] ?? 0)),
+                );
+            }
 
             if ('' !== trim($delayed_font_css)) {
                 $delayed_font_content = trim($delayed_font_css) . "
@@ -1698,6 +1913,8 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     $delayed_font_content = trim((string) $delayed_font_content) . "
 ";
                 }
+                $delayed_font_display_stats = array();
+                $delayed_font_content = $this->normalize_font_face_display_in_css($delayed_font_content, $delayed_font_display_stats);
                 if ('' === trim($delayed_font_content) || false === stripos($delayed_font_content, '@font-face')) {
                     if ($active_css_is_mixed) {
                         return array();
@@ -2583,7 +2800,60 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 $source_label = 'empty';
             }
 
-            $script = '<script data-ucwp-font-css-map="1" data-ucwp-runtime-font-rewrite="1" data-ucwp-font-css-map-count="' . esc_attr((string) count($map)) . '" data-ucwp-font-css-map-source="' . esc_attr($source_label) . '">(function(){var map=' . $json . ';if(!map||typeof map!=="object"){map={};}var toAbs=function(url){if(!url){return "";}try{return new URL(url, document.baseURI).href;}catch(e){try{var a=document.createElement("a");a.href=url;return a.href||url;}catch(err){return url;}}};var rewrite=function(node){if(!node||node.nodeType!==1){return;}var tag=String(node.tagName||"").toLowerCase();if(tag!=="link"){return;}var rel=String(node.getAttribute("rel")||"").toLowerCase();if(rel.indexOf("stylesheet")===-1){return;}var href=node.getAttribute("href")||node.href||"";if(!href){return;}var abs=toAbs(href);if(abs&&map[abs]&&abs!==map[abs]){node.setAttribute("href",map[abs]);node.setAttribute("data-ucwp-runtime-font-rewrite-hit","1");try{node.href=map[abs];}catch(e){}}};var scan=function(root){try{var links=(root||document).querySelectorAll? (root||document).querySelectorAll("link[rel][href]") : [];for(var i=0;i<links.length;i++){rewrite(links[i]);}}catch(e){}};scan(document);try{var mo=new MutationObserver(function(list){for(var i=0;i<list.length;i++){var added=list[i]&&list[i].addedNodes?list[i].addedNodes:[];for(var j=0;j<added.length;j++){var node=added[j];rewrite(node);scan(node);}}});mo.observe(document.documentElement||document.head||document.body,{childList:true,subtree:true});}catch(e){}})();</script>';
+            $script = '<script data-ucwp-font-css-map="1" data-ucwp-runtime-font-rewrite="1" data-ucwp-runtime-font-rewrite-policy="bounded-head-observer" data-ucwp-font-css-map-count="' . esc_attr((string) count($map)) . '" data-ucwp-font-css-map-source="' . esc_attr($source_label) . '">(function(){var map=' . $json . ';if(!map||typeof map!=="object"){map={};}var maxLinks=80;var seen=0;var toAbs=function(url){if(!url){return "";}try{return new URL(url,document.baseURI).href;}catch(e){try{var a=document.createElement("a");a.href=url;return a.href||url;}catch(err){return url;}}};var rewrite=function(node){if(!node||node.nodeType!==1||seen>=maxLinks){return;}var tag=String(node.tagName||"").toLowerCase();if(tag!=="link"){return;}var rel=String(node.getAttribute("rel")||"").toLowerCase();if(rel.indexOf("stylesheet")===-1){return;}seen++;var href=node.getAttribute("href")||node.href||"";if(!href){return;}var abs=toAbs(href);if(abs&&map[abs]&&abs!==map[abs]){node.setAttribute("href",map[abs]);node.setAttribute("data-ucwp-runtime-font-rewrite-hit","1");try{node.href=map[abs];}catch(e){}}};var scan=function(root){try{var base=root&&root.querySelectorAll?root:document;var links=base.querySelectorAll?base.querySelectorAll("link[rel][href]"):[];for(var i=0;i<links.length&&seen<maxLinks;i++){rewrite(links[i]);}if(root&&root.nodeType===1){rewrite(root);}}catch(e){}};scan(document);try{var target=document.head||document.documentElement||document.body;var mo=new MutationObserver(function(list){for(var i=0;i<list.length&&seen<maxLinks;i++){var added=list[i]&&list[i].addedNodes?list[i].addedNodes:[];for(var j=0;j<added.length&&seen<maxLinks;j++){scan(added[j]);}}});if(target){mo.observe(target,{childList:true,subtree:true});setTimeout(function(){try{mo.disconnect();}catch(e){}},10000);}}catch(e){}})();</script>';
+
+            return $this->insert_html_before_closing_head($html, $script);
+        }
+
+        private function normalize_inline_style_font_display_in_html($html)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<style') || false === stripos($html, '@font-face')) {
+                return $html;
+            }
+
+            $updated = preg_replace_callback(
+                '/<style\b([^>]*)>([\s\S]*?)<\/style>/i',
+                function ($matches) {
+                    $attrs = isset($matches[1]) ? (string) $matches[1] : '';
+                    $css = isset($matches[2]) ? (string) $matches[2] : '';
+
+                    if ('' === $css || false === stripos($css, '@font-face')) {
+                        return (string) $matches[0];
+                    }
+
+                    if (preg_match('/\btype\s*=\s*(["\'])(.*?)\1/i', $attrs, $type_match)) {
+                        $type = strtolower(trim((string) ($type_match[2] ?? '')));
+                        if ('' !== $type && 'text/css' !== $type) {
+                            return (string) $matches[0];
+                        }
+                    }
+
+                    $patched_css = $this->normalize_font_face_display_in_css($css);
+                    if (!is_string($patched_css) || $patched_css === $css) {
+                        return (string) $matches[0];
+                    }
+
+                    return '<style' . $attrs . ' data-ucwp-inline-font-display-patched="1">' . $patched_css . '</style>';
+                },
+                $html
+            );
+
+            return is_string($updated) && '' !== $updated ? $updated : $html;
+        }
+
+        private function inject_runtime_font_display_cssom_patch($html)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '</head>')) {
+                return $html;
+            }
+
+            if (false !== stripos($html, 'data-ucwp-font-display-cssom-patch=')) {
+                return $html;
+            }
+
+            $script = <<<'JS'
+<script data-ucwp-font-display-cssom-patch="1" data-ucwp-font-display-cssom-policy="bounded-idle">(function(){if(window.__ucwpFontDisplayCssomPatch){return;}window.__ucwpFontDisplayCssomPatch=1;var RX=/@font-face\s*\{[^}]*\}/gi;var MAX_SHEETS=48;var MAX_RULES=2500;var patchedRules=0;var scheduled=false;function root(){return document.documentElement||document.body||document.head;}function mark(k,v){try{var r=root();if(r){r.setAttribute('data-ucwp-font-display-'+k,String(v));}}catch(e){}}function patchBlock(block){if(!block||String(block).toLowerCase().indexOf('@font-face')===-1){return block;}if(/font-display\s*:/i.test(block)){return block.replace(/font-display\s*:\s*[^;}]+;?/i,'font-display: swap;');}return block.replace(/}\s*$/,';font-display: swap;}').replace(/\{\s*;/,'{');}function patchText(css){css=String(css||'');if(css.toLowerCase().indexOf('@font-face')===-1){return css;}return css.replace(RX,function(block){return patchBlock(block);});}function patchStyleNode(node){if(!node||node.nodeType!==1||String(node.tagName||'').toLowerCase()!=='style'){return;}var type=String(node.getAttribute('type')||'').toLowerCase();if(type&&type!=='text/css'){return;}var css=node.textContent||'';if(css.toLowerCase().indexOf('@font-face')===-1){return;}var patched=patchText(css);if(patched!==css){node.textContent=patched;node.setAttribute('data-ucwp-font-display-patched','1');}}function patchRule(sheet,rule,index){try{if(!rule||patchedRules>=MAX_RULES){return;}var text=rule.cssText||'';if(String(text).toLowerCase().indexOf('@font-face')===-1){return;}patchedRules++;if(rule.style&&rule.style.setProperty){try{rule.style.setProperty('font-display','swap');return;}catch(e){}}var patched=patchText(text);if(patched!==text&&sheet&&sheet.deleteRule&&sheet.insertRule){sheet.deleteRule(index);sheet.insertRule(patched,index);}}catch(e){}}function patchSheets(){var sheets=document.styleSheets||[];var sheetCount=0;patchedRules=0;for(var i=0;i<sheets.length&&sheetCount<MAX_SHEETS&&patchedRules<MAX_RULES;i++){var rules;try{rules=sheets[i].cssRules||sheets[i].rules;}catch(e){continue;}if(!rules){continue;}sheetCount++;for(var j=0;j<rules.length&&patchedRules<MAX_RULES;j++){patchRule(sheets[i],rules[j],j);}}mark('cssom-sheets',sheetCount);mark('cssom-rules',patchedRules);}function patchStyleNodes(rootNode){try{var base=rootNode&&rootNode.querySelectorAll?rootNode:document;var styles=base.querySelectorAll?base.querySelectorAll('style'):[];for(var i=0;i<styles.length;i++){patchStyleNode(styles[i]);}if(rootNode&&rootNode.nodeType===1&&String(rootNode.tagName||'').toLowerCase()==='style'){patchStyleNode(rootNode);}}catch(e){}}function idle(cb){if('requestIdleCallback' in window){window.requestIdleCallback(cb,{timeout:1200});return;}setTimeout(cb,80);}function scheduleSheets(){if(scheduled){return;}scheduled=true;idle(function(){scheduled=false;patchSheets();});}try{var proto=window.CSSStyleSheet&&window.CSSStyleSheet.prototype;if(proto&&proto.insertRule&&!proto.__ucwpFontDisplayPatched){var insertRule=proto.insertRule;proto.insertRule=function(rule,index){return insertRule.call(this,patchText(rule),index);};if(proto.addRule){var addRule=proto.addRule;proto.addRule=function(selector,style,index){if(String(selector||'').toLowerCase()==='@font-face'){style=patchText('@font-face{'+String(style||'')+'}').replace(/^@font-face\s*\{|}\s*$/gi,'');}return addRule.call(this,selector,style,index);};}proto.__ucwpFontDisplayPatched=1;}}catch(e){}patchStyleNodes(document);scheduleSheets();try{var mo=new MutationObserver(function(list){for(var i=0;i<list.length;i++){var added=list[i]&&list[i].addedNodes?list[i].addedNodes:[];for(var j=0;j<added.length;j++){patchStyleNodes(added[j]);}}});mo.observe(document.documentElement||document.head||document.body,{childList:true,subtree:true});setTimeout(function(){try{mo.disconnect();mark('cssom-observer','disconnected');}catch(e){}},10000);}catch(e){}if(document.addEventListener){document.addEventListener('DOMContentLoaded',scheduleSheets,{once:true});window.addEventListener('load',function(){scheduleSheets();setTimeout(scheduleSheets,1200);},{once:true});}else{window.attachEvent&&window.attachEvent('onload',scheduleSheets);}})();</script>
+JS;
 
             return $this->insert_html_before_closing_head($html, $script);
         }
@@ -2988,6 +3258,53 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             );
         }
 
+        private function css_has_font_face_requiring_display_normalization($css)
+        {
+            $css = (string) $css;
+            if ('' === $css || false === stripos($css, '@font-face')) {
+                return false;
+            }
+
+            if (function_exists('ucwp_extract_font_face_blocks_from_css')) {
+                $extracted = ucwp_extract_font_face_blocks_from_css($css);
+                $blocks = isset($extracted['blocks']) && is_array($extracted['blocks']) ? $extracted['blocks'] : array();
+                foreach ($blocks as $block) {
+                    if ($this->font_face_block_requires_display_normalization((string) $block)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            if (!preg_match_all('/@font-face\s*{.*?}/is', $css, $matches)) {
+                return false;
+            }
+
+            foreach ((array) ($matches[0] ?? array()) as $block) {
+                if ($this->font_face_block_requires_display_normalization((string) $block)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function font_face_block_requires_display_normalization($block)
+        {
+            $block = (string) $block;
+            if ('' === $block || false === stripos($block, '@font-face')) {
+                return false;
+            }
+
+            if (!preg_match('/font-display\s*:\s*([^;}]+)/i', $block, $match)) {
+                return true;
+            }
+
+            $value = strtolower(trim((string) ($match[1] ?? '')));
+            return in_array($value, array('auto', 'block'), true);
+        }
+
         private function rewrite_self_hosted_font_css_content($css, $source_url, array &$google_import_stats = null)
         {
             $css = $this->normalize_protocol_relative_urls_in_css($css, $source_url);
@@ -3062,22 +3379,41 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             return is_string($updated) && '' !== $updated ? $updated : $css;
         }
 
-        private function normalize_font_face_display_in_css($css)
+        private function normalize_font_face_display_in_css($css, &$stats = null)
         {
             $css = (string) $css;
+            if (null === $stats) {
+                $stats = array();
+            }
+            foreach (array('fontFaceBlocksScanned', 'fontDisplayAdded', 'fontDisplayExisting', 'fontFaceBlocksChanged') as $key) {
+                if (!isset($stats[$key])) {
+                    $stats[$key] = 0;
+                }
+            }
+
             if ('' === $css || false === stripos($css, '@font-face')) {
                 return $css;
             }
 
             return (string) preg_replace_callback(
                 '/@font-face\s*{.*?}/is',
-                function ($matches) {
+                function ($matches) use (&$stats) {
                     $block = (string) $matches[0];
+                    $stats['fontFaceBlocksScanned']++;
                     $block = (string) preg_replace('/([^;{}\s])\s+(font-display\s*:)/i', '$1; $2', $block);
 
-                    if (false !== stripos($block, 'font-display')) {
-                        $updated = preg_replace('/font-display\s*:\s*[^;}{]+;?/i', 'font-display: swap;', $block, 1);
-                        return is_string($updated) && '' !== $updated ? $updated : $block;
+                    if (preg_match('/font-display\s*:\s*([^;}]+);?/i', $block, $display_match)) {
+                        $value = strtolower(trim((string) ($display_match[1] ?? '')));
+                        $stats['fontDisplayExisting']++;
+                        if (in_array($value, array('auto', 'block'), true)) {
+                            $updated_block = (string) preg_replace('/font-display\s*:\s*[^;}]+;?/i', 'font-display: swap;', $block, 1);
+                            if ($updated_block !== $block) {
+                                $stats['fontFaceBlocksChanged']++;
+                                return $updated_block;
+                            }
+                        }
+
+                        return $block;
                     }
 
                     $body = (string) preg_replace('/}\s*$/', '', $block, 1);
@@ -3086,6 +3422,8 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                         $body .= ';';
                     }
 
+                    $stats['fontDisplayAdded']++;
+                    $stats['fontFaceBlocksChanged']++;
                     return $body . "\n  font-display: swap;\n}";
                 },
                 $css

@@ -390,6 +390,17 @@ $runtime_config = array(
     ),
     'cache_query_strings'            => false,
     'cache_query_allowlist'          => array(),
+    'cache_safe_tracking_cookies'    => true,
+    'safe_tracking_cookie_patterns'  => array(),
+    'unsafe_cache_cookie_patterns'   => array(
+        'wordpress_logged_in_',
+        'wordpress_sec_',
+        'comment_author_',
+        'wp-postpass_',
+        'woocommerce_items_in_cart',
+        'woocommerce_cart_hash',
+        'wp_woocommerce_session_',
+    ),
     'woo_safe_mode'                  => false,
     'cache_stats_enabled'            => false,
     'stale_while_revalidate_enabled' => false,
@@ -479,6 +490,9 @@ $ucwp_normalize_runtime_config = static function ($config) use ($runtime_config,
         'excluded_query_args'            => $ucwp_normalize_runtime_string_list($config['excluded_query_args'] ?? $runtime_config['excluded_query_args'], '/[^a-z0-9_-]/'),
         'cache_query_strings'            => !empty($config['cache_query_strings']),
         'cache_query_allowlist'          => $cache_query_allowlist,
+        'cache_safe_tracking_cookies'    => array_key_exists('cache_safe_tracking_cookies', (array) $config) ? !empty($config['cache_safe_tracking_cookies']) : !empty($runtime_config['cache_safe_tracking_cookies']),
+        'safe_tracking_cookie_patterns'  => $ucwp_normalize_runtime_string_list($config['safe_tracking_cookie_patterns'] ?? $runtime_config['safe_tracking_cookie_patterns'], '/[^a-z0-9_\-.\*]/'),
+        'unsafe_cache_cookie_patterns'   => $ucwp_normalize_runtime_string_list($config['unsafe_cache_cookie_patterns'] ?? $runtime_config['unsafe_cache_cookie_patterns'], '/[^a-z0-9_\-.\*]/'),
         'woo_safe_mode'                  => !empty($config['woo_safe_mode']),
         'cache_stats_enabled'            => !empty($config['cache_stats_enabled']),
         'stale_while_revalidate_enabled' => !empty($config['stale_while_revalidate_enabled']),
@@ -566,6 +580,39 @@ foreach ($runtime_secret_candidates as $runtime_secret_file) {
     }
 }
 $runtime_config = $ucwp_normalize_runtime_config($runtime_config);
+
+$ucwp_cookie_name_matches_pattern = static function ($cookie_name, $pattern) {
+    $cookie_name = strtolower(trim((string) $cookie_name));
+    $pattern = strtolower(trim((string) $pattern));
+    if ('' === $cookie_name || '' === $pattern || '*' === $pattern) {
+        return false;
+    }
+
+    if (false !== strpos($pattern, '*')) {
+        $regex = '/^' . str_replace('\*', '.*', preg_quote($pattern, '/')) . '$/i';
+        return 1 === preg_match($regex, $cookie_name);
+    }
+
+    return false !== strpos($cookie_name, $pattern);
+};
+
+$ucwp_cookie_name_matches_any_pattern = static function ($cookie_name, $patterns) use ($ucwp_cookie_name_matches_pattern) {
+    foreach ((array) $patterns as $pattern) {
+        if ($ucwp_cookie_name_matches_pattern($cookie_name, $pattern)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+foreach (array_keys((array) ($_COOKIE ?? array())) as $cookie_name) {
+    $cookie_name = ucwp_clean_server_text($cookie_name);
+    if ($ucwp_cookie_name_matches_any_pattern($cookie_name, $runtime_config['unsafe_cache_cookie_patterns'] ?? array())) {
+        return;
+    }
+}
+
 $ucwp_cache_stats_enabled = !empty($runtime_config['cache_stats_enabled']);
 
 $revalidate_flag = isset($_GET['ucwp_revalidate']) ? (string) $_GET['ucwp_revalidate'] : '';

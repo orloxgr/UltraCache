@@ -233,13 +233,40 @@ trait Ultra_Cache_Media_Queue_Trait
 			return false !== $created;
 		}
 
-		private function get_media_queue_pending_count() {
+		private function get_media_queue_pending_count($format = null) {
 			if (!$this->media_queue_table_exists()) {
 				return 0;
 			}
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
+			if (null !== $format) {
+				$format = $this->normalize_media_queue_format($format);
+				return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE status = 'pending' AND format = %s", $format));
+			}
+
 			return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status = 'pending'");
+		}
+
+		private function retire_on_demand_partial_media_queue_rows() {
+			if (!$this->media_queue_table_exists()) {
+				return 0;
+			}
+
+			global $wpdb;
+			$table = $this->get_media_queue_table_name();
+			$count = $wpdb->query($wpdb->prepare(
+				"UPDATE {$table} SET status = 'skipped', last_error = %s, updated_at = %s, started_at = NULL, completed_at = %s WHERE status = 'pending' AND format IN ('avif','webp','both') AND last_error LIKE %s",
+				'Frontend on-demand partial queue was retired; use manual bulk or WP-CLI media conversion to complete missing variants.',
+				current_time('mysql'),
+				current_time('mysql'),
+				'%Partially optimized by on-demand generation%'
+			));
+
+			if (is_numeric($count) && (int) $count > 0) {
+				$this->invalidate_media_work_summary_cache();
+			}
+
+			return is_numeric($count) ? (int) $count : 0;
 		}
 
 		public function reset_stale_media_queue_items() {
@@ -799,7 +826,13 @@ trait Ultra_Cache_Media_Queue_Trait
 			$format = $this->normalize_media_queue_format($format);
 			$status = isset($completion['status']) ? (string) $completion['status'] : 'pending';
 			$status = in_array($status, array('pending', 'skipped'), true) ? $status : 'pending';
+			$original_status = $status;
 			$message = isset($completion['message']) ? (string) $completion['message'] : '';
+
+			if ('pending' === $status) {
+				$status = 'skipped';
+				$message = 'Frontend on-demand generated an optimized variant; remaining variants were not queued automatically. Use manual bulk or WP-CLI media conversion to complete missing variants.';
+			}
 
 			if ($attachment_id <= 0 || !$this->ensure_media_queue_table()) {
 				return false;
@@ -810,9 +843,21 @@ trait Ultra_Cache_Media_Queue_Trait
 			$signature = $this->get_attachment_source_signature($attachment_id);
 			$now = current_time('mysql');
 			$completed = ('skipped' === $status);
-			$existing = $wpdb->get_row($wpdb->prepare("SELECT id, attempts FROM {$table} WHERE attachment_id = %d AND format = %s", $attachment_id, $format), ARRAY_A);
+			$existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, attempts, last_error FROM {$table} WHERE attachment_id = %d AND format = %s", $attachment_id, $format), ARRAY_A);
 
 			if (is_array($existing) && !empty($existing['id'])) {
+				$existing_status = isset($existing['status']) ? (string) $existing['status'] : '';
+				$existing_error = isset($existing['last_error']) ? (string) $existing['last_error'] : '';
+				$existing_from_on_demand = (false !== stripos($existing_error, 'on-demand'));
+
+				if (!$existing_from_on_demand) {
+					return false;
+				}
+
+				if ('done' === $existing_status) {
+					return false;
+				}
+
 				$updated = $wpdb->update(
 					$table,
 					array(
@@ -831,6 +876,10 @@ trait Ultra_Cache_Media_Queue_Trait
 				);
 
 				return false !== $updated;
+			}
+
+			if ('pending' === $original_status || 'skipped' === $status) {
+				return false;
 			}
 
 			$inserted = $wpdb->insert(

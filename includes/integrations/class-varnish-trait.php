@@ -13,6 +13,10 @@ trait Ultra_Cache_WP_Varnish_Trait
 {
         public function handle_varnish_after_purge_all($payload = array())
         {
+            $settings = self::get_dashboard_settings();
+            if (empty($settings['flushAllIncludeVarnish'])) {
+                return;
+            }
             self::varnish_flush_all_current_host();
         }
 

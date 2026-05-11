@@ -57,8 +57,14 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
                 $response['stats'] = Ultra_Cache_WP::get_engine_stats();
             }
+            if ($success && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'maybe_flush_external_caches_after_purge')) {
+                $response['externalFlush'] = Ultra_Cache_WP::maybe_flush_external_caches_after_purge();
+            }
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
                 $response['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
+            }
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_external_cache_detection')) {
+                $response['externalCaches'] = Ultra_Cache_WP::get_external_cache_detection(false);
             }
 
             return new WP_REST_Response($response, $success ? 200 : 500);
@@ -268,6 +274,39 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             }
 
             $result = Ultra_Cache_WP::flush_apcu();
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+        }
+
+        public function external_caches_redetect()
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'redetect_external_caches')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'External cache detection helper not available.'), 500);
+            }
+
+            $result = Ultra_Cache_WP::redetect_external_caches();
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
+                $result['stats'] = Ultra_Cache_WP::get_engine_stats();
+            }
+            return new WP_REST_Response($result, 200);
+        }
+
+        public function litespeed_flush()
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_litespeed_cache')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'LiteSpeed Cache helper not available.'), 500);
+            }
+
+            $result = Ultra_Cache_WP::flush_litespeed_cache();
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+        }
+
+        public function nginx_flush()
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_nginx_cache')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Nginx Cache helper not available.'), 500);
+            }
+
+            $result = Ultra_Cache_WP::flush_nginx_cache();
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
         }
 

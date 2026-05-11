@@ -407,6 +407,236 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			);
 		}
 
+
+		/**
+		 * Rewrite local upload background-image URLs inside a stylesheet body.
+		 *
+		 * External CSS is shared across cache variants, so this method does not rely on
+		 * the current browser Accept header. In Automatic mode it emits a safe fallback
+		 * declaration followed by image-set() when AVIF/WebP variants are available;
+		 * older browsers keep the original declaration, while modern browsers choose the
+		 * best optimized source they support. For explicit AVIF/WebP modes it rewrites
+		 * the URL directly to the requested optimized format when available.
+		 *
+		 * @param string $css        CSS content.
+		 * @param string $source_url Public URL of the source stylesheet.
+		 * @param array  $stats      Optional stats array passed by reference.
+		 * @return string
+		 */
+		public function rewrite_css_image_urls_for_stylesheet($css, $source_url = '', &$stats = array()) {
+			$css = (string) $css;
+			if (!$this->is_media_optimization_enabled() || '' === $css || false === stripos($css, 'url(')) {
+				return $css;
+			}
+
+			if (!is_array($stats)) {
+				$stats = array();
+			}
+			foreach (array('cssImageUrlsScanned', 'cssImageUrlsRewritten', 'cssImageUrlsImageSet', 'cssImageUrlsSkipped') as $key) {
+				if (!isset($stats[$key])) {
+					$stats[$key] = 0;
+				}
+			}
+
+			$mode = $this->get_media_output_mode();
+			$rewritten = preg_replace_callback(
+				'/(\bbackground(?:-image)?\s*:\s*)([^;{}]*url\([^;{}]+?\)[^;{}]*)(;?)/i',
+				function ($matches) use ($source_url, $mode, &$stats) {
+					$prefix = isset($matches[1]) ? (string) $matches[1] : '';
+					$value = isset($matches[2]) ? (string) $matches[2] : '';
+					$suffix = isset($matches[3]) ? (string) $matches[3] : '';
+					if ('' === $prefix || '' === $value || false === stripos($value, 'url(')) {
+						return (string) ($matches[0] ?? '');
+					}
+
+					$changed = false;
+					$used_image_set = false;
+					$new_value = preg_replace_callback(
+						'/url\(([^)]+)\)/i',
+						function ($url_matches) use ($source_url, $mode, &$stats, &$changed, &$used_image_set) {
+							$stats['cssImageUrlsScanned']++;
+							$original_match = isset($url_matches[0]) ? (string) $url_matches[0] : '';
+							$inner = isset($url_matches[1]) ? (string) $url_matches[1] : '';
+							$candidate = $this->resolve_css_image_url_candidate($inner, $source_url);
+							if ('' === $candidate) {
+								$stats['cssImageUrlsSkipped']++;
+								return $original_match;
+							}
+
+							$avif = false;
+							$webp = false;
+							if ('webp' !== $mode && $this->media_output_mode_allows('avif')) {
+								$avif = $this->get_avif_url_from_public_url($candidate);
+							}
+							if (!$avif && 'avif' !== $mode && $this->media_output_mode_allows('webp')) {
+								$webp = $this->get_webp_url_from_public_url($candidate, true);
+							}
+							$original = $this->sanitize_css_image_original_url($candidate);
+							if (!$avif && !$webp) {
+								$stats['cssImageUrlsSkipped']++;
+								return $original_match;
+							}
+
+							if ('auto' === $mode) {
+								$image_set = $this->build_css_image_set_value($avif, $webp, $original);
+								if ('' === $image_set) {
+									$stats['cssImageUrlsSkipped']++;
+									return $original_match;
+								}
+								$changed = true;
+								$used_image_set = true;
+								$stats['cssImageUrlsRewritten']++;
+								$stats['cssImageUrlsImageSet']++;
+								return $image_set;
+							}
+
+							$replacement = ('avif' === $mode) ? $avif : $webp;
+							if (!$replacement) {
+								$replacement = $avif ? $avif : $webp;
+							}
+							$replacement = $this->escape_rewritten_public_url_for_css_url($replacement);
+							if ('' === $replacement) {
+								$stats['cssImageUrlsSkipped']++;
+								return $original_match;
+							}
+
+							$changed = true;
+							$stats['cssImageUrlsRewritten']++;
+							return 'url("' . $replacement . '")';
+						},
+						$value
+					);
+
+					if (!$changed || !is_string($new_value) || '' === $new_value) {
+						return (string) ($matches[0] ?? '');
+					}
+
+					$optimized_declaration = $prefix . $new_value . ('' !== $suffix ? $suffix : ';');
+					if ($used_image_set) {
+						$original_declaration = $prefix . $value . ('' !== $suffix ? $suffix : ';');
+						return $original_declaration . $optimized_declaration;
+					}
+
+					return $optimized_declaration;
+				},
+				$css
+			);
+
+			return is_string($rewritten) ? $rewritten : $css;
+		}
+
+		private function resolve_css_image_url_candidate($inner, $source_url = '') {
+			$raw = trim((string) $inner);
+			if ('' === $raw) {
+				return '';
+			}
+
+			$quote_tokens = array('&quot;', '&#039;', '&#39;', '&#x27;', '&#X27;', '"', "'");
+			foreach ($quote_tokens as $token) {
+				$length = strlen($token);
+				if ($length > 0 && strlen($raw) >= ($length * 2) && 0 === strpos($raw, $token) && substr($raw, -$length) === $token) {
+					$raw = substr($raw, $length, -$length);
+					break;
+				}
+			}
+
+			$candidate = html_entity_decode(str_replace('\/', '/', $raw), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+			$candidate = trim($candidate);
+			if ('' === $candidate || false !== strpos($candidate, '/uc-images/')) {
+				return '';
+			}
+
+			$lower = strtolower($candidate);
+			foreach (array('data:', 'blob:', 'about:', 'javascript:', '#') as $prefix) {
+				if (0 === strpos($lower, $prefix)) {
+					return '';
+				}
+			}
+
+			if (!preg_match('~\.(?:jpe?g|png|webp)(?:[?#].*)?$~iu', $candidate)) {
+				return '';
+			}
+
+			if (preg_match('~^https?://~i', $candidate) || 0 === strpos($candidate, '/')) {
+				return $candidate;
+			}
+
+			if (0 === strpos($candidate, '//')) {
+				$scheme = (string) wp_parse_url((string) $source_url, PHP_URL_SCHEME);
+				if ('' === $scheme) {
+					$scheme = is_ssl() ? 'https' : 'http';
+				}
+				return $scheme . ':' . $candidate;
+			}
+
+			$base = '' !== (string) $source_url ? (string) $source_url : home_url('/');
+			$parts = wp_parse_url($base);
+			if (!is_array($parts) || empty($parts['host'])) {
+				return '';
+			}
+
+			$scheme = !empty($parts['scheme']) ? (string) $parts['scheme'] : (is_ssl() ? 'https' : 'http');
+			$host = (string) $parts['host'];
+			$port = !empty($parts['port']) ? ':' . (int) $parts['port'] : '';
+			$path = !empty($parts['path']) ? (string) $parts['path'] : '/';
+			$dir = preg_replace('~/[^/]*$~', '/', $path);
+			$dir = is_string($dir) && '' !== $dir ? $dir : '/';
+			$combined = $this->normalize_css_path_segments($dir . $candidate);
+
+			return $scheme . '://' . $host . $port . $combined;
+		}
+
+		private function normalize_css_path_segments($path) {
+			$path = '/' . ltrim(str_replace('\\', '/', (string) $path), '/');
+			$segments = explode('/', $path);
+			$out = array();
+			foreach ($segments as $segment) {
+				if ('' === $segment || '.' === $segment) {
+					continue;
+				}
+				if ('..' === $segment) {
+					array_pop($out);
+					continue;
+				}
+				$out[] = $segment;
+			}
+
+			return '/' . implode('/', $out);
+		}
+
+		private function sanitize_css_image_original_url($url) {
+			$url = esc_url_raw((string) $url);
+			if ('' === $url || preg_match("/[\x00-\x1F\x7F\s()\"']/", $url)) {
+				return '';
+			}
+			return $url;
+		}
+
+		private function build_css_image_set_value($avif_url, $webp_url, $original_url) {
+			$candidates = array();
+			$avif_url = $this->escape_rewritten_public_url_for_css_url($avif_url);
+			$webp_url = $this->escape_rewritten_public_url_for_css_url($webp_url);
+			$original_url = $this->sanitize_css_image_original_url($original_url);
+
+			if ('' !== $avif_url) {
+				$candidates[] = 'url("' . $avif_url . '") type("image/avif")';
+			}
+			if ('' !== $webp_url && $webp_url !== $avif_url) {
+				$candidates[] = 'url("' . $webp_url . '") type("image/webp")';
+			}
+			if ('' !== $original_url) {
+				$extension = strtolower((string) pathinfo((string) wp_parse_url($original_url, PHP_URL_PATH), PATHINFO_EXTENSION));
+				$mime = 'png' === $extension ? 'image/png' : ('webp' === $extension ? 'image/webp' : 'image/jpeg');
+				$candidates[] = 'url("' . $original_url . '") type("' . $mime . '")';
+			}
+
+			if (count($candidates) < 2) {
+				return '';
+			}
+
+			return 'image-set(' . implode(', ', $candidates) . ')';
+		}
+
 		private function rewrite_css_url_upload_image_urls_globally($html) {
 			$html = (string) $html;
 			if ('' === $html || false === stripos($html, 'url(')) {
@@ -885,26 +1115,38 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 
 		private function get_on_demand_max_conversions_per_request() {
 			$context = $this->get_media_generation_context();
-			// 2.56.184: warm/cron/stale/manual renders may need to regenerate a full page's
-			// discovered local upload image candidates after persistent optimized storage has
-			// been emptied. Frontend visitor requests remain conservative.
-			$default = in_array($context, array('warm', 'cron', 'stale', 'manual'), true) ? 100 : 3;
+			// Frontend/page-cache/warm/stale renders must not become bulk image converters.
+			// Explicit admin/CLI media queue and bulk conversion paths call generate_attachment_formats()
+			// directly and are intentionally not limited by this on-demand budget.
+			if ('manual' === $context) {
+				$default = 100;
+			} elseif (in_array($context, array('warm', 'cron', 'stale'), true)) {
+				$default = 2;
+			} else {
+				$default = 1;
+			}
 			if (defined('UCWP_MEDIA_ON_DEMAND_MAX_PER_REQUEST')) {
 				$default = (int) UCWP_MEDIA_ON_DEMAND_MAX_PER_REQUEST;
 			}
 			$limit = (int) apply_filters('ucwp_media_on_demand_max_conversions_per_request', $default, $context);
-			$upper = in_array($context, array('warm', 'cron', 'stale', 'manual'), true) ? 100 : 25;
+			$upper = 'manual' === $context ? 100 : 10;
 			return max(0, min($upper, $limit));
 		}
 
 		private function get_on_demand_timeout_seconds() {
 			$context = $this->get_media_generation_context();
-			$default = in_array($context, array('warm', 'cron', 'stale', 'manual'), true) ? 10.0 : 3.0;
+			if ('manual' === $context) {
+				$default = 10.0;
+			} elseif (in_array($context, array('warm', 'cron', 'stale'), true)) {
+				$default = 2.5;
+			} else {
+				$default = 1.5;
+			}
 			if (defined('UCWP_MEDIA_ON_DEMAND_TIMEOUT_SECONDS')) {
 				$default = (float) UCWP_MEDIA_ON_DEMAND_TIMEOUT_SECONDS;
 			}
 			$timeout = (float) apply_filters('ucwp_media_on_demand_timeout_seconds', $default, $context);
-			$upper = in_array($context, array('warm', 'cron', 'stale', 'manual'), true) ? 60.0 : 30.0;
+			$upper = 'manual' === $context ? 60.0 : 10.0;
 			return max(0.1, min($upper, $timeout));
 		}
 
@@ -1042,7 +1284,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				return true;
 			}
 
-			$force_generation_budget = (bool) $force_generation_budget && $this->is_safe_warm_generation_context();
+			$force_generation_budget = (bool) $force_generation_budget && 'manual' === $this->get_media_generation_context();
 			if (!$force_generation_budget && !$this->can_start_on_demand_conversion()) {
 				return false;
 			}
@@ -1061,9 +1303,8 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 					return false;
 				}
 
-				// Count forced same-candidate fallbacks too, but do not block them in safe
-				// warm/cron/stale/manual contexts. This prevents AVIF failures from leaving
-				// the original JPG/PNG in cached HTML when WebP can be generated immediately.
+				// Count every on-demand conversion. Frontend, warm, cron and stale page renders
+				// must obey the same small budget so cache builds cannot become bulk media jobs.
 				$this->on_demand_conversions_started++;
 
 				$generated = ('avif' === $format)

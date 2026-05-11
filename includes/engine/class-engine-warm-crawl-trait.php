@@ -189,12 +189,78 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             return !function_exists('ucwp_is_local_https_url') || !ucwp_is_local_https_url($url);
         }
 
+        private function get_runtime_locks_dir()
+        {
+            return trailingslashit(UCWP_CACHE_DIR) . 'locks/';
+        }
+
+        private function is_runtime_lock_file_path($file)
+        {
+            $file = wp_normalize_path((string) $file);
+            if ('' === $file || is_link($file) || '.lock' !== substr($file, -5)) {
+                return false;
+            }
+
+            $dir = wp_normalize_path($this->get_runtime_locks_dir());
+            if (function_exists('ucwp_path_has_dir_prefix')) {
+                if (!ucwp_path_has_dir_prefix($file, $dir)) {
+                    return false;
+                }
+            } elseif (0 !== strpos($file, trailingslashit($dir))) {
+                return false;
+            }
+
+            $base = basename($file);
+            return (bool) preg_match('/^(?:purge-all|page-cache-write-[a-f0-9]{32}|page-cache-build-(?:[a-f0-9]{32}|slot-[0-9]+)|css-(?:bundle|entry)-[a-f0-9]{32})\.lock$/i', $base);
+        }
+
+        private function delete_runtime_lock_file($file, $context = 'runtime_lock_release')
+        {
+            $file = wp_normalize_path((string) $file);
+            if ('' === $file || !$this->is_runtime_lock_file_path($file)) {
+                if (function_exists('ucwp_debug_log')) {
+                    ucwp_debug_log('runtime lock delete blocked: invalid path', array(
+                        'path' => $file,
+                        'context' => (string) $context,
+                    ));
+                }
+                return false;
+            }
+
+            if (!file_exists($file)) {
+                return true;
+            }
+
+            $deleted = function_exists('ucwp_safe_unlink') ? ucwp_safe_unlink($file, (string) $context) : false;
+            clearstatcache(true, $file);
+            if (!$deleted && file_exists($file)) {
+                $dir = dirname($file);
+                $this->record_cache_event('runtime-lock-delete-failed', array(
+                    'context' => (string) $context,
+                    'file' => basename($file),
+                    'path' => $file,
+                    'dirWritable' => function_exists('ucwp_path_is_writable') ? (ucwp_path_is_writable($dir) ? 'yes' : 'no') : 'unknown',
+                ));
+                if (function_exists('ucwp_debug_log')) {
+                    ucwp_debug_log('runtime lock delete failed', array(
+                        'path' => $file,
+                        'context' => (string) $context,
+                    ));
+                }
+                return false;
+            }
+
+            return true;
+        }
+
         private function acquire_runtime_lock($name, $ttl = 180)
         {
             $name = (string) $name;
             if ('' === $name) {
                 return false;
             }
+
+            $this->maybe_cleanup_stale_runtime_locks();
 
             $file = $this->get_runtime_lock_file($name);
             // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Runtime lock requires native fopen/flock semantics and is limited to UltraCache cache storage.
@@ -204,11 +270,9 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             }
 
             if (!@flock($handle, LOCK_EX | LOCK_NB)) {
-                $mtime = @filemtime($file);
-                if ($mtime && (time() - (int) $mtime) > max(30, (int) $ttl)) {
-                    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_touch -- Refreshes only a path-guarded UltraCache runtime lock file.
-                    @touch($file);
-                }
+                // Do not refresh the marker mtime for locks we do not own. Touching
+                // another worker's marker made old page-cache-build locks look new
+                // during diagnostics and could delay stale-lock maintenance.
                 // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle.
                 @fclose($handle);
                 return false;
@@ -222,7 +286,87 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             return true;
         }
 
-        private function release_runtime_lock($name, $delete_file = false)
+        private function maybe_cleanup_stale_runtime_locks()
+        {
+            static $checked = false;
+            if ($checked) {
+                return 0;
+            }
+            $checked = true;
+
+            // Keep the normal HIT/MISS path cheap. Locks are also deleted on normal release;
+            // this maintenance only handles orphaned files left by timeouts/fatals/killed PHP workers.
+            if (wp_rand(1, 200) !== 1 && '1' !== sanitize_text_field(ucwp_query_value('ucwp_lock_maintenance'))) {
+                return 0;
+            }
+
+            return $this->cleanup_stale_runtime_locks(2 * HOUR_IN_SECONDS, 250);
+        }
+
+        private function cleanup_stale_runtime_locks($age_seconds = 7200, $max_delete = 250)
+        {
+            $dir = $this->get_runtime_locks_dir();
+            if (!is_dir($dir) || !is_readable($dir)) {
+                return 0;
+            }
+
+            $age_seconds = max(300, (int) $age_seconds);
+            $max_delete = max(1, min(1000, (int) $max_delete));
+            $now = time();
+            $deleted = 0;
+            $files = (array) glob(trailingslashit($dir) . '*.lock');
+
+            foreach ($files as $file) {
+                $file = wp_normalize_path((string) $file);
+                if (!$this->is_runtime_lock_file_path($file) || !is_file($file)) {
+                    continue;
+                }
+                $mtime = function_exists('ucwp_safe_filemtime') ? ucwp_safe_filemtime($file, 'runtime_lock_cleanup') : @filemtime($file);
+                if (!$mtime || ($now - (int) $mtime) < $age_seconds) {
+                    continue;
+                }
+
+                $handle = false;
+                $locked = true;
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native flock probe is required to avoid deleting active runtime lock markers. Path is restricted to UltraCache locks/.
+                $handle = @fopen($file, 'c+');
+                if ($handle) {
+                    $locked = !@flock($handle, LOCK_EX | LOCK_NB);
+                }
+
+                if ($locked) {
+                    if ($handle) {
+                        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle.
+                        @fclose($handle);
+                    }
+                    continue;
+                }
+
+                if ($handle) {
+                    @flock($handle, LOCK_UN);
+                    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle before WP-safe deletion.
+                    @fclose($handle);
+                }
+
+                if ($this->delete_runtime_lock_file($file, 'runtime_lock_cleanup')) {
+                    $deleted++;
+                }
+                if ($deleted >= $max_delete) {
+                    break;
+                }
+            }
+
+            if ($deleted > 0) {
+                $this->record_cache_event('runtime-lock-cleanup', array(
+                    'deleted' => $deleted,
+                    'age_seconds' => $age_seconds,
+                ));
+            }
+
+            return $deleted;
+        }
+
+        private function release_runtime_lock($name, $delete_file = true)
         {
             $name = (string) $name;
             if (empty($this->runtime_locks[$name])) {
@@ -232,20 +376,15 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             $handle = $this->runtime_locks[$name];
             $file = $delete_file ? $this->get_runtime_lock_file($name) : '';
 
-            if ($delete_file && '' !== $file && is_string($file)) {
-                @fflush($handle);
-                if (function_exists('ucwp_safe_unlink')) {
-                    ucwp_safe_unlink($file);
-                } elseif (file_exists($file)) {
-                    // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- Fallback only for the path-guarded UltraCache runtime lock file.
-                    @unlink($file);
-                }
-            }
-
+            @fflush($handle);
             @flock($handle, LOCK_UN);
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle.
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle before WP-safe marker deletion.
             @fclose($handle);
             unset($this->runtime_locks[$name]);
+
+            if ($delete_file && '' !== $file && is_string($file)) {
+                $this->delete_runtime_lock_file($file, 'runtime_lock_release');
+            }
         }
 
         private function is_ultracache_internal_loopback_request()

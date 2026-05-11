@@ -93,6 +93,9 @@ if (!trait_exists('Ultra_Cache_Rest_Helpers_Trait')) {
                 if (method_exists('Ultra_Cache_WP', 'get_apcu_status_summary')) {
                     $stats['apcu'] = Ultra_Cache_WP::get_apcu_status_summary();
                 }
+                if (method_exists('Ultra_Cache_WP', 'get_external_cache_detection')) {
+                    $stats['externalCaches'] = Ultra_Cache_WP::get_external_cache_detection(false);
+                }
             }
 
             return $stats;
