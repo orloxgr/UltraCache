@@ -1184,7 +1184,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
         private function invalidate_dashboard_cache_activity_snapshot()
         {
-            delete_transient('ucwp_dashboard_cache_activity_v1');
+            delete_transient('ultracache_dashboard_cache_activity_v1');
         }
 
         public function get_crawl_urls($scope = 'full')

@@ -8,25 +8,84 @@
 
 defined('ABSPATH') || exit;
 
+if (!function_exists('ucwp_dropin_guard_normalize_path')) {
+	function ucwp_dropin_guard_normalize_path($path) {
+		$path = is_string($path) ? trim($path) : '';
+		if ('' === $path || false !== strpos($path, "\0")) {
+			return '';
+		}
+		$path = str_replace('\\', '/', $path);
+		$path = preg_replace('#/+#', '/', $path);
+		return is_string($path) ? rtrim($path, '/') : '';
+	}
+}
+
+if (!function_exists('ucwp_dropin_guard_resolve_path')) {
+	function ucwp_dropin_guard_resolve_path($path, $must_exist = false) {
+		$path = is_string($path) ? trim($path) : '';
+		if ('' === $path || false !== strpos($path, "\0")) {
+			return '';
+		}
+		$real = function_exists('realpath') ? realpath($path) : false;
+		if (is_string($real) && '' !== $real) {
+			return ucwp_dropin_guard_normalize_path($real);
+		}
+		if ($must_exist) {
+			return '';
+		}
+		$parent = dirname($path);
+		$leaf = basename($path);
+		if ('' === $leaf || '.' === $leaf || '..' === $leaf) {
+			return '';
+		}
+		$real_parent = function_exists('realpath') ? realpath($parent) : false;
+		if (is_string($real_parent) && '' !== $real_parent) {
+			return ucwp_dropin_guard_normalize_path(rtrim($real_parent, '/\\') . DIRECTORY_SEPARATOR . $leaf);
+		}
+		return ucwp_dropin_guard_normalize_path($path);
+	}
+}
+
+if (!function_exists('ucwp_dropin_allowed_file_roots')) {
+	function ucwp_dropin_allowed_file_roots() {
+		return array(__UCWP_OBJECT_CACHE_DIR__);
+	}
+}
+
+if (!function_exists('ucwp_dropin_is_allowed_file_path')) {
+	function ucwp_dropin_is_allowed_file_path($path, $must_exist = false) {
+		$resolved = ucwp_dropin_guard_resolve_path($path, (bool) $must_exist);
+		if ('' === $resolved) {
+			return false;
+		}
+		foreach (ucwp_dropin_allowed_file_roots() as $root) {
+			$root = ucwp_dropin_guard_resolve_path($root, false);
+			if ('' === $root) {
+				continue;
+			}
+			if ($resolved === $root || 0 === strpos($resolved, $root . '/')) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
 if (!function_exists('ucwp_dropin_safe_file_get_contents')) {
 	function ucwp_dropin_safe_file_get_contents($file) {
-		return is_readable($file) ? file_get_contents($file) : false;
+		return ucwp_dropin_is_allowed_file_path($file, true) && is_readable($file) ? file_get_contents($file) : false;
 	}
 }
 
 if (!function_exists('ucwp_dropin_safe_file_put_contents')) {
     function ucwp_dropin_safe_file_put_contents($file, $data, $flags = 0, $context = '') {
-        $file = (string) $file;
-        $dir = dirname($file);
-        if ('' === $file) {
+        $file = is_string($file) ? trim($file) : '';
+        if ('' === $file || !ucwp_dropin_is_allowed_file_path($file, false)) {
             return false;
         }
+        $dir = dirname($file);
         if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
-            if (function_exists('ucwp_dropin_safe_mkdir')) {
-                ucwp_dropin_safe_mkdir($dir, 0755, true);
-            } else {
-                @mkdir($dir, 0755, true);
-            }
+            ucwp_dropin_safe_mkdir($dir, 0755, true);
         }
         if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !is_writable($dir))) {
             if (is_dir($dir)) {
@@ -41,20 +100,26 @@ if (!function_exists('ucwp_dropin_safe_file_put_contents')) {
 }
 if (!function_exists('ucwp_dropin_safe_unlink')) {
 	function ucwp_dropin_safe_unlink($file) {
-		return !file_exists($file) ? true : unlink($file);
+		if (!ucwp_dropin_is_allowed_file_path($file, false)) {
+			return false;
+		}
+		return !file_exists($file) ? true : @unlink($file);
 	}
 }
 
 if (!function_exists('ucwp_dropin_safe_rename')) {
 	function ucwp_dropin_safe_rename($from, $to) {
-		return rename($from, $to);
+		if (!ucwp_dropin_is_allowed_file_path($from, true) || !ucwp_dropin_is_allowed_file_path($to, false)) {
+			return false;
+		}
+		return @rename($from, $to);
 	}
 }
 
 if (!function_exists('ucwp_dropin_safe_mkdir')) {
     function ucwp_dropin_safe_mkdir($dir, $mode = 0755, $recursive = true) {
         $dir = is_string($dir) ? trim($dir) : '';
-        if ('' === $dir) {
+        if ('' === $dir || !ucwp_dropin_is_allowed_file_path($dir, false)) {
             return false;
         }
         if (is_dir($dir)) {
@@ -67,7 +132,7 @@ if (!function_exists('ucwp_dropin_safe_mkdir')) {
 if (!function_exists('ucwp_dropin_safe_scandir')) {
 	function ucwp_dropin_safe_scandir($dir) {
 		$dir = is_string($dir) ? trim($dir) : '';
-		if ('' === $dir || !is_dir($dir) || !is_readable($dir)) {
+		if ('' === $dir || !ucwp_dropin_is_allowed_file_path($dir, true) || !is_dir($dir) || !is_readable($dir)) {
 			return false;
 		}
 		return scandir($dir);
@@ -77,7 +142,7 @@ if (!function_exists('ucwp_dropin_safe_scandir')) {
 if (!function_exists('ucwp_dropin_safe_rmdir')) {
 	function ucwp_dropin_safe_rmdir($dir) {
 		$dir = is_string($dir) ? trim($dir) : '';
-		if ('' === $dir) {
+		if ('' === $dir || !ucwp_dropin_is_allowed_file_path($dir, false)) {
 			return false;
 		}
 		if (!file_exists($dir)) {
@@ -96,7 +161,7 @@ if (!function_exists('ucwp_dropin_safe_rmdir')) {
 			}
 		}
 		clearstatcache(true, $dir);
-		return rmdir($dir) || !file_exists($dir);
+		return @rmdir($dir) || !file_exists($dir);
 	}
 }
 

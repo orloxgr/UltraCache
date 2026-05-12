@@ -250,7 +250,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                 }
 
                 if (!empty($settings['brotli_enabled']) && function_exists('brotli_compress')) {
-                    $compressed = brotli_compress($html, 11, BROTLI_TEXT);
+                    $compressed = brotli_compress($html, 5, BROTLI_TEXT);
                     if (false !== $compressed) {
                         $this->write_cache_variant_atomically($file_path . '.br', $compressed);
                     }

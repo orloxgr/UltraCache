@@ -606,7 +606,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		public static function get_last_flush_report() {
-			$report = get_option('ucwp_object_cache_last_flush_report', array());
+			$report = get_option('ultracache_object_cache_last_flush_report', array());
 			return is_array($report) ? $report : array();
 		}
 
@@ -971,7 +971,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			if (!is_array($report)) {
 				return;
 			}
-			update_option('ucwp_object_cache_last_flush_report', $report, false);
+			update_option('ultracache_object_cache_last_flush_report', $report, false);
 		}
 
 		public static function get_stats($full_count = false) {
@@ -994,14 +994,18 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			$partial = false;
 			$partial_reason = '';
 			$stats_limit = 0;
+			$disk_stats_partial = false;
+			$disk_stats_partial_reason = '';
+			$disk_stats_limit = 0;
 
-			$files = self::collect_cache_files(UCWP_OBJECT_CACHE_DIR, 'cache');
-			$disk_entries = count($files);
-			foreach ($files as $file) {
-				$size = ucwp_safe_filesize($file, 'object_cache_manager_stats');
-				if (false !== $size) {
-					$disk_bytes += (int) $size;
-				}
+			$should_collect_disk_stats = in_array('disk', array($selected_backend, $active_backend, $fallback_backend), true);
+			if ($should_collect_disk_stats) {
+				$disk_stats = self::collect_disk_cache_stats((bool) $full_count);
+				$disk_entries = (int) ($disk_stats['entries'] ?? 0);
+				$disk_bytes = (int) ($disk_stats['bytes'] ?? 0);
+				$disk_stats_partial = !empty($disk_stats['partial']);
+				$disk_stats_partial_reason = (string) ($disk_stats['partialReason'] ?? '');
+				$disk_stats_limit = (int) ($disk_stats['limit'] ?? 0);
 			}
 
 			if (('redis' === $selected_backend || 'redis' === $active_backend) && self::redis_supported()) {
@@ -1040,6 +1044,9 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			} elseif ('disk' === $active_backend) {
 				$entry_count = $disk_entries;
 				$bytes = $disk_bytes;
+				$partial = $disk_stats_partial;
+				$partial_reason = $disk_stats_partial_reason;
+				$stats_limit = $disk_stats_limit;
 			}
 
 			$metrics = self::read_metrics_snapshot();
@@ -1070,6 +1077,10 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'objectCacheDiskEntries' => $disk_entries,
 				'objectCacheDiskSizeBytes' => $disk_bytes,
 				'objectCacheDiskSizeHuman' => function_exists('size_format') ? size_format($disk_bytes, 2) : (string) $disk_bytes,
+				'objectCacheDiskStatsCollected' => (bool) $should_collect_disk_stats,
+				'objectCacheDiskStatsPartial' => (bool) $disk_stats_partial,
+				'objectCacheDiskStatsLimit' => $disk_stats_limit,
+				'objectCacheDiskStatsPartialReason' => $disk_stats_partial_reason,
 				'objectCacheHits'         => $hits,
 				'objectCacheMisses'       => $misses,
 				'objectCacheHitRatio'     => $ratio,
@@ -1078,6 +1089,62 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'objectCacheStatsMode'    => $full_count ? 'full' : 'sampled',
 				'objectCacheStatsPartialReason' => $partial_reason,
 			);
+		}
+
+		private static function collect_disk_cache_stats($full_count = false) {
+			$default_max_files = (int) apply_filters('ucwp_disk_object_cache_stats_max_files', 5000);
+			$default_max_files = max(250, min(50000, $default_max_files));
+			$full_max_files = (int) apply_filters('ucwp_disk_object_cache_stats_full_max_files', 50000);
+			$full_max_files = max($default_max_files, min(200000, $full_max_files));
+			$max_files = $full_count ? $full_max_files : $default_max_files;
+			$deadline_seconds = $full_count
+				? (float) apply_filters('ucwp_disk_object_cache_stats_full_scan_timeout', 10)
+				: (float) apply_filters('ucwp_disk_object_cache_stats_scan_timeout', 1);
+			$deadline_seconds = $full_count ? max(1, min(30, $deadline_seconds)) : max(0.1, min(3, $deadline_seconds));
+
+			$stats = array(
+				'entries' => 0,
+				'bytes' => 0,
+				'partial' => false,
+				'partialReason' => '',
+				'limit' => $max_files,
+			);
+
+			if (!is_dir(UCWP_OBJECT_CACHE_DIR)) {
+				return $stats;
+			}
+
+			$deadline = microtime(true) + $deadline_seconds;
+			try {
+				$iterator = new RecursiveIteratorIterator(
+					new RecursiveDirectoryIterator(UCWP_OBJECT_CACHE_DIR, FilesystemIterator::SKIP_DOTS)
+				);
+				foreach ($iterator as $file) {
+					if (microtime(true) > $deadline) {
+						$stats['partial'] = true;
+						$stats['partialReason'] = 'deadline';
+						break;
+					}
+					if (!$file->isFile() || 'cache' !== strtolower($file->getExtension())) {
+						continue;
+					}
+					$stats['entries']++;
+					$size = ucwp_safe_filesize($file->getPathname(), 'object_cache_manager_disk_stats');
+					if (false !== $size) {
+						$stats['bytes'] += (int) $size;
+					}
+					if ($max_files > 0 && $stats['entries'] >= $max_files) {
+						$stats['partial'] = true;
+						$stats['partialReason'] = 'limit';
+						break;
+					}
+				}
+			} catch (Exception $e) {
+				$stats['partial'] = true;
+				$stats['partialReason'] = 'error';
+			}
+
+			return $stats;
 		}
 
 		private static function collect_apcu_namespace_stats($prefix, $full_count = false) {

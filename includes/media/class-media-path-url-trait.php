@@ -125,6 +125,87 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 		}
 
+		private function can_generate_optimized_media_from_lookup($force_generation_budget = false) {
+			// 2.57.135 CPU guard: frontend/cache STORE, warm and stale HTML rewrites
+			// must be lookup-only. Heavy AVIF/WebP encoding is reserved for explicit
+			// manual/queue paths that call the conversion routines directly.
+			return (bool) $force_generation_budget && method_exists($this, 'get_media_generation_context') && 'manual' === $this->get_media_generation_context();
+		}
+
+		private function normalize_uploads_relative_image_path($relative_path) {
+			$relative_path = ltrim(str_replace('\\', '/', (string) $relative_path), '/');
+			if ('' === $relative_path || false !== strpos($relative_path, "\0")) {
+				return false;
+			}
+
+			$relative_path = rawurldecode($relative_path);
+			$relative_path = ltrim(str_replace('\\', '/', $relative_path), '/');
+			if ('' === $relative_path || false !== strpos($relative_path, '/uc-images/')) {
+				return false;
+			}
+
+			foreach (explode('/', $relative_path) as $segment) {
+				if ('' === $segment || '.' === $segment || '..' === $segment) {
+					return false;
+				}
+			}
+
+			if (!preg_match('/\.(?:jpe?g|png|webp)$/i', $relative_path)) {
+				return false;
+			}
+
+			return $relative_path;
+		}
+
+		private function get_existing_optimized_url_from_uploads_relative_path($relative_path, $format) {
+			$format = strtolower((string) $format);
+			$relative_path = $this->normalize_uploads_relative_image_path($relative_path);
+			if (!$relative_path || !in_array($format, array('avif', 'webp'), true)) {
+				return false;
+			}
+
+			if ('avif' === $format) {
+				$optimized_relative_path = preg_replace('/\.(?:jpe?g|png|webp)$/i', '.avif', $relative_path);
+				$base_dir = defined('UCWP_AVIF_DIR') ? UCWP_AVIF_DIR : '';
+			} else {
+				if (!preg_match('/\.(?:jpe?g|png)$/i', $relative_path)) {
+					return false;
+				}
+				$optimized_relative_path = preg_replace('/\.(?:jpe?g|png)$/i', '.webp', $relative_path);
+				$base_dir = defined('UCWP_WEBP_DIR') ? UCWP_WEBP_DIR : '';
+			}
+
+			if (!is_string($optimized_relative_path) || '' === $optimized_relative_path || '' === (string) $base_dir) {
+				return false;
+			}
+
+			$optimized_path = trailingslashit((string) $base_dir) . $optimized_relative_path;
+			if (!$this->optimized_storage_path_exists($optimized_path)) {
+				return false;
+			}
+
+			return $this->get_root_relative_optimized_media_url($format, $optimized_relative_path);
+		}
+
+		private function get_public_url_lookup_cache_key($format, $public_url, $force_generation_budget = false) {
+			$format = strtolower((string) $format);
+			$normalized = $this->normalize_public_url($public_url);
+			if ('' === $normalized) {
+				$normalized = trim((string) $public_url);
+			}
+
+			$context = method_exists($this, 'get_media_generation_context') ? $this->get_media_generation_context() : 'frontend';
+			return $format . '|' . $context . '|' . ((bool) $force_generation_budget ? '1' : '0') . '|' . md5($normalized);
+		}
+
+		private function memoize_public_url_lookup($key, $value) {
+			if (is_string($key) && '' !== $key) {
+				$this->optimized_public_url_lookup_memo[$key] = $value ? (string) $value : false;
+			}
+
+			return $value ? (string) $value : false;
+		}
+
 		private function get_avif_url_from_source($source_file, $force_generation_budget = false) {
 			$avif_path = $this->get_avif_path_from_source($source_file);
 
@@ -133,7 +214,11 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			if (!$this->optimized_storage_path_exists($avif_path)) {
-				$generated = $this->ensure_generated_variant($source_file, 'avif', (bool) $force_generation_budget);
+				if (!$this->can_generate_optimized_media_from_lookup($force_generation_budget)) {
+					return false;
+				}
+
+				$generated = $this->ensure_generated_variant($source_file, 'avif', true);
 				if (!$generated || !$this->optimized_storage_path_exists($avif_path, true)) {
 					return false;
 				}
@@ -156,7 +241,11 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			if (!$this->optimized_storage_path_exists($webp_path)) {
-				$generated = $this->ensure_generated_variant($source_file, 'webp', (bool) $force_generation_budget);
+				if (!$this->can_generate_optimized_media_from_lookup($force_generation_budget)) {
+					return false;
+				}
+
+				$generated = $this->ensure_generated_variant($source_file, 'webp', true);
 				if (!$generated || !$this->optimized_storage_path_exists($webp_path, true)) {
 					return false;
 				}
@@ -223,37 +312,67 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		}
 
 		private function get_avif_url_from_public_url($public_url, $force_generation_budget = false) {
+			$key = $this->get_public_url_lookup_cache_key('avif', $public_url, $force_generation_budget);
+			if (isset($this->optimized_public_url_lookup_memo[$key])) {
+				return $this->optimized_public_url_lookup_memo[$key];
+			}
+
 			$relative_path = $this->get_uploads_relative_path_from_public_url($public_url);
 			if (!$relative_path) {
-				return false;
+				return $this->memoize_public_url_lookup($key, false);
+			}
+
+			$existing_url = $this->get_existing_optimized_url_from_uploads_relative_path($relative_path, 'avif');
+			if ($existing_url) {
+				return $this->memoize_public_url_lookup($key, $existing_url);
+			}
+
+			if (!$this->can_generate_optimized_media_from_lookup($force_generation_budget)) {
+				$this->maybe_queue_missing_optimized_media_from_public_url($public_url, 'avif');
+				return $this->memoize_public_url_lookup($key, false);
 			}
 
 			$uploads = wp_get_upload_dir();
 			$uploads_root = realpath($uploads['basedir']);
 			if (!is_string($uploads_root) || '' === $uploads_root) {
-				return false;
+				return $this->memoize_public_url_lookup($key, false);
 			}
 
 			$source_path = trailingslashit($uploads_root) . $relative_path;
-
-			return $this->get_avif_url_from_source($source_path, (bool) $force_generation_budget);
+			$result = $this->get_avif_url_from_source($source_path, true);
+			return $this->memoize_public_url_lookup($key, $result);
 		}
 
 		private function get_webp_url_from_public_url($public_url, $force_generation_budget = false) {
+			$key = $this->get_public_url_lookup_cache_key('webp', $public_url, $force_generation_budget);
+			if (isset($this->optimized_public_url_lookup_memo[$key])) {
+				return $this->optimized_public_url_lookup_memo[$key];
+			}
+
 			$relative_path = $this->get_uploads_relative_path_from_public_url($public_url);
 			if (!$relative_path) {
-				return false;
+				return $this->memoize_public_url_lookup($key, false);
+			}
+
+			$existing_url = $this->get_existing_optimized_url_from_uploads_relative_path($relative_path, 'webp');
+			if ($existing_url) {
+				return $this->memoize_public_url_lookup($key, $existing_url);
+			}
+
+			if (!$this->can_generate_optimized_media_from_lookup($force_generation_budget)) {
+				$this->maybe_queue_missing_optimized_media_from_public_url($public_url, 'webp');
+				return $this->memoize_public_url_lookup($key, false);
 			}
 
 			$uploads = wp_get_upload_dir();
 			$uploads_root = realpath($uploads['basedir']);
 			if (!is_string($uploads_root) || '' === $uploads_root) {
-				return false;
+				return $this->memoize_public_url_lookup($key, false);
 			}
 
 			$source_path = trailingslashit($uploads_root) . $relative_path;
-
-			return $this->get_webp_url_from_source($source_path, (bool) $force_generation_budget);
+			$result = $this->get_webp_url_from_source($source_path, true);
+			return $this->memoize_public_url_lookup($key, $result);
 		}
 
 		private function normalize_local_path_for_compare($path) {
@@ -432,32 +551,31 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		}
 
 		private function get_best_url_from_public_url($public_url) {
-			// 2.56.186: keep AVIF-first selection, but do not let a slow/failed AVIF
-			// on-demand attempt prevent the same discovered image candidate from falling
-			// back to WebP in warm/cron/stale/manual contexts. The discovery layer must
-			// resolve each URL atomically: AVIF if available/generated, otherwise WebP,
-			// otherwise preserve the original URL.
+			$accept_key = ($this->can_serve_avif() ? 'a1' : 'a0') . '|' . ($this->can_serve_webp() ? 'w1' : 'w0');
+			$normalized = $this->normalize_public_url($public_url);
+			$lookup_key = 'best|' . $accept_key . '|' . md5('' !== $normalized ? $normalized : (string) $public_url);
+			if (isset($this->optimized_public_url_lookup_memo[$lookup_key])) {
+				return $this->optimized_public_url_lookup_memo[$lookup_key];
+			}
+
 			$attempted_avif = false;
 			if ($this->can_serve_avif()) {
 				$attempted_avif = true;
 				$avif_url = $this->get_avif_url_from_public_url($public_url);
 				if ($avif_url) {
 					$this->remember_optimized_image_url_rewrite($public_url, $avif_url);
-					return $avif_url;
+					return $this->memoize_public_url_lookup($lookup_key, $avif_url);
 				}
 			}
 
 			if ($this->can_serve_webp()) {
-				// If AVIF was already attempted for this exact candidate and failed, allow
-				// the WebP fallback to finish in safe generation contexts even when the
-				// AVIF attempt consumed the normal per-request budget/time window.
 				$webp_url = $this->get_webp_url_from_public_url($public_url, $attempted_avif);
 				if ($webp_url) {
 					$this->remember_optimized_image_url_rewrite($public_url, $webp_url);
-					return $webp_url;
+					return $this->memoize_public_url_lookup($lookup_key, $webp_url);
 				}
 			}
 
-			return false;
+			return $this->memoize_public_url_lookup($lookup_key, false);
 		}
 }

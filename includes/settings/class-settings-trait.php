@@ -8,15 +8,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
     {
         public static function get_dashboard_defaults()
         {
-            ucwp_request_profile_checkpoint('sanitize_settings_before_compression_support');
-            $compression_support = self::get_compression_support_status();
-            ucwp_request_profile_checkpoint('sanitize_settings_after_compression_support', array('brotli' => !empty($compression_support['brotli']) ? 'true' : 'false', 'gzip' => !empty($compression_support['gzip']) ? 'true' : 'false'));
-            ucwp_request_profile_checkpoint('sanitize_settings_before_frontend_compression_cached');
-            $frontend_compression = self::get_frontend_compression_probe_status(false);
-            ucwp_request_profile_checkpoint('sanitize_settings_after_frontend_compression_cached', array('brotli' => !empty($frontend_compression['brotli']) ? 'true' : 'false', 'gzip' => !empty($frontend_compression['gzip']) ? 'true' : 'false', 'broken_brotli' => !empty($frontend_compression['brokenBrotli']) ? 'true' : 'false', 'broken_gzip' => !empty($frontend_compression['brokenGzip']) ? 'true' : 'false'));
-            ucwp_request_profile_checkpoint('sanitize_settings_before_media_support');
-            $media_support = self::get_media_support_status();
-            ucwp_request_profile_checkpoint('sanitize_settings_after_media_support', array('supported' => !empty($media_support['supported']) ? 'true' : 'false'));
+            // Defaults must stay cheap and side-effect free. Capability probes are
+            // dashboard diagnostics, not runtime default construction.
             return array(
                 'pageCacheEnabled'           => false,
                 'objectCacheEnabled'         => false,
@@ -125,7 +118,21 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cacheSafeTrackingCookiesEnabled' => true,
                 'safeTrackingCookieList'     => implode("\n", self::get_default_safe_tracking_cookie_patterns()),
                 'unsafeCacheCookieList'      => implode("\n", self::get_default_unsafe_cache_cookie_patterns()),
+                'uninstallCleanupPolicy'    => 'delete_everything',
             );
+        }
+
+        public static function sanitize_uninstall_cleanup_policy($policy)
+        {
+            $policy = strtolower(trim((string) $policy));
+            $allowed = array(
+                'plugin_only',
+                'keep_settings',
+                'keep_settings_tables',
+                'delete_everything',
+            );
+
+            return in_array($policy, $allowed, true) ? $policy : 'plugin_only';
         }
 
         private static function get_full_site_warm_source_order_keys()
@@ -1428,7 +1435,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             return !empty($value);
         }
 
-        public static function sanitize_dashboard_settings(array $settings)
+        public static function sanitize_dashboard_settings(array $settings, $validate_support = true)
         {
             $raw_settings = $settings;
             $defaults = self::get_dashboard_defaults();
@@ -1512,54 +1519,59 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 $settings['lazyLoadImagesEnabled'] = false;
             }
 
-            $compression_support = self::get_compression_support_status();
-            if (empty($compression_support['brotli'])) {
-                $settings['brotliEnabled'] = false;
-            }
-            if (empty($compression_support['gzip'])) {
-                $settings['gzipEnabled'] = false;
-            }
+            if ($validate_support) {
+                $compression_support = self::get_compression_support_status();
+                if (empty($compression_support['brotli'])) {
+                    $settings['brotliEnabled'] = false;
+                }
+                if (empty($compression_support['gzip'])) {
+                    $settings['gzipEnabled'] = false;
+                }
 
-            $frontend_compression = self::get_frontend_compression_probe_status(false);
-            if (!empty($frontend_compression['brotli']) || !empty($frontend_compression['brokenBrotli'])) {
-                $settings['brotliEnabled'] = false;
-            }
-            if (!empty($frontend_compression['gzip']) || !empty($frontend_compression['brokenGzip'])) {
-                $settings['gzipEnabled'] = false;
-            }
+                $frontend_compression = self::get_frontend_compression_probe_status(false);
+                if (!empty($frontend_compression['brotli']) || !empty($frontend_compression['brokenBrotli'])) {
+                    $settings['brotliEnabled'] = false;
+                }
+                if (!empty($frontend_compression['gzip']) || !empty($frontend_compression['brokenGzip'])) {
+                    $settings['gzipEnabled'] = false;
+                }
 
-            $live_support_checks = self::should_use_live_settings_support_checks();
-            ucwp_request_profile_checkpoint(
-                $live_support_checks ? 'sanitize_settings_before_object_cache_support_live' : 'sanitize_settings_before_object_cache_support_cached'
-            );
-            $object_cache_support = self::get_object_cache_support_status($live_support_checks);
-            ucwp_request_profile_checkpoint(
-                $live_support_checks ? 'sanitize_settings_after_object_cache_support_live' : 'sanitize_settings_after_object_cache_support_cached',
-                array(
-                    'available' => !empty($object_cache_support['available']) ? 'true' : 'false',
-                    'source' => isset($object_cache_support['source']) ? (string) $object_cache_support['source'] : '',
-                )
-            );
-            if (empty($object_cache_support['available'])) {
-                $settings['objectCacheEnabled'] = false;
-            }
+                $live_support_checks = self::should_use_live_settings_support_checks();
+                ucwp_request_profile_checkpoint(
+                    $live_support_checks ? 'sanitize_settings_before_object_cache_support_live' : 'sanitize_settings_before_object_cache_support_cached'
+                );
+                $object_cache_support = self::get_object_cache_support_status($live_support_checks);
+                ucwp_request_profile_checkpoint(
+                    $live_support_checks ? 'sanitize_settings_after_object_cache_support_live' : 'sanitize_settings_after_object_cache_support_cached',
+                    array(
+                        'available' => !empty($object_cache_support['available']) ? 'true' : 'false',
+                        'source' => isset($object_cache_support['source']) ? (string) $object_cache_support['source'] : '',
+                    )
+                );
+                if (empty($object_cache_support['available'])) {
+                    $settings['objectCacheEnabled'] = false;
+                }
 
-            $media_support = self::get_media_support_status();
-            if (empty($media_support['supported'])) {
-                $settings['mediaOptimizationEnabled'] = false;
-                $settings['mediaGenerateOnUploadEnabled'] = false;
-                $settings['mediaGenerateOnDemandEnabled'] = false;
-            }
+                $media_support = self::get_media_support_status();
+                if (empty($media_support['supported'])) {
+                    $settings['mediaOptimizationEnabled'] = false;
+                    $settings['mediaGenerateOnUploadEnabled'] = false;
+                    $settings['mediaGenerateOnDemandEnabled'] = false;
+                }
 
-            ucwp_request_profile_checkpoint('sanitize_settings_before_varnish_support');
-            $varnish_support = self::get_varnish_support_status();
-            ucwp_request_profile_checkpoint('sanitize_settings_after_varnish_support', array('available' => !empty($varnish_support['available']) ? 'true' : 'false'));
-            if (empty($varnish_support['available'])) {
-                $settings['varnishCliEnabled'] = false;
+                ucwp_request_profile_checkpoint('sanitize_settings_before_varnish_support');
+                $varnish_support = self::get_varnish_support_status();
+                ucwp_request_profile_checkpoint('sanitize_settings_after_varnish_support', array('available' => !empty($varnish_support['available']) ? 'true' : 'false'));
+                if (empty($varnish_support['available'])) {
+                    $settings['varnishCliEnabled'] = false;
+                }
+            } else {
+                ucwp_request_profile_checkpoint('sanitize_settings_support_checks_skipped_runtime');
             }
 
             $settings['cronWarmStartAfterCleanup'] = !empty($settings['cronWarmStartAfterCleanup']);
             $settings['cronWarmStartAfterManualPurge'] = !empty($settings['cronWarmStartAfterManualPurge']);
+            $settings['uninstallCleanupPolicy'] = self::sanitize_uninstall_cleanup_policy($settings['uninstallCleanupPolicy'] ?? $defaults['uninstallCleanupPolicy']);
 
             // Keep the public settings payload canonical. Stored options may still contain
             // obsolete keys, but they must not leak back to CLI, REST, exports, or
@@ -1573,8 +1585,12 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
         {
             self::$dashboard_settings_cache = null;
             self::$settings_cache = null;
-            delete_transient('ucwp_frontend_compression_probe_v1');
-            delete_transient('ucwp_object_cache_support_status_v1');
+            delete_transient('ultracache_frontend_compression_probe_v1');
+            delete_transient('ultracache_object_cache_support_status_v1');
+            delete_transient('ultracache_media_support_status_v3');
+            delete_transient('ultracache_gd_avif_encode_probe_v2');
+            delete_transient('ultracache_gd_webp_encode_probe_v2');
+            delete_transient('ultracache_media_queue_init_maintenance_v1');
             ucwp_reset_loopback_ssl_status();
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_settings_cache')) {
@@ -1613,20 +1629,10 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'sanitized_count' => is_array($sanitized) ? count($sanitized) : 0,
             ));
 
-            // Keep the stored option canonical so invalid combinations do not remain
-            // visible in direct option reads, CLI checks, or diagnostics.
-            // Redis and Varnish admin secrets are intentionally not persisted in wp_options;
-            // hydrated server-side settings read them from the off-docroot runtime secrets file.
-            $canonical_for_storage = $sanitized;
-            $canonical_for_storage['redisPassword'] = '';
-            $canonical_for_storage['varnishCliKey'] = '';
-            ucwp_request_profile_checkpoint('dashboard_settings_before_canonical_compare');
-            if (!is_array($saved) || wp_json_encode($raw_saved) !== wp_json_encode($canonical_for_storage)) {
-                ucwp_request_profile_checkpoint('dashboard_settings_before_update_option');
-                update_option(UCWP_SETTINGS_KEY, $canonical_for_storage, false);
-                ucwp_request_profile_checkpoint('dashboard_settings_after_update_option');
-            }
-            ucwp_request_profile_checkpoint('dashboard_settings_after_canonical_compare');
+            // Dashboard settings reads are intentionally side-effect free.
+            // Canonical storage cleanup happens on explicit saves/migrations only,
+            // so status polling cannot turn into wp_options write traffic.
+            ucwp_request_profile_checkpoint('dashboard_settings_read_only_canonical_skip');
 
             self::$dashboard_settings_cache = $sanitized;
 
@@ -1679,6 +1685,27 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             return $merged;
         }
 
+        private static function get_runtime_dashboard_settings()
+        {
+            $saved = get_option(UCWP_SETTINGS_KEY, array());
+            $raw_saved = is_array($saved) ? $saved : array();
+            $sanitized = self::sanitize_dashboard_settings($raw_saved, false);
+
+            // Runtime reads must hydrate secret values, but they must not run
+            // dashboard support probes or write the canonical option back.
+            $runtime_redis_password = self::get_runtime_redis_password();
+            if ('' !== $runtime_redis_password) {
+                $sanitized['redisPassword'] = $runtime_redis_password;
+            }
+
+            $runtime_varnish_secret = self::get_runtime_varnish_admin_secret();
+            if ('' !== $runtime_varnish_secret) {
+                $sanitized['varnishCliKey'] = $runtime_varnish_secret;
+            }
+
+            return $sanitized;
+        }
+
         public static function get_dashboard_settings_for_client()
         {
             $settings = self::get_dashboard_settings();
@@ -1719,9 +1746,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 return self::$settings_cache;
             }
 
-            ucwp_request_profile_settings_checkpoint('wp_get_settings_before_dashboard_settings');
-            $ui = self::get_dashboard_settings();
-            ucwp_request_profile_settings_checkpoint('wp_get_settings_after_dashboard_settings', array(
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_before_runtime_dashboard_settings');
+            $ui = self::get_runtime_dashboard_settings();
+            ucwp_request_profile_settings_checkpoint('wp_get_settings_after_runtime_dashboard_settings', array(
                 'dashboard_settings_count' => is_array($ui) ? count($ui) : 0,
             ));
 

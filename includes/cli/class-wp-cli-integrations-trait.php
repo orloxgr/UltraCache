@@ -247,7 +247,7 @@ if (!trait_exists('UCWP_CLI_Integrations_Trait')) {
                         'X-UltraCache-Store-Profile'  => '1',
                         'X-UltraCache-Debug'          => '1',
                         'X-UltraCache-Profile-Bypass' => '1',
-                        'X-UltraCache-Token'          => wp_hash('ucwp-revalidate-v1'),
+                        'X-UltraCache-Token'          => (function_exists('ucwp_create_runtime_control_token') ? ucwp_create_runtime_control_token() : ''),
                     ),
                     'user-agent'  => 'UltraCache CSS Diagnostics/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown') . '; ' . home_url('/'),
                 ));

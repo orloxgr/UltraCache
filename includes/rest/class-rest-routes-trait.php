@@ -23,6 +23,13 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
+                '/diagnostics/storage/refresh' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'refresh_storage_diagnostics'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/varnish/test' => array(
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,
@@ -152,6 +159,12 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                                 'type'              => 'string',
                                 'required'          => true,
                                 'sanitize_callback' => 'sanitize_text_field',
+                            ),
+                            'cleanupPolicy' => array(
+                                'type'              => 'string',
+                                'required'          => false,
+                                'sanitize_callback' => array($this, 'sanitize_uninstall_cleanup_policy_param'),
+                                'validate_callback' => array($this, 'validate_uninstall_cleanup_policy_param'),
                             ),
                         ),
                     ),

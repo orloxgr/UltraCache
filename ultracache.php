@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.57.134
+ * Version: 2.57.149
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 7.4
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.57.134');
+    define('UCWP_VERSION', '2.57.149');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -33,19 +33,19 @@ if (!defined('UCWP_URL')) {
     define('UCWP_URL', plugin_dir_url(__FILE__));
 }
 if (!defined('UCWP_SETTINGS_KEY')) {
-    define('UCWP_SETTINGS_KEY', 'ucwp_settings');
+    define('UCWP_SETTINGS_KEY', 'ultracache_settings');
 }
 if (!defined('UCWP_CRON_WARM_STATE_KEY')) {
-    define('UCWP_CRON_WARM_STATE_KEY', 'ucwp_cron_warm_state');
+    define('UCWP_CRON_WARM_STATE_KEY', 'ultracache_cron_warm_state');
 }
 if (!defined('UCWP_CRON_WARM_LOCK_KEY')) {
-    define('UCWP_CRON_WARM_LOCK_KEY', 'ucwp_cron_warm_lock');
+    define('UCWP_CRON_WARM_LOCK_KEY', 'ultracache_cron_warm_lock');
 }
 if (!defined('UCWP_CRAWL_SCOPE_SUMMARY_KEY')) {
-    define('UCWP_CRAWL_SCOPE_SUMMARY_KEY', 'ucwp_crawl_scope_summary');
+    define('UCWP_CRAWL_SCOPE_SUMMARY_KEY', 'ultracache_crawl_scope_summary');
 }
 if (!defined('UCWP_WP_CACHE_MANAGED_KEY')) {
-    define('UCWP_WP_CACHE_MANAGED_KEY', 'ucwp_wp_cache_managed');
+    define('UCWP_WP_CACHE_MANAGED_KEY', 'ultracache_wp_cache_managed');
 }
 if (!defined('UCWP_CACHE_DIR')) {
     define('UCWP_CACHE_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/');
@@ -560,7 +560,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             );
         }
 
-        public static function get_dashboard_stats_snapshot($max_age = 20, $allow_refresh = true)
+        public static function get_dashboard_stats_snapshot($max_age = 60, $allow_refresh = true)
         {
             $now = time();
             $max_age = max(3, (int) $max_age);
@@ -572,7 +572,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return self::get_cache_stats_disabled_payload('snapshot_disabled');
             }
 
-            $cache_key = defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_dashboard_stats_snapshot_v1' : 'ucwp_dashboard_stats_snapshot_v1';
+            $cache_key = defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_dashboard_stats_snapshot_v2' : 'ucwp_dashboard_stats_snapshot_v2';
             $cached = get_transient($cache_key);
 
             if (is_array($cached) && isset($cached['time'], $cached['stats']) && is_array($cached['stats'])) {
@@ -595,7 +595,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 );
             }
 
-            $stats = self::get_engine_stats(false, true);
+            $stats = self::get_engine_stats(false, true, false);
             $stats = is_array($stats) ? $stats : array();
             $stats['dashboardStatsSnapshotCached'] = false;
             $stats['dashboardStatsSnapshotAge'] = 0;
@@ -799,10 +799,23 @@ if (!class_exists('Ultra_Cache_WP')) {
             if ($media && method_exists($media, 'ensure_media_queue_table')) {
                 $media->ensure_media_queue_table();
             }
+            if ($media && method_exists($media, 'ensure_media_page_refs_table')) {
+                $media->ensure_media_page_refs_table();
+            }
+            if (class_exists('Ultra_Cache_Rest_API') && method_exists('Ultra_Cache_Rest_API', 'get_instance')) {
+                $rest_api = Ultra_Cache_Rest_API::get_instance();
+                if ($rest_api && method_exists($rest_api, 'ensure_action_jobs_table')) {
+                    $rest_api->ensure_action_jobs_table();
+                }
+            }
+            self::ensure_cron_warm_queue_table();
+            if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_analytics_table')) {
+                Ultra_Cache_Engine::ensure_analytics_table();
+            }
             $browser_cache_sync = self::sync_browser_cache_rules();
             if (false === $browser_cache_sync) {
                 set_transient(
-                    'ucwp_admin_notice',
+                    'ultracache_admin_notice',
                     array(
                         'type'    => 'warning',
                         'message' => self::maybe_translate('UltraCache: Browser Cache Headers are enabled, but .htaccess could not be updated during activation. Check file permissions or disable Browser Cache Headers.'),
@@ -952,7 +965,7 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function ensure_runtime_revalidate_secret()
         {
             $runtime = self::load_runtime_secret_file();
-            $expected = wp_hash('ucwp-revalidate-v1');
+            $expected = function_exists('ucwp_runtime_control_secret') ? ucwp_runtime_control_secret() : wp_hash('ucwp-revalidate-v1');
 
             if (isset($runtime['revalidate_secret']) && hash_equals((string) $runtime['revalidate_secret'], (string) $expected)) {
                 return true;
@@ -1074,7 +1087,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'stale_while_revalidate_enabled'  => !empty($settings['stale_while_revalidate_enabled']),
                 'cache_fresh_ttl_minutes'         => max(1, absint($settings['cache_fresh_ttl_minutes'])),
                 'cache_max_stale_minutes'         => max(absint($settings['cache_fresh_ttl_minutes']), absint($settings['cache_max_stale_minutes'])),
-                'revalidate_secret'               => wp_hash('ucwp-revalidate-v1'),
+                'revalidate_secret'               => function_exists('ucwp_runtime_control_secret') ? ucwp_runtime_control_secret() : wp_hash('ucwp-revalidate-v1'),
                 'varnish_admin_secret'            => (string) ($settings['varnish_cli_key'] ?? ''),
                 'trusted_hosts'                   => ucwp_get_trusted_hosts(),
             ));
@@ -1454,6 +1467,222 @@ if (!class_exists('Ultra_Cache_WP')) {
             return self::start_cron_warmup_queue((string) $reason, (bool) $run_immediately);
         }
 
+        private static function get_database_retention_delete_limit($default = 500)
+        {
+            $limit = (int) apply_filters('ucwp_database_retention_max_deletes_per_run', $default);
+            return max(25, min(1000, $limit));
+        }
+
+        private static function plugin_custom_table_exists($table)
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb) || !is_string($table) || '' === $table) {
+                return false;
+            }
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema existence check for UltraCache-owned custom tables.
+            $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+            return (string) $found === (string) $table;
+        }
+
+        private static function cleanup_plugin_database_table_rows($table, $operation, array $args = array())
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb) || !self::plugin_custom_table_exists($table)) {
+                return 0;
+            }
+
+            $deleted = 0;
+            switch ((string) $operation) {
+                case 'action_terminal':
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only UltraCache-owned historical custom-table rows.
+                    $deleted = $wpdb->query($wpdb->prepare("DELETE FROM %i WHERE status IN ('done','failed') AND finished_at > 0 AND finished_at < %d LIMIT %d", $table, (int) ($args[0] ?? 0), (int) ($args[1] ?? 0)));
+                    break;
+                case 'action_stale':
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only stale UltraCache-owned dashboard action rows.
+                    $deleted = $wpdb->query($wpdb->prepare("DELETE FROM %i WHERE status IN ('queued','running') AND updated_at > 0 AND updated_at < %d LIMIT %d", $table, (int) ($args[0] ?? 0), (int) ($args[1] ?? 0)));
+                    break;
+                case 'cron_processed':
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only processed UltraCache-owned warm queue rows.
+                    $deleted = $wpdb->query($wpdb->prepare("DELETE FROM %i WHERE status IN ('done','error') AND processed_at > 0 AND processed_at < %d LIMIT %d", $table, (int) ($args[0] ?? 0), (int) ($args[1] ?? 0)));
+                    break;
+                case 'cron_orphan':
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only orphaned UltraCache-owned warm queue rows when the queue is inactive.
+                    $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE updated_at > 0 AND updated_at < %d LIMIT %d', $table, (int) ($args[0] ?? 0), (int) ($args[1] ?? 0)));
+                    break;
+                case 'media_refs_purged':
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only already-purged UltraCache-owned media page refs.
+                    $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE purged_at IS NOT NULL AND purged_at <> %s AND purged_at < %s LIMIT %d', $table, '0000-00-00 00:00:00', (string) ($args[0] ?? ''), (int) ($args[1] ?? 0)));
+                    break;
+                case 'media_refs_complete':
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only completed stale UltraCache-owned media page refs, never pending refs.
+                    $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE status = %s AND (purged_at IS NULL OR purged_at = %s) AND purge_ready_at IS NOT NULL AND purge_ready_at <> %s AND purge_ready_at < %s LIMIT %d', $table, 'complete', '0000-00-00 00:00:00', '0000-00-00 00:00:00', (string) ($args[0] ?? ''), (int) ($args[1] ?? 0)));
+                    break;
+            }
+
+            return is_numeric($deleted) ? max(0, (int) $deleted) : 0;
+        }
+
+        public static function cleanup_plugin_database_tables(array $args = array())
+        {
+            global $wpdb;
+
+            $dry_run = !empty($args['dry_run']);
+            $limit = isset($args['limit']) ? (int) $args['limit'] : self::get_database_retention_delete_limit(500);
+            $limit = max(25, min(1000, $limit));
+            $now = time();
+            $summary = array(
+                'success' => true,
+                'dryRun' => $dry_run,
+                'limit' => $limit,
+                'deleted' => 0,
+                'updated' => 0,
+                'tables' => array(),
+                'policy' => array(
+                    'activeRowsPreserved' => true,
+                    'mediaQueueCompletionRowsKept' => true,
+                    'boundedDeletes' => true,
+                ),
+            );
+
+            if (!($wpdb instanceof wpdb)) {
+                $summary['success'] = false;
+                $summary['message'] = 'Database cleanup skipped because wpdb is unavailable.';
+                return $summary;
+            }
+
+            $tables = array(
+                'actionJobs' => $wpdb->prefix . 'ultracache_action_jobs',
+                'cronWarmQueue' => $wpdb->prefix . 'ultracache_cron_warm_queue',
+                'mediaPageRefs' => $wpdb->prefix . 'ultracache_media_page_refs',
+                'mediaQueue' => $wpdb->prefix . 'ultracache_media_queue',
+                'analytics' => $wpdb->prefix . 'ultracache_analytics',
+            );
+
+            if (self::plugin_custom_table_exists($tables['actionJobs'])) {
+                $action_cutoff = $now - (int) apply_filters('ucwp_action_jobs_terminal_retention_seconds', DAY_IN_SECONDS);
+                $stale_cutoff = $now - (int) apply_filters('ucwp_action_jobs_stale_nonterminal_seconds', 6 * HOUR_IN_SECONDS);
+                $deleted = 0;
+                if (!$dry_run) {
+                    $deleted += self::cleanup_plugin_database_table_rows(
+                        $tables['actionJobs'],
+                        'action_terminal',
+                        array($action_cutoff, $limit)
+                    );
+                    $remaining = max(0, $limit - $deleted);
+                    if ($remaining > 0) {
+                        $deleted += self::cleanup_plugin_database_table_rows(
+                            $tables['actionJobs'],
+                            'action_stale',
+                            array($stale_cutoff, $remaining)
+                        );
+                    }
+                }
+                $summary['tables']['actionJobs'] = array('deleted' => $deleted, 'retentionSeconds' => $now - $action_cutoff);
+                $summary['deleted'] += $deleted;
+            }
+
+            if (self::plugin_custom_table_exists($tables['cronWarmQueue'])) {
+                $state = self::get_cron_warm_state();
+                $active = !empty($state['active']);
+                $processed_cutoff = $now - (int) apply_filters('ucwp_cron_warm_queue_processed_retention_seconds', 6 * HOUR_IN_SECONDS);
+                $orphan_cutoff = $now - (int) apply_filters('ucwp_cron_warm_queue_orphan_retention_seconds', DAY_IN_SECONDS);
+                $deleted = 0;
+                if (!$dry_run) {
+                    $deleted += self::cleanup_plugin_database_table_rows(
+                        $tables['cronWarmQueue'],
+                        'cron_processed',
+                        array($processed_cutoff, $limit)
+                    );
+                    if (!$active) {
+                        $remaining = max(0, $limit - $deleted);
+                        if ($remaining > 0) {
+                            $deleted += self::cleanup_plugin_database_table_rows(
+                                $tables['cronWarmQueue'],
+                                'cron_orphan',
+                                array($orphan_cutoff, $remaining)
+                            );
+                        }
+                    }
+                }
+                $summary['tables']['cronWarmQueue'] = array('deleted' => $deleted, 'activePreserved' => $active);
+                $summary['deleted'] += $deleted;
+            }
+
+            if (self::plugin_custom_table_exists($tables['mediaPageRefs'])) {
+                $purged_cutoff = get_date_from_gmt(gmdate('Y-m-d H:i:s', $now - (int) apply_filters('ucwp_media_page_refs_purged_retention_seconds', HOUR_IN_SECONDS)));
+                $complete_cutoff = get_date_from_gmt(gmdate('Y-m-d H:i:s', $now - (int) apply_filters('ucwp_media_page_refs_complete_retention_seconds', 2 * DAY_IN_SECONDS)));
+                $deleted = 0;
+                if (!$dry_run) {
+                    $deleted += self::cleanup_plugin_database_table_rows(
+                        $tables['mediaPageRefs'],
+                        'media_refs_purged',
+                        array($purged_cutoff, $limit)
+                    );
+                    $remaining = max(0, $limit - $deleted);
+                    if ($remaining > 0) {
+                        $deleted += self::cleanup_plugin_database_table_rows(
+                            $tables['mediaPageRefs'],
+                            'media_refs_complete',
+                            array($complete_cutoff, $remaining)
+                        );
+                    }
+                }
+                $summary['tables']['mediaPageRefs'] = array('deleted' => $deleted, 'pendingPreserved' => true);
+                $summary['deleted'] += $deleted;
+            }
+
+            if (self::plugin_custom_table_exists($tables['mediaQueue'])) {
+                $processing_cutoff = get_date_from_gmt(gmdate('Y-m-d H:i:s', $now - (int) apply_filters('ucwp_media_queue_processing_stale_seconds', HOUR_IN_SECONDS)));
+                $updated = 0;
+                if (!$dry_run) {
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded stale processing recovery updates only UltraCache-owned media queue rows and preserves done/skipped completion history for large stores.
+                    $updated = $wpdb->query(
+                        $wpdb->prepare(
+                            'UPDATE %i SET status = %s, last_error = %s, updated_at = %s, started_at = NULL WHERE status = %s AND started_at IS NOT NULL AND started_at <> %s AND started_at < %s LIMIT %d',
+                            $tables['mediaQueue'],
+                            'pending',
+                            'Recovered from stale processing state by scheduled UltraCache DB cleanup.',
+                            current_time('mysql'),
+                            'processing',
+                            '0000-00-00 00:00:00',
+                            $processing_cutoff,
+                            $limit
+                        )
+                    );
+                    $updated = is_numeric($updated) ? max(0, (int) $updated) : 0;
+                }
+                $summary['tables']['mediaQueue'] = array('updated' => $updated, 'deleted' => 0, 'completionRowsKept' => true);
+                $summary['updated'] += $updated;
+            }
+
+            if (self::plugin_custom_table_exists($tables['analytics'])) {
+                $reason_cap = (int) apply_filters('ucwp_analytics_reason_row_cap', 100);
+                $reason_cap = max(20, min(500, $reason_cap));
+                $deleted = 0;
+                if (!$dry_run) {
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded analytics cleanup removes only low-ranking reason rows; aggregate counters remain intact.
+                    $deleted = $wpdb->query(
+                        $wpdb->prepare(
+                            'DELETE FROM %i WHERE metric_type = %s AND metric_key NOT IN (SELECT metric_key FROM (SELECT metric_key FROM %i WHERE metric_type = %s ORDER BY metric_value DESC, updated_at DESC LIMIT %d) AS ucwp_keep_reasons)',
+                            $tables['analytics'],
+                            'reason',
+                            $tables['analytics'],
+                            'reason',
+                            $reason_cap
+                        )
+                    );
+                    $deleted = is_numeric($deleted) ? max(0, (int) $deleted) : 0;
+                }
+                $summary['tables']['analytics'] = array('deleted' => $deleted, 'reasonCap' => $reason_cap);
+                $summary['deleted'] += $deleted;
+            }
+
+            return $summary;
+        }
+
         public static function run_scheduled_cache_cleanup()
         {
             $engine = self::get_engine_instance();
@@ -1502,8 +1731,13 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'max_age_seconds' => 600,
             ));
 
+            $db_retention_cleanup = self::cleanup_plugin_database_tables(array(
+                'dry_run' => false,
+                'limit' => self::get_database_retention_delete_limit(500),
+            ));
+
             return array(
-                'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed || $css_files_before !== $css_files_after || !empty($runtime_artifacts_cleanup['deleted'])),
+                'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed || $css_files_before !== $css_files_after || !empty($runtime_artifacts_cleanup['deleted']) || !empty($db_retention_cleanup['deleted']) || !empty($db_retention_cleanup['updated'])),
                 'warmed'  => $warmed,
                 'queueStarted' => $queue_started,
                 'objectCacheRemoved' => $object_cache_removed,
@@ -1522,6 +1756,9 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'runtimeArtifactsDeleted' => (int) ($runtime_artifacts_cleanup['deleted'] ?? 0),
                 'runtimeArtifactsSkippedActive' => (int) ($runtime_artifacts_cleanup['skippedActive'] ?? 0),
                 'runtimeArtifactsSkippedYoung' => (int) ($runtime_artifacts_cleanup['skippedYoung'] ?? 0),
+                'databaseRetentionDeleted' => (int) ($db_retention_cleanup['deleted'] ?? 0),
+                'databaseRetentionUpdated' => (int) ($db_retention_cleanup['updated'] ?? 0),
+                'databaseRetentionTables' => isset($db_retention_cleanup['tables']) && is_array($db_retention_cleanup['tables']) ? $db_retention_cleanup['tables'] : array(),
             );
         }
 
@@ -1687,6 +1924,224 @@ if (!class_exists('Ultra_Cache_WP')) {
         }
 
 
+        private static function get_cron_warm_queue_db_version()
+        {
+            return '1';
+        }
+
+        private static function get_cron_warm_queue_db_version_option_key()
+        {
+            return 'ultracache_cron_warm_queue_db_version';
+        }
+
+        private static function get_cron_warm_queue_table_name()
+        {
+            global $wpdb;
+            return $wpdb->prefix . 'ultracache_cron_warm_queue';
+        }
+
+        private static function cron_warm_queue_table_exists()
+        {
+            global $wpdb;
+            if (!($wpdb instanceof wpdb)) {
+                return false;
+            }
+
+            $table = self::get_cron_warm_queue_table_name();
+            $cache_key = 'cron_warm_queue_table_exists_' . md5((string) $table);
+            $cached = wp_cache_get($cache_key, 'ultracache');
+            if (is_bool($cached)) {
+                return $cached;
+            }
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Schema existence check for an UltraCache-owned custom table; cached below.
+            $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+            $exists = ((string) $found === (string) $table);
+            wp_cache_set($cache_key, $exists, 'ultracache', HOUR_IN_SECONDS);
+            return $exists;
+        }
+
+        public static function ensure_cron_warm_queue_table()
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb)) {
+                return false;
+            }
+
+            $table = self::get_cron_warm_queue_table_name();
+            $version = (string) get_option(self::get_cron_warm_queue_db_version_option_key(), '');
+            if (self::get_cron_warm_queue_db_version() === $version && self::cron_warm_queue_table_exists()) {
+                return true;
+            }
+
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            $charset_collate = $wpdb->get_charset_collate();
+            $sql = "CREATE TABLE {$table} (
+                id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                url_hash varchar(40) NOT NULL DEFAULT '',
+                url text NOT NULL,
+                position bigint(20) unsigned NOT NULL DEFAULT 0,
+                status varchar(20) NOT NULL DEFAULT 'pending',
+                result_message text NULL,
+                created_at bigint(20) unsigned NOT NULL DEFAULT 0,
+                updated_at bigint(20) unsigned NOT NULL DEFAULT 0,
+                processed_at bigint(20) unsigned NOT NULL DEFAULT 0,
+                PRIMARY KEY  (id),
+                UNIQUE KEY url_hash (url_hash),
+                KEY status_position (status, position),
+                KEY updated_at (updated_at),
+                KEY processed_at (processed_at)
+            ) {$charset_collate};";
+
+            dbDelta($sql);
+            if (self::cron_warm_queue_table_exists()) {
+                update_option(self::get_cron_warm_queue_db_version_option_key(), self::get_cron_warm_queue_db_version(), false);
+                wp_cache_delete('cron_warm_queue_table_exists_' . md5((string) $table), 'ultracache');
+                return true;
+            }
+
+            return false;
+        }
+
+        private static function clear_cron_warm_queue_table()
+        {
+            global $wpdb;
+
+            if (!self::ensure_cron_warm_queue_table()) {
+                return false;
+            }
+
+            $table = self::get_cron_warm_queue_table_name();
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Explicit cron warm queue reset clears only UltraCache-owned queue rows.
+            $wpdb->query($wpdb->prepare('DELETE FROM %i', $table));
+            return true;
+        }
+
+        private static function insert_cron_warm_queue_urls(array $urls, $base_position = 0)
+        {
+            global $wpdb;
+
+            if (empty($urls) || !self::ensure_cron_warm_queue_table()) {
+                return 0;
+            }
+
+            $table = self::get_cron_warm_queue_table_name();
+            $now = time();
+            $base_position = max(0, (int) $base_position);
+            $inserted = 0;
+
+            foreach ($urls as $url) {
+                $url = is_string($url) ? trim($url) : '';
+                if ('' === $url) {
+                    continue;
+                }
+
+                $url = function_exists('esc_url_raw') ? esc_url_raw($url) : $url;
+                if ('' === $url) {
+                    continue;
+                }
+
+                $hash = sha1($url);
+                $position = $base_position + $inserted + 1;
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cron warm queue writes only UltraCache-owned rows.
+                $result = $wpdb->query(
+                    $wpdb->prepare(
+                        'INSERT IGNORE INTO %i (url_hash, url, position, status, result_message, created_at, updated_at, processed_at) VALUES (%s, %s, %d, %s, %s, %d, %d, %d)',
+                        $table,
+                        $hash,
+                        $url,
+                        $position,
+                        'pending',
+                        '',
+                        $now,
+                        $now,
+                        0
+                    )
+                );
+                if (false !== $result && $result > 0) {
+                    $inserted++;
+                }
+            }
+
+            return $inserted;
+        }
+
+        private static function load_cron_warm_pending_queue_rows($limit)
+        {
+            global $wpdb;
+
+            $limit = max(0, min(600, absint($limit)));
+            if ($limit < 1 || !self::ensure_cron_warm_queue_table()) {
+                return array();
+            }
+
+            $table = self::get_cron_warm_queue_table_name();
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cron warm queue reads only UltraCache-owned rows.
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT id, url FROM %i WHERE status = %s ORDER BY position ASC, id ASC LIMIT %d',
+                    $table,
+                    'pending',
+                    $limit
+                ),
+                ARRAY_A
+            );
+
+            return is_array($rows) ? $rows : array();
+        }
+
+        private static function count_cron_warm_pending_queue_rows()
+        {
+            global $wpdb;
+
+            if (!self::ensure_cron_warm_queue_table()) {
+                return 0;
+            }
+
+            $table = self::get_cron_warm_queue_table_name();
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cron warm queue count reads only UltraCache-owned rows.
+            return (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    'SELECT COUNT(*) FROM %i WHERE status = %s',
+                    $table,
+                    'pending'
+                )
+            );
+        }
+
+        private static function mark_cron_warm_queue_row_processed($row_id, $status, $message = '')
+        {
+            global $wpdb;
+
+            $row_id = absint($row_id);
+            if ($row_id < 1 || !self::ensure_cron_warm_queue_table()) {
+                return false;
+            }
+
+            $status = in_array((string) $status, array('done', 'error'), true) ? (string) $status : 'done';
+            $message = sanitize_textarea_field((string) $message);
+            if (strlen($message) > 2000) {
+                $message = substr($message, 0, 2000);
+            }
+
+            $table = self::get_cron_warm_queue_table_name();
+            $now = time();
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cron warm queue updates only UltraCache-owned rows.
+            return false !== $wpdb->update(
+                $table,
+                array(
+                    'status' => $status,
+                    'result_message' => $message,
+                    'updated_at' => $now,
+                    'processed_at' => $now,
+                ),
+                array('id' => $row_id),
+                array('%s', '%s', '%d', '%d'),
+                array('%d')
+            );
+        }
+
         private static function get_default_cron_warm_state()
         {
             return array(
@@ -1748,6 +2203,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $state['finishedAt'] = time();
             $state['updatedAt'] = time();
             $state['lastMessage'] = self::maybe_translate('Cron warm up queue reset after cache flush.');
+            self::clear_cron_warm_queue_table();
             self::save_cron_warm_state($state);
             self::unschedule_cron_warm_events();
             return self::get_cron_warm_status();
@@ -1785,6 +2241,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'processed' => max(0, (int) $state['processed']),
                 'total' => max(0, (int) $state['total']),
                 'remaining' => $remaining,
+                'queuedPending' => self::count_cron_warm_pending_queue_rows(),
+                'queueStorage' => 'db',
                 'successCount' => max(0, (int) $state['successCount']),
                 'errorCount' => max(0, (int) $state['errorCount']),
                 'startedAt' => max(0, (int) $state['startedAt']),
@@ -1835,6 +2293,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             try {
                 $pages_per_minute = max(0, (int) $settings['cron_warm_pages_per_minute']);
                 $total_limit = max(0, (int) $settings['scheduled_warm_limit']);
+                self::clear_cron_warm_queue_table();
                 $state = self::save_cron_warm_state(array(
                     'active'         => true,
                     'reason'         => sanitize_key((string) $reason),
@@ -1885,6 +2344,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $state['finishedAt'] = time();
             $state['updatedAt'] = time();
             $state['lastMessage'] = self::maybe_translate('Cron warm up stopped.');
+            self::clear_cron_warm_queue_table();
             self::save_cron_warm_state($state);
             self::unschedule_cron_warm_events();
 
@@ -1983,8 +2443,10 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         public static function run_cron_warm_tick(array $args = array())
         {
+            self::ensure_cron_warm_queue_table();
             $state = self::get_cron_warm_state();
             if (empty($state['active'])) {
+                self::clear_cron_warm_queue_table();
                 self::unschedule_cron_warm_events();
                 return array(
                     'success' => true,
@@ -2014,6 +2476,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     $state['lastError'] = 'Cron warm up engine is not available.';
                     $state['lastMessage'] = $state['lastError'];
                     $state['updatedAt'] = time();
+                    self::clear_cron_warm_queue_table();
                     self::save_cron_warm_state($state);
                     self::unschedule_cron_warm_events();
                     return array('success' => false, 'message' => $state['lastError'], 'state' => self::get_cron_warm_status());
@@ -2035,7 +2498,10 @@ if (!class_exists('Ultra_Cache_WP')) {
                     $state['finishedAt'] = time();
                     $state['pagesPerMinute'] = 0;
                     $state['totalLimit'] = $total_limit;
+                    $state['currentBatch'] = array();
+                    $state['batchIndex'] = 0;
                     $state['lastMessage'] = 'Cron warm up paused because pages per minute is 0.';
+                    self::clear_cron_warm_queue_table();
                     self::save_cron_warm_state($state);
                     self::unschedule_cron_warm_events();
                     return array('success' => false, 'message' => $state['lastMessage'], 'warmedThisRun' => 0, 'state' => self::get_cron_warm_status());
@@ -2050,20 +2516,17 @@ if (!class_exists('Ultra_Cache_WP')) {
                     $state['pagesPerMinute'] = $pages_per_minute;
                     $state['totalLimit'] = $total_limit;
                     $state['total'] = max(0, min((int) $state['total'], $total_limit));
+                    $state['currentBatch'] = array();
+                    $state['batchIndex'] = 0;
                     $state['lastMessage'] = 'Cron warm up reached the scheduled warm limit.';
+                    self::clear_cron_warm_queue_table();
                     self::save_cron_warm_state($state);
                     self::unschedule_cron_warm_events();
                     return array('success' => true, 'message' => $state['lastMessage'], 'warmedThisRun' => 0, 'state' => self::get_cron_warm_status());
                 }
 
-                $current_batch = isset($state['currentBatch']) && is_array($state['currentBatch']) ? array_values($state['currentBatch']) : array();
-                $batch_index = max(0, (int) $state['batchIndex']);
-                if ($batch_index >= count($current_batch)) {
-                    $current_batch = array();
-                    $batch_index = 0;
-                }
-
-                if (empty($current_batch)) {
+                $pending_rows = self::load_cron_warm_pending_queue_rows($pages_per_minute);
+                if (empty($pending_rows)) {
                     $remaining_budget = $total_limit > 0 ? max(0, $total_limit - max(0, (int) $state['processed'])) : 0;
                     if ($total_limit > 0 && $remaining_budget < 1) {
                         $state['active'] = false;
@@ -2074,16 +2537,21 @@ if (!class_exists('Ultra_Cache_WP')) {
                         $state['pagesPerMinute'] = $pages_per_minute;
                         $state['totalLimit'] = $total_limit;
                         $state['total'] = max(0, min((int) $state['total'], $total_limit));
+                        $state['currentBatch'] = array();
+                        $state['batchIndex'] = 0;
                         $state['lastMessage'] = 'Cron warm up reached the scheduled warm limit.';
+                        self::clear_cron_warm_queue_table();
                         self::save_cron_warm_state($state);
                         self::unschedule_cron_warm_events();
                         return array('success' => true, 'message' => $state['lastMessage'], 'warmedThisRun' => 0, 'state' => self::get_cron_warm_status());
                     }
 
+                    self::clear_cron_warm_queue_table();
                     $batch_limit = $total_limit > 0 ? min($pages_per_minute, $remaining_budget) : $pages_per_minute;
                     $batch = $engine->get_crawl_urls_cursor_batch((string) $state['cursor'], $batch_limit);
-                    $current_batch = isset($batch['items']) && is_array($batch['items']) ? array_values($batch['items']) : array();
-                    $state['currentBatch'] = $current_batch;
+                    $items = isset($batch['items']) && is_array($batch['items']) ? array_values($batch['items']) : array();
+                    $inserted = self::insert_cron_warm_queue_urls($items, max(0, (int) $state['processed']));
+                    $state['currentBatch'] = array();
                     $state['batchIndex'] = 0;
                     $state['batchHasMore'] = !empty($batch['hasMore']);
                     $state['nextCursorPending'] = !empty($batch['nextCursor']) ? (string) $batch['nextCursor'] : '';
@@ -2096,9 +2564,12 @@ if (!class_exists('Ultra_Cache_WP')) {
                     $state['lastRunAt'] = $now;
                     $state['updatedAt'] = $now;
                     $state['invokedBy'] = !empty($args['invokedBy']) ? sanitize_key((string) $args['invokedBy']) : '';
-                    $state['lastMessage'] = empty($current_batch) ? 'No eligible URLs found for this cron warm tick.' : 'Cron warm up running.';
+                    $state['lastMessage'] = $inserted < 1 ? 'No eligible URLs found for this cron warm tick.' : 'Cron warm up running.';
                     self::save_cron_warm_state($state);
+                    $pending_rows = self::load_cron_warm_pending_queue_rows($pages_per_minute);
                 } else {
+                    $state['currentBatch'] = array();
+                    $state['batchIndex'] = 0;
                     $state['pagesPerMinute'] = $pages_per_minute;
                     $state['totalLimit'] = $total_limit;
                     $state['lastRunAt'] = $now;
@@ -2111,58 +2582,58 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $errors = 0;
                 $last_error = (string) $state['lastError'];
                 $last_url = (string) $state['lastUrl'];
+                $state_save_every = (int) apply_filters('ucwp_cron_warm_state_save_interval_urls', 10);
+                $state_save_every = max(1, min(100, $state_save_every));
+                $state_save_seconds = (float) apply_filters('ucwp_cron_warm_state_save_interval_seconds', 3);
+                $state_save_seconds = max(0.5, min(15, $state_save_seconds));
+                $last_state_save_at = microtime(true);
+                $handled_this_run = 0;
+                $pending_total_this_run = count($pending_rows);
 
-                foreach ($current_batch as $index => $url) {
-                    if ($index < $batch_index) {
+                foreach ($pending_rows as $row) {
+                    $row_id = isset($row['id']) ? absint($row['id']) : 0;
+                    $url = isset($row['url']) ? (string) $row['url'] : '';
+                    if ($row_id < 1 || '' === $url) {
                         continue;
                     }
 
-                    $last_url = (string) $url;
+                    $last_url = $url;
                     $result = $engine->warm_url($url, array('ignore_runtime_bypass' => true));
                     if (!empty($result['success'])) {
                         $warmed++;
                         $state['successCount'] = (int) $state['successCount'] + 1;
+                        self::mark_cron_warm_queue_row_processed($row_id, 'done', !empty($result['message']) ? (string) $result['message'] : 'OK');
                     } else {
                         $errors++;
                         $state['errorCount'] = (int) $state['errorCount'] + 1;
                         if (!empty($result['message'])) {
                             $last_error = (string) $result['message'];
                         }
+                        self::mark_cron_warm_queue_row_processed($row_id, 'error', $last_error);
                     }
 
-                    $state['batchIndex'] = $index + 1;
+                    $handled_this_run++;
+                    $state['batchIndex'] = $handled_this_run;
                     $state['processed'] = max(0, (int) $state['processed']) + 1;
                     $state['lastRunAt'] = time();
                     $state['updatedAt'] = time();
                     $state['lastError'] = (string) $last_error;
                     $state['lastUrl'] = $last_url;
-                    $state['lastMessage'] = sprintf('Processed %d/%d URL(s) in the current cron warm batch.', $state['batchIndex'], count($current_batch));
-                    self::save_cron_warm_state($state);
+                    $state['currentBatch'] = array();
+                    $state['lastMessage'] = sprintf('Processed %d/%d URL(s) in the current cron warm DB batch.', $handled_this_run, $pending_total_this_run);
+                    if (0 === ($handled_this_run % $state_save_every) || microtime(true) - $last_state_save_at >= $state_save_seconds) {
+                        self::save_cron_warm_state($state);
+                        $last_state_save_at = microtime(true);
+                    }
 
                     self::renew_cron_warm_lock($lock_token, $lock_ttl);
                 }
 
                 $completed = false;
-                if (empty($current_batch)) {
+                $pending_after = self::count_cron_warm_pending_queue_rows();
+                if ($pending_after < 1) {
                     if (!empty($state['batchHasMore']) && !empty($state['nextCursorPending'])) {
-                        $state['cursor'] = (string) $state['nextCursorPending'];
-                        $state['currentBatch'] = array();
-                        $state['batchIndex'] = 0;
-                        $state['batchHasMore'] = false;
-                        $state['nextCursorPending'] = '';
-                        $state['active'] = true;
-                        $state['completed'] = false;
-                        $state['stopped'] = false;
-                        $state['stopReason'] = '';
-                        $state['updatedAt'] = time();
-                        $state['lastMessage'] = 'Advanced cron warm queue to the next batch.';
-                        self::save_cron_warm_state($state);
-                        self::ensure_cron_warm_events_scheduled();
-                    } else {
-                        $completed = true;
-                    }
-                } elseif ((int) $state['batchIndex'] >= count($current_batch)) {
-                    if (!empty($state['batchHasMore'])) {
+                        self::clear_cron_warm_queue_table();
                         $state['cursor'] = (string) $state['nextCursorPending'];
                         $state['currentBatch'] = array();
                         $state['batchIndex'] = 0;
@@ -2174,15 +2645,19 @@ if (!class_exists('Ultra_Cache_WP')) {
                         $state['stopReason'] = '';
                         $state['updatedAt'] = time();
                         $remaining_after = max(0, (int) $state['total'] - (int) $state['processed']);
-                        $state['lastMessage'] = sprintf('Warmed %d URL(s) this tick. %d remaining.', $warmed, $remaining_after);
+                        $state['lastMessage'] = $handled_this_run > 0 ? sprintf('Warmed %d URL(s) this tick. %d remaining.', $warmed, $remaining_after) : 'Advanced cron warm queue to the next batch.';
                         self::save_cron_warm_state($state);
                         self::ensure_cron_warm_events_scheduled();
                     } else {
                         $completed = true;
                     }
+                } else {
+                    self::save_cron_warm_state($state);
+                    self::ensure_cron_warm_events_scheduled();
                 }
 
                 if ($completed) {
+                    self::clear_cron_warm_queue_table();
                     $state['active'] = false;
                     $state['completed'] = true;
                     $state['stopped'] = false;
@@ -2209,22 +2684,75 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
         }
 
-private static function delete_plugin_options_and_transients()
+
+private static function get_uninstall_cleanup_policy($policy = null)
+{
+    if (null !== $policy && '' !== trim((string) $policy)) {
+        return self::sanitize_uninstall_cleanup_policy($policy);
+    }
+
+    $settings = get_option(UCWP_SETTINGS_KEY, array());
+    if (is_array($settings) && isset($settings['uninstallCleanupPolicy'])) {
+        return self::sanitize_uninstall_cleanup_policy($settings['uninstallCleanupPolicy']);
+    }
+
+    return 'delete_everything';
+}
+
+private static function drop_plugin_custom_tables()
 {
     global $wpdb;
 
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $tables = array(
+        $wpdb->prefix . 'ultracache_media_queue',
+        $wpdb->prefix . 'ultracache_media_page_refs',
+        $wpdb->prefix . 'ultracache_action_jobs',
+        $wpdb->prefix . 'ultracache_cron_warm_queue',
+        $wpdb->prefix . 'ultracache_analytics',
+    );
+
+    foreach ($tables as $table) {
+        if (preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Explicit UltraCache cleanup drops only UltraCache-owned custom tables.
+            $wpdb->query($wpdb->prepare('DROP TABLE IF EXISTS %i', $table));
+        }
+    }
+}
+
+private static function delete_plugin_options_and_transients($keep_settings = false, $keep_tables = false)
+{
+    global $wpdb;
+
+    $keep_settings = (bool) $keep_settings;
+    $keep_tables = (bool) $keep_tables;
+
     $option_names = array(
-        UCWP_SETTINGS_KEY,
         UCWP_CRON_WARM_STATE_KEY,
         UCWP_CRON_WARM_LOCK_KEY . '_atomic',
-        defined('UCWP_CRAWL_SCOPE_SUMMARY_KEY') ? UCWP_CRAWL_SCOPE_SUMMARY_KEY : 'ucwp_crawl_scope_summary',
+        defined('UCWP_CRAWL_SCOPE_SUMMARY_KEY') ? UCWP_CRAWL_SCOPE_SUMMARY_KEY : 'ultracache_crawl_scope_summary',
         UCWP_WP_CACHE_MANAGED_KEY,
         UCWP_SETTINGS_KEY . '_action_jobs',
-        'ucwp_media_conversion_queue',
-        'ucwp_media_diagnostics_v1',
-        'ucwp_media_queue_db_version',
-        'ucwp_object_cache_last_flush_report',
+        'ultracache_media_conversion_queue',
+        'ultracache_media_diagnostics_v1',
+        'ultracache_object_cache_last_flush_report',
     );
+
+    if (!$keep_settings) {
+        array_unshift($option_names, UCWP_SETTINGS_KEY);
+    }
+
+    if (!$keep_tables) {
+        $option_names[] = 'ultracache_media_queue_db_version';
+        $option_names[] = 'ultracache_media_page_refs_db_version';
+        $option_names[] = 'ultracache_action_jobs_db_version';
+        $option_names[] = 'ultracache_cron_warm_queue_db_version';
+        $option_names[] = 'ultracache_analytics_db_version';
+        $option_names[] = 'ultracache_media_queue_build_state_v1';
+    }
 
     foreach ($option_names as $option_name) {
         delete_option($option_name);
@@ -2232,54 +2760,19 @@ private static function delete_plugin_options_and_transients()
     }
 
     delete_transient(UCWP_CRON_WARM_LOCK_KEY);
-    delete_transient('ucwp_loopback_ssl_status_v1');
-    delete_transient('ucwp_frontend_compression_probe_v1');
-    delete_transient('ucwp_media_conversion_queue_lock');
-    delete_transient('ucwp_media_queue_process_lock_v1');
-    delete_transient('ucwp_media_work_summary_v1');
+    delete_transient('ultracache_loopback_ssl_status_v1');
+    delete_transient('ultracache_frontend_compression_probe_v1');
+    delete_transient('ultracache_media_conversion_queue_lock');
+    delete_transient('ultracache_media_queue_process_lock_v1');
+    delete_transient('ultracache_media_work_summary_v1');
+    delete_transient('ultracache_media_page_refs_cleanup_lock');
 
-    if ($wpdb instanceof wpdb) {
-        $patterns = array(
-            'ucwp_%',
-            '_transient_ucwp_%',
-            '_transient_timeout_ucwp_%',
-            '_site_transient_ucwp_%',
-            '_site_transient_timeout_ucwp_%',
-        );
-
-        foreach ($patterns as $pattern) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Full plugin-data delete intentionally removes UltraCache-owned options.
-            $wpdb->query(
-                $wpdb->prepare(
-                    'DELETE FROM %i WHERE option_name LIKE %s',
-                    $wpdb->options,
-                    $pattern
-                )
-            );
-        }
-
-        $media_queue_table = $wpdb->prefix . 'ucwp_media_queue';
-        if (preg_match('/^[A-Za-z0-9_]+$/', $media_queue_table)) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Full plugin-data delete intentionally drops UltraCache's private media queue table.
-            $wpdb->query($wpdb->prepare('DROP TABLE IF EXISTS %i', $media_queue_table));
-        }
-
-        if (is_multisite()) {
-            foreach (array('ucwp_%', '_site_transient_ucwp_%', '_site_transient_timeout_ucwp_%') as $site_pattern) {
-                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Full plugin-data delete intentionally removes UltraCache-owned site metadata.
-                $wpdb->query(
-                    $wpdb->prepare(
-                        'DELETE FROM %i WHERE meta_key LIKE %s',
-                        $wpdb->sitemeta,
-                        $site_pattern
-                    )
-                );
-            }
-        }
+    if (!$keep_tables) {
+        self::drop_plugin_custom_tables();
     }
 }
 
-private static function remove_runtime_secret_files()
+private static function remove_runtime_secret_files($include_secrets = true)
 {
     $candidates = array();
 
@@ -2288,7 +2781,9 @@ private static function remove_runtime_secret_files()
         $candidates[] = trailingslashit(UCWP_CACHE_DIR) . 'runtime-config.json';
     }
 
-    $candidates[] = self::get_runtime_secret_path();
+    if ($include_secrets) {
+        $candidates[] = self::get_runtime_secret_path();
+    }
 
     foreach (array_unique($candidates) as $path) {
         if (is_string($path) && '' !== $path && file_exists($path)) {
@@ -2297,11 +2792,18 @@ private static function remove_runtime_secret_files()
     }
 }
 
-public static function delete_all_plugin_data_and_deactivate()
+public static function delete_all_plugin_data_and_deactivate($cleanup_policy = null)
 {
     if (!current_user_can('manage_options') || !current_user_can('activate_plugins')) {
         return new WP_Error('ucwp_forbidden', 'Deleting UltraCache data and deactivating the plugin requires manage_options and activate_plugins permissions.');
     }
+
+    $cleanup_policy = self::get_uninstall_cleanup_policy($cleanup_policy);
+    $keep_settings = in_array($cleanup_policy, array('plugin_only', 'keep_settings', 'keep_settings_tables'), true);
+    $keep_tables = in_array($cleanup_policy, array('plugin_only', 'keep_settings_tables'), true);
+    $delete_cache_files = ('plugin_only' !== $cleanup_policy);
+    $delete_options = ('plugin_only' !== $cleanup_policy);
+    $remove_secrets = ('delete_everything' === $cleanup_policy);
 
     self::stop_cron_warmup_queue('delete-all-data');
     self::unschedule_cache_cleanup();
@@ -2326,18 +2828,22 @@ public static function delete_all_plugin_data_and_deactivate()
 
     self::sync_browser_cache_rules(false);
     self::set_wp_cache_flag(false);
-    self::remove_runtime_secret_files();
+    self::remove_runtime_secret_files($remove_secrets);
 
-    if (defined('UCWP_CACHE_DIR') && is_dir(UCWP_CACHE_DIR)) {
-        ucwp_safe_rmdir(UCWP_CACHE_DIR, 'delete_all_plugin_data cache dir');
-    }
-    if (defined('UCWP_OBJECT_CACHE_DIR') && is_dir(UCWP_OBJECT_CACHE_DIR)) {
-        ucwp_safe_rmdir(UCWP_OBJECT_CACHE_DIR, 'delete_all_plugin_data object cache dir');
+    if ($delete_cache_files) {
+        if (defined('UCWP_CACHE_DIR') && is_dir(UCWP_CACHE_DIR)) {
+            ucwp_safe_rmdir(UCWP_CACHE_DIR, 'delete_all_plugin_data cache dir');
+        }
+        if (defined('UCWP_OBJECT_CACHE_DIR') && is_dir(UCWP_OBJECT_CACHE_DIR)) {
+            ucwp_safe_rmdir(UCWP_OBJECT_CACHE_DIR, 'delete_all_plugin_data object cache dir');
+        }
     }
 
     // Keep converted media files by design. UCWP_AVIF_DIR and UCWP_WEBP_DIR
     // are intentionally not removed here.
-    self::delete_plugin_options_and_transients();
+    if ($delete_options) {
+        self::delete_plugin_options_and_transients($keep_settings, $keep_tables);
+    }
     self::reset_settings_cache();
 
     if (!function_exists('deactivate_plugins')) {
@@ -2348,9 +2854,20 @@ public static function delete_all_plugin_data_and_deactivate()
         deactivate_plugins(UCWP_BASENAME, false, is_multisite());
     }
 
+    $messages = array(
+        'plugin_only' => 'UltraCache was deactivated. Settings, custom tables, cache files, and converted media were kept.',
+        'keep_settings' => 'UltraCache was deactivated. Settings were kept; runtime/cache files and custom tables were removed. Converted media folders were not deleted.',
+        'keep_settings_tables' => 'UltraCache was deactivated. Settings and custom tables were kept; runtime/cache files were removed. Converted media folders were not deleted.',
+        'delete_everything' => 'UltraCache data was deleted and the plugin was deactivated. Converted media folders were not deleted.',
+    );
+
     return array(
         'success' => true,
-        'message' => 'UltraCache data was deleted and the plugin was deactivated. Converted media folders were not deleted.',
+        'cleanupPolicy' => $cleanup_policy,
+        'message' => isset($messages[$cleanup_policy]) ? $messages[$cleanup_policy] : $messages['delete_everything'],
+        'settingsKept' => $keep_settings,
+        'tablesKept' => $keep_tables,
+        'cacheFilesKept' => !$delete_cache_files,
         'mediaFoldersKept' => array(
             'avif' => defined('UCWP_AVIF_DIR') ? UCWP_AVIF_DIR : '',
             'webp' => defined('UCWP_WEBP_DIR') ? UCWP_WEBP_DIR : '',
@@ -3090,7 +3607,7 @@ public static function delete_all_plugin_data_and_deactivate()
             $requests = $hits + $misses;
             $hit_rate = $requests > 0 ? round(($hits / $requests) * 100, 2) : 0.0;
             $last_restart = (int) ($status['last_restart_time'] ?? 0);
-            $last_flush = (int) get_option('ucwp_opcache_last_flush_at', 0);
+            $last_flush = (int) get_option('ultracache_opcache_last_flush_at', 0);
 
             return array(
                 'available'                 => true,
@@ -3134,7 +3651,7 @@ public static function delete_all_plugin_data_and_deactivate()
 
             $success = (bool) @opcache_reset();
             if ($success) {
-                update_option('ucwp_opcache_last_flush_at', time(), false);
+                update_option('ultracache_opcache_last_flush_at', time(), false);
             }
             $response = array(
                 'success' => $success,
@@ -3538,7 +4055,7 @@ public static function delete_all_plugin_data_and_deactivate()
             );
         }
 
-        public static function get_engine_stats($full_object_count = false, $force = false)
+        public static function get_engine_stats($full_object_count = false, $force = false, $include_diagnostics = false)
         {
             if (!$force && method_exists(__CLASS__, 'are_cache_stats_enabled') && !self::are_cache_stats_enabled()) {
                 return self::get_cache_stats_disabled_payload('engine_stats_disabled');
@@ -3577,7 +4094,14 @@ public static function delete_all_plugin_data_and_deactivate()
             $stats['opcache'] = self::get_opcache_status_summary();
             $stats['apcu'] = self::get_apcu_status_summary();
             $stats['externalCaches'] = self::get_external_cache_detection(false);
-            $stats['diagnostics'] = self::get_dashboard_diagnostics();
+            $stats['dashboardStatsLightweight'] = true;
+            $stats['dashboardDiagnosticsIncluded'] = false;
+
+            if ($include_diagnostics) {
+                $stats['diagnostics'] = self::get_dashboard_diagnostics();
+                $stats['dashboardDiagnosticsIncluded'] = true;
+            }
+
             return $stats;
         }
 
@@ -3617,7 +4141,7 @@ public static function delete_all_plugin_data_and_deactivate()
                 'liveProbe'     => false,
             );
 
-            $cached = get_transient('ucwp_frontend_compression_probe_v1');
+            $cached = get_transient('ultracache_frontend_compression_probe_v1');
             if (is_array($cached)) {
                 return array_merge($status, $cached, array('cachedOnly' => true));
             }
@@ -3632,7 +4156,7 @@ public static function delete_all_plugin_data_and_deactivate()
 
             $probe_base = home_url('/');
             if ('' === (string) $probe_base) {
-                set_transient('ucwp_frontend_compression_probe_v1', $status, 5 * MINUTE_IN_SECONDS);
+                set_transient('ultracache_frontend_compression_probe_v1', $status, 5 * MINUTE_IN_SECONDS);
                 return $status;
             }
 
@@ -3703,7 +4227,7 @@ public static function delete_all_plugin_data_and_deactivate()
                 $status['message'] = 'Your server is already using gzip compression by default.';
             }
 
-            set_transient('ucwp_frontend_compression_probe_v1', $status, 5 * MINUTE_IN_SECONDS);
+            set_transient('ultracache_frontend_compression_probe_v1', $status, 5 * MINUTE_IN_SECONDS);
             return $status;
         }
 

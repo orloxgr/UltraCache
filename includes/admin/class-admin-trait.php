@@ -49,7 +49,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
             if (!$cache_stats_enabled && method_exists(__CLASS__, 'get_cache_stats_disabled_payload')) {
                 $dashboard_stats = self::get_cache_stats_disabled_payload('admin_bootstrap_disabled');
             } else {
-                $dashboard_stats = method_exists(__CLASS__, 'get_dashboard_stats_snapshot') ? self::get_dashboard_stats_snapshot(20, false) : array('success' => true);
+                $dashboard_stats = method_exists(__CLASS__, 'get_dashboard_stats_snapshot') ? self::get_dashboard_stats_snapshot(60, false) : array('success' => true);
             }
 
             // Cache Statistics OFF must not turn the dashboard into a dummy shell.
@@ -212,7 +212,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
             $action = sanitize_key(wp_unslash($_GET['ucwp_action']));
             if ('purge_all' === $action && method_exists($engine, 'purge_all')) {
                 $engine->purge_all();
-                set_transient('ucwp_admin_notice', __('UltraCache: all cache cleared.', 'ultracache'), 30);
+                set_transient('ultracache_admin_notice', __('UltraCache: all cache cleared.', 'ultracache'), 30);
             } elseif ('purge_page' === $action) {
                 $url = self::get_current_url_without_plugin_args();
                 if ($url) {
@@ -222,7 +222,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                         $engine->purge_page_by_url($url);
                     }
 
-                    set_transient('ucwp_admin_notice', __('UltraCache: current page cache cleared.', 'ultracache'), 30);
+                    set_transient('ultracache_admin_notice', __('UltraCache: current page cache cleared.', 'ultracache'), 30);
                 }
             }
 
@@ -232,12 +232,12 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
 
         public function render_admin_notice()
         {
-            $notice = get_transient('ucwp_admin_notice');
+            $notice = get_transient('ultracache_admin_notice');
             if (!$notice) {
                 return;
             }
 
-            delete_transient('ucwp_admin_notice');
+            delete_transient('ultracache_admin_notice');
 
             $type = 'success';
             $message = $notice;

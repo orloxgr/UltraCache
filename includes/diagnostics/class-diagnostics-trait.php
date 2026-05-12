@@ -935,13 +935,55 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             return $summary;
         }
 
-        private static function get_cache_storage_diagnostics($settings = array(), $css_summary = null)
+        private static function get_cache_storage_diagnostics($settings = array(), $css_summary = null, $force_refresh = false)
         {
             $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
             $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
             $object_dir = defined('UCWP_OBJECT_CACHE_DIR') ? trailingslashit(UCWP_OBJECT_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/';
             $avif_dir = defined('UCWP_AVIF_DIR') ? trailingslashit(UCWP_AVIF_DIR) : trailingslashit(WP_CONTENT_DIR) . 'uploads/uc-images/avif/';
             $webp_dir = defined('UCWP_WEBP_DIR') ? trailingslashit(UCWP_WEBP_DIR) : trailingslashit(WP_CONTENT_DIR) . 'uploads/uc-images/webp/';
+            $storage_cache_key = 'ucwp_cache_storage_diagnostics_v2';
+
+            if (!$force_refresh) {
+                $cached_storage = get_transient($storage_cache_key);
+                if (is_array($cached_storage) && isset($cached_storage['total'])) {
+                    $cached_storage['cached'] = true;
+                    $cached_storage['scanSkipped'] = false;
+                    $cached_storage['message'] = isset($cached_storage['message']) && '' !== (string) $cached_storage['message']
+                        ? (string) $cached_storage['message']
+                        : self::maybe_translate('Storage diagnostics are cached. Use Refresh storage diagnostics for a capped filesystem rescan.');
+                    return $cached_storage;
+                }
+
+                return array(
+                    'enabled' => true,
+                    'warningLevel' => 'notice',
+                    'warnings' => array(self::maybe_translate('Storage diagnostics are passive until manually refreshed; normal dashboard refresh does not scan cache/media directories.')),
+                    'scanLimit' => 0,
+                    'cached' => false,
+                    'scanSkipped' => true,
+                    'scannedAt' => 0,
+                    'message' => self::maybe_translate('Use Refresh storage diagnostics to run a capped filesystem scan.'),
+                    'total' => array('files' => 0, 'bytes' => 0, 'truncated' => false),
+                    'pageCache' => array('files' => 0, 'bytes' => 0, 'truncated' => false),
+                    'cssBundles' => array('files' => 0, 'bytes' => 0, 'recognizedBundleFiles' => 0, 'warningLevel' => 'notice', 'message' => self::maybe_translate('CSS bundle storage has not been scanned yet.')),
+                    'objectCacheDisk' => array('files' => 0, 'bytes' => 0, 'truncated' => false, 'exists' => is_dir($object_dir)),
+                    'mediaCache' => array(
+                        'storageRoot' => 'uploads/uc-images',
+                        'persistent' => true,
+                        'message' => self::maybe_translate('Generated media storage has not been scanned yet. Use Refresh storage diagnostics.'),
+                        'files' => 0,
+                        'bytes' => 0,
+                        'avifFiles' => 0,
+                        'avifBytes' => 0,
+                        'avifTruncated' => false,
+                        'webpFiles' => 0,
+                        'webpBytes' => 0,
+                        'webpTruncated' => false,
+                        'truncated' => false,
+                    ),
+                );
+            }
 
             $css_summary = is_array($css_summary) ? $css_summary : self::get_css_bundle_summary_diagnostics(is_array($settings) ? $settings : array());
             $manifest = isset($css_summary['manifest']) && is_array($css_summary['manifest']) ? $css_summary['manifest'] : array();
@@ -992,11 +1034,15 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 $warning_level = 'notice';
             }
 
-            return array(
+            $diagnostics = array(
                 'enabled' => true,
                 'warningLevel' => $warning_level,
                 'warnings' => array_values(array_unique($warnings)),
                 'scanLimit' => 8000,
+                'cached' => false,
+                'scanSkipped' => false,
+                'scannedAt' => time(),
+                'message' => self::maybe_translate('Storage diagnostics were refreshed with capped filesystem scans.'),
                 'total' => array(
                     'files' => $total_files,
                     'bytes' => $total_bytes,
@@ -1038,6 +1084,9 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'truncated' => !empty($avif['truncated']) || !empty($webp['truncated']),
                 ),
             );
+
+            set_transient($storage_cache_key, $diagnostics, 10 * MINUTE_IN_SECONDS);
+            return $diagnostics;
         }
 
         private static function get_css_bundle_summary_diagnostics($settings = array())
@@ -1046,7 +1095,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
             $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
             $manifest_file = $css_bundle_dir . 'manifest.json';
-            $last = get_option('ucwp_last_css_bundle_summary', array());
+            $last = get_option('ultracache_last_css_bundle_summary', array());
             if (!is_array($last)) {
                 $last = array();
             }
@@ -1498,16 +1547,15 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             );
         }
 
-        public static function get_dashboard_diagnostics()
+        public static function get_dashboard_diagnostics($force_storage_refresh = false)
         {
             $settings             = self::get_dashboard_settings();
             $support              = self::get_media_support_status();
             $compression          = self::get_compression_support_status();
-            $last                 = get_transient('ucwp_last_cache_event');
+            $last                 = get_transient('ultracache_last_cache_event');
             $advanced_cache_path  = trailingslashit(WP_CONTENT_DIR) . 'advanced-cache.php';
             $object_cache_path    = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
             $runtime_config_path  = self::get_runtime_config_path();
-            $analytics_path       = trailingslashit(UCWP_CACHE_DIR) . 'analytics.json';
             $browser_cache_path   = self::get_browser_cache_htaccess_path();
             $object_cache_support  = self::get_object_cache_support_status(false);
             $object_backend_status = array();
@@ -1540,7 +1588,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $object_active_persistent = in_array($active_object_backend, array('redis', 'apcu', 'disk'), true);
 
             $css_bundle_summary_diagnostics = self::get_css_bundle_summary_diagnostics($settings);
-            $cache_storage_diagnostics = self::get_cache_storage_diagnostics($settings, $css_bundle_summary_diagnostics);
+            $cache_storage_diagnostics = self::get_cache_storage_diagnostics($settings, $css_bundle_summary_diagnostics, (bool) $force_storage_refresh);
 
             $diagnostics = array(
                 'pageCache' => array(
@@ -1669,7 +1717,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'advancedCache'     => self::get_path_diagnostic($advanced_cache_path, 'file', 'UltraCache advanced-cache drop-in'),
                     'objectCache'       => self::get_path_diagnostic($object_cache_path, 'file', 'UltraCache generated object-cache drop-in'),
                     'runtimeConfig'     => self::get_runtime_config_diagnostic($runtime_config_path),
-                    'analytics'         => self::get_analytics_diagnostic($analytics_path),
+                    'analytics'         => self::get_analytics_diagnostic(),
                     'browserCacheRules' => self::get_path_diagnostic($browser_cache_path, 'file', '# BEGIN UltraCache Browser Cache'),
                 ),
                 'lastCacheWrite' => self::get_page_cache_activity_snapshot(),
@@ -1782,22 +1830,46 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             return $diag;
         }
 
-        private static function get_analytics_diagnostic($path)
+        private static function get_analytics_diagnostic()
         {
-            $diag = self::get_path_diagnostic($path, 'file');
-            $diag['validJson'] = false;
-            $diag['keys']      = array();
+            $diag = array(
+                'storage' => 'db',
+                'table' => '',
+                'exists' => false,
+                'valid' => false,
+                'rows' => 0,
+                'keys' => array(),
+                'message' => self::maybe_translate('Aggregate analytics are stored in the UltraCache analytics DB table.'),
+            );
 
-            if (!empty($diag['exists']) && !empty($diag['readable'])) {
-                $contents = ucwp_safe_file_get_contents($path, 'dashboard analytics diagnostic');
-                if (false !== $contents && '' !== $contents) {
-                    $decoded = json_decode((string) $contents, true);
-                    if (is_array($decoded)) {
-                        $diag['validJson'] = true;
-                        $diag['keys']      = array_values(array_slice(array_keys($decoded), 0, 12));
-                    }
-                }
+            if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_analytics_table')) {
+                Ultra_Cache_Engine::ensure_analytics_table();
             }
+
+            global $wpdb;
+            if (!($wpdb instanceof wpdb)) {
+                $diag['message'] = self::maybe_translate('Database connection is unavailable.');
+                return $diag;
+            }
+
+            $table = method_exists('Ultra_Cache_Engine', 'get_analytics_table_name') ? Ultra_Cache_Engine::get_analytics_table_name() : $wpdb->prefix . 'ultracache_analytics';
+            $diag['table'] = $table;
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Diagnostics check only UltraCache-owned analytics table metadata.
+            $exists = ((string) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === (string) $table);
+            $diag['exists'] = (bool) $exists;
+            if (!$exists) {
+                $diag['message'] = self::maybe_translate('Analytics DB table is missing.');
+                return $diag;
+            }
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Diagnostics count only UltraCache-owned analytics rows.
+            $diag['rows'] = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $table));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Diagnostics preview only UltraCache-owned analytics metric keys.
+            $keys = $wpdb->get_col($wpdb->prepare('SELECT metric_key FROM %i ORDER BY metric_type ASC, metric_key ASC LIMIT 12', $table));
+            $diag['keys'] = is_array($keys) ? array_values(array_map('strval', $keys)) : array();
+            $diag['valid'] = true;
+            $diag['message'] = self::maybe_translate('Analytics DB table is ready.');
 
             return $diag;
         }
@@ -1815,7 +1887,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 && (!function_exists('apcu_enabled') || apcu_enabled());
 
             if ($apcu_available) {
-                $probe_key = 'ucwp_analytics_probe_' . md5(uniqid('ucwp', true));
+                $probe_key = 'ultracache_analytics_probe_' . md5(uniqid('ucwp', true));
                 $probe_value = 'ucwp:' . md5($probe_key . '|' . microtime(true));
                 $probe_ok = false;
                 $probe_message = self::maybe_translate('APCu read/write probe failed.');
@@ -1905,17 +1977,20 @@ trait Ultra_Cache_WP_Diagnostics_Trait
 
         private static function get_page_cache_activity_snapshot()
         {
-            $cache_key = 'ucwp_dashboard_cache_activity_v1';
+            $cache_key = 'ultracache_dashboard_cache_activity_v1';
             $cached    = get_transient($cache_key);
             if (is_array($cached)) {
                 return $cached;
             }
 
             $snapshot = array(
-                'path'      => '',
-                'modified'  => 0,
-                'size'      => 0,
-                'pageFiles' => 0,
+                'path'          => '',
+                'modified'      => 0,
+                'size'          => 0,
+                'pageFiles'     => 0,
+                'scannedFiles'  => 0,
+                'partial'       => false,
+                'partialReason' => '',
             );
 
             if (!is_dir(UCWP_CACHE_DIR)) {
@@ -1923,14 +1998,34 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 return $snapshot;
             }
 
+            $max_scan_files = (int) apply_filters('ucwp_page_cache_activity_snapshot_max_scan_files', 5000);
+            $max_scan_files = max(250, min(50000, $max_scan_files));
+            $deadline_seconds = (float) apply_filters('ucwp_page_cache_activity_snapshot_timeout', 1);
+            $deadline_seconds = max(0.1, min(3, $deadline_seconds));
+            $deadline = microtime(true) + $deadline_seconds;
+            $snapshot['scanLimit'] = $max_scan_files;
+
             try {
                 $iterator = new RecursiveIteratorIterator(
                     new RecursiveDirectoryIterator(UCWP_CACHE_DIR, FilesystemIterator::SKIP_DOTS)
                 );
 
                 foreach ($iterator as $file_info) {
+                    if (microtime(true) > $deadline) {
+                        $snapshot['partial'] = true;
+                        $snapshot['partialReason'] = 'deadline';
+                        break;
+                    }
+
                     if (!$file_info->isFile()) {
                         continue;
+                    }
+
+                    $snapshot['scannedFiles']++;
+                    if ($snapshot['scannedFiles'] >= $max_scan_files) {
+                        $snapshot['partial'] = true;
+                        $snapshot['partialReason'] = 'limit';
+                        break;
                     }
 
                     $path = str_replace('\\', '/', (string) $file_info->getPathname());
@@ -1958,6 +2053,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 }
             } catch (Exception $e) {
                 $snapshot['error'] = (string) $e->getMessage();
+                $snapshot['partial'] = true;
+                $snapshot['partialReason'] = 'error';
             }
 
             set_transient($cache_key, $snapshot, MINUTE_IN_SECONDS);
@@ -1966,7 +2063,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
 
         private static function get_object_cache_support_status($allow_live_check = true)
         {
-            $cache_key = 'ucwp_object_cache_support_status_v1';
+            $cache_key = 'ultracache_object_cache_support_status_v1';
             $allow_live_check = (bool) $allow_live_check;
 
             if (!$allow_live_check) {

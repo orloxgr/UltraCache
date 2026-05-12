@@ -67,12 +67,43 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		private $optimized_image_url_rewrite_map = array();
 
 		/**
+		 * Per-request manifest-style lookup cache for public upload image URLs.
+		 *
+		 * Keeps media rewrite lookup-only paths from repeating URL parsing and
+		 * filesystem existence checks for the same generated image size.
+		 *
+		 * @var array<string,string|false>
+		 */
+		private $optimized_public_url_lookup_memo = array();
+
+		/**
 		 * Per-request memo from upload source file paths to attachment IDs for
 		 * lightweight on-demand queue synchronization.
 		 *
 		 * @var array<string,int>
 		 */
 		private $on_demand_source_attachment_memo = array();
+
+		/**
+		 * Per-request missing-media queue discovery keys.
+		 *
+		 * @var array<string,bool>
+		 */
+		private $on_demand_queue_discovery_seen = array();
+
+		/**
+		 * Number of missing media items queued from lookup-only rewrites.
+		 *
+		 * @var int
+		 */
+		private $on_demand_queue_discovery_count = 0;
+
+		/**
+		 * Per-request page/media relation keys already recorded for affected-page purge.
+		 *
+		 * @var array<string,bool>
+		 */
+		private $on_demand_affected_page_seen = array();
 
 		/**
 		 * Current safe generation context: frontend, warm, cron, stale, or manual.
@@ -96,7 +127,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		/**
 		 * Background conversion queue option name.
 		 */
-		const BACKGROUND_QUEUE_OPTION = 'ucwp_media_conversion_queue';
+		const BACKGROUND_QUEUE_OPTION = 'ultracache_media_conversion_queue';
 
 		/**
 		 * Background conversion cron hook.
@@ -106,29 +137,50 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		/**
 		 * Background conversion queue lock transient.
 		 */
-		const BACKGROUND_QUEUE_LOCK = 'ucwp_media_conversion_queue_lock';
+		const BACKGROUND_QUEUE_LOCK = 'ultracache_media_conversion_queue_lock';
+
+		/**
+		 * Missing-media on-demand queue dedupe transient prefix.
+		 */
+		const MEDIA_ON_DEMAND_QUEUE_TRANSIENT_PREFIX = 'ultracache_media_odq_';
 
 		/**
 		 * Cached media work summary transient.
 		 */
-		const MEDIA_WORK_SUMMARY_TRANSIENT = 'ucwp_media_work_summary_v1';
+		const MEDIA_WORK_SUMMARY_TRANSIENT = 'ultracache_media_work_summary_v1';
+
+		/**
+		 * Cached media optimized storage health transient base.
+		 */
+		const MEDIA_STORAGE_HEALTH_TRANSIENT = 'ucwp_media_storage_health_v1';
+
+		/**
+		 * Cached media optimized storage statistics transient.
+		 */
+		const MEDIA_STORAGE_STATS_TRANSIENT = 'ucwp_media_storage_stats_v1';
 
 		/**
 		 * Stores the most recent media conversion diagnostics.
 		 */
-		const MEDIA_DIAGNOSTICS_OPTION = 'ucwp_media_diagnostics_v1';
+		const MEDIA_DIAGNOSTICS_OPTION = 'ultracache_media_diagnostics_v1';
 
 		/** Persistent media conversion queue table version. */
 		const MEDIA_QUEUE_DB_VERSION = '1';
 
 		/** Persistent media conversion queue database version option. */
-		const MEDIA_QUEUE_DB_VERSION_OPTION = 'ucwp_media_queue_db_version';
+		const MEDIA_QUEUE_DB_VERSION_OPTION = 'ultracache_media_queue_db_version';
 
 		/** Persistent media conversion queue rebuild cursor option. */
-		const MEDIA_QUEUE_BUILD_STATE_OPTION = 'ucwp_media_queue_build_state_v1';
+		const MEDIA_QUEUE_BUILD_STATE_OPTION = 'ultracache_media_queue_build_state_v1';
+
+		/** Persistent on-demand media affected page refs table version. */
+		const MEDIA_PAGE_REFS_DB_VERSION = '1';
+
+		/** Persistent on-demand media affected page refs database version option. */
+		const MEDIA_PAGE_REFS_DB_VERSION_OPTION = 'ultracache_media_page_refs_db_version';
 
 		/** Persistent media conversion queue lock transient. */
-		const MEDIA_QUEUE_PROCESS_LOCK = 'ucwp_media_queue_process_lock_v1';
+		const MEDIA_QUEUE_PROCESS_LOCK = 'ultracache_media_queue_process_lock_v1';
 
 		/** Seconds before a processing media queue item is considered stale. */
 		const MEDIA_QUEUE_PROCESSING_TTL = 600;

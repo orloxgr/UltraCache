@@ -490,7 +490,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 
         private function get_google_fonts_last_scan_option_key()
         {
-            return (defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings') . '_google_fonts_last_scan';
+            return (defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ultracache_settings') . '_google_fonts_last_scan';
         }
 
         private function store_google_fonts_last_scan_result(array $result)

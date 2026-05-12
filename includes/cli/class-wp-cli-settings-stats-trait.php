@@ -300,7 +300,7 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 defined('UCWP_VERSION') ? ('version=' . UCWP_VERSION) : 'Version constant unavailable.'
             );
 
-            $stored = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
+            $stored = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ultracache_settings', array());
             $stored = is_array($stored) ? $stored : array();
             $deprecated_keys = array_values(array_intersect(array_keys($stored), array_merge($this->get_deprecated_setting_keys(), array('criticalCssEnabled', 'criticalCssInlineEnabled', 'criticalCssExcludeList'))));
             $this->self_test_add_check(

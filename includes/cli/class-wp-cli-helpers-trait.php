@@ -36,7 +36,7 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 return Ultra_Cache_WP::get_dashboard_settings();
             }
 
-            $settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ucwp_settings', array());
+            $settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ultracache_settings', array());
             return is_array($settings) ? $settings : array();
         }
 

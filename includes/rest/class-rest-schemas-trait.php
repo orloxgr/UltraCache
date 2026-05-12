@@ -152,6 +152,12 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
         {
             return array(
                 'media_format' => $this->get_media_queue_format_arg_schema(),
+                'refresh_storage' => array(
+                    'type'              => 'boolean',
+                    'required'          => false,
+                    'default'           => false,
+                    'sanitize_callback' => 'rest_sanitize_boolean',
+                ),
             );
         }
 
@@ -298,7 +304,21 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'cacheSafeTrackingCookiesEnabled'      => array('type' => 'boolean', 'required' => false),
                 'safeTrackingCookieList'               => array('type' => 'string', 'required' => false),
                 'unsafeCacheCookieList'                => array('type' => 'string', 'required' => false),
+                'uninstallCleanupPolicy'             => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_uninstall_cleanup_policy_param'), 'validate_callback' => array($this, 'validate_uninstall_cleanup_policy_param')),
             );
+        }
+
+        public function sanitize_uninstall_cleanup_policy_param($value)
+        {
+            return class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'sanitize_uninstall_cleanup_policy')
+                ? Ultra_Cache_WP::sanitize_uninstall_cleanup_policy($value)
+                : 'delete_everything';
+        }
+
+        public function validate_uninstall_cleanup_policy_param($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('plugin_only', 'keep_settings', 'keep_settings_tables', 'delete_everything'), true);
         }
 
         private function get_redis_test_args()

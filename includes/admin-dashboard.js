@@ -29,7 +29,7 @@
 	const CLEAR_NOTICE_DELAY = 4200;
 	const SYSTEM_NOTICE_DELAY = 7000;
 	const SYSTEM_NOTICE_COOLDOWN = 24 * 60 * 60 * 1000;
-	const STATS_REFRESH_INTERVAL = 15000;
+	const STATS_REFRESH_INTERVAL = 60000;
 	const SETTINGS_SAVE_DEBOUNCE_MS = 700;
 	const ACTION_QUEUE_POLL_DELAY = 750;
 	const ACTION_QUEUE_MAX_POLLS = 480;
@@ -246,7 +246,7 @@
 			deferJsEnabled: false, deferAllJsEnabled: false, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
-			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false, cacheSafeTrackingCookiesEnabled: false,
+			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false, cacheSafeTrackingCookiesEnabled: false, varnishCliEnabled: false,
 			homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: false, cssBundleScope: 'homepage', mediaOutputMode: 'auto',
 		} },
 		safe: { label: 'Safe', description: 'Public-safe profile based on the exported Safe settings. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.', patch: {
@@ -274,7 +274,7 @@
 			deferJsExcludeList: "",
 			delaySafeThirdPartyJsEnabled: true,
 			delayAllThirdPartyJsEnabled: false,
-			lazyMailerliteNonceEnabled: true,
+			lazyMailerliteNonceEnabled: false,
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
 			delayFunctionalThirdPartyJsEnabled: false,
 			delayFunctionalThirdPartyJsPatterns: "recaptcha\nhcaptcha\ngoogle.com/recaptcha\ngstatic.com/recaptcha\nmaps.googleapis.com\nmaps.gstatic.com\ncomplianz\ncmplz\ncookieyes\ncky-\nintercom\ncrisp.chat\ntawk.to\nzendesk\ncalendly\ntypeform\njotform",
@@ -359,7 +359,7 @@
 			cacheStatsEnabled: false,
 			mediaOptimizationEnabled: true,
 			mediaGenerateOnUploadEnabled: true,
-			mediaGenerateOnDemandEnabled: true,
+			mediaGenerateOnDemandEnabled: false,
 			mediaOutputMode: "auto",
 			deferJsEnabled: true,
 			deferAllJsEnabled: false,
@@ -367,7 +367,7 @@
 			deferJsExcludeList: "",
 			delaySafeThirdPartyJsEnabled: true,
 			delayAllThirdPartyJsEnabled: false,
-			lazyMailerliteNonceEnabled: true,
+			lazyMailerliteNonceEnabled: false,
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
 			delayFunctionalThirdPartyJsEnabled: true,
 			delayFunctionalThirdPartyJsPatterns: "recaptcha\nhcaptcha\ngoogle.com/recaptcha\ngstatic.com/recaptcha\nmaps.googleapis.com\nmaps.gstatic.com\ncomplianz\ncmplz\ncookieyes\ncky-\nintercom\ncrisp.chat\ntawk.to\nzendesk\ncalendly\ntypeform\njotform",
@@ -377,12 +377,12 @@
 			leftoverCssBundleEnabled: true,
 			homepageCssBundleExcludeList: "",
 			homepageCssBundleMode: "safe",
-			cssBundleScope: "per-page",
-			pageCssBundleOnEntryEnabled: true,
+			cssBundleScope: "shared",
+			pageCssBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false,
 			sliderSafeModeEnabled: false,
 			clsDimensionsEnabled: true,
-			asyncCssEnabled: true,
+			asyncCssEnabled: false,
 			asyncCssExcludeList: "",
 			aggressiveAsyncCssEnabled: false,
 			delayNonCriticalJsEnabled: true,
@@ -460,7 +460,7 @@
 			deferJsExcludeList: "wp-i18n\nwp-hooks\njquery\npage-builder.js\nindex.js\ncontact-form-7-js-translations",
 			delaySafeThirdPartyJsEnabled: true,
 			delayAllThirdPartyJsEnabled: true,
-			lazyMailerliteNonceEnabled: true,
+			lazyMailerliteNonceEnabled: false,
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
 			delayFunctionalThirdPartyJsEnabled: true,
 			delayFunctionalThirdPartyJsPatterns: "recaptcha\nhcaptcha\ngoogle.com/recaptcha\ngstatic.com/recaptcha\nmaps.googleapis.com\nmaps.gstatic.com\ncomplianz\ncmplz\ncookieyes\ncky-\nintercom\ncrisp.chat\ntawk.to\nzendesk\ncalendly\ntypeform\njotform",
@@ -1441,6 +1441,7 @@
 		const routes = {
 			stats: { path: 'stats', method: 'GET' },
 			purge_all: { path: 'purge-all', method: 'POST' },
+			storage_diagnostics_refresh: { path: 'diagnostics/storage/refresh', method: 'POST' },
 			get_crawl_urls: { path: 'crawl-urls', method: 'GET' },
 			inspect_url: { path: 'inspect-url', method: 'POST' },
 			crawl_page: { path: 'crawl-page', method: 'POST' },
@@ -2854,6 +2855,52 @@
 		]);
 	}
 
+	function CustomSelect({ value, options, onChange, disabled, className }) {
+		const [open, setOpen] = useState(false);
+		const wrapRef = useRef(null);
+		const selected = (options || []).find((option) => option.value === value) || (options || [])[0] || { value: '', label: '' };
+
+		useEffect(() => {
+			function handleOutsideClick(event) {
+				if (!wrapRef.current || wrapRef.current.contains(event.target)) {
+					return;
+				}
+				setOpen(false);
+			}
+
+			document.addEventListener('mousedown', handleOutsideClick);
+			return () => document.removeEventListener('mousedown', handleOutsideClick);
+		}, []);
+
+		function selectOption(nextValue) {
+			if (disabled) {
+				return;
+			}
+			setOpen(false);
+			if (nextValue !== value) {
+				onChange(nextValue);
+			}
+		}
+
+		return h('div', { ref: wrapRef, className: classNames('uc-custom-select', className || '', disabled ? 'opacity-60 pointer-events-none' : '') }, [
+			h('button', {
+				type: 'button',
+				className: 'uc-field-input uc-custom-select-button',
+				disabled: !!disabled,
+				onClick: () => setOpen(!open),
+			}, [
+				h('span', { key: 'label' }, selected.label),
+				h('span', { key: 'icon', className: 'uc-custom-select-icon', 'aria-hidden': 'true' }, '▾'),
+			]),
+			open ? h('div', { className: 'uc-custom-select-menu', role: 'listbox' }, (options || []).map((option) => h('button', {
+				type: 'button',
+				key: option.value,
+				className: classNames('uc-custom-select-option', option.value === value ? 'is-selected' : ''),
+				onClick: () => selectOption(option.value),
+			}, option.label))) : null,
+		]);
+	}
+
 	function MultiSelectField({ label, description, value, onChange, disabled, options }) {
 		const selected = splitWarmSourceList(value);
 		const availableOptions = Array.isArray(options) ? options : [];
@@ -3078,7 +3125,7 @@
 	}
 
 
-		function DiagnosticsCard({ diagnostics, stats, open, onToggle }) {
+		function DiagnosticsCard({ diagnostics, stats, open, onToggle, onRefreshStorageDiagnostics, busy }) {
 		const compressionStatus = diagnostics.compression || {};
 		const pathDiagnostics = diagnostics.paths || {};
 		const reverseProxy = diagnostics.reverseProxy || {};
@@ -3166,7 +3213,7 @@
 			['Object-cache storage format', !!objectCacheDiag.storageFormat, objectCacheDiag.storageFormat || 'Unavailable'],
 			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : ('Disabled' + (analyticsBackend.message ? ' · ' + analyticsBackend.message : ''))],
 			['Runtime config', !!runtimeConfigDiag.exists && !!runtimeConfigDiag.valid, runtimeConfigDiag.exists ? (runtimeConfigDiag.valid ? 'Present · Valid' : 'Present · Invalid') : 'Missing'],
-			['Analytics file', !!analyticsDiag.exists && !!analyticsDiag.validJson, analyticsDiag.exists ? (analyticsDiag.validJson ? 'Present · Valid JSON' : 'Present · Invalid JSON') : 'Missing'],
+			['Analytics storage', !!analyticsDiag.exists && !!analyticsDiag.valid, analyticsDiag.exists ? ('DB table · ' + formatNumber(analyticsDiag.rows || 0) + ' rows') : 'Missing DB table'],
 			['Browser cache rules', !!browserCacheRulesDiag.exists && !!browserCacheRulesDiag.managed, browserCacheRulesDiag.exists ? (browserCacheRulesDiag.managed ? 'Present · Managed block found' : 'Present · No UltraCache block') : 'Missing'],
 			['Object cache directory', !!objectCacheDirDiag.exists, objectCacheDirDiag.exists ? (objectCacheDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
 			['AVIF optimized media directory', !!avifDirDiag.exists, avifDirDiag.exists ? (avifDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
@@ -3221,6 +3268,12 @@
 			h('div', { className: 'uc-diagnostic-group', key: 'cache-storage-summary-group' }, [
 				h('div', { className: 'uc-section-title' }, 'Cache storage diagnostics'),
 				renderRows(storageRows, 'plain'),
+				h('button', {
+					className: 'uc-btn mt-3 text-white py-2 px-3 font-bold',
+					onClick: onRefreshStorageDiagnostics,
+					disabled: busy || !onRefreshStorageDiagnostics,
+				}, busy ? 'Engine Busy' : 'Refresh storage diagnostics'),
+				cacheStorageDiag.message ? h('div', { className: 'mt-2 text-xs text-zinc-500' }, cacheStorageDiag.message) : null,
 				storageWarnings.length ? h('div', { className: 'mt-3 text-xs text-cyan-300 space-y-1' }, storageWarnings.map(function(message, index) {
 					return h('div', { key: 'diagnostics-storage-warning-' + index }, message);
 				})) : null,
@@ -3234,7 +3287,7 @@
 		]);
 	}
 
-	function AdvancedDiagnosticsCard({ diagnostics, stats }) {
+	function AdvancedDiagnosticsCard({ diagnostics, stats, onRefreshStorageDiagnostics, busy }) {
 		const last = diagnostics.lastEvent || {};
 		const objectCacheStatus = diagnostics.objectCache || {};
 		const selectedObjectBackend = objectCacheStatus.selectedBackend || 'redis';
@@ -3412,7 +3465,7 @@
 								renderPathDetails('advanced-cache.php', advancedCacheDiag),
 								renderPathDetails('object-cache.php', objectCacheDiag),
 								renderPathDetails('runtime-config.php', runtimeConfigDiag, runtimeConfigDiag.keys && runtimeConfigDiag.keys.length ? h(DetailRow, { label: 'Keys', value: runtimeConfigDiag.keys.join(', ') }) : null),
-								renderPathDetails('analytics.json', analyticsDiag, analyticsDiag.keys && analyticsDiag.keys.length ? h(DetailRow, { label: 'Top keys', value: analyticsDiag.keys.join(', ') }) : null),
+								analyticsDiag.table ? renderPathDetails('Analytics DB table', Object.assign({}, analyticsDiag, { path: analyticsDiag.table, readable: analyticsDiag.exists, writable: analyticsDiag.exists }), analyticsDiag.keys && analyticsDiag.keys.length ? h(DetailRow, { label: 'Top keys', value: analyticsDiag.keys.join(', ') }) : null) : null,
 								renderPathDetails('Cache directory', cacheDirDiag),
 								renderPathDetails('Object cache directory', objectCacheDirDiag),
 							]),
@@ -3421,6 +3474,12 @@
 					h('div', { className: 'uc-diagnostic-group', key: 'cache-storage-diagnostics' }, [
 						h('div', { className: 'uc-section-title' }, 'Cache storage diagnostics'),
 						renderRows(storageRows, 'plain'),
+						h('button', {
+							className: 'uc-btn mt-3 text-white py-2 px-3 font-bold',
+							onClick: onRefreshStorageDiagnostics,
+							disabled: busy || !onRefreshStorageDiagnostics,
+						}, busy ? 'Engine Busy' : 'Refresh storage diagnostics'),
+						cacheStorageDiag.message ? h('div', { className: 'mt-2 text-xs text-zinc-500' }, cacheStorageDiag.message) : null,
 						storageWarnings.length ? h('div', { className: 'mt-3 text-xs text-cyan-300 space-y-1' }, storageWarnings.map(function(message, index) {
 							return h('div', { key: 'storage-warning-' + index }, message);
 						})) : null,
@@ -5421,15 +5480,22 @@
 			);
 
 			if (hasMeaningfulStats) {
+				const responseHasDiagnostics = !!(freshStats && freshStats.diagnostics && typeof freshStats.diagnostics === 'object');
 				if (uiActionQueueDepthRef.current > 0) {
-					stageDashboardPayloadForQueue({ stats: freshStats, diagnostics: (freshStats && freshStats.diagnostics) || initialDiagnostics || {} });
+					const queuedPayload = { stats: freshStats };
+					if (responseHasDiagnostics) {
+						queuedPayload.diagnostics = freshStats.diagnostics;
+					}
+					stageDashboardPayloadForQueue(queuedPayload);
 					return freshStats;
 				}
 				setStats(freshStats);
-				const nextDiagnostics = (freshStats && freshStats.diagnostics) || initialDiagnostics || {};
-				setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(nextDiagnostics));
-				if (nextDiagnostics && nextDiagnostics.mediaRuntime && nextDiagnostics.mediaRuntime.queue) {
-					setMediaQueueStatus(nextDiagnostics.mediaRuntime.queue);
+				if (responseHasDiagnostics) {
+					const nextDiagnostics = freshStats.diagnostics || {};
+					setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(nextDiagnostics));
+					if (nextDiagnostics && nextDiagnostics.mediaRuntime && nextDiagnostics.mediaRuntime.queue) {
+						setMediaQueueStatus(nextDiagnostics.mediaRuntime.queue);
+					}
 				}
 			}
 		}
@@ -5627,6 +5693,9 @@
 				return;
 			}
 			setMediaQueueStatus(payload);
+			if (payload.storageStats && typeof payload.storageStats === 'object') {
+				setStats((current) => Object.assign({}, current || {}, payload.storageStats));
+			}
 			setDiagnostics((current) => {
 				const next = Object.assign({}, current || {});
 				const mediaRuntime = Object.assign({}, next.mediaRuntime || {});
@@ -5640,8 +5709,8 @@
 			return 'best';
 		}
 
-		async function refreshMediaQueueStatus() {
-			const response = await apiRequest('media_queue_status', { media_format: getSelectedMediaQueueFormat() });
+		async function refreshMediaQueueStatus(refreshStorage = false) {
+			const response = await apiRequest('media_queue_status', { media_format: getSelectedMediaQueueFormat(), refresh_storage: !!refreshStorage });
 			applyMediaQueueStatus(response);
 			return response;
 		}
@@ -7174,6 +7243,23 @@
 			await runMediaQueueRestAction('media_queue_repair', 'Verifying / Repairing Media Queue', 'Media queue verification/repair finished.');
 		}
 
+		async function refreshMediaStorageStats() {
+			if (busy) {
+				return;
+			}
+			setBusy(true);
+			try {
+				const response = await refreshMediaQueueStatus(true);
+				const storage = response && response.storageStats ? response.storageStats : {};
+				const total = Math.max(0, Number(storage.optimizedImages || 0));
+				pushToast({ type: 'success', text: 'Media storage stats refreshed. Found ' + formatNumber(total) + ' optimized file' + (total === 1 ? '' : 's') + '.' });
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Media storage stats refresh failed.' });
+			} finally {
+				setBusy(false);
+			}
+		}
+
 		async function retryFailedMediaQueue() {
 			await runMediaQueueRestAction('media_queue_retry_failed', 'Retrying Failed Media Items', 'Failed media items moved back to pending.');
 		}
@@ -7185,6 +7271,24 @@
 				}
 			}
 			await runMediaQueueRestAction('media_queue_clear_completed', 'Clearing Completed Queue Rows', 'Completed media queue rows cleared.');
+		}
+
+		async function refreshStorageDiagnostics() {
+			if (busy) {
+				return;
+			}
+			setBusy(true);
+			try {
+				const response = await apiRequest('storage_diagnostics_refresh', {});
+				if (response && response.diagnostics) {
+					setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(response.diagnostics));
+				}
+				pushToast({ type: 'success', text: 'Storage diagnostics refreshed.' });
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Storage diagnostics refresh failed.' });
+			} finally {
+				setBusy(false);
+			}
 		}
 
 
@@ -7291,39 +7395,68 @@
 			}
 		}
 
+function normalizeUninstallCleanupPolicy(policy) {
+	policy = String(policy || '').trim();
+	return ['plugin_only', 'keep_settings', 'keep_settings_tables', 'delete_everything'].indexOf(policy) !== -1 ? policy : 'delete_everything';
+}
+
+function getUninstallCleanupPolicyLabel(policy) {
+	policy = normalizeUninstallCleanupPolicy(policy);
+	const labels = {
+		plugin_only: 'Only deactivate/delete the plugin',
+		keep_settings: 'Keep plugin settings',
+		keep_settings_tables: 'Keep plugin settings and tables',
+		delete_everything: 'Delete everything',
+	};
+	return labels[policy] || labels.delete_everything;
+}
+
+function getUninstallCleanupPolicyDescription(policy) {
+	policy = normalizeUninstallCleanupPolicy(policy);
+	const descriptions = {
+		plugin_only: 'Keeps settings, custom tables, cache files, and generated media. Removes UltraCache drop-ins/scheduled hooks for safety.',
+		keep_settings: 'Keeps dashboard settings/secrets. Removes custom tables, runtime/cache files, drop-ins, and scheduled hooks.',
+		keep_settings_tables: 'Keeps dashboard settings/secrets and custom tables. Removes runtime/cache files, drop-ins, and scheduled hooks.',
+		delete_everything: 'Removes settings, custom tables, runtime/cache files, drop-ins, scheduled hooks, and UltraCache options.',
+	};
+	return descriptions[policy] || descriptions.delete_everything;
+}
+
 async function deleteAllPluginDataAndDeactivate() {
 	if (busy) {
 		return;
 	}
 
+	const cleanupPolicy = normalizeUninstallCleanupPolicy((settingsRef.current || settings || {}).uninstallCleanupPolicy);
 	const mediaFolders = [
 		'wp-content/uploads/uc-images/avif',
 		'wp-content/uploads/uc-images/webp',
 	];
 	const confirmed = window.confirm(
-		'Delete all UltraCache plugin data and deactivate the plugin?\n\n' +
-		'This removes UltraCache settings, runtime files, drop-ins, Redis password files, object cache files, cache files, scheduled jobs, and managed .htaccess/WP_CACHE changes.\n\n' +
-		'Converted media folders will NOT be deleted automatically. Delete them manually if needed:\n- ' + mediaFolders.join('\n- ')
+		'UltraCache delete/deactivate policy: ' + getUninstallCleanupPolicyLabel(cleanupPolicy) + '\n\n' +
+		getUninstallCleanupPolicyDescription(cleanupPolicy) + '\n\n' +
+		'Generated media folders are never deleted automatically. Delete them manually if needed:\n- ' + mediaFolders.join('\n- ')
 	);
 	if (!confirmed) {
 		return;
 	}
 
-	const typed = window.prompt('Type DELETE to confirm. Converted media folders must be deleted manually if you want them removed.');
+	const typed = window.prompt('Type DELETE to confirm this UltraCache delete/deactivate action.');
 	if (String(typed || '').trim() !== 'DELETE') {
-		pushToast({ type: 'info', text: 'Delete all plugin data cancelled.' });
+		pushToast({ type: 'info', text: 'UltraCache delete/deactivate cancelled.' });
 		return;
 	}
 
 	setBusy(true);
 	try {
-		const response = await apiRequest('delete_all_data', { confirmation: 'DELETE' });
-		pushToast({ type: 'success', text: response && response.message ? response.message : 'UltraCache data deleted and plugin deactivated.' });
+		await syncQueuedSettingsBeforeAction();
+		const response = await apiRequest('delete_all_data', { confirmation: 'DELETE', cleanupPolicy });
+		pushToast({ type: 'success', text: response && response.message ? response.message : 'UltraCache delete/deactivate action completed.' });
 		window.setTimeout(() => {
 			window.location.href = 'plugins.php?deactivate=true';
 		}, 1200);
 	} catch (error) {
-		pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to delete UltraCache data.' });
+		pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to delete/deactivate UltraCache.' });
 		setBusy(false);
 	}
 }
@@ -7626,6 +7759,14 @@ async function deleteAllPluginDataAndDeactivate() {
 							}, busy ? 'Engine Busy' : 'Rebuild Media Queue'),
 							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Scans the media library and rebuilds the attachment queue. Use after large imports or when the queue looks outdated.'),
 						]),
+						h('div', { key: 'refresh-storage' }, [
+							h('button', {
+								className: 'uc-btn w-full text-white py-3 font-bold',
+								onClick: refreshMediaStorageStats,
+								disabled: busy || !mediaOptimizationEnabled,
+							}, busy ? 'Engine Busy' : 'Refresh Storage Stats'),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Runs a capped manual scan of uploads/uc-images. Normal dashboard/status refreshes stay passive and do not crawl media directories.'),
+						]),
 						h('div', { key: 'repair' }, [
 							h('button', {
 								className: 'uc-btn w-full text-white py-3 font-bold',
@@ -7747,7 +7888,7 @@ h(ToggleRow, {
 				Card,
 				{
 					title: 'Media Optimization',
-					description: 'Master switch for next-gen image generation, frontend rewriting, upload-time conversion, on-demand conversion, and batch conversion.',
+					description: 'Master switch for next-gen image generation, frontend rewriting, upload-time conversion, on-demand queue discovery, and batch conversion.',
 					key: 'media-optimization',
 				},
 				[
@@ -7792,8 +7933,8 @@ h(ToggleRow, {
 						key: 'media-generate-upload',
 					}),
 					h(ToggleRow, {
-						label: 'Generate on Demand',
-						description: 'When enabled, UltraCache may create missing AVIF/WebP variants during safe frontend renders, warm-ups, cron warm tasks, and stale background refreshes. Generation is guarded by per-image locks, per-request limits, and a short time budget.',
+						label: 'Queue Missing Media on Demand',
+						description: 'When enabled, UltraCache queues missing AVIF/WebP variants discovered during frontend, warm-up, cron warm, or stale rewrites. The current request never performs image conversion; the existing background media queue handles generation.',
 						checked: !!settings.mediaGenerateOnDemandEnabled,
 						onChange: (value) => updateSetting('mediaGenerateOnDemandEnabled', value),
 						disabled: busy || !mediaOptimizationEnabled,
@@ -8487,7 +8628,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 			h(ExternalCacheFlushSettingsCard, { stats, settings, busy: false, onRedetect: redetectExternalCaches, onToggle: (key, value) => updateSetting(key, value), key: 'external-cache-flush-settings' }),
 
 				h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
-					h(DiagnosticsCard, { diagnostics, stats, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, key: 'diagnostics' }),
+					h(DiagnosticsCard, { diagnostics, stats, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, busy, onRefreshStorageDiagnostics: refreshStorageDiagnostics, key: 'diagnostics' }),
 					h(ActivitySummaryCard, { stats, cssBundleDiagnostics, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, key: 'activity-summary' }),
 				]),
 				h(PerformanceProfilerCard, {
@@ -8499,7 +8640,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					onCopyCssExclusion: copyCssBundleExclusionSuggestion,
 					key: 'performance-profiler-card'
 				}),
-				h(AdvancedDiagnosticsCard, { diagnostics, stats, key: 'advanced-diagnostics-card' }),
+				h(AdvancedDiagnosticsCard, { diagnostics, stats, busy, onRefreshStorageDiagnostics: refreshStorageDiagnostics, key: 'advanced-diagnostics-card' }),
 
 			h(
 				Card,
@@ -8582,6 +8723,26 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 						h('div', { className: 'text-sm text-white' }, 'Export creates a portable JSON file from the current UltraCache dashboard settings.'),
 						h('div', { className: 'text-xs text-zinc-500' }, 'Import applies only supported dashboard options. Generated cache files, drop-ins, and runtime state are rebuilt by the existing save flow.'),
 					]),
+					h('div', { className: 'mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-start', key: 'uninstall-policy' }, [
+						h('div', { key: 'label' }, [
+							h('div', { className: 'text-sm text-white' }, 'Delete / uninstall cleanup policy'),
+							h('div', { className: 'text-xs text-zinc-500 mt-1' }, getUninstallCleanupPolicyDescription((settings || {}).uninstallCleanupPolicy)),
+							h('div', { className: 'text-xs text-amber-200/80 mt-2' }, 'Generated images under uploads/uc-images are never deleted automatically.'),
+						]),
+						h(CustomSelect, {
+							key: 'select',
+							className: 'md:max-w-sm w-full md:ml-auto',
+							value: normalizeUninstallCleanupPolicy((settings || {}).uninstallCleanupPolicy),
+							disabled: busy,
+							onChange: (nextValue) => updateSetting('uninstallCleanupPolicy', normalizeUninstallCleanupPolicy(nextValue)),
+							options: [
+								{ value: 'plugin_only', label: 'Only delete/deactivate plugin' },
+								{ value: 'keep_settings', label: 'Keep plugin settings' },
+								{ value: 'keep_settings_tables', label: 'Keep plugin settings and tables' },
+								{ value: 'delete_everything', label: 'Delete everything' },
+							],
+						}),
+					]),
 					h('div', { className: 'mt-4 flex gap-3 flex-wrap' }, [
 						h(Button, { onClick: exportSettingsFile, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Export Settings'),
 						h(Button, { onClick: openImportSettingsDialog, disabled: busy, variant: 'light' }, busy ? 'Working…' : 'Import Settings'),
@@ -8589,7 +8750,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					h(Button, { onClick: deleteAllPluginDataAndDeactivate, disabled: busy, variant: 'danger' }, busy ? 'Working…' : 'Delete all plugin Data and disable plugin'),
 					]),
 					h('div', { className: 'mt-4 text-xs text-zinc-500', key: 'hint' }, 'Recommended flow: export from the known-good site, then import into the target site and review Diagnostics once.'),
-					h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'delete-hint' }, 'Delete all plugin Data and disable plugin keeps converted media folders. Remove wp-content/uploads/uc-images/avif and wp-content/uploads/uc-images/webp manually if you want to delete converted media.'),
+					h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'delete-hint' }, 'Delete/deactivate follows the selected cleanup policy. Generated media remains under wp-content/uploads/uc-images/ and must be removed manually if you want it deleted.'),
 				]
 			),
 

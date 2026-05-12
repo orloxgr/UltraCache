@@ -3243,6 +3243,75 @@ HTML;
             return $score;
         }
 
+        private function extract_sr7_first_slide_slice($html, $max_length = 120000)
+        {
+            $html = (string) $html;
+            $max_length = max(20000, min(180000, (int) $max_length));
+
+            $slides_pos = stripos($html, '"slides"');
+            if (false === $slides_pos) {
+                $slides_pos = stripos($html, 'slides');
+            }
+            if (false === $slides_pos) {
+                return '';
+            }
+
+            $probe = substr($html, $slides_pos, min($max_length, 120000));
+            $first_pos = strpos($probe, '"1"');
+            if (false === $first_pos) {
+                $first_pos = strpos($probe, "'1'");
+            }
+
+            $start = false !== $first_pos ? $slides_pos + (int) $first_pos : $slides_pos;
+            return substr($html, $start, $max_length);
+        }
+
+        private function sr7_context_has_image_marker($context)
+        {
+            $context = (string) $context;
+            if ('' === $context) {
+                return false;
+            }
+
+            if (preg_match('~"subtype"\s*:\s*"image"~i', $context)) {
+                return true;
+            }
+
+            if (preg_match('~"bg"\s*:\s*\{~i', $context) && preg_match('~"image"\s*:\s*\{~i', $context)) {
+                return true;
+            }
+
+            return false;
+        }
+
+        private function extract_sr7_dimensions_from_context($context)
+        {
+            $context = (string) $context;
+            $width = 0;
+            $height = 0;
+
+            if (preg_match('~"size"\s*:\s*\{.{0,900}?"w"\s*:\s*\[\s*"?(\d+)px"?.{0,500}?"h"\s*:\s*\[\s*"?(\d+)px"?~s', $context, $dim)) {
+                $width = (int) $dim[1];
+                $height = (int) $dim[2];
+            } elseif (preg_match('~"w"\s*:\s*\[\s*"?(\d+)px"?.{0,500}?"h"\s*:\s*\[\s*"?(\d+)px"?~s', $context, $dim)) {
+                $width = (int) $dim[1];
+                $height = (int) $dim[2];
+            } else {
+                if (preg_match('~"width"\s*:\s*\[\s*([0-9]+)~s', $context, $wm)) {
+                    $width = (int) $wm[1];
+                }
+                if (preg_match('~"height"\s*:\s*\[\s*([0-9]+)~s', $context, $hm)) {
+                    $height = (int) $hm[1];
+                }
+            }
+
+            if ($width <= 0 || $height <= 0 || $width > 5000 || $height > 5000) {
+                return array(0, 0);
+            }
+
+            return array($width, $height);
+        }
+
         private function extract_sr7_first_slide_layer_image_candidates($html)
         {
             $html = str_replace('\/', '/', (string) $html);
@@ -3250,71 +3319,54 @@ HTML;
                 return array();
             }
 
-            $slice = '';
-            if (preg_match('~"slides"\s*:\s*\{\s*"1"\s*:\s*\{(.+?)(?:,"2"\s*:|,"3"\s*:|,"4"\s*:|\}\s*\}\s*[,;])~s', $html, $match)) {
-                $slice = (string) $match[1];
-            } else {
-                $pos = strpos($html, '"slides":{"1"');
-                if (false !== $pos) {
-                    $slice = substr($html, $pos, 120000);
-                }
-            }
-
+            $slice = $this->extract_sr7_first_slide_slice($html, 120000);
             if ('' === $slice) {
                 return array();
             }
 
-            $candidates = array();
-            $patterns = array(
-                '~"subtype"\s*:\s*"image".{0,6500}?"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif)(?:\?[^"]*)?)"~is',
-                '~"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif)(?:\?[^"]*)?)".{0,6500}?"subtype"\s*:\s*"image"~is',
-                '~"bg"\s*:\s*\{.{0,6500}?"image"\s*:\s*\{.{0,2500}?"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif)(?:\?[^"]*)?)"~is',
-            );
+            if (!preg_match_all('~"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif)(?:\?[^"]*)?)"~i', $slice, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+                return array();
+            }
 
-            foreach ($patterns as $pattern) {
-                if (!preg_match_all($pattern, $slice, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            $candidates = array();
+            $processed = 0;
+            foreach ($matches as $match) {
+                $processed++;
+                if ($processed > 120) {
+                    break;
+                }
+
+                $url = isset($match[1][0]) ? (string) $match[1][0] : '';
+                $offset = isset($match[1][1]) ? (int) $match[1][1] : (isset($match[0][1]) ? (int) $match[0][1] : 0);
+                $context = substr($slice, max(0, $offset - 2600), 6200);
+                if (!$this->sr7_context_has_image_marker($context)) {
                     continue;
                 }
 
-                foreach ($matches as $match) {
-                    $url = isset($match[1][0]) ? (string) $match[1][0] : '';
-                    $offset = isset($match[0][1]) ? (int) $match[0][1] : 0;
-                    $url = html_entity_decode(trim($url), ENT_QUOTES, 'UTF-8');
-                    if (0 === strpos($url, '/')) {
-                        $url = $this->absolutize_public_resource_url($url);
-                    }
-                    $url = $this->normalize_public_resource_url($url);
-                    if ('' === $url || !$this->is_lcp_candidate_image_url($url)) {
-                        continue;
-                    }
-
-                    $context = substr($slice, max(0, $offset - 2200), 5200);
-                    $width = 0;
-                    $height = 0;
-                    if (preg_match('~"size"\s*:\s*\{.{0,900}?"w"\s*:\s*\[\s*"?(\d+)px"?.{0,500}?"h"\s*:\s*\[\s*"?(\d+)px"?~s', $context, $dim)) {
-                        $width = (int) $dim[1];
-                        $height = (int) $dim[2];
-                    }
-
-                    if (($width <= 0 || $height <= 0) && preg_match('~"w"\s*:\s*\[\s*"?(\d+)px"?.{0,500}?"h"\s*:\s*\[\s*"?(\d+)px"?~s', $context, $dim)) {
-                        $width = (int) $dim[1];
-                        $height = (int) $dim[2];
-                    }
-
-                    $id = '';
-                    if (preg_match('~"id"\s*:\s*"?([^",}\]]+)"?~', $context, $id_match)) {
-                        $id = (string) $id_match[1];
-                    }
-
-                    $candidates[$url] = array(
-                        'url' => $url,
-                        'width' => $width,
-                        'height' => $height,
-                        'layer' => $id,
-                        'offset' => $offset,
-                        'context' => strtolower($context),
-                    );
+                $url = html_entity_decode(trim($url), ENT_QUOTES, 'UTF-8');
+                if (0 === strpos($url, '/')) {
+                    $url = $this->absolutize_public_resource_url($url);
                 }
+                $url = $this->normalize_public_resource_url($url);
+                if ('' === $url || !$this->is_lcp_candidate_image_url($url)) {
+                    continue;
+                }
+
+                list($width, $height) = $this->extract_sr7_dimensions_from_context($context);
+
+                $id = '';
+                if (preg_match('~"id"\s*:\s*"?([^",}\]]+)"?~', $context, $id_match)) {
+                    $id = (string) $id_match[1];
+                }
+
+                $candidates[$url] = array(
+                    'url' => $url,
+                    'width' => $width,
+                    'height' => $height,
+                    'layer' => $id,
+                    'offset' => $offset,
+                    'context' => strtolower($context),
+                );
             }
 
             return array_values($candidates);
@@ -3327,17 +3379,30 @@ HTML;
                 return array();
             }
 
-            if (!preg_match_all('~"bg"\s*:\s*\{.{0,7000}?"image"\s*:\s*\{.{0,3500}?"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif|svg)(?:\?[^"]*)?)"~is', $html, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            $search_html = strlen($html) > 500000 ? substr($html, 0, 500000) : $html;
+            if (!preg_match_all('~"src"\s*:\s*"([^"]+\.(?:avif|webp|png|jpe?g|gif|svg)(?:\?[^"]*)?)"~i', $search_html, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
                 return array();
             }
 
             $candidates = array();
+            $processed = 0;
             foreach ($matches as $match) {
+                $processed++;
+                if ($processed > 160) {
+                    break;
+                }
+
                 $url = isset($match[1][0]) ? html_entity_decode(trim((string) $match[1][0]), ENT_QUOTES, 'UTF-8') : '';
-                $offset = isset($match[0][1]) ? (int) $match[0][1] : 0;
+                $offset = isset($match[1][1]) ? (int) $match[1][1] : (isset($match[0][1]) ? (int) $match[0][1] : 0);
                 if ('' === $url) {
                     continue;
                 }
+
+                $context = substr($search_html, max(0, $offset - 4500), 11000);
+                if (!preg_match('~"bg"\s*:\s*\{~i', $context) || !preg_match('~"image"\s*:\s*\{~i', $context)) {
+                    continue;
+                }
+
                 if (0 === strpos($url, '/')) {
                     $url = $this->absolutize_public_resource_url($url);
                 }
@@ -3346,15 +3411,7 @@ HTML;
                     continue;
                 }
 
-                $context = substr($html, max(0, $offset - 3500), 9000);
-                $width = 0;
-                $height = 0;
-                if (preg_match('~"width"\s*:\s*\[\s*([0-9]+)~s', $context, $wm)) {
-                    $width = (int) $wm[1];
-                }
-                if (preg_match('~"height"\s*:\s*\[\s*([0-9]+)~s', $context, $hm)) {
-                    $height = (int) $hm[1];
-                }
+                list($width, $height) = $this->extract_sr7_dimensions_from_context($context);
 
                 $key = $this->normalize_public_resource_url($url);
                 $candidates[$key] = array(
@@ -3620,28 +3677,28 @@ HTML;
         private function extract_sr7_first_slide_layer_dimensions($html)
         {
             $html = str_replace('\/', '/', (string) $html);
-            $slice = '';
-            if (preg_match('~"slides"\s*:\s*\{\s*"1"\s*:\s*\{(.+?)(?:,"2"\s*:|,"3"\s*:|,"4"\s*:)~s', $html, $match)) {
-                $slice = (string) $match[1];
-            } else {
-                $pos = strpos($html, '"slides":{"1"');
-                if (false !== $pos) {
-                    $slice = substr($html, $pos, 80000);
-                }
-            }
-
+            $slice = $this->extract_sr7_first_slide_slice($html, 80000);
             if ('' === $slice) {
                 return array();
             }
 
+            if (!preg_match_all('~"subtype"\s*:\s*"image"~i', $slice, $matches, PREG_OFFSET_CAPTURE)) {
+                return array();
+            }
+
             $targets = array();
-            if (preg_match_all('~"subtype"\s*:\s*"image".{0,1800}?"size"\s*:\s*\{.{0,800}?"w"\s*:\s*\[\s*"?(\d+)px"?.{0,300}?"h"\s*:\s*\[\s*"?(\d+)px"?~s', $slice, $matches, PREG_SET_ORDER)) {
-                foreach ($matches as $match) {
-                    $width = isset($match[1]) ? (int) $match[1] : 0;
-                    $height = isset($match[2]) ? (int) $match[2] : 0;
-                    if ($width > 0 && $height > 0 && $width <= 5000 && $height <= 5000) {
-                        $targets[$width . 'x' . $height] = array('width' => $width, 'height' => $height);
-                    }
+            $processed = 0;
+            foreach ($matches[0] as $match) {
+                $processed++;
+                if ($processed > 120) {
+                    break;
+                }
+
+                $offset = isset($match[1]) ? (int) $match[1] : 0;
+                $context = substr($slice, $offset, 4200);
+                list($width, $height) = $this->extract_sr7_dimensions_from_context($context);
+                if ($width > 0 && $height > 0) {
+                    $targets[$width . 'x' . $height] = array('width' => $width, 'height' => $height);
                 }
             }
 

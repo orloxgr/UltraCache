@@ -89,7 +89,13 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Media queue is not available.'), 500);
             }
 
-            return new WP_REST_Response($media->get_media_queue_status($this->get_media_queue_format_from_request($request)), 200);
+            $refresh_storage = rest_sanitize_boolean($request->get_param('refresh_storage'));
+            $status = $media->get_media_queue_status($this->get_media_queue_format_from_request($request), (bool) $refresh_storage);
+            if ($refresh_storage && method_exists($media, 'get_stats')) {
+                $status['storageStats'] = $media->get_stats(true);
+            }
+
+            return new WP_REST_Response($status, 200);
         }
 
         public function media_queue_rebuild(WP_REST_Request $request)

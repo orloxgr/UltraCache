@@ -8,7 +8,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
     {
         private function get_action_queue_option_key()
         {
-            return defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_jobs' : 'ucwp_settings_action_jobs';
+            return defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_jobs' : 'ultracache_settings_action_jobs';
         }
 
         private function get_allowed_action_queue_actions()
@@ -58,7 +58,203 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function get_action_queue_lock_option_key()
         {
-            return defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_queue_heavy_lock' : 'ucwp_settings_action_queue_heavy_lock';
+            return defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_queue_heavy_lock' : 'ultracache_settings_action_queue_heavy_lock';
+        }
+
+
+        private function get_action_jobs_db_version()
+        {
+            return '1';
+        }
+
+        private function get_action_jobs_db_version_option_key()
+        {
+            return 'ultracache_action_jobs_db_version';
+        }
+
+        private function get_action_jobs_table_name()
+        {
+            global $wpdb;
+            return $wpdb->prefix . 'ultracache_action_jobs';
+        }
+
+        private function action_jobs_table_exists()
+        {
+            global $wpdb;
+            if (!($wpdb instanceof wpdb)) {
+                return false;
+            }
+
+            $table = $this->get_action_jobs_table_name();
+            $cache_key = 'action_jobs_table_exists_' . md5((string) $table);
+            $cached = wp_cache_get($cache_key, 'ultracache');
+            if (is_bool($cached)) {
+                return $cached;
+            }
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Schema existence check for an UltraCache-owned custom table; cached below.
+            $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+            $exists = ((string) $found === (string) $table);
+            wp_cache_set($cache_key, $exists, 'ultracache', HOUR_IN_SECONDS);
+            return $exists;
+        }
+
+        public function ensure_action_jobs_table()
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb)) {
+                return false;
+            }
+
+            $table = $this->get_action_jobs_table_name();
+            $version = (string) get_option($this->get_action_jobs_db_version_option_key(), '');
+            if ($this->get_action_jobs_db_version() === $version && $this->action_jobs_table_exists()) {
+                return true;
+            }
+
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            $charset_collate = $wpdb->get_charset_collate();
+            $sql = "CREATE TABLE {$table} (
+                job_id varchar(64) NOT NULL,
+                action varchar(80) NOT NULL DEFAULT '',
+                status varchar(20) NOT NULL DEFAULT 'queued',
+                is_heavy tinyint(1) unsigned NOT NULL DEFAULT 0,
+                is_direct tinyint(1) unsigned NOT NULL DEFAULT 0,
+                message text NULL,
+                params longtext NULL,
+                result longtext NULL,
+                blocked_by varchar(64) NOT NULL DEFAULT '',
+                created_at bigint(20) unsigned NOT NULL DEFAULT 0,
+                started_at bigint(20) unsigned NOT NULL DEFAULT 0,
+                updated_at bigint(20) unsigned NOT NULL DEFAULT 0,
+                finished_at bigint(20) unsigned NOT NULL DEFAULT 0,
+                orphaned_runtime tinyint(1) unsigned NOT NULL DEFAULT 0,
+                extra_data longtext NULL,
+                PRIMARY KEY  (job_id),
+                KEY status_updated (status, updated_at),
+                KEY action_status (action, status),
+                KEY finished_at (finished_at),
+                KEY created_at (created_at)
+            ) {$charset_collate};";
+
+            dbDelta($sql);
+            if ($this->action_jobs_table_exists()) {
+                update_option($this->get_action_jobs_db_version_option_key(), $this->get_action_jobs_db_version(), false);
+                wp_cache_delete('action_jobs_table_exists_' . md5((string) $table), 'ultracache');
+                return true;
+            }
+
+            return false;
+        }
+
+        private function action_queue_job_from_row(array $row)
+        {
+            $job = array(
+                'id'        => sanitize_text_field((string) ($row['job_id'] ?? '')),
+                'action'    => sanitize_key((string) ($row['action'] ?? '')),
+                'status'    => sanitize_key((string) ($row['status'] ?? 'queued')),
+                'createdAt' => (int) ($row['created_at'] ?? 0),
+                'startedAt' => (int) ($row['started_at'] ?? 0),
+                'updatedAt' => (int) ($row['updated_at'] ?? 0),
+                'finishedAt'=> (int) ($row['finished_at'] ?? 0),
+            );
+
+            $message = isset($row['message']) ? (string) $row['message'] : '';
+            if ('' !== $message) {
+                $job['message'] = $message;
+            }
+
+            if (!empty($row['params'])) {
+                $params = maybe_unserialize($row['params']);
+                $job['params'] = is_array($params) ? $params : array();
+            } else {
+                $job['params'] = array();
+            }
+
+            if (!empty($row['result'])) {
+                $result = maybe_unserialize($row['result']);
+                if (is_array($result)) {
+                    $job['result'] = $result;
+                }
+            }
+
+            if (!empty($row['blocked_by'])) {
+                $job['blockedBy'] = sanitize_text_field((string) $row['blocked_by']);
+            }
+            if (!empty($row['is_direct'])) {
+                $job['direct'] = true;
+            }
+            if (!empty($row['orphaned_runtime'])) {
+                $job['orphanedRuntime'] = true;
+            }
+
+            if (!empty($row['extra_data'])) {
+                $extra = maybe_unserialize($row['extra_data']);
+                if (is_array($extra)) {
+                    foreach ($extra as $extra_key => $extra_value) {
+                        if (!array_key_exists($extra_key, $job)) {
+                            $job[$extra_key] = $extra_value;
+                        }
+                    }
+                }
+            }
+
+            return $job;
+        }
+
+        private function action_queue_job_to_row($id, array $job)
+        {
+            $id = sanitize_text_field((string) $id);
+            if ('' === $id) {
+                $id = sanitize_text_field((string) ($job['id'] ?? ''));
+            }
+
+            $core_keys = array(
+                'id' => true,
+                'action' => true,
+                'status' => true,
+                'message' => true,
+                'params' => true,
+                'result' => true,
+                'createdAt' => true,
+                'startedAt' => true,
+                'updatedAt' => true,
+                'finishedAt' => true,
+                'blockedBy' => true,
+                'direct' => true,
+                'orphanedRuntime' => true,
+            );
+            $extra = array();
+            foreach ($job as $key => $value) {
+                if (!isset($core_keys[$key])) {
+                    $extra[$key] = $value;
+                }
+            }
+
+            $action = sanitize_key((string) ($job['action'] ?? ''));
+            $status = sanitize_key((string) ($job['status'] ?? 'queued'));
+            if (!in_array($status, array('queued', 'running', 'done', 'failed'), true)) {
+                $status = 'queued';
+            }
+
+            return array(
+                'job_id'           => $id,
+                'action'           => $action,
+                'status'           => $status,
+                'is_heavy'         => $this->is_heavy_action_queue_action($action) ? 1 : 0,
+                'is_direct'        => !empty($job['direct']) ? 1 : 0,
+                'message'          => isset($job['message']) ? sanitize_textarea_field((string) $job['message']) : '',
+                'params'           => maybe_serialize(is_array($job['params'] ?? null) ? $job['params'] : array()),
+                'result'           => isset($job['result']) ? maybe_serialize($job['result']) : '',
+                'blocked_by'       => sanitize_text_field((string) ($job['blockedBy'] ?? '')),
+                'created_at'       => max(0, (int) ($job['createdAt'] ?? time())),
+                'started_at'       => max(0, (int) ($job['startedAt'] ?? 0)),
+                'updated_at'       => max(0, (int) ($job['updatedAt'] ?? 0)),
+                'finished_at'      => max(0, (int) ($job['finishedAt'] ?? 0)),
+                'orphaned_runtime' => !empty($job['orphanedRuntime']) ? 1 : 0,
+                'extra_data'       => !empty($extra) ? maybe_serialize($extra) : '',
+            );
         }
 
         private function normalize_action_jobs(array $jobs)
@@ -108,20 +304,68 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function load_action_jobs()
         {
-            $jobs = get_option($this->get_action_queue_option_key(), array());
-            $jobs = is_array($jobs) ? $jobs : array();
-            $normalized = $this->normalize_action_jobs($jobs);
-            if ($normalized !== $jobs) {
-                update_option($this->get_action_queue_option_key(), $this->scrub_action_jobs_for_storage($normalized), false);
+            if (!$this->ensure_action_jobs_table()) {
+                return array();
             }
 
-            return $this->reconcile_action_queue_state($normalized);
+            global $wpdb;
+            $table = $this->get_action_jobs_table_name();
+            $cache_key = 'action_jobs_rows_v1';
+            $rows = wp_cache_get($cache_key, 'ultracache');
+            if (!is_array($rows)) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned custom action queue table; rows are cached and invalidated on writes.
+                $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM %i ORDER BY updated_at DESC, created_at DESC LIMIT %d', $table, 50), ARRAY_A);
+                $rows = is_array($rows) ? $rows : array();
+                wp_cache_set($cache_key, $rows, 'ultracache', 30);
+            }
+            $jobs = array();
+            if (is_array($rows)) {
+                foreach ($rows as $row) {
+                    $job = is_array($row) ? $this->action_queue_job_from_row($row) : array();
+                    $id = (string) ($job['id'] ?? '');
+                    if ('' !== $id) {
+                        $jobs[$id] = $job;
+                    }
+                }
+            }
+
+            $normalized = $this->normalize_action_jobs($jobs);
+            if ($normalized !== $jobs) {
+                $this->save_action_jobs($normalized);
+                $jobs = $normalized;
+            }
+
+            return $this->reconcile_action_queue_state($jobs);
         }
 
         private function save_action_jobs(array $jobs)
         {
+            if (!$this->ensure_action_jobs_table()) {
+                return;
+            }
+
+            global $wpdb;
+            $table = $this->get_action_jobs_table_name();
             $normalized = $this->normalize_action_jobs($jobs);
-            update_option($this->get_action_queue_option_key(), $this->scrub_action_jobs_for_storage($normalized), false);
+            $scrubbed = $this->scrub_action_jobs_for_storage($normalized);
+
+            wp_cache_delete('action_jobs_rows_v1', 'ultracache');
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned custom action queue table; cache is invalidated before writes.
+            $wpdb->query($wpdb->prepare('DELETE FROM %i', $table));
+            foreach ($scrubbed as $id => $job) {
+                if (!is_array($job)) {
+                    continue;
+                }
+                $row = $this->action_queue_job_to_row($id, $job);
+                if ('' === (string) $row['job_id']) {
+                    continue;
+                }
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned custom action queue table; cache is invalidated before writes.
+                $wpdb->replace($table, $row, array(
+                    '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s',
+                    '%d', '%d', '%d', '%d', '%d', '%s',
+                ));
+            }
         }
 
         private function find_active_heavy_action_job(array $jobs, $exclude_id = '')
@@ -305,7 +549,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             $jobs = $this->reconcile_action_queue_orphaned_running_jobs($jobs);
 
             if ($jobs !== $before) {
-                update_option($this->get_action_queue_option_key(), $this->scrub_action_jobs_for_storage($jobs), false);
+                $this->save_action_jobs($jobs);
             }
 
             return $jobs;

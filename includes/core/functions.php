@@ -209,19 +209,42 @@ if (!function_exists('ucwp_query_value')) {
     }
 }
 
-if (!function_exists('ucwp_request_profile_token_valid')) {
-    function ucwp_request_profile_token_valid()
+if (!function_exists('ucwp_runtime_control_secret')) {
+    function ucwp_runtime_control_secret()
     {
         if (!function_exists('wp_hash')) {
-            return false;
+            return '';
         }
 
-        $token = trim((string) ucwp_query_value('ucwp_rt'));
-        if ('' === $token) {
-            $token = trim((string) ucwp_server_value('HTTP_X_ULTRACACHE_TOKEN'));
+        return (string) wp_hash('ucwp-revalidate-v1');
+    }
+}
+
+if (!function_exists('ucwp_create_runtime_control_token')) {
+    function ucwp_create_runtime_control_token($secret = '', $issued_at = null)
+    {
+        $secret = is_string($secret) && '' !== trim($secret) ? (string) $secret : ucwp_runtime_control_secret();
+        if ('' === $secret) {
+            return '';
         }
 
-        if ('' === $token) {
+        $issued_at = null === $issued_at ? time() : (int) $issued_at;
+        if ($issued_at <= 0) {
+            return '';
+        }
+
+        $payload = 'v2|' . (string) $issued_at . '|ucwp-runtime-control';
+        $mac = hash_hmac('sha256', $payload, $secret);
+
+        return 'v2:' . (string) $issued_at . ':' . $mac;
+    }
+}
+
+if (!function_exists('ucwp_validate_runtime_control_token')) {
+    function ucwp_validate_runtime_control_token($token, $secret = '', $ttl = 900)
+    {
+        $token = is_scalar($token) ? trim((string) $token) : '';
+        if ('' === $token || strlen($token) > 160) {
             return false;
         }
 
@@ -229,12 +252,43 @@ if (!function_exists('ucwp_request_profile_token_valid')) {
             $token = sanitize_text_field($token);
         }
 
-        $expected = (string) wp_hash('ucwp-revalidate-v1');
-        if ('' === $expected) {
+        $secret = is_string($secret) && '' !== trim($secret) ? (string) $secret : ucwp_runtime_control_secret();
+        if ('' === $secret) {
             return false;
         }
 
-        return function_exists('hash_equals') ? hash_equals($expected, $token) : $expected === $token;
+        $parts = explode(':', $token);
+        if (3 !== count($parts) || 'v2' !== $parts[0]) {
+            return false;
+        }
+
+        $issued_at = (int) $parts[1];
+        $mac = (string) $parts[2];
+        $ttl = max(60, min(3600, (int) $ttl));
+        $now = time();
+        if ($issued_at <= 0 || $issued_at > ($now + 60) || ($now - $issued_at) > $ttl) {
+            return false;
+        }
+
+        if (1 !== preg_match('/^[a-f0-9]{64}$/', $mac)) {
+            return false;
+        }
+
+        $expected = hash_hmac('sha256', 'v2|' . (string) $issued_at . '|ucwp-runtime-control', $secret);
+
+        return function_exists('hash_equals') ? hash_equals($expected, $mac) : $expected === $mac;
+    }
+}
+
+if (!function_exists('ucwp_request_profile_token_valid')) {
+    function ucwp_request_profile_token_valid()
+    {
+        $token = trim((string) ucwp_query_value('ucwp_rt'));
+        if ('' === $token) {
+            $token = trim((string) ucwp_server_value('HTTP_X_ULTRACACHE_TOKEN'));
+        }
+
+        return ucwp_validate_runtime_control_token($token);
     }
 }
 
@@ -1896,7 +1950,7 @@ if (!function_exists('ucwp_safe_configured_infrastructure_remote_request')) {
 if (!function_exists('ucwp_get_loopback_ssl_status')) {
     function ucwp_get_loopback_ssl_status()
     {
-        $status = get_transient('ucwp_loopback_ssl_status_v1');
+        $status = get_transient('ultracache_loopback_ssl_status_v1');
         if (!is_array($status)) {
             $status = array();
         }
@@ -1916,14 +1970,14 @@ if (!function_exists('ucwp_get_loopback_ssl_status')) {
 if (!function_exists('ucwp_set_loopback_ssl_status')) {
     function ucwp_set_loopback_ssl_status(array $status)
     {
-        set_transient('ucwp_loopback_ssl_status_v1', $status, DAY_IN_SECONDS);
+        set_transient('ultracache_loopback_ssl_status_v1', $status, DAY_IN_SECONDS);
     }
 }
 
 if (!function_exists('ucwp_reset_loopback_ssl_status')) {
     function ucwp_reset_loopback_ssl_status()
     {
-        delete_transient('ucwp_loopback_ssl_status_v1');
+        delete_transient('ultracache_loopback_ssl_status_v1');
     }
 }
 

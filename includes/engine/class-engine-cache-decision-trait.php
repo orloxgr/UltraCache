@@ -595,7 +595,16 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
 
         private function get_revalidate_secret()
         {
-            return wp_hash('ucwp-revalidate-v1');
+            return function_exists('ucwp_runtime_control_secret') ? ucwp_runtime_control_secret() : wp_hash('ucwp-revalidate-v1');
+        }
+
+        private function is_valid_revalidate_token($token)
+        {
+            if (!function_exists('ucwp_validate_runtime_control_token')) {
+                return false;
+            }
+
+            return ucwp_validate_runtime_control_token($token, $this->get_revalidate_secret());
         }
 
         private function is_internal_revalidate_request()
@@ -615,7 +624,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 return false;
             }
 
-            return hash_equals($this->get_revalidate_secret(), $token);
+            return $this->is_valid_revalidate_token($token);
         }
 
         private function is_profile_bypass_request()
@@ -634,7 +643,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 return false;
             }
 
-            return hash_equals($this->get_revalidate_secret(), $token);
+            return $this->is_valid_revalidate_token($token);
         }
 
         private function clear_revalidate_lock($url)

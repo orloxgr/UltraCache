@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.57.134
+Stable tag: 2.57.149
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -221,10 +221,61 @@ Disable the last risky optimization, confirm the issue disappears, then add visi
 
 == Changelog ==
 
-= 2.57.134 =
-* Stops frontend/on-demand media generation from creating automatic pending AVIF/WebP/Both background queue rows. Missing variants remain for explicit bulk or WP-CLI conversion.
-* Retires old partial on-demand queue rows so they no longer keep `ucwp_process_media_conversion_queue` due-now.
-* Limits the automatic background media hook to the `best` upload queue with a small batch/time budget; manual UI bulk and WP-CLI media conversion remain unrestricted.
+= 2.57.149 =
+
+* Rename UltraCache custom database tables and persistent option keys to the fuller `ultracache_` namespace for new installs.
+* Remove dynamic `call_user_func_array( $wpdb->prepare() )` cleanup queries flagged by Plugin Check.
+* Use explicit prepared custom-table cleanup queries and curated option/transient deletion.
+* Update default performance profiles: All Off disables Varnish purge, Lazy MailerLite nonce refresh stays off, Balanced uses shared CSS bundling and keeps Async Remaining CSS off.
+
+= 2.57.145 =
+* Move on-demand media affected page references from a serialized option to an indexed custom DB table.
+* Keep affected-page purges batched to one purge per page URL.
+* Add a dashboard cleanup policy for delete/uninstall: plugin-only, keep settings, keep settings plus tables, or delete everything.
+* Keep generated media under wp-content/uploads/uc-images manual-only for deletion.
+
+= 2.57.143 =
+* Added expiring timestamped HMAC tokens for internal profiler/revalidate requests.
+* Hardened advanced-cache.php and object-cache.php file helpers with allowed-path checks.
+* Kept Redis/Varnish endpoint policy unchanged.
+
+= 2.57.142 =
+* Added affected-page tracking for on-demand media queue discoveries.
+* Purges each affected page once after its tracked media batch completes.
+* Avoids one purge per image when a page discovers many missing variants.
+
+= 2.57.141 =
+* Queues missing optimized media discovered during frontend/warm rewrites.
+* Keeps AVIF/WebP generation out of the current frontend request.
+* Schedules existing background media queue work with request caps/dedupe.
+
+= 2.57.140 =
+* Makes automatic stats polling lightweight by omitting full diagnostics.
+* Extends the stats snapshot cache window to 60 seconds.
+* Keeps diagnostics manual/bootstrap-only during normal refreshes.
+
+= 2.57.139 =
+* Skips irrelevant disk object-cache scans and caps disk stats.
+* Batches cron warm state saves instead of writing after every URL.
+* Caps page-cache activity scans and keeps settings reads write-free.
+
+= 2.57.138 =
+* Replaces stacked full-document media HTML rewrite passes with single upload-token discovery plus one replacement-map application.
+* Adds request-level optimized public URL lookup memoization so repeated image tokens do not repeat path/filesystem checks.
+* Adds relative-path generated variant lookup for existing AVIF/WebP files and keeps Build 3 schema-free.
+
+= 2.57.136 =
+* Splits frontend/cache runtime settings reads away from dashboard settings reads so normal requests no longer run dashboard capability probes or canonical settings writes.
+* Keeps dashboard defaults side-effect free and moves support validation behind the dashboard/admin sanitization path only.
+* Caches media support status and GD WebP encode probing with WordPress transients.
+* Throttles media queue init maintenance and avoids custom queue-table polling on normal frontend init.
+
+= 2.57.135 =
+* Refactors SR7/LCP image extraction to avoid large-range backtracking regexes over Slider Revolution inline JSON; discovery now uses bounded slices, URL-first scans, and small context checks.
+* Makes frontend/cache STORE, warm, cron, and stale media rewrites lookup-only: missing AVIF/WebP variants are left as original URLs instead of being generated during page rendering.
+* Keeps generation work in explicit media conversion paths instead of media URL lookup helpers.
+* Changes the Balanced preset so it no longer enables on-demand media generation or CSS bundle-on-entry.
+* Caps Brotli sidecar compression at quality 5 instead of 11 to reduce MISS/STORE CPU.
 
 = 2.57.133 =
 * Removed the hidden automatic safe-html-minify pass from frontend/cache HTML output.

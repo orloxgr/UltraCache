@@ -98,12 +98,12 @@ trait Ultra_Cache_WP_Varnish_Trait
 
         private static function set_varnish_last_result(array $result)
         {
-            set_transient('ucwp_varnish_last_result', self::sanitize_varnish_result($result), DAY_IN_SECONDS);
+            set_transient('ultracache_varnish_last_result', self::sanitize_varnish_result($result), DAY_IN_SECONDS);
         }
 
         private static function get_varnish_last_result()
         {
-            $value = get_transient('ucwp_varnish_last_result');
+            $value = get_transient('ultracache_varnish_last_result');
             return is_array($value) ? $value : array();
         }
 
@@ -655,7 +655,7 @@ trait Ultra_Cache_WP_Varnish_Trait
 
         private static function get_reverse_proxy_status()
         {
-            $cached = get_transient('ucwp_reverse_proxy_status_v2');
+            $cached = get_transient('ultracache_reverse_proxy_status_v2');
             if (is_array($cached)) {
                 return $cached;
             }
@@ -756,7 +756,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 }
             }
 
-            set_transient('ucwp_reverse_proxy_status_v2', $status, MINUTE_IN_SECONDS);
+            set_transient('ultracache_reverse_proxy_status_v2', $status, MINUTE_IN_SECONDS);
             return $status;
         }
 

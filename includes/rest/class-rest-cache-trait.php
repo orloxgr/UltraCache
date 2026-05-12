@@ -25,10 +25,24 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_stats_snapshot')) {
                 // Stats are ON, so the REST refresh must return a real dashboard snapshot.
                 // The hard zero-impact path is handled above when Count cache stats is OFF.
-                return new WP_REST_Response(Ultra_Cache_WP::get_dashboard_stats_snapshot(20, true), 200);
+                return new WP_REST_Response(Ultra_Cache_WP::get_dashboard_stats_snapshot(60, true), 200);
             }
 
             return new WP_REST_Response(array('success' => true), 200);
+        }
+
+        public function refresh_storage_diagnostics()
+        {
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
+                return new WP_REST_Response(array('success' => false, 'message' => 'Storage diagnostics helper is not available.'), 500);
+            }
+
+            $diagnostics = Ultra_Cache_WP::get_dashboard_diagnostics(true);
+            return new WP_REST_Response(array(
+                'success' => true,
+                'message' => 'Storage diagnostics refreshed.',
+                'diagnostics' => $diagnostics,
+            ), 200);
         }
 
         public function purge_all()
@@ -174,7 +188,8 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 return new WP_REST_Response(array('success' => false, 'message' => 'Cleanup helper not available.'), 500);
             }
 
-            $result = Ultra_Cache_WP::delete_all_plugin_data_and_deactivate();
+            $cleanup_policy = $request->get_param('cleanupPolicy');
+            $result = Ultra_Cache_WP::delete_all_plugin_data_and_deactivate($cleanup_policy);
             if (is_wp_error($result)) {
                 return new WP_REST_Response(array('success' => false, 'message' => $result->get_error_message()), 500);
             }

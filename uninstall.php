@@ -145,46 +145,31 @@ if (!function_exists('ucwp_uninstall_delete_path')) {
     }
 }
 
+function ucwp_uninstall_sanitize_cleanup_policy($policy)
+{
+    $policy = strtolower(trim((string) $policy));
+    $allowed = array('plugin_only', 'keep_settings', 'keep_settings_tables', 'delete_everything');
+    return in_array($policy, $allowed, true) ? $policy : 'plugin_only';
+}
+
+function ucwp_uninstall_get_cleanup_policy()
+{
+    $settings = get_option('ultracache_settings', array());
+    if (is_array($settings) && isset($settings['uninstallCleanupPolicy'])) {
+        return ucwp_uninstall_sanitize_cleanup_policy($settings['uninstallCleanupPolicy']);
+    }
+
+    return 'delete_everything';
+}
+
 function ucwp_run_uninstall_cleanup()
 {
-    $ucwp_options = array(
-        'ucwp_settings',
-        'ucwp_settings_action_jobs',
-        'ucwp_settings_action_queue_heavy_lock',
-        'ucwp_cron_warm_state',
-        'ucwp_cron_warm_lock',
-        'ucwp_cron_warm_lock_atomic',
-        'ucwp_wp_cache_managed',
-        'ucwp_media_conversion_queue',
-        'ucwp_media_diagnostics_v1',
-        'ucwp_media_queue_db_version',
-        'ucwp_media_queue_build_state_v1',
-        'ucwp_object_cache_last_flush_report',
-    );
-
-    foreach ($ucwp_options as $ucwp_option) {
-        delete_option($ucwp_option);
-        delete_site_option($ucwp_option);
-    }
-
-    $ucwp_transients = array(
-        'ucwp_admin_notice',
-        'ucwp_dashboard_cache_activity_v1',
-        'ucwp_frontend_compression_probe_v1',
-        'ucwp_last_cache_event',
-        'ucwp_loopback_ssl_status_v1',
-        'ucwp_media_conversion_queue_lock',
-        'ucwp_media_queue_process_lock_v1',
-        'ucwp_media_work_summary_v1',
-        'ucwp_object_cache_support_status_v1',
-        'ucwp_reverse_proxy_status_v2',
-        'ucwp_varnish_last_result',
-    );
-
-    foreach ($ucwp_transients as $ucwp_transient) {
-        delete_transient($ucwp_transient);
-        delete_site_transient($ucwp_transient);
-    }
+    $ucwp_policy = ucwp_uninstall_get_cleanup_policy();
+    $ucwp_keep_settings = in_array($ucwp_policy, array('plugin_only', 'keep_settings', 'keep_settings_tables'), true);
+    $ucwp_keep_tables = in_array($ucwp_policy, array('plugin_only', 'keep_settings_tables'), true);
+    $ucwp_delete_cache_files = ('plugin_only' !== $ucwp_policy);
+    $ucwp_remove_secrets = ('delete_everything' === $ucwp_policy);
+    $ucwp_delete_runtime_options = ('plugin_only' !== $ucwp_policy);
 
     $ucwp_scheduled_hooks = array(
         'ucwp_scheduled_cache_cleanup',
@@ -197,60 +182,85 @@ function ucwp_run_uninstall_cleanup()
         wp_clear_scheduled_hook($ucwp_hook);
     }
 
-    if (isset($GLOBALS['wpdb']) && $GLOBALS['wpdb'] instanceof wpdb) {
-        global $wpdb;
-
-        $ucwp_patterns = array(
-            'ucwp_%',
-            '_transient_ucwp_%',
-            '_transient_timeout_ucwp_%',
-            '_site_transient_ucwp_%',
-            '_site_transient_timeout_ucwp_%',
+    if ($ucwp_delete_runtime_options) {
+        $ucwp_options = array(
+            'ultracache_settings_action_jobs',
+            'ultracache_settings_action_queue_heavy_lock',
+            'ultracache_cron_warm_state',
+            'ultracache_cron_warm_lock',
+            'ultracache_cron_warm_lock_atomic',
+            'ultracache_wp_cache_managed',
+            'ultracache_media_conversion_queue',
+            'ultracache_media_diagnostics_v1',
+            'ultracache_media_queue_build_state_v1',
+            'ultracache_object_cache_last_flush_report',
         );
 
-        foreach ($ucwp_patterns as $ucwp_pattern) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Uninstall cleanup removes only UltraCache-owned options; caching is not useful during uninstall.
-            $wpdb->query(
-                $wpdb->prepare(
-                    'DELETE FROM %i WHERE option_name LIKE %s',
-                    $wpdb->options,
-                    $ucwp_pattern
-                )
-            );
+        if (!$ucwp_keep_settings) {
+            array_unshift($ucwp_options, 'ultracache_settings');
         }
 
-        $ucwp_media_queue_table = $wpdb->prefix . 'ucwp_media_queue';
-        if (preg_match('/^[A-Za-z0-9_]+$/', $ucwp_media_queue_table)) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Uninstall cleanup drops the UltraCache-owned custom media queue table.
-            $wpdb->query($wpdb->prepare('DROP TABLE IF EXISTS %i', $ucwp_media_queue_table));
+        if (!$ucwp_keep_tables) {
+            $ucwp_options[] = 'ultracache_media_queue_db_version';
+            $ucwp_options[] = 'ultracache_media_page_refs_db_version';
+            $ucwp_options[] = 'ultracache_action_jobs_db_version';
+            $ucwp_options[] = 'ultracache_cron_warm_queue_db_version';
+            $ucwp_options[] = 'ultracache_analytics_db_version';
         }
 
-        if (is_multisite()) {
-            $ucwp_site_patterns = array(
-                'ucwp_%',
-                '_site_transient_ucwp_%',
-                '_site_transient_timeout_ucwp_%',
-            );
+        foreach ($ucwp_options as $ucwp_option) {
+            delete_option($ucwp_option);
+            delete_site_option($ucwp_option);
+        }
 
-            foreach ($ucwp_site_patterns as $ucwp_pattern) {
-                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Uninstall cleanup removes only UltraCache-owned site metadata; caching is not useful during uninstall.
-                $wpdb->query(
-                    $wpdb->prepare(
-                        'DELETE FROM %i WHERE meta_key LIKE %s',
-                        $wpdb->sitemeta,
-                        $ucwp_pattern
-                    )
-                );
+        $ucwp_transients = array(
+            'ultracache_admin_notice',
+            'ultracache_dashboard_cache_activity_v1',
+            'ultracache_frontend_compression_probe_v1',
+            'ultracache_last_cache_event',
+            'ultracache_loopback_ssl_status_v1',
+            'ultracache_media_conversion_queue_lock',
+            'ultracache_media_queue_process_lock_v1',
+            'ultracache_media_page_refs_cleanup_lock',
+            'ultracache_media_work_summary_v1',
+            'ultracache_object_cache_support_status_v1',
+            'ultracache_reverse_proxy_status_v2',
+            'ultracache_varnish_last_result',
+        );
+
+        foreach ($ucwp_transients as $ucwp_transient) {
+            delete_transient($ucwp_transient);
+            delete_site_transient($ucwp_transient);
+        }
+    }
+
+    if (!$ucwp_keep_tables && isset($GLOBALS['wpdb']) && $GLOBALS['wpdb'] instanceof wpdb) {
+        global $wpdb;
+        $ucwp_custom_tables = array(
+            $wpdb->prefix . 'ultracache_media_queue',
+            $wpdb->prefix . 'ultracache_media_page_refs',
+            $wpdb->prefix . 'ultracache_action_jobs',
+            $wpdb->prefix . 'ultracache_cron_warm_queue',
+            $wpdb->prefix . 'ultracache_analytics',
+        );
+
+        foreach ($ucwp_custom_tables as $ucwp_custom_table) {
+            if (preg_match('/^[A-Za-z0-9_]+$/', $ucwp_custom_table)) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Uninstall cleanup drops only UltraCache-owned custom tables.
+                $wpdb->query($wpdb->prepare('DROP TABLE IF EXISTS %i', $ucwp_custom_table));
             }
         }
     }
+
 
     $ucwp_cache_root = defined('WP_CONTENT_DIR') ? trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/' : '';
     $ucwp_object_root = defined('WP_CONTENT_DIR') ? trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/' : '';
     $ucwp_allowed_roots = array_filter(array($ucwp_cache_root, $ucwp_object_root));
 
-    foreach ($ucwp_allowed_roots as $ucwp_root) {
-        ucwp_uninstall_delete_path($ucwp_root, $ucwp_allowed_roots);
+    if ($ucwp_delete_cache_files) {
+        foreach ($ucwp_allowed_roots as $ucwp_root) {
+            ucwp_uninstall_delete_path($ucwp_root, $ucwp_allowed_roots);
+        }
     }
 
     if (defined('WP_CONTENT_DIR')) {
@@ -267,7 +277,7 @@ function ucwp_run_uninstall_cleanup()
 
     $ucwp_runtime_secret_candidates = array();
 
-    if (defined('ABSPATH')) {
+    if (defined('ABSPATH') && $ucwp_remove_secrets) {
         $ucwp_site_root = wp_basename(untrailingslashit(ABSPATH));
         $ucwp_site_root = strtolower(preg_replace('/[^a-z0-9._-]+/', '-', (string) $ucwp_site_root));
         $ucwp_site_root = trim($ucwp_site_root, '.-_');
@@ -277,7 +287,7 @@ function ucwp_run_uninstall_cleanup()
         $ucwp_runtime_secret_candidates[] = dirname(untrailingslashit(ABSPATH)) . '/.' . $ucwp_site_root . '-ultracache-runtime-secrets.php';
     }
 
-    if ('' !== $ucwp_cache_root) {
+    if ('' !== $ucwp_cache_root && $ucwp_delete_cache_files) {
         $ucwp_runtime_secret_candidates[] = trailingslashit($ucwp_cache_root) . 'runtime-config.php';
         $ucwp_runtime_secret_candidates[] = trailingslashit($ucwp_cache_root) . 'runtime-config.json';
     }

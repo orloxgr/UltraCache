@@ -8,6 +8,292 @@ if (!defined('ABSPATH')) {
  */
 trait Ultra_Cache_Engine_Analytics_Trait
 {
+        public static function get_analytics_db_version()
+        {
+            return '1';
+        }
+
+        public static function get_analytics_db_version_option_key()
+        {
+            return 'ultracache_analytics_db_version';
+        }
+
+        public static function get_analytics_table_name()
+        {
+            global $wpdb;
+            return ($wpdb instanceof wpdb) ? $wpdb->prefix . 'ultracache_analytics' : '';
+        }
+
+        public static function analytics_table_exists()
+        {
+            global $wpdb;
+            if (!($wpdb instanceof wpdb)) {
+                return false;
+            }
+
+            $table = self::get_analytics_table_name();
+            if ('' === $table) {
+                return false;
+            }
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema existence check for UltraCache-owned analytics table.
+            $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+            return (string) $found === (string) $table;
+        }
+
+        public static function ensure_analytics_table()
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb)) {
+                return false;
+            }
+
+            $table = self::get_analytics_table_name();
+            if ('' === $table) {
+                return false;
+            }
+
+            $version = (string) get_option(self::get_analytics_db_version_option_key(), '');
+            if (self::get_analytics_db_version() === $version && self::analytics_table_exists()) {
+                return true;
+            }
+
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            $charset_collate = $wpdb->get_charset_collate();
+            $sql = "CREATE TABLE {$table} (
+                metric_key varchar(191) NOT NULL DEFAULT '',
+                metric_type varchar(32) NOT NULL DEFAULT 'counter',
+                metric_label varchar(191) NOT NULL DEFAULT '',
+                metric_value bigint(20) unsigned NOT NULL DEFAULT 0,
+                payload longtext NULL,
+                updated_at bigint(20) unsigned NOT NULL DEFAULT 0,
+                PRIMARY KEY  (metric_key),
+                KEY metric_type (metric_type),
+                KEY updated_at (updated_at)
+            ) {$charset_collate};";
+
+            dbDelta($sql);
+            if (self::analytics_table_exists()) {
+                update_option(self::get_analytics_db_version_option_key(), self::get_analytics_db_version(), false);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static function get_analytics_reason_row_cap()
+        {
+            $cap = (int) apply_filters('ucwp_analytics_reason_row_cap', 100);
+            return max(20, min(500, $cap));
+        }
+
+        private static function get_analytics_scalar_counter_keys()
+        {
+            return array(
+                'pageHits',
+                'pageMisses',
+                'pageBypasses',
+                'pageStores',
+                'pageStoreSkips',
+                'pageStaleHits',
+                'pageBackgroundRevalidations',
+                'warmSuccess',
+                'warmFailed',
+                'clsImagesScanned',
+                'clsDimensionsInjected',
+                'clsImagesSkipped',
+                'clsImagesUnresolved',
+                'cssAsyncStylesScanned',
+                'cssAsyncStylesRewritten',
+                'cssAsyncStylesSkipped',
+                'cssAsyncStylesUnresolved',
+                'frontpageCssStylesScanned',
+                'frontpageCssStylesBundled',
+                'frontpageCssStylesSkipped',
+                'frontpageCssStylesUnresolved',
+                'frontpageCssBundlesBuilt',
+                'sr7LcpDetected',
+                'sr7LcpPreloadsInjected',
+                'sr7LcpSkipped',
+                'sr7LcpUnresolved',
+                'htmlRewriteSafetyBailouts',
+            );
+        }
+
+        private static function analytics_payload_encode($value)
+        {
+            $encoded = function_exists('wp_json_encode') ? wp_json_encode($value) : json_encode($value);
+            return is_string($encoded) ? $encoded : '';
+        }
+
+        private static function analytics_payload_decode($payload, $fallback = array())
+        {
+            if (!is_string($payload) || '' === trim($payload)) {
+                return $fallback;
+            }
+
+            $decoded = json_decode($payload, true);
+            return is_array($decoded) ? $decoded : $fallback;
+        }
+
+        private static function analytics_to_db_rows(array $analytics)
+        {
+            $analytics = self::normalize_analytics($analytics);
+            $rows = array();
+            $now = function_exists('current_time') ? (int) current_time('timestamp') : time();
+
+            foreach (self::get_analytics_scalar_counter_keys() as $key) {
+                $rows[] = array(
+                    'metric_key' => 'counter:' . $key,
+                    'metric_type' => 'counter',
+                    'metric_label' => $key,
+                    'metric_value' => max(0, (int) ($analytics[$key] ?? 0)),
+                    'payload' => '',
+                    'updated_at' => $now,
+                );
+            }
+
+            foreach (array('orig', 'webp', 'avif') as $bucket) {
+                $rows[] = array(
+                    'metric_key' => 'bucket:' . $bucket,
+                    'metric_type' => 'bucket',
+                    'metric_label' => $bucket,
+                    'metric_value' => max(0, (int) ($analytics['bucketHits'][$bucket] ?? 0)),
+                    'payload' => '',
+                    'updated_at' => $now,
+                );
+            }
+
+            foreach (array('identity', 'gzip', 'brotli') as $encoding) {
+                $rows[] = array(
+                    'metric_key' => 'encoding:' . $encoding,
+                    'metric_type' => 'encoding',
+                    'metric_label' => $encoding,
+                    'metric_value' => max(0, (int) ($analytics['encodingHits'][$encoding] ?? 0)),
+                    'payload' => '',
+                    'updated_at' => $now,
+                );
+            }
+
+            $reasons = isset($analytics['bypassReasons']) && is_array($analytics['bypassReasons']) ? $analytics['bypassReasons'] : array();
+            $normalized_reasons = array();
+            foreach ($reasons as $reason => $count) {
+                $reason = sanitize_text_field((string) $reason);
+                if ('' === $reason) {
+                    continue;
+                }
+                $normalized_reasons[$reason] = max(0, (int) $count);
+            }
+            arsort($normalized_reasons);
+            $normalized_reasons = array_slice($normalized_reasons, 0, self::get_analytics_reason_row_cap(), true);
+            foreach ($normalized_reasons as $reason => $count) {
+                $rows[] = array(
+                    'metric_key' => 'reason:' . md5($reason),
+                    'metric_type' => 'reason',
+                    'metric_label' => $reason,
+                    'metric_value' => max(0, (int) $count),
+                    'payload' => '',
+                    'updated_at' => $now,
+                );
+            }
+
+            foreach (array('lastPurge', 'lastWarm', 'lastFrontpageCssWarm', 'htmlRewriteLastBailout') as $meta_key) {
+                $rows[] = array(
+                    'metric_key' => 'meta:' . $meta_key,
+                    'metric_type' => 'meta',
+                    'metric_label' => $meta_key,
+                    'metric_value' => 0,
+                    'payload' => self::analytics_payload_encode(isset($analytics[$meta_key]) && is_array($analytics[$meta_key]) ? $analytics[$meta_key] : array()),
+                    'updated_at' => $now,
+                );
+            }
+
+            return $rows;
+        }
+
+        private static function read_analytics_from_db()
+        {
+            global $wpdb;
+
+            if (!self::ensure_analytics_table()) {
+                return self::get_default_analytics();
+            }
+
+            $table = self::get_analytics_table_name();
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads UltraCache-owned analytics summary rows.
+            $rows = $wpdb->get_results($wpdb->prepare('SELECT metric_key, metric_type, metric_label, metric_value, payload FROM %i', $table), ARRAY_A);
+            if (empty($rows) || !is_array($rows)) {
+                return self::get_default_analytics();
+            }
+
+            $analytics = self::get_default_analytics();
+            foreach ($rows as $row) {
+                $type = isset($row['metric_type']) ? (string) $row['metric_type'] : '';
+                $label = isset($row['metric_label']) ? (string) $row['metric_label'] : '';
+                $value = max(0, (int) ($row['metric_value'] ?? 0));
+
+                if ('counter' === $type && in_array($label, self::get_analytics_scalar_counter_keys(), true)) {
+                    $analytics[$label] = $value;
+                    continue;
+                }
+
+                if ('bucket' === $type && in_array($label, array('orig', 'webp', 'avif'), true)) {
+                    $analytics['bucketHits'][$label] = $value;
+                    continue;
+                }
+
+                if ('encoding' === $type && in_array($label, array('identity', 'gzip', 'brotli'), true)) {
+                    $analytics['encodingHits'][$label] = $value;
+                    continue;
+                }
+
+                if ('reason' === $type && '' !== $label) {
+                    $analytics['bypassReasons'][$label] = $value;
+                    continue;
+                }
+
+                if ('meta' === $type && in_array($label, array('lastPurge', 'lastWarm', 'lastFrontpageCssWarm', 'htmlRewriteLastBailout'), true)) {
+                    $analytics[$label] = self::analytics_payload_decode($row['payload'] ?? '', array());
+                }
+            }
+
+            return self::normalize_analytics($analytics);
+        }
+
+        private static function write_analytics_to_db(array $data)
+        {
+            global $wpdb;
+
+            if (!self::ensure_analytics_table()) {
+                return false;
+            }
+
+            $table = self::get_analytics_table_name();
+            $rows = self::analytics_to_db_rows($data);
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Replaces UltraCache-owned analytics summary rows atomically enough for lightweight counters.
+            $wpdb->query($wpdb->prepare('DELETE FROM %i', $table));
+
+            foreach ($rows as $row) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Writes UltraCache-owned analytics metric rows.
+                $wpdb->replace(
+                    $table,
+                    array(
+                        'metric_key' => $row['metric_key'],
+                        'metric_type' => $row['metric_type'],
+                        'metric_label' => $row['metric_label'],
+                        'metric_value' => $row['metric_value'],
+                        'payload' => $row['payload'],
+                        'updated_at' => $row['updated_at'],
+                    ),
+                    array('%s', '%s', '%s', '%d', '%s', '%d')
+                );
+            }
+
+            return true;
+        }
+
         private static function get_analytics_file()
         {
             return trailingslashit(UCWP_CACHE_DIR) . 'analytics.json';
@@ -21,7 +307,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
         private static function get_analytics_hit_buffer_key_prefix()
         {
             $base = defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : UCWP_CACHE_DIR;
-            return 'ucwp_analytics_hit_buffer_' . md5((string) $base) . '_';
+            return 'ultracache_analytics_hit_buffer_' . md5((string) $base) . '_';
         }
 
         private static function analytics_apcu_available()
@@ -483,6 +769,8 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 'sr7LcpPreloadsInjected' => 0,
                 'sr7LcpSkipped' => 0,
                 'sr7LcpUnresolved' => 0,
+                'htmlRewriteSafetyBailouts' => 0,
+                'htmlRewriteLastBailout' => array(),
             );
         }
 
@@ -491,7 +779,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
             $defaults = self::get_default_analytics();
             $data = array_replace_recursive($defaults, $data);
 
-            foreach (array('pageHits', 'pageMisses', 'pageBypasses', 'pageStores', 'pageStoreSkips', 'pageStaleHits', 'pageBackgroundRevalidations', 'warmSuccess', 'warmFailed', 'clsImagesScanned', 'clsDimensionsInjected', 'clsImagesSkipped', 'clsImagesUnresolved', 'cssAsyncStylesScanned', 'cssAsyncStylesRewritten', 'cssAsyncStylesSkipped', 'cssAsyncStylesUnresolved', 'frontpageCssStylesScanned', 'frontpageCssStylesBundled', 'frontpageCssStylesSkipped', 'frontpageCssStylesUnresolved', 'frontpageCssBundlesBuilt', 'sr7LcpDetected', 'sr7LcpPreloadsInjected', 'sr7LcpSkipped', 'sr7LcpUnresolved') as $key) {
+            foreach (array('pageHits', 'pageMisses', 'pageBypasses', 'pageStores', 'pageStoreSkips', 'pageStaleHits', 'pageBackgroundRevalidations', 'warmSuccess', 'warmFailed', 'clsImagesScanned', 'clsDimensionsInjected', 'clsImagesSkipped', 'clsImagesUnresolved', 'cssAsyncStylesScanned', 'cssAsyncStylesRewritten', 'cssAsyncStylesSkipped', 'cssAsyncStylesUnresolved', 'frontpageCssStylesScanned', 'frontpageCssStylesBundled', 'frontpageCssStylesSkipped', 'frontpageCssStylesUnresolved', 'frontpageCssBundlesBuilt', 'sr7LcpDetected', 'sr7LcpPreloadsInjected', 'sr7LcpSkipped', 'sr7LcpUnresolved', 'htmlRewriteSafetyBailouts') as $key) {
                 $data[$key] = max(0, (int) ($data[$key] ?? 0));
             }
 
@@ -505,6 +793,17 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
             if (!is_array($data['bypassReasons'])) {
                 $data['bypassReasons'] = array();
+            } else {
+                $normalized_reasons = array();
+                foreach ($data['bypassReasons'] as $reason => $count) {
+                    $reason = sanitize_text_field((string) $reason);
+                    if ('' === $reason) {
+                        continue;
+                    }
+                    $normalized_reasons[$reason] = max(0, (int) $count);
+                }
+                arsort($normalized_reasons);
+                $data['bypassReasons'] = array_slice($normalized_reasons, 0, self::get_analytics_reason_row_cap(), true);
             }
 
             if (!is_array($data['lastPurge'])) {
@@ -517,6 +816,10 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
             if (!is_array($data['lastFrontpageCssWarm'])) {
                 $data['lastFrontpageCssWarm'] = array();
+            }
+
+            if (!isset($data['htmlRewriteLastBailout']) || !is_array($data['htmlRewriteLastBailout'])) {
+                $data['htmlRewriteLastBailout'] = array();
             }
 
             return $data;
@@ -534,22 +837,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 self::flush_analytics_hit_buffer();
             }
 
-            $file = self::get_analytics_file();
-            if (!file_exists($file) || !is_readable($file)) {
-                return self::get_default_analytics();
-            }
-
-            $raw = ucwp_safe_file_get_contents($file);
-            if (false === $raw || '' === $raw) {
-                return self::get_default_analytics();
-            }
-
-            $decoded = json_decode($raw, true);
-            if (!is_array($decoded)) {
-                return self::get_default_analytics();
-            }
-
-            return self::normalize_analytics($decoded);
+            return self::read_analytics_from_db();
         }
 
         private static function write_analytics(array $data, $force = false)
@@ -558,9 +846,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 return;
             }
 
-            self::ensure_cache_directories();
-            $file = self::get_analytics_file();
-            ucwp_safe_file_put_contents($file, wp_json_encode(self::normalize_analytics($data)), LOCK_EX);
+            self::write_analytics_to_db($data);
         }
 
         private static function mutate_analytics($callback)
@@ -826,12 +1112,12 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 'time_mysql' => current_time('mysql'),
             );
 
-            if (false === get_option('ucwp_last_css_bundle_summary', false)) {
-                add_option('ucwp_last_css_bundle_summary', $summary, '', 'no');
+            if (false === get_option('ultracache_last_css_bundle_summary', false)) {
+                add_option('ultracache_last_css_bundle_summary', $summary, '', 'no');
                 return;
             }
 
-            update_option('ucwp_last_css_bundle_summary', $summary, false);
+            update_option('ultracache_last_css_bundle_summary', $summary, false);
         }
 
         public static function get_stats()
@@ -895,6 +1181,6 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 $payload
             );
 
-            set_transient('ucwp_last_cache_event', $event, DAY_IN_SECONDS);
+            set_transient('ultracache_last_cache_event', $event, DAY_IN_SECONDS);
         }
 }

@@ -94,11 +94,41 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		}
 
 		public function maybe_schedule_pending_background_generation() {
+			if (!$this->is_background_media_queue_enabled()) {
+				return;
+			}
+
+			// Frontend init must not poll the custom queue table. Uploaded media
+			// already schedules the queue directly, and the cron handler performs
+			// the authoritative DB maintenance when it actually runs.
+			$is_maintenance_context = (defined('WP_CLI') && WP_CLI)
+				|| (function_exists('wp_doing_cron') && wp_doing_cron())
+				|| (function_exists('wp_doing_ajax') && wp_doing_ajax())
+				|| (function_exists('is_admin') && is_admin());
+
+			$legacy_queue = $this->get_background_generation_queue();
+			if (!$is_maintenance_context) {
+				if (!empty($legacy_queue)) {
+					$this->schedule_background_generation_queue();
+				}
+				return;
+			}
+
+			$maintenance_key = 'ultracache_media_queue_init_maintenance_v1';
+			if (get_transient($maintenance_key)) {
+				if (!empty($legacy_queue)) {
+					$this->schedule_background_generation_queue();
+				}
+				return;
+			}
+
+			set_transient($maintenance_key, 1, 10 * MINUTE_IN_SECONDS);
+
 			if (method_exists($this, 'retire_on_demand_partial_media_queue_rows')) {
 				$this->retire_on_demand_partial_media_queue_rows();
 			}
 
-			if ($this->get_media_queue_pending_count('best') <= 0 && empty($this->get_background_generation_queue())) {
+			if ($this->get_media_queue_pending_count('best') <= 0 && empty($legacy_queue)) {
 				return;
 			}
 
@@ -106,7 +136,7 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		}
 
 		public function process_background_generation_queue() {
-			if (!$this->is_media_optimization_enabled() || !$this->is_generate_on_upload_enabled() || !$this->is_supported()) {
+			if (!$this->is_background_media_queue_enabled() || !$this->is_supported()) {
 				return;
 			}
 

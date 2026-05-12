@@ -687,7 +687,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'X-UltraCache-Debug'          => '1',
                 'X-UltraCache-Profile-Bypass' => '1',
                 'X-UltraCache-Profile-Run'    => $run_id,
-                'X-UltraCache-Token'          => wp_hash('ucwp-revalidate-v1'),
+                'X-UltraCache-Token'          => (function_exists('ucwp_create_runtime_control_token') ? ucwp_create_runtime_control_token() : ''),
                 'Cache-Control'               => 'no-cache, no-store, max-age=0',
                 'Pragma'                      => 'no-cache',
             );
@@ -715,7 +715,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'ucwp_store_profile'  => '1',
                 'ucwp_profile_bypass' => '1',
                 'ucwp_profile_run'    => $run_id,
-                'ucwp_rt'             => wp_hash('ucwp-revalidate-v1'),
+                'ucwp_rt'             => (function_exists('ucwp_create_runtime_control_token') ? ucwp_create_runtime_control_token() : ''),
             );
             if ('verbose' === $mode) {
                 $profile_query_args['ucwp_store_profile_verbose'] = '1';

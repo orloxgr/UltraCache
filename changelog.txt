@@ -1,3 +1,83 @@
+2.57.149 - Namespace cleanup and Plugin Check DB compliance
+- Renamed new-install custom database tables from `ucwp_*` to `ultracache_*`.
+- Renamed persistent option/transient keys from `ucwp_*` to `ultracache_*` where they store plugin state.
+- Removed dynamic prepared-query construction that WordPress Plugin Check reported in DB cleanup paths.
+- Replaced wildcard option cleanup with curated `delete_option()` / `delete_transient()` cleanup.
+- Updated action-job table reads/writes to use prepared `%i` table identifiers plus cache invalidation.
+- Fixed profile defaults: All Off disables Varnish purge, Lazy MailerLite nonce refresh is off in profiles, Balanced uses shared CSS bundling and keeps Async Remaining CSS off.
+
+
+2.57.147 - Analytics DB review
+- Moved aggregate analytics storage from analytics.json to indexed custom DB rows.
+- Added custom table `wp_ultracache_analytics` for counters, buckets, reasons, and last-event payloads.
+- WP-side analytics reads/writes use $wpdb/dbDelta; no legacy migration from analytics.json is performed.
+- Advanced-cache no longer flushes counters into analytics.json; WP drains APCu/Redis buffers into DB.
+- Added analytics DB table to activation and uninstall/delete cleanup policy.
+
+2.57.146 - Cron warm queue table
+- Moved cron warm queue URLs/currentBatch out of the serialized cron warm state option.
+- Added indexed custom DB table `wp_ultracache_cron_warm_queue` for pending warm URLs.
+- Cron warm state now keeps metadata/counters only; active URLs are stored as DB rows.
+- Added the cron warm queue table and db-version option to activation and uninstall/delete cleanup policy.
+- No analytics storage or cleanup-polish behavior changes in this build.
+
+2.57.145 - Action jobs table
+- Moved on-demand media page-to-attachment refs from serialized option storage to an indexed custom database table.
+- Kept affected page purge batching at one purge per page URL.
+- Added a delete/uninstall cleanup policy with plugin-only, keep settings, keep settings plus tables, and delete-everything modes.
+- No legacy migration is performed; new refs start clean in the table.
+
+2.57.143 - Security hardening
+- Added expiring timestamped HMAC tokens for internal profiler/revalidate requests.
+- Hardened advanced-cache/object-cache drop-in file helpers with allowed-path guards.
+
+2.57.142 - Affected page purge batching
+- Track page URL to media queue relations for on-demand discoveries.
+- Purge each affected page once after all tracked media finish.
+- Return on-demand affected page purge counts from queue processing.
+
+2.57.141 - Media on-demand queue discovery
+- Changes Media on Demand into lookup-only discovery plus background queue enqueue.
+- Queues missing AVIF/WebP variants from frontend/warm rewrites with request caps and transient dedupe.
+- Keeps image conversion in the existing media queue worker, never in the current frontend request.
+
+2.57.140 - Dashboard stats cleanup
+- Makes automatic dashboard stats polling lightweight by omitting full diagnostics from stats snapshots.
+- Extends the stats snapshot cache window to 60 seconds to reduce refresh pressure.
+- Prevents stats refresh from resetting diagnostics to the initial bootstrap payload when no diagnostics are returned.
+
+2.57.139 - CPU/I/O hardening
+- Skips disk object-cache directory scans unless Disk is selected, active, or a reported fallback backend.
+- Adds capped/deadline disk object-cache stats collection with sampled/partial metadata.
+- Batches cron warm state saves so warm ticks no longer write wp_options after every URL.
+- Caps page-cache activity snapshot scanning with file and time budgets.
+- Keeps dashboard settings reads side-effect free so status polling cannot write settings back to wp_options.
+
+2.57.138 - Dashboard/storage status CPU cleanup
+- Made media queue status passive by default: it no longer recursively scans uploads/uc-images on normal dashboard/status refreshes.
+- Added capped manual Refresh Storage Stats flow for AVIF/WebP storage counts and queue storage health.
+- Changed media storage statistics to use cached/manual-refresh data instead of recursive scans during normal stats polling.
+- Cached full cache-storage diagnostics and made normal dashboard refresh return cached/passive data instead of crawling cache/media directories.
+- Added a manual storage diagnostics refresh REST endpoint for explicit capped filesystem rescans.
+
+- Replaced stacked full-document media HTML rewrite passes with a single upload-token discovery path and one replacement-map application.
+- Added request-level public URL lookup memoization for generated media variants.
+- Added relative-path optimized media lookup so frontend rewrites avoid repeated source realpath checks when variants already exist.
+- Kept Build 3 schema-free: no new database tables or custom DB operations.
+
+2.57.136 - Runtime CPU cleanup
+- Splits frontend/cache runtime settings reads away from dashboard settings reads so normal requests no longer run dashboard capability probes or canonical settings writes.
+- Keeps dashboard defaults side-effect free and moves support validation behind the dashboard/admin sanitization path only.
+- Caches media support status and GD WebP encode probing with WordPress transients.
+- Throttles media queue init maintenance and avoids custom queue-table polling on normal frontend init.
+
+2.57.135 - CPU hotfix: SR7 regex and frontend generation guards
+- Refactors SR7/LCP image extraction to avoid large-range backtracking regexes over Slider Revolution inline JSON; discovery now uses bounded slices, URL-first scans, and small context checks.
+- Makes frontend/cache STORE, warm, cron, and stale media rewrites lookup-only: missing AVIF/WebP variants are left as original URLs instead of being generated during page rendering.
+- Keeps generation work in explicit media conversion paths instead of media URL lookup helpers.
+- Changes the Balanced preset so it no longer enables on-demand media generation or CSS bundle-on-entry.
+- Caps Brotli sidecar compression at quality 5 instead of 11 to reduce MISS/STORE CPU.
+
 2.57.134 - Stop on-demand media queue pressure
 - Stops frontend/on-demand image generation from creating automatic pending AVIF/WebP/Both background queue rows. Missing variants are left for explicit admin bulk or WP-CLI media conversion.
 - Retires old partial on-demand queue rows so they no longer keep ucwp_process_media_conversion_queue due-now.

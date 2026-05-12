@@ -424,7 +424,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 				return $gd_avif_supported;
 			}
 
-			$cache_key = 'ucwp_gd_avif_encode_probe_v2';
+			$cache_key = 'ultracache_gd_avif_encode_probe_v2';
 			$cached = get_transient($cache_key);
 			if (is_array($cached) && array_key_exists('supported', $cached)) {
 				$gd_avif_supported = !empty($cached['supported']);
@@ -511,14 +511,23 @@ trait Ultra_Cache_Media_Conversion_Trait
 				return $gd_webp_supported;
 			}
 
+			$cache_key = 'ultracache_gd_webp_encode_probe_v2';
+			$cached = get_transient($cache_key);
+			if (is_array($cached) && array_key_exists('supported', $cached)) {
+				$gd_webp_supported = !empty($cached['supported']);
+				return $gd_webp_supported;
+			}
+
 			if (!function_exists('imagewebp') || !function_exists('imagecreatetruecolor')) {
 				$gd_webp_supported = false;
+				set_transient($cache_key, array('supported' => false, 'error' => 'GD imagewebp() is unavailable'), DAY_IN_SECONDS);
 				return false;
 			}
 
 			$tmp = $this->create_temp_file('ucwp-webp-test');
 			if (!$tmp) {
 				$gd_webp_supported = false;
+				set_transient($cache_key, array('supported' => false, 'error' => 'Unable to create GD WebP probe file'), HOUR_IN_SECONDS);
 				return false;
 			}
 
@@ -528,6 +537,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 			$image = imagecreatetruecolor(2, 2);
 			if (!$image) {
 				$gd_webp_supported = false;
+				set_transient($cache_key, array('supported' => false, 'error' => 'Unable to create GD WebP probe canvas'), HOUR_IN_SECONDS);
 				return false;
 			}
 
@@ -563,6 +573,11 @@ trait Ultra_Cache_Media_Conversion_Trait
 			if (file_exists($test_file)) {
 				ucwp_safe_unlink($test_file);
 			}
+
+			set_transient($cache_key, array(
+				'supported' => (bool) $gd_webp_supported,
+				'error' => $gd_webp_supported ? '' : 'GD WebP probe did not produce a valid non-empty WebP file',
+			), DAY_IN_SECONDS);
 
 			return $gd_webp_supported;
 		}

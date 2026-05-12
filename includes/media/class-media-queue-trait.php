@@ -13,7 +13,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 		private function get_media_queue_table_name() {
 			global $wpdb;
-			return $wpdb->prefix . 'ucwp_media_queue';
+			return $wpdb->prefix . 'ultracache_media_queue';
 		}
 
 		private function media_queue_table_exists() {
@@ -79,37 +79,105 @@ trait Ultra_Cache_Media_Queue_Trait
 			);
 		}
 
-		private function optimized_output_dir_has_file($dir, $extension) {
+		private function optimized_output_dir_has_file($dir, $extension, $max_files = 1500, $time_budget = 0.75) {
 			$dir = (string) $dir;
 			$extension = strtolower(ltrim((string) $extension, '.'));
+			$max_files = max(100, min(10000, (int) $max_files));
+			$deadline = microtime(true) + max(0.1, min(5.0, (float) $time_budget));
 			if ('' === $dir || '' === $extension || !is_dir($dir) || !is_readable($dir)) {
-				return false;
+				return array('hasFiles' => false, 'scannedFiles' => 0, 'truncated' => false, 'timedOut' => false, 'error' => '');
 			}
 
+			$scanned = 0;
+			$truncated = false;
+			$timed_out = false;
 			try {
 				$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
 				foreach ($iterator as $item) {
-					if ($item->isFile() && strtolower($item->getExtension()) === $extension) {
-						return true;
+					if (microtime(true) >= $deadline) {
+						$timed_out = true;
+						$truncated = true;
+						break;
+					}
+					if (!$item->isFile()) {
+						continue;
+					}
+					$scanned++;
+					if (strtolower($item->getExtension()) === $extension) {
+						return array('hasFiles' => true, 'scannedFiles' => $scanned, 'truncated' => false, 'timedOut' => false, 'error' => '');
+					}
+					if ($scanned >= $max_files) {
+						$truncated = true;
+						break;
 					}
 				}
 			} catch (Exception $e) {
-				return false;
+				return array('hasFiles' => false, 'scannedFiles' => $scanned, 'truncated' => $truncated, 'timedOut' => $timed_out, 'error' => (string) $e->getMessage());
 			}
 
-			return false;
+			return array('hasFiles' => false, 'scannedFiles' => $scanned, 'truncated' => $truncated, 'timedOut' => $timed_out, 'error' => '');
 		}
 
-		private function get_media_optimized_storage_health($format = 'best', $completed_rows = 0) {
+		private function get_media_optimized_storage_health_transient_key($format = 'best') {
+			return self::MEDIA_STORAGE_HEALTH_TRANSIENT . '_' . $this->normalize_media_queue_format($format);
+		}
+
+		private function get_media_optimized_storage_health($format = 'best', $completed_rows = 0, $force_refresh = false) {
 			$format = $this->normalize_media_queue_format($format);
 			$completed_rows = max(0, (int) $completed_rows);
 			$avif_dir = defined('UCWP_AVIF_DIR') ? UCWP_AVIF_DIR : '';
 			$webp_dir = defined('UCWP_WEBP_DIR') ? UCWP_WEBP_DIR : '';
 			$avif_dir_exists = ('' !== (string) $avif_dir && is_dir($avif_dir));
 			$webp_dir_exists = ('' !== (string) $webp_dir && is_dir($webp_dir));
-			$avif_has_files = $this->optimized_output_dir_has_file($avif_dir, 'avif');
-			$webp_has_files = $this->optimized_output_dir_has_file($webp_dir, 'webp');
+			$cache_key = $this->get_media_optimized_storage_health_transient_key($format);
+			$cached = $force_refresh ? false : get_transient($cache_key);
 
+			if (is_array($cached) && isset($cached['avifHasFiles'], $cached['webpHasFiles'])) {
+				$health = $cached;
+				$health['cached'] = true;
+				$health['scanSkipped'] = false;
+			} elseif ($force_refresh) {
+				$avif_scan = $this->optimized_output_dir_has_file($avif_dir, 'avif');
+				$webp_scan = $this->optimized_output_dir_has_file($webp_dir, 'webp');
+				$health = array(
+					'storageRoot' => 'uploads/uc-images',
+					'persistentStorage' => true,
+					'avifDir' => (string) $avif_dir,
+					'webpDir' => (string) $webp_dir,
+					'avifDirExists' => $avif_dir_exists,
+					'webpDirExists' => $webp_dir_exists,
+					'avifHasFiles' => !empty($avif_scan['hasFiles']),
+					'webpHasFiles' => !empty($webp_scan['hasFiles']),
+					'avifScan' => $avif_scan,
+					'webpScan' => $webp_scan,
+					'scannedAt' => time(),
+					'cached' => false,
+					'scanSkipped' => false,
+				);
+				set_transient($cache_key, $health, 10 * MINUTE_IN_SECONDS);
+			} else {
+				$health = array(
+					'storageRoot' => 'uploads/uc-images',
+					'persistentStorage' => true,
+					'avifDir' => (string) $avif_dir,
+					'webpDir' => (string) $webp_dir,
+					'avifDirExists' => $avif_dir_exists,
+					'webpDirExists' => $webp_dir_exists,
+					'avifHasFiles' => false,
+					'webpHasFiles' => false,
+					'targetHasFiles' => false,
+					'targetMissing' => false,
+					'needsRepair' => false,
+					'cached' => false,
+					'scanSkipped' => true,
+					'scannedAt' => 0,
+					'message' => 'Optimized storage health is passive. Use Refresh Storage Stats or Verify / Repair Queue to run the capped filesystem scan.',
+				);
+				return $health;
+			}
+
+			$avif_has_files = !empty($health['avifHasFiles']);
+			$webp_has_files = !empty($health['webpHasFiles']);
 			if ('avif' === $format) {
 				$target_has_files = $avif_has_files;
 				$target_missing = !$avif_has_files;
@@ -125,21 +193,11 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 
 			$needs_repair = ($completed_rows > 0 && $target_missing);
-
-			return array(
-				'storageRoot' => 'uploads/uc-images',
-				'persistentStorage' => true,
-				'avifDir' => (string) $avif_dir,
-				'webpDir' => (string) $webp_dir,
-				'avifDirExists' => $avif_dir_exists,
-				'webpDirExists' => $webp_dir_exists,
-				'avifHasFiles' => $avif_has_files,
-				'webpHasFiles' => $webp_has_files,
-				'targetHasFiles' => $target_has_files,
-				'targetMissing' => $target_missing,
-				'needsRepair' => $needs_repair,
-				'message' => $needs_repair ? 'Optimized image files appear to be missing from persistent uploads/uc-images storage. Start/Resume or warm-up regeneration can repair missing variants without relying on the old cache directory.' : '',
-			);
+			$health['targetHasFiles'] = $target_has_files;
+			$health['targetMissing'] = $target_missing;
+			$health['needsRepair'] = $needs_repair;
+			$health['message'] = $needs_repair ? 'Optimized image files appear to be missing from persistent uploads/uc-images storage. Start/Resume or warm-up regeneration can repair missing variants without relying on the old cache directory.' : '';
+			return $health;
 		}
 
 		private function repair_media_queue_if_optimized_storage_missing($format = 'best') {
@@ -150,8 +208,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$format = $this->normalize_media_queue_format($format);
-			$completed_rows = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE format = %s AND status IN ('done','skipped')", $format));
-			$health = $this->get_media_optimized_storage_health($format, $completed_rows);
+			$completed_rows = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM %i WHERE format = %s AND status IN ('done','skipped')", $table, $format));
+			$health = $this->get_media_optimized_storage_health($format, $completed_rows, true);
 			if (empty($health['needsRepair'])) {
 				return array_merge(array('repaired' => false, 'requeued' => 0, 'reason' => 'not_needed'), $health);
 			}
@@ -164,7 +222,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 
 			$count = $wpdb->query($wpdb->prepare(
-				"UPDATE {$table} SET status = 'pending', last_error = %s, updated_at = %s, started_at = NULL, completed_at = NULL WHERE format = %s AND status IN ('done','skipped')",
+				"UPDATE %i SET status = 'pending', last_error = %s, updated_at = %s, started_at = NULL, completed_at = NULL WHERE format = %s AND status IN ('done','skipped')",
+				$table,
 				'Optimized image files were missing; queued for repair.',
 				current_time('mysql'),
 				$format
@@ -173,7 +232,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			return array_merge(array('repaired' => true, 'requeued' => is_numeric($count) ? (int) $count : 0, 'reason' => 'optimized_storage_missing'), $health);
 		}
 
-		public function upsert_media_queue_item($attachment_id, $format = 'best', $status = 'pending', $last_error = '', $attempts = 0) {
+		public function upsert_media_queue_item($attachment_id, $format = 'best', $status = 'pending', $last_error = '', $attempts = 0, $force_pending = false) {
 			$attachment_id = absint($attachment_id);
 			if ($attachment_id <= 0 || !wp_attachment_is_image($attachment_id)) {
 				return false;
@@ -194,7 +253,7 @@ trait Ultra_Cache_Media_Queue_Trait
 				$next_status = $status;
 				if ('pending' === $status && in_array((string) $existing['status'], array('done', 'skipped'), true)) {
 					$same_source = ((int) $existing['source_mtime'] === (int) $signature['mtime'] && (int) $existing['source_size'] === (int) $signature['size']);
-					$next_status = $same_source ? (string) $existing['status'] : 'pending';
+					$next_status = (!$force_pending && $same_source) ? (string) $existing['status'] : 'pending';
 				}
 
 				$wpdb->update(
@@ -231,6 +290,459 @@ trait Ultra_Cache_Media_Queue_Trait
 			);
 
 			return false !== $created;
+		}
+
+
+		private function is_background_media_queue_enabled() {
+			return $this->is_media_optimization_enabled() && ($this->is_generate_on_upload_enabled() || $this->is_generate_on_demand_enabled());
+		}
+
+		private function get_on_demand_queue_max_per_request() {
+			$default = defined('UCWP_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST') ? (int) UCWP_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST : 20;
+			$context = method_exists($this, 'get_media_generation_context') ? $this->get_media_generation_context() : 'frontend';
+			$limit = (int) apply_filters('ucwp_media_on_demand_queue_max_per_request', $default, $context);
+			return max(0, min(100, $limit));
+		}
+
+		private function can_queue_missing_media_from_lookup() {
+			if (!$this->is_background_media_queue_enabled() || !$this->is_generate_on_demand_enabled()) {
+				return false;
+			}
+
+			if (method_exists($this, 'is_supported') && !$this->is_supported()) {
+				return false;
+			}
+
+			$context = method_exists($this, 'get_media_generation_context') ? $this->get_media_generation_context() : 'frontend';
+			if ('manual' === $context) {
+				return false;
+			}
+
+			if (!in_array($context, array('frontend', 'warm', 'cron', 'stale'), true)) {
+				return false;
+			}
+
+			if ('frontend' === $context && method_exists($this, 'is_frontend_on_demand_request') && !$this->is_frontend_on_demand_request()) {
+				return false;
+			}
+
+			$max = $this->get_on_demand_queue_max_per_request();
+			return $max > 0 && $this->on_demand_queue_discovery_count < $max;
+		}
+
+		private function get_on_demand_queue_dedupe_transient_key($attachment_id, $queue_format, $source_file, $missing_format) {
+			$attachment_id = absint($attachment_id);
+			$queue_format = $this->normalize_media_queue_format($queue_format);
+			$missing_format = strtolower((string) $missing_format);
+			$source_file = is_string($source_file) ? wp_normalize_path($source_file) : '';
+			$signature = $this->get_attachment_source_signature($attachment_id);
+			$hash = md5($attachment_id . '|' . $queue_format . '|' . $missing_format . '|' . $source_file . '|' . (int) $signature['mtime'] . '|' . (int) $signature['size']);
+			return self::MEDIA_ON_DEMAND_QUEUE_TRANSIENT_PREFIX . $hash;
+		}
+
+
+		private function get_media_page_refs_table_name() {
+			global $wpdb;
+			return $wpdb->prefix . 'ultracache_media_page_refs';
+		}
+
+		private function media_page_refs_table_exists() {
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+			$found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+			return (string) $found === (string) $table;
+		}
+
+		public function ensure_media_page_refs_table() {
+			global $wpdb;
+
+			$table = $this->get_media_page_refs_table_name();
+			$version = (string) get_option(self::MEDIA_PAGE_REFS_DB_VERSION_OPTION, '');
+			if (self::MEDIA_PAGE_REFS_DB_VERSION === $version && $this->media_page_refs_table_exists()) {
+				return true;
+			}
+
+			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+			$charset_collate = $wpdb->get_charset_collate();
+			$sql = "CREATE TABLE {$table} (
+				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+				page_url_hash char(32) NOT NULL,
+				page_url text NOT NULL,
+				attachment_id bigint(20) unsigned NOT NULL,
+				format varchar(12) NOT NULL DEFAULT 'best',
+				missing_formats varchar(40) NOT NULL DEFAULT '',
+				status varchar(20) NOT NULL DEFAULT 'pending',
+				converted tinyint(1) unsigned NOT NULL DEFAULT 0,
+				discovered_at datetime NULL DEFAULT NULL,
+				updated_at datetime NULL DEFAULT NULL,
+				completed_at datetime NULL DEFAULT NULL,
+				purge_ready_at datetime NULL DEFAULT NULL,
+				purged_at datetime NULL DEFAULT NULL,
+				PRIMARY KEY  (id),
+				UNIQUE KEY page_attachment_format (page_url_hash, attachment_id, format),
+				KEY attachment_format_status (attachment_id, format, status),
+				KEY page_status (page_url_hash, status),
+				KEY purge_ready (purge_ready_at, purged_at),
+				KEY purged_at (purged_at),
+				KEY updated_at (updated_at)
+			) {$charset_collate};";
+
+			dbDelta($sql);
+			if ($this->media_page_refs_table_exists()) {
+				update_option(self::MEDIA_PAGE_REFS_DB_VERSION_OPTION, self::MEDIA_PAGE_REFS_DB_VERSION, false);
+				return true;
+			}
+
+			return false;
+		}
+
+		private function maybe_cleanup_on_demand_affected_page_refs() {
+			if (get_transient('ultracache_media_page_refs_cleanup_lock')) {
+				return;
+			}
+			set_transient('ultracache_media_page_refs_cleanup_lock', 1, HOUR_IN_SECONDS);
+
+			if (!$this->ensure_media_page_refs_table()) {
+				return;
+			}
+
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+			$limit = (int) apply_filters('ucwp_media_page_refs_cleanup_max_deletes_per_run', 250);
+			$limit = max(25, min(1000, $limit));
+			$purged_cutoff = get_date_from_gmt(gmdate('Y-m-d H:i:s', time() - HOUR_IN_SECONDS));
+			$complete_cutoff = get_date_from_gmt(gmdate('Y-m-d H:i:s', time() - (2 * DAY_IN_SECONDS)));
+
+			// Delete only rows that already triggered a page purge. Never delete pending refs here:
+			// on very large stores the media queue may legitimately take days to drain.
+			$wpdb->query($wpdb->prepare(
+				'DELETE FROM %i WHERE purged_at IS NOT NULL AND purged_at <> %s AND purged_at < %s LIMIT %d',
+				$table,
+				'0000-00-00 00:00:00',
+				$purged_cutoff,
+				$limit
+			));
+
+			// If a page became purge-ready but the purge could not be recorded, keep it for
+			// a grace window and then remove only the completed refs, not pending work.
+			$wpdb->query($wpdb->prepare(
+				'DELETE FROM %i WHERE status = %s AND (purged_at IS NULL OR purged_at = %s) AND purge_ready_at IS NOT NULL AND purge_ready_at <> %s AND purge_ready_at < %s LIMIT %d',
+				$table,
+				'complete',
+				'0000-00-00 00:00:00',
+				'0000-00-00 00:00:00',
+				$complete_cutoff,
+				$limit
+			));
+		}
+
+		private function get_on_demand_affected_media_key($attachment_id, $format = 'best') {
+			return absint($attachment_id) . '|' . $this->normalize_media_queue_format($format);
+		}
+
+		private function get_current_on_demand_affected_page_url() {
+			if (is_admin() || wp_doing_ajax() || (defined('REST_REQUEST') && REST_REQUEST)) {
+				return '';
+			}
+
+			$request_uri = ucwp_server_value('REQUEST_URI');
+			if ('' === trim((string) $request_uri)) {
+				return '';
+			}
+
+			$path = wp_unslash((string) $request_uri);
+			$parts = wp_parse_url($path);
+			if (is_array($parts) && isset($parts['path'])) {
+				$path = (string) $parts['path'] . (isset($parts['query']) && '' !== (string) $parts['query'] ? '?' . (string) $parts['query'] : '');
+			}
+
+			$url = home_url($path);
+			$url = remove_query_arg(array('ucwp_action', '_wpnonce', 'ucwp_odq_test', 'ucwp_cache_bust'), $url);
+			$url = esc_url_raw($url);
+			if ('' === $url) {
+				return '';
+			}
+
+			return $url;
+		}
+
+		private function normalize_on_demand_missing_formats($formats) {
+			$items = array();
+			foreach (preg_split('/[,\s]+/', (string) $formats) as $format) {
+				$format = strtolower(trim((string) $format));
+				if (in_array($format, array('avif', 'webp'), true)) {
+					$items[$format] = $format;
+				}
+			}
+			ksort($items);
+			return implode(',', array_values($items));
+		}
+
+		private function merge_on_demand_missing_format($existing_formats, $missing_format) {
+			$items = array();
+			foreach (preg_split('/[,\s]+/', (string) $existing_formats) as $format) {
+				$format = strtolower(trim((string) $format));
+				if (in_array($format, array('avif', 'webp'), true)) {
+					$items[$format] = $format;
+				}
+			}
+			$missing_format = strtolower((string) $missing_format);
+			if (in_array($missing_format, array('avif', 'webp'), true)) {
+				$items[$missing_format] = $missing_format;
+			}
+			ksort($items);
+			return implode(',', array_values($items));
+		}
+
+		private function record_on_demand_affected_page($attachment_id, $format = 'best', $missing_format = '') {
+			$attachment_id = absint($attachment_id);
+			$format = $this->normalize_media_queue_format($format);
+			if ($attachment_id <= 0) {
+				return false;
+			}
+
+			$page_url = $this->get_current_on_demand_affected_page_url();
+			if ('' === $page_url) {
+				return false;
+			}
+
+			$page_key = md5($page_url);
+			$seen_key = $page_key . '|' . $this->get_on_demand_affected_media_key($attachment_id, $format);
+			if (isset($this->on_demand_affected_page_seen[$seen_key])) {
+				return true;
+			}
+			$this->on_demand_affected_page_seen[$seen_key] = true;
+
+			if (!$this->ensure_media_page_refs_table()) {
+				return false;
+			}
+
+			$this->maybe_cleanup_on_demand_affected_page_refs();
+
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+			$now = current_time('mysql');
+			$row = $wpdb->get_row($wpdb->prepare(
+				"SELECT id, missing_formats, status FROM {$table} WHERE page_url_hash = %s AND attachment_id = %d AND format = %s LIMIT 1",
+				$page_key,
+				$attachment_id,
+				$format
+			), ARRAY_A);
+
+			if (is_array($row) && !empty($row['id'])) {
+				$missing_formats = $this->merge_on_demand_missing_format($row['missing_formats'] ?? '', $missing_format);
+				$wpdb->query($wpdb->prepare(
+					"UPDATE {$table} SET page_url = %s, missing_formats = %s, status = 'pending', updated_at = %s, purged_at = NULL, purge_ready_at = NULL WHERE id = %d",
+					$page_url,
+					$missing_formats,
+					$now,
+					(int) $row['id']
+				));
+				return true;
+			}
+
+			$missing_formats = $this->merge_on_demand_missing_format('', $missing_format);
+			$inserted = $wpdb->insert(
+				$table,
+				array(
+					'page_url_hash'  => $page_key,
+					'page_url'       => $page_url,
+					'attachment_id'  => $attachment_id,
+					'format'         => $format,
+					'missing_formats'=> $missing_formats,
+					'status'         => 'pending',
+					'converted'      => 0,
+					'discovered_at'  => $now,
+					'updated_at'     => $now,
+				),
+				array('%s', '%s', '%d', '%s', '%s', '%s', '%d', '%s', '%s')
+			);
+
+			return false !== $inserted;
+		}
+
+		private function mark_on_demand_affected_media_processed($attachment_id, $format, array $result) {
+			$attachment_id = absint($attachment_id);
+			$format = $this->normalize_media_queue_format($format);
+			if ($attachment_id <= 0 || !$this->ensure_media_page_refs_table()) {
+				return array();
+			}
+
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+			$now = current_time('mysql');
+			$converted = !empty($result['converted']) || !empty($result['alreadyOptimized']) || ((int) ($result['skippedExisting'] ?? 0) > 0) || (((int) ($result['avif'] ?? 0) + (int) ($result['webp'] ?? 0)) > 0);
+
+			$page_rows = $wpdb->get_results($wpdb->prepare(
+				"SELECT DISTINCT page_url_hash FROM {$table} WHERE attachment_id = %d AND format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00') LIMIT 250",
+				$attachment_id,
+				$format
+			), ARRAY_A);
+
+			if (empty($page_rows)) {
+				return array();
+			}
+
+			$wpdb->query($wpdb->prepare(
+				"UPDATE {$table} SET status = 'complete', converted = %d, completed_at = %s, updated_at = %s WHERE attachment_id = %d AND format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+				$converted ? 1 : 0,
+				$now,
+				$now,
+				$attachment_id,
+				$format
+			));
+
+			$ready_urls = array();
+			foreach ((array) $page_rows as $page_row) {
+				$page_key = isset($page_row['page_url_hash']) ? (string) $page_row['page_url_hash'] : '';
+				if (!preg_match('/^[a-f0-9]{32}$/', $page_key)) {
+					continue;
+				}
+
+				$summary = $wpdb->get_row($wpdb->prepare(
+					"SELECT MAX(page_url) AS page_url, SUM(CASE WHEN status <> 'complete' THEN 1 ELSE 0 END) AS pending_media, SUM(CASE WHEN converted = 1 THEN 1 ELSE 0 END) AS converted_media FROM {$table} WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+					$page_key
+				), ARRAY_A);
+
+				if (!is_array($summary)) {
+					continue;
+				}
+
+				$pending = (int) ($summary['pending_media'] ?? 0);
+				$converted_count = (int) ($summary['converted_media'] ?? 0);
+				$page_url = isset($summary['page_url']) ? esc_url_raw((string) $summary['page_url']) : '';
+				if ($pending <= 0 && $converted_count > 0 && '' !== $page_url) {
+					$wpdb->query($wpdb->prepare(
+						"UPDATE {$table} SET purge_ready_at = %s, updated_at = %s WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+						$now,
+						$now,
+						$page_key
+					));
+					$ready_urls[$page_url] = $page_url;
+				}
+			}
+
+			return array_values($ready_urls);
+		}
+
+		private function mark_on_demand_affected_pages_purged(array $urls) {
+			$urls = array_values(array_unique(array_filter(array_map('strval', $urls))));
+			if (empty($urls) || !$this->ensure_media_page_refs_table()) {
+				return 0;
+			}
+
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+			$now = current_time('mysql');
+			$count = 0;
+			foreach ($urls as $url) {
+				$page_key = md5($url);
+				$updated = $wpdb->query($wpdb->prepare(
+					"UPDATE {$table} SET purged_at = %s, updated_at = %s WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+					$now,
+					$now,
+					$page_key
+				));
+				if (is_numeric($updated) && (int) $updated > 0) {
+					$count++;
+				}
+			}
+
+			return $count;
+		}
+
+		private function purge_ready_on_demand_affected_pages(array $urls) {
+			$urls = array_values(array_unique(array_filter(array_map('strval', $urls))));
+			if (empty($urls)) {
+				return 0;
+			}
+
+			$engine = null;
+			if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'get_instance')) {
+				$engine = Ultra_Cache_Engine::get_instance();
+			}
+
+			$purged = false;
+			if ($engine && method_exists($engine, 'purge_urls')) {
+				$purged = $engine->purge_urls($urls, 'media-on-demand', array(
+					'reason' => 'on-demand-media-ready',
+					'count'  => count($urls),
+				));
+			} elseif ($engine && method_exists($engine, 'purge_page_by_url')) {
+				$success = 0;
+				foreach ($urls as $url) {
+					if ($engine->purge_page_by_url($url)) {
+						$success++;
+					}
+				}
+				$purged = $success > 0;
+			}
+
+			if ($purged) {
+				$this->mark_on_demand_affected_pages_purged($urls);
+				return count($urls);
+			}
+
+			return 0;
+		}
+
+		private function maybe_queue_missing_optimized_media_from_public_url($public_url, $missing_format) {
+			$missing_format = strtolower((string) $missing_format);
+			if (!in_array($missing_format, array('avif', 'webp'), true) || !$this->media_output_mode_allows($missing_format)) {
+				return false;
+			}
+
+			if (!$this->can_queue_missing_media_from_lookup()) {
+				return false;
+			}
+
+			$relative_path = $this->get_uploads_relative_path_from_public_url($public_url);
+			if (!$relative_path) {
+				return false;
+			}
+
+			$discovery_key = $missing_format . '|' . $relative_path;
+			if (isset($this->on_demand_queue_discovery_seen[$discovery_key])) {
+				return false;
+			}
+			$this->on_demand_queue_discovery_seen[$discovery_key] = true;
+
+			$uploads = wp_get_upload_dir();
+			$uploads_root = !empty($uploads['basedir']) ? realpath($uploads['basedir']) : false;
+			if (!is_string($uploads_root) || '' === $uploads_root) {
+				return false;
+			}
+
+			$source_file = trailingslashit($uploads_root) . ltrim(str_replace('\\', '/', (string) $relative_path), '/');
+			if (!$this->optimized_storage_readable_source_exists($source_file) || !$this->is_allowed_source_file($source_file)) {
+				return false;
+			}
+
+			$attachment_id = $this->find_attachment_id_for_source_file($source_file);
+			if ($attachment_id <= 0) {
+				return false;
+			}
+
+			$queue_format = 'best';
+			$dedupe_key = $this->get_on_demand_queue_dedupe_transient_key($attachment_id, $queue_format, $source_file, $missing_format);
+			if (get_transient($dedupe_key)) {
+				$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
+				return false;
+			}
+
+			$message = 'Queued by on-demand missing media discovery (' . $missing_format . '). Current request stayed lookup-only.';
+			$queued = $this->upsert_media_queue_item($attachment_id, $queue_format, 'pending', $message, 0, true);
+			if (!$queued) {
+				return false;
+			}
+
+			$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
+			$this->on_demand_queue_discovery_count++;
+			set_transient($dedupe_key, 1, HOUR_IN_SECONDS);
+			$this->invalidate_media_work_summary_cache();
+			$this->schedule_background_generation_queue();
+
+			return true;
 		}
 
 		private function get_media_queue_pending_count($format = null) {
@@ -411,7 +923,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			);
 		}
 
-		public function get_media_queue_status($format = 'best') {
+		public function get_media_queue_status($format = 'best', $force_storage_refresh = false) {
 			if (!$this->ensure_media_queue_table()) {
 				return array('enabled' => false, 'message' => 'Media queue table unavailable.');
 			}
@@ -432,7 +944,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$completed = (int) ($counts['done'] + $counts['skipped']);
 			$remaining = (int) ($counts['pending'] + $counts['processing']);
 			$build_state = $this->get_media_queue_build_state($format);
-			$storage_health = $this->get_media_optimized_storage_health($format, $completed);
+			$storage_health = $this->get_media_optimized_storage_health($format, $completed, (bool) $force_storage_refresh);
 			return array(
 				'enabled' => true,
 				'format' => $format,
@@ -546,6 +1058,7 @@ trait Ultra_Cache_Media_Queue_Trait
 					$result['skippedReason'] = 'already_optimized';
 					$result['alreadyOptimized'] = true;
 				}
+				$result['onDemandAffectedPagePurgeReadyUrls'] = $this->mark_on_demand_affected_media_processed($attachment_id, $format, $result);
 				return $result;
 			}
 
@@ -570,11 +1083,14 @@ trait Ultra_Cache_Media_Queue_Trait
 				$result['converted'] = $generated > 0;
 				$result['queueStatus'] = $status;
 				$result['skippedExisting'] = $skipped_existing;
+				$result['onDemandAffectedPagePurgeReadyUrls'] = $this->mark_on_demand_affected_media_processed($attachment_id, $format, $result);
 				return $result;
 			} catch (Throwable $e) {
 				$message = $e->getMessage();
 				$wpdb->update($table, array('status' => 'failed', 'last_error' => $message, 'updated_at' => current_time('mysql'), 'completed_at' => current_time('mysql')), array('id' => (int) $row['id']), array('%s', '%s', '%s', '%s'), array('%d'));
-				return array('success' => false, 'attachment_id' => $attachment_id, 'message' => $message, 'queueStatus' => 'failed', 'converted' => false);
+				$result = array('success' => false, 'attachment_id' => $attachment_id, 'message' => $message, 'queueStatus' => 'failed', 'converted' => false);
+				$result['onDemandAffectedPagePurgeReadyUrls'] = $this->mark_on_demand_affected_media_processed($attachment_id, $format, $result);
+				return $result;
 			}
 		}
 
@@ -596,6 +1112,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			$generated_webp = 0;
 			$failed = 0;
 			$skipped = 0;
+			$affected_page_purge_ready_urls = array();
+			$affected_page_purged = 0;
 			try {
 				$batch = $this->get_media_queue_batch(0, $limit, $format, true);
 				foreach ((array) ($batch['items'] ?? array()) as $attachment_id) {
@@ -611,7 +1129,11 @@ trait Ultra_Cache_Media_Queue_Trait
 					} elseif ('skipped' === (string) ($result['queueStatus'] ?? '')) {
 						$skipped++;
 					}
+					foreach ((array) ($result['onDemandAffectedPagePurgeReadyUrls'] ?? array()) as $ready_url) {
+						$affected_page_purge_ready_urls[(string) $ready_url] = (string) $ready_url;
+					}
 				}
+				$affected_page_purged = $this->purge_ready_on_demand_affected_pages($affected_page_purge_ready_urls);
 			} finally {
 				delete_transient(self::MEDIA_QUEUE_PROCESS_LOCK);
 			}
@@ -635,6 +1157,8 @@ trait Ultra_Cache_Media_Queue_Trait
 				'alreadyOptimizedThisRun' => $skipped,
 				'batchLimitReached' => $batch_limit_reached,
 				'timeBudgetReached' => $time_budget_reached,
+				'onDemandAffectedPagesReady' => count($affected_page_purge_ready_urls),
+				'onDemandAffectedPagesPurged' => $affected_page_purged,
 				'complete' => empty($status['remaining']) && empty($status['failed']),
 				'pauseReason' => $pause_reason,
 			), $status);
@@ -656,7 +1180,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$format = $this->normalize_media_queue_format($format);
-			$count = $wpdb->query($wpdb->prepare("UPDATE {$table} SET status = 'pending', last_error = '', updated_at = %s WHERE format = %s AND status = 'failed'", current_time('mysql'), $format));
+			$count = $wpdb->query($wpdb->prepare("UPDATE %i SET status = 'pending', last_error = '', updated_at = %s WHERE format = %s AND status = 'failed'", $table, current_time('mysql'), $format));
 			return array_merge(array('success' => true, 'retried' => is_numeric($count) ? (int) $count : 0), $this->get_media_queue_status($format));
 		}
 
@@ -667,7 +1191,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$format = $this->normalize_media_queue_format($format);
-			$count = $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE format = %s AND status IN ('done','skipped')", $format));
+			$count = $wpdb->query($wpdb->prepare("DELETE FROM %i WHERE format = %s AND status IN ('done','skipped')", $table, $format));
 			return array_merge(array('success' => true, 'cleared' => is_numeric($count) ? (int) $count : 0), $this->get_media_queue_status($format));
 		}
 

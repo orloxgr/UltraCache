@@ -16,6 +16,10 @@ trait Ultra_Cache_Media_Diagnostics_Trait
 
 		private function invalidate_media_work_summary_cache() {
 			delete_transient(self::MEDIA_WORK_SUMMARY_TRANSIENT);
+			delete_transient(self::MEDIA_STORAGE_STATS_TRANSIENT);
+			foreach (array('best', 'avif', 'webp', 'both') as $format) {
+				delete_transient(self::MEDIA_STORAGE_HEALTH_TRANSIENT . '_' . $format);
+			}
 		}
 
 		private function update_media_diagnostic_state(array $updates) {
@@ -137,6 +141,13 @@ trait Ultra_Cache_Media_Diagnostics_Trait
 		}
 
 		public function get_support_status() {
+			$cache_key = 'ultracache_media_support_status_v3';
+			$cached = get_transient($cache_key);
+			if (is_array($cached) && array_key_exists('supported', $cached)) {
+				$cached['cached'] = true;
+				return $cached;
+			}
+
 			$imagick      = extension_loaded('imagick');
 			$imagick_avif = $this->supports_imagick_avif();
 			$imagick_webp = $this->supports_imagick_webp();
@@ -154,7 +165,7 @@ trait Ultra_Cache_Media_Diagnostics_Trait
 				$last_class = 'WP_Image_Editor_Imagick';
 			}
 
-			return array(
+			$status = array(
 				'imagick'      => $imagick,
 				'imagick_avif' => $imagick_avif,
 				'imagick_webp' => $imagick_webp,
@@ -167,47 +178,102 @@ trait Ultra_Cache_Media_Diagnostics_Trait
 				'last_avif_encode_at' => (int) ($diag['lastAvifEncodeAt'] ?? 0),
 				'last_image_editor_class' => $last_class,
 				'supported'    => ($imagick_avif || $gd_avif || $imagick_webp || $gd_webp),
+				'cached'       => false,
 			);
+
+			set_transient($cache_key, $status, 10 * MINUTE_IN_SECONDS);
+			return $status;
 		}
 
-		public function get_stats() {
-			$avif_files = 0;
-			$webp_files = 0;
+		private function scan_media_storage_stats($max_files = 8000, $time_budget = 1.5) {
 			$bytes = 0;
-
-			$scan = static function( $dir, $extension ) use ( &$bytes ) {
+			$scan = static function($dir, $extension) use (&$bytes, $max_files, $time_budget) {
 				$count = 0;
-				if ( ! $dir || ! is_dir( $dir ) ) {
-					return 0;
+				$scanned = 0;
+				$truncated = false;
+				$timed_out = false;
+				$deadline = microtime(true) + max(0.1, min(5.0, (float) $time_budget));
+				if (!$dir || !is_dir($dir) || !is_readable($dir)) {
+					return array('files' => 0, 'bytes' => 0, 'scannedFiles' => 0, 'truncated' => false, 'timedOut' => false, 'error' => '');
 				}
 
-				$iterator = new RecursiveIteratorIterator(
-					new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS )
-				);
-
-				foreach ( $iterator as $item ) {
-					if ( ! $item->isFile() ) {
-						continue;
+				try {
+					$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+					foreach ($iterator as $item) {
+						if (microtime(true) >= $deadline) {
+							$truncated = true;
+							$timed_out = true;
+							break;
+						}
+						if (!$item->isFile()) {
+							continue;
+						}
+						$scanned++;
+						$size = max(0, (int) $item->getSize());
+						$bytes += $size;
+						if (strtolower($item->getExtension()) === strtolower($extension)) {
+							$count++;
+						}
+						if ($scanned >= $max_files) {
+							$truncated = true;
+							break;
+						}
 					}
-
-					$bytes += (int) $item->getSize();
-					if ( strtolower( $item->getExtension() ) === strtolower( $extension ) ) {
-						$count++;
-					}
+				} catch (Exception $e) {
+					return array('files' => $count, 'bytes' => $bytes, 'scannedFiles' => $scanned, 'truncated' => $truncated, 'timedOut' => $timed_out, 'error' => (string) $e->getMessage());
 				}
 
-				return $count;
+				return array('files' => $count, 'bytes' => $bytes, 'scannedFiles' => $scanned, 'truncated' => $truncated, 'timedOut' => $timed_out, 'error' => '');
 			};
 
-			$avif_files = $scan( defined( 'UCWP_AVIF_DIR' ) ? UCWP_AVIF_DIR : '', 'avif' );
-			$webp_files = $scan( defined( 'UCWP_WEBP_DIR' ) ? UCWP_WEBP_DIR : '', 'webp' );
-
+			$avif = $scan(defined('UCWP_AVIF_DIR') ? UCWP_AVIF_DIR : '', 'avif');
+			$webp = $scan(defined('UCWP_WEBP_DIR') ? UCWP_WEBP_DIR : '', 'webp');
+			$avif_files = (int) ($avif['files'] ?? 0);
+			$webp_files = (int) ($webp['files'] ?? 0);
 			return array(
 				'optimizedImages' => $avif_files + $webp_files,
 				'avifFiles' => $avif_files,
 				'webpFiles' => $webp_files,
 				'mediaSizeBytes' => $bytes,
-				'mediaSizeHuman' => function_exists( 'size_format' ) ? size_format( $bytes, 2 ) : (string) $bytes,
+				'mediaSizeHuman' => function_exists('size_format') ? size_format($bytes, 2) : (string) $bytes,
+				'mediaStatsCached' => false,
+				'mediaStatsScanSkipped' => false,
+				'mediaStatsScannedAt' => time(),
+				'mediaStatsTruncated' => !empty($avif['truncated']) || !empty($webp['truncated']),
+				'mediaStatsTimedOut' => !empty($avif['timedOut']) || !empty($webp['timedOut']),
+				'avifScan' => $avif,
+				'webpScan' => $webp,
+			);
+		}
+
+		public function refresh_media_storage_stats() {
+			$stats = $this->scan_media_storage_stats();
+			set_transient(self::MEDIA_STORAGE_STATS_TRANSIENT, $stats, 10 * MINUTE_IN_SECONDS);
+			return $stats;
+		}
+
+		public function get_stats($force_refresh = false) {
+			if ($force_refresh) {
+				return $this->refresh_media_storage_stats();
+			}
+
+			$cached = get_transient(self::MEDIA_STORAGE_STATS_TRANSIENT);
+			if (is_array($cached) && isset($cached['optimizedImages'])) {
+				$cached['mediaStatsCached'] = true;
+				$cached['mediaStatsScanSkipped'] = false;
+				return $cached;
+			}
+
+			return array(
+				'optimizedImages' => 0,
+				'avifFiles' => 0,
+				'webpFiles' => 0,
+				'mediaSizeBytes' => 0,
+				'mediaSizeHuman' => function_exists('size_format') ? size_format(0, 2) : '0',
+				'mediaStatsCached' => false,
+				'mediaStatsScanSkipped' => true,
+				'mediaStatsScannedAt' => 0,
+				'mediaStatsMessage' => 'Media storage stats are passive. Use Refresh Storage Stats to run the capped filesystem scan.',
 			);
 		}
 
