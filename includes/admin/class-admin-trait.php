@@ -52,6 +52,20 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                 $dashboard_stats = method_exists(__CLASS__, 'get_dashboard_stats_snapshot') ? self::get_dashboard_stats_snapshot(60, false) : array('success' => true);
             }
 
+            // Runtime cache cards are lightweight admin visibility tools, not
+            // counter/stat collection. Keep them available on first dashboard load
+            // even when cache stats are passive or an old cached stats snapshot did
+            // not contain OPcache/APCu/external-cache payloads yet.
+            if (empty($dashboard_stats['opcache']) && method_exists(__CLASS__, 'get_opcache_status_summary')) {
+                $dashboard_stats['opcache'] = self::get_opcache_status_summary();
+            }
+            if (empty($dashboard_stats['apcu']) && method_exists(__CLASS__, 'get_apcu_status_summary')) {
+                $dashboard_stats['apcu'] = self::get_apcu_status_summary();
+            }
+            if (empty($dashboard_stats['externalCaches']) && method_exists(__CLASS__, 'get_external_cache_detection')) {
+                $dashboard_stats['externalCaches'] = self::get_external_cache_detection(false);
+            }
+
             // Cache Statistics OFF must not turn the dashboard into a dummy shell.
             // Counter/stat collection and polling remain disabled through
             // $dashboard_stats, but read-only diagnostics are loaded once during

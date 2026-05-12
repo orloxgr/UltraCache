@@ -87,12 +87,13 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
             $table = $this->get_action_jobs_table_name();
             $cache_key = 'action_jobs_table_exists_' . md5((string) $table);
-            $cached = wp_cache_get($cache_key, 'ultracache');
-            if (is_bool($cached)) {
+            $cache_found = false;
+            $cached = wp_cache_get($cache_key, 'ultracache', false, $cache_found);
+            if ($cache_found && is_bool($cached)) {
                 return $cached;
             }
 
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Schema existence check for an UltraCache-owned custom table; cached below.
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema existence check for an UltraCache-owned custom table; result is cached below.
             $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
             $exists = ((string) $found === (string) $table);
             wp_cache_set($cache_key, $exists, 'ultracache', HOUR_IN_SECONDS);
@@ -139,6 +140,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             ) {$charset_collate};";
 
             dbDelta($sql);
+            wp_cache_delete('action_jobs_table_exists_' . md5((string) $table), 'ultracache');
             if ($this->action_jobs_table_exists()) {
                 update_option($this->get_action_jobs_db_version_option_key(), $this->get_action_jobs_db_version(), false);
                 wp_cache_delete('action_jobs_table_exists_' . md5((string) $table), 'ultracache');
@@ -302,6 +304,17 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             return $jobs;
         }
 
+        private function get_action_jobs_rows_cache_key()
+        {
+            return 'action_jobs_rows_v2_' . md5((string) $this->get_action_jobs_table_name());
+        }
+
+        private function flush_action_jobs_rows_cache()
+        {
+            wp_cache_delete($this->get_action_jobs_rows_cache_key(), 'ultracache');
+            wp_cache_delete('action_jobs_rows_v1', 'ultracache');
+        }
+
         private function load_action_jobs()
         {
             if (!$this->ensure_action_jobs_table()) {
@@ -310,14 +323,20 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
             global $wpdb;
             $table = $this->get_action_jobs_table_name();
-            $cache_key = 'action_jobs_rows_v1';
-            $rows = wp_cache_get($cache_key, 'ultracache');
-            if (!is_array($rows)) {
-                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned custom action queue table; rows are cached and invalidated on writes.
-                $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM %i ORDER BY updated_at DESC, created_at DESC LIMIT %d', $table, 50), ARRAY_A);
-                $rows = is_array($rows) ? $rows : array();
-                wp_cache_set($cache_key, $rows, 'ultracache', 30);
-            }
+            $cache_key = $this->get_action_jobs_rows_cache_key();
+
+            /*
+             * Action jobs are wp-admin/dashboard state, not a frontend hot path.
+             * Always refresh from the UltraCache-owned custom table so queued
+             * actions cannot disappear behind a stale persistent object-cache row.
+             * The refreshed rows are still written to object cache for diagnostics
+             * and for WordPressCS' explicit caching expectation around custom DB reads.
+             */
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache-owned custom action queue table; refreshed intentionally to avoid stale dashboard job state and then cached below.
+            $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM %i ORDER BY updated_at DESC, created_at DESC LIMIT %d', $table, 50), ARRAY_A);
+            $rows = is_array($rows) ? $rows : array();
+            wp_cache_set($cache_key, $rows, 'ultracache', 30);
+
             $jobs = array();
             if (is_array($rows)) {
                 foreach ($rows as $row) {
@@ -349,8 +368,8 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             $normalized = $this->normalize_action_jobs($jobs);
             $scrubbed = $this->scrub_action_jobs_for_storage($normalized);
 
-            wp_cache_delete('action_jobs_rows_v1', 'ultracache');
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned custom action queue table; cache is invalidated before writes.
+            $this->flush_action_jobs_rows_cache();
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache-owned custom action queue table; cache is invalidated before writes.
             $wpdb->query($wpdb->prepare('DELETE FROM %i', $table));
             foreach ($scrubbed as $id => $job) {
                 if (!is_array($job)) {
@@ -360,12 +379,13 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 if ('' === (string) $row['job_id']) {
                     continue;
                 }
-                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned custom action queue table; cache is invalidated before writes.
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache-owned custom action queue table; cache is invalidated before writes.
                 $wpdb->replace($table, $row, array(
                     '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s',
                     '%d', '%d', '%d', '%d', '%d', '%s',
                 ));
             }
+            $this->flush_action_jobs_rows_cache();
         }
 
         private function find_active_heavy_action_job(array $jobs, $exclude_id = '')

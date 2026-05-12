@@ -190,10 +190,12 @@ function ucwp_run_uninstall_cleanup()
             'ultracache_cron_warm_lock',
             'ultracache_cron_warm_lock_atomic',
             'ultracache_wp_cache_managed',
+            'ultracache_wp_config_backup_registry',
             'ultracache_media_conversion_queue',
             'ultracache_media_diagnostics_v1',
             'ultracache_media_queue_build_state_v1',
             'ultracache_object_cache_last_flush_report',
+            'ultracache_last_css_bundle_summary',
         );
 
         if (!$ucwp_keep_settings) {

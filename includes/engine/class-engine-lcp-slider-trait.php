@@ -4284,6 +4284,38 @@ HTML;
             return (bool) preg_match('/\.(avif|webp|png|jpe?g|gif|bmp|heic|heif)($|\?)/i', $src);
         }
 
+        private function html_has_equivalent_lcp_image_preload($html, $src)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return false;
+            }
+
+            $normalized_src = strtolower($this->normalize_public_resource_url($src));
+            if ('' === $normalized_src) {
+                return false;
+            }
+
+            if (!preg_match_all('/<link\b[^>]*>/i', $html, $matches)) {
+                return false;
+            }
+
+            foreach ((array) $matches[0] as $tag) {
+                $tag = (string) $tag;
+                $rel = strtolower((string) $this->extract_attribute_from_html_tag($tag, 'rel'));
+                $as = strtolower((string) $this->extract_attribute_from_html_tag($tag, 'as'));
+                if (false === strpos($rel, 'preload') || 'image' !== trim($as)) {
+                    continue;
+                }
+
+                $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'href'), ENT_QUOTES, 'UTF-8');
+                if (strtolower($this->normalize_public_resource_url($href)) === $normalized_src) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private function inject_lcp_preload_link($html, $src)
         {
             $sr7_source_url = $this->resolve_sr7_generated_image_list_source_url($src, $html);
@@ -4350,6 +4382,10 @@ HTML;
                 }
 
                 return $html;
+            }
+
+            if ($this->html_has_equivalent_lcp_image_preload($html, $src)) {
+                return $this->cleanup_ambiguous_sr7_generated_lcp_preloads($html);
             }
 
             $link = '<link rel="preload" as="image" href="' . $src . '"';

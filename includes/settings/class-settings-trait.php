@@ -36,7 +36,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'deferAllJsEnabled'          => false,
                 'delayAllThirdPartyJsEnabled' => false,
                 'deferJsForceList'           => '',
-                'deferJsExcludeList'         => '',
+                'deferJsExcludeList'         => implode("\n", self::get_default_js_delay_defer_exclusion_patterns()),
                 'delaySafeThirdPartyJsEnabled'   => false,
                 'lazyMailerliteNonceEnabled' => false,
                 'delaySafeThirdPartyJsPatterns' => implode("\n", self::get_default_safe_third_party_delay_patterns()),
@@ -115,7 +115,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cacheExceptionQueryArgs'    => implode("\n", self::get_default_excluded_query_args()),
                 'cacheQueryStringsEnabled'   => false,
                 'cacheQueryStringAllowlist'  => '',
-                'cacheSafeTrackingCookiesEnabled' => true,
+                'cacheSafeTrackingCookiesEnabled' => false,
                 'safeTrackingCookieList'     => implode("\n", self::get_default_safe_tracking_cookie_patterns()),
                 'unsafeCacheCookieList'      => implode("\n", self::get_default_unsafe_cache_cookie_patterns()),
                 'uninstallCleanupPolicy'    => 'delete_everything',
@@ -1467,15 +1467,14 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['cacheExceptionPaths']       = self::sanitize_excluded_paths_setting($settings['cacheExceptionPaths']);
             $settings['cacheExceptionQueryArgs']   = self::sanitize_setting_key_list($settings['cacheExceptionQueryArgs']);
             $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
-            $settings['cacheSafeTrackingCookiesEnabled'] = self::normalize_boolean_setting_value($settings['cacheSafeTrackingCookiesEnabled'] ?? true, true);
+            $settings['cacheSafeTrackingCookiesEnabled'] = self::normalize_boolean_setting_value($settings['cacheSafeTrackingCookiesEnabled'] ?? false, false);
             $settings['safeTrackingCookieList']    = self::sanitize_cookie_pattern_setting($settings['safeTrackingCookieList']);
             $settings['unsafeCacheCookieList']     = self::sanitize_cookie_pattern_setting($settings['unsafeCacheCookieList']);
             $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
             $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
-            // Defer all JS is intentionally aggressive/manual. An empty visible
-            // JS Delay / Defer Exclusions list must stay empty: the plugin should
-            // defer every eligible script, let the user see breakage, then let the
-            // scan/Populate Defaults help them add visible exclusions.
+            // Existing installs keep their saved visible JS Delay / Defer Exclusions.
+            // Fresh installs receive the safe dependency-floor defaults in the
+            // visible textarea; there are still no hidden safe-stage exclusions.
             $settings['deferJsExcludeList'] = self::normalize_textarea_setting($settings['deferJsExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = '';
             $settings['delaySafeThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delaySafeThirdPartyJsPatterns']);

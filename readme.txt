@@ -4,7 +4,7 @@ Tags: cache, performance, redis, varnish, webp
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.57.149
+Stable tag: 2.57.164
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -125,7 +125,9 @@ Google Terms of Service: https://policies.google.com/terms
 
 = Existing third-party scripts on the site =
 
-UltraCache may detect URLs or inline code from services such as Google Tag Manager, Google Analytics, Facebook/Meta Pixel, Google Maps, reCAPTCHA, hCaptcha, Hotjar, Microsoft Clarity, Stripe, PayPal, and similar services when analyzing the site's existing frontend HTML for delay/defer exclusions, cache safety rules, or diagnostics. UltraCache does not add these services to the site and does not send data to them by itself.
+UltraCache may detect URLs or inline code from services such as Google Tag Manager, Google Analytics, Facebook/Meta Pixel, Google Maps, reCAPTCHA, hCaptcha, Hotjar, Microsoft Clarity, Stripe, PayPal, and similar services when analyzing the site's existing frontend HTML for delay/defer exclusions, cache safety rules, or diagnostics.
+
+UltraCache does not enqueue, iframe, inject, fetch, or otherwise load these third-party services itself. Domains such as `googletagmanager.com`, `connect.facebook.net`, `maps.googleapis.com`, and `maps.gstatic.com` may appear in the plugin only as text patterns used to classify or delay resources that are already present on the site from a theme, another plugin, or the site owner. UltraCache does not send visitor data to those services by itself.
 
 = Varnish =
 
@@ -220,6 +222,28 @@ Disable the last risky optimization, confirm the issue disappears, then add visi
 9. Review Diagnostics for page cache, object cache, Varnish, storage, media queue, CSS Bundle Summary, and generated drop-in versions.
 
 == Changelog ==
+
+= 2.57.164 =
+* Fixes initial dashboard visibility for OPcache/APCu/Varnish cards when cache stats are passive or no stats snapshot exists yet.
+* Keeps the Varnish settings card visible when Varnish is configured or detected as the reverse proxy, even if purge integration is disabled.
+* Deletes the stored CSS Bundle Summary option during Delete All Data / uninstall cleanup.
+
+= 2.57.162 =
+* Fixed the Delete All Data dashboard action so its confirmed redirect does not trigger the generic browser leave-page prompt used for unsaved settings.
+
+= 2.57.161 =
+* Fix APCu dashboard warnings so active APCu object-cache backends are not mislabeled as analytics/shared-memory advisory mode.
+
+= 2.57.160 =
+* Runs the Safe Defer JS assisted init-script scan when a profile enables Safe Defer JS.
+* Ignores Slider Revolution/SR7/tp-tools runtime assets during Safe Defer scan suggestions.
+* Replaces wp-config backup cleanup glob scans with a tracked UltraCache backup registry.
+
+= 2.57.160 =
+* Renamed Enable Defer JS to Safe Defer JS.
+* Added a front-page scan-assisted append flow for visible theme/page-builder init script exclusions.
+* Added a manual Scan & append detected init scripts button to JS Delay / Defer Exclusions.
+* Added duplicate LCP image preload dedupe.
 
 = 2.57.149 =
 

@@ -897,7 +897,7 @@
 		const capText = ' Current cap: ' + formatNumber(Number.isFinite(selectedCap) ? Math.max(0, selectedCap) : 0) + '.';
 		const globalCapText = maxUrls > 0 ? ' Global crawl cap: ' + formatNumber(maxUrls) + '.' : '';
 
-		return 'Cap for scheduled warm-up. The sources are chosen from the "Full-site warm-up sources" setting in the Warm Cache box. Selected sources are: ' + sourceText + '. URLs are processed in the above priority order.' + totalText + capText + globalCapText;
+		return 'Cap for scheduled / cron warm-up. The sources are chosen from the "Full-site warm-up sources" setting in the Warm Cache box. Selected sources are: ' + sourceText + '. URLs are processed in the above priority order.' + totalText + capText + globalCapText;
 	}
 
 	function splitWarmSourceList(value) {
@@ -1484,6 +1484,7 @@
 			delete_all_data: { path: 'delete-all-data', method: 'POST' },
 			populate_query_allowlist: { path: 'query-string-allowlist/populate', method: 'POST' },
 			font_patterns_scan: { path: 'font-patterns/scan-frontpage', method: 'POST' },
+			safe_defer_init_scan: { path: 'safe-defer/init-scan', method: 'POST' },
 		};
 
 		const route = routes[subAction];
@@ -2137,13 +2138,14 @@
 		]);
 	}
 
-	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onRuntimeScan, onLoadLatestProfileScan }) {
+	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onSafeInitScan, onScan, onRuntimeScan, onLoadLatestProfileScan }) {
 		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
 		const [draft, setDraft] = useState(value || "");
 		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
 		const [scan, setScan] = useState(null);
 		const [populateBusy, setPopulateBusy] = useState(false);
 		const [scanBusy, setScanBusy] = useState(false);
+		const [initScanBusy, setInitScanBusy] = useState(false);
 		const [debugScanBusy, setDebugScanBusy] = useState(false);
 		const [runtimeScanBusy, setRuntimeScanBusy] = useState(false);
 		const [runtimeScanStatus, setRuntimeScanStatus] = useState('');
@@ -2431,6 +2433,21 @@
 			}
 		}
 
+		async function handleSafeInitScan() {
+			if (disabled || initScanBusy || typeof onSafeInitScan !== 'function') {
+				return;
+			}
+			setInitScanBusy(true);
+			try {
+				const next = await onSafeInitScan(draftValue);
+				if (typeof next === 'string') {
+					setDraft(next);
+				}
+			} finally {
+				setInitScanBusy(false);
+			}
+		}
+
 		async function handleScan() {
 			if (disabled || scanBusy || typeof onScan !== 'function') {
 				return;
@@ -2491,7 +2508,7 @@
 
 		return h('div', { className: 'uc-field-wrap', style: { gridColumn: '1 / -1' } }, [
 			h('label', { className: 'uc-field-label' }, 'JS Delay / Defer Exclusions'),
-			h('div', { className: 'text-xs text-zinc-500 mb-2' }, 'Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Defer JS, Defer all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Defer, and Main Thread Relief where applicable. Populate Defaults adds only the hard dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.'),
+			h('div', { className: 'text-xs text-zinc-500 mb-2' }, 'Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, Defer all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Defer, and Main Thread Relief where applicable. Populate Defaults adds only the hard dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.'),
 			h('textarea', {
 				className: 'uc-field-input uc-field-textarea',
 				value: draft,
@@ -2509,7 +2526,7 @@
 					placeholder: defaultScanUrl || 'https://example.com/page/',
 					onChange: (e) => setScanUrl(e.target.value),
 				}),
-				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Scan a same-site page. UltraCache profiles the final HTML and shows missing visible exclusions, including inline dependency blocks such as jquery-js-after, wp-i18n-js-after, wp-api-fetch-js-after, and *-js-translations. Nothing is applied automatically.'),
+				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Scan a same-site page. UltraCache profiles the final HTML and shows missing visible exclusions, including inline dependency blocks such as jquery-js-after, wp-i18n-js-after, wp-api-fetch-js-after, and *-js-translations. Nothing is applied automatically by the scan button; Safe Defer JS can append detected init scripts here only when you enable that switch.'),
 			]),
 			h('div', { className: 'mt-2 mb-2 flex flex-wrap items-center text-[11px] text-zinc-500' }, [
 				h('span', { className: 'text-zinc-400', style: { marginRight: '10px' } }, 'Runtime Scan context'),
@@ -2527,6 +2544,7 @@
 			]),
 			h('div', { className: 'uc-js-scan-actions mt-3 mb-3' }, [
 				h(Button, { key: 'defaults', onClick: handlePopulateDefaults, disabled: !!disabled || populateBusy }, populateBusy ? 'Populating…' : 'Populate Defaults'),
+				h(Button, { key: 'safe-init-scan', onClick: handleSafeInitScan, disabled: !!disabled || initScanBusy }, initScanBusy ? 'Scanning init scripts…' : 'Scan & append detected init scripts'),
 				h(Button, { key: 'scan', onClick: handleScan, disabled: !!disabled || scanBusy }, scanBusy ? 'Scanning…' : 'JS Delay / Defer Scan'),
 				h(Button, { key: 'runtime-scan', onClick: handleRuntimeScan, disabled: !!disabled || runtimeScanBusy }, runtimeScanBusy ? 'Runtime scanning…' : 'Runtime Scan'),
 				h(Button, { key: 'debug-scan', onClick: handleDebugLoadLatestProfileScan, disabled: !!disabled || debugScanBusy }, debugScanBusy ? 'Loading…' : 'Debug Profile'),
@@ -4121,8 +4139,48 @@
 			return null;
 		}
 		const statusText = !isAvailable ? 'Unavailable' : (isEnabled ? 'Enabled' : 'Disabled');
-		const activeObjectBackend = stats && (stats.objectCacheActiveBackend || stats.objectCacheBackend || stats.objectCacheStatsSource);
-		const apcuIsActiveObjectBackend = String(activeObjectBackend || '').toLowerCase() === 'apcu';
+		const objectCacheStatus = stats && stats.objectCache ? stats.objectCache : {};
+		const diagnosticsObjectCacheStatus = stats && stats.diagnostics && stats.diagnostics.objectCache ? stats.diagnostics.objectCache : {};
+		const normalizeBackendValue = (value) => {
+			value = String(value || '').toLowerCase().trim();
+			return ['redis', 'apcu', 'disk', 'runtime'].indexOf(value) !== -1 ? value : '';
+		};
+		const firstBackendValue = (values) => {
+			for (let i = 0; i < values.length; i++) {
+				const normalized = normalizeBackendValue(values[i]);
+				if (normalized) {
+					return normalized;
+				}
+			}
+			return '';
+		};
+		const activeObjectBackend = firstBackendValue([
+			objectCacheStatus.activeBackend,
+			diagnosticsObjectCacheStatus.activeBackend,
+			stats && stats.objectCacheActiveBackend,
+			stats && stats.objectCacheStatsSource,
+			objectCacheStatus.activeFallbackBackend,
+			diagnosticsObjectCacheStatus.activeFallbackBackend,
+			stats && stats.objectCacheBackend,
+		]);
+		const fallbackObjectBackend = firstBackendValue([
+			objectCacheStatus.activeFallbackBackend,
+			diagnosticsObjectCacheStatus.activeFallbackBackend,
+			objectCacheStatus.fallbackBackend,
+			diagnosticsObjectCacheStatus.fallbackBackend,
+		]);
+		const selectedObjectBackend = firstBackendValue([
+			objectCacheStatus.selectedBackend,
+			diagnosticsObjectCacheStatus.selectedBackend,
+			stats && stats.objectCacheBackend,
+			settings && settings.objectCacheBackend,
+		]);
+		const fallbackActive = !!(
+			objectCacheStatus.fallbackActive ||
+			diagnosticsObjectCacheStatus.fallbackActive ||
+			(stats && stats.objectCacheFallbackActive)
+		);
+		const apcuIsActiveObjectBackend = activeObjectBackend === 'apcu' || (fallbackActive && fallbackObjectBackend === 'apcu') || (!activeObjectBackend && selectedObjectBackend === 'apcu' && settings && settings.objectCacheEnabled);
 		const memoryUsage = typeof apcu.memoryUsagePercent !== 'undefined' ? Number(apcu.memoryUsagePercent) : 0;
 		const apcuWarnings = [];
 		if (memoryUsage >= 85) {
@@ -4210,9 +4268,26 @@
 		]);
 	}
 
-	function ExternalCacheFlushSettingsCard({ stats, settings, busy, onRedetect, onToggle }) {
+	function ExternalCacheFlushSettingsCard({ stats, diagnostics, settings, busy, onRedetect, onToggle }) {
 		const detection = stats && stats.externalCaches ? stats.externalCaches : {};
 		const layers = detection && detection.layers ? detection.layers : {};
+		const reverseProxy = diagnostics && diagnostics.reverseProxy ? diagnostics.reverseProxy : {};
+		const varnishDiagnostic = diagnostics && diagnostics.varnish ? diagnostics.varnish : {};
+		const varnishLayer = layers && layers.varnish ? layers.varnish : {};
+		const reverseProxyTextForVarnish = [
+			reverseProxy.provider,
+			reverseProxy.server,
+			reverseProxy.via,
+			reverseProxy.x_cache,
+			reverseProxy.x_cache_status,
+			reverseProxy.message,
+		].join(' ').toLowerCase();
+		const reverseProxyLooksLikeVarnish = !!(reverseProxy && reverseProxy.detected && reverseProxyTextForVarnish.indexOf('varnish') !== -1);
+		const varnishConfigured = !!(
+			(settings && (settings.varnishCliEnabled || settings.varnishCliServers || settings.flushAllIncludeVarnish)) ||
+			(varnishDiagnostic && (varnishDiagnostic.enabled || varnishDiagnostic.available || varnishDiagnostic.servers || varnishDiagnostic.endpointCount || varnishDiagnostic.secretConfigured))
+		);
+		const showVarnishCandidate = !!((varnishLayer && varnishLayer.detected) || reverseProxyLooksLikeVarnish || varnishConfigured);
 		const candidates = [
 			{ key: 'opcache', setting: 'flushAllIncludeOpcache', label: 'OPcache', description: 'Also reset PHP OPcache when Flush All Cache runs.' },
 			{ key: 'apcu', setting: 'flushAllIncludeApcu', label: 'APCu', description: 'Also clear the APCu user cache when Flush All Cache runs.' },
@@ -4220,23 +4295,40 @@
 			{ key: 'nginx', setting: 'flushAllIncludeNginx', label: 'Nginx Cache', description: 'Also trigger the detected Nginx Helper purge hook when Flush All Cache runs.' },
 			{ key: 'varnish', setting: 'flushAllIncludeVarnish', label: 'Varnish Cache', description: 'Also flush the configured UltraCache Varnish endpoint when Flush All Cache runs.' },
 		];
-		const visible = candidates.filter((item) => layers[item.key] && layers[item.key].detected && layers[item.key].flushable);
+		const visible = candidates.filter((item) => {
+			const layer = layers[item.key] || {};
+			if (item.key === 'varnish') {
+				return showVarnishCandidate;
+			}
+			return !!(layer.detected && layer.flushable);
+		});
+		const renderCandidate = (item) => {
+			const layer = layers[item.key] || {};
+			const isVarnish = item.key === 'varnish';
+			const flushable = !!layer.flushable;
+			const disabled = !!busy || (isVarnish && !flushable);
+			let description = item.description;
+			if (isVarnish && !flushable) {
+				description = 'Varnish is detected or configured, but UltraCache Varnish purge is currently disabled or not flushable. Enable and test the Varnish purge integration before including it in Flush All Cache.';
+			}
+			return h(ToggleRow, {
+				label: 'Also flush ' + item.label,
+				description: description,
+				checked: !!(settings && settings[item.setting]),
+				onChange: (value) => onToggle(item.setting, value),
+				disabled: disabled,
+				key: item.setting,
+			});
+		};
 		return h(Card, {
 			title: 'External Cache Flush',
-			description: 'Also empty detected external/server cache layers with each Flush All Cache. Only detected and flushable layers are shown.',
+			description: 'Also empty detected external/server cache layers with each Flush All Cache. Detected or configured Varnish is shown even when purge integration still needs to be enabled/tested.',
 		}, [
 			h('div', { className: 'flex flex-wrap items-center justify-between gap-3 mt-2' }, [
 				h('div', { className: 'text-xs text-zinc-500', key: 'detected-at' }, detection.detectedAtHuman ? ('Last detected: ' + detection.detectedAtHuman) : 'No cache detection result saved yet.'),
 				h(Button, { onClick: onRedetect, disabled: busy, variant: 'light', key: 'redetect' }, busy ? 'Working…' : 'Redetect Caches'),
 			]),
-			visible.length ? h('div', { className: 'mt-4 divide-y divide-white/5' }, visible.map((item) => h(ToggleRow, {
-				label: 'Also flush ' + item.label,
-				description: item.description,
-				checked: !!(settings && settings[item.setting]),
-				onChange: (value) => onToggle(item.setting, value),
-				disabled: busy,
-				key: item.setting,
-			}))) : h('div', { className: 'text-xs text-zinc-500 mt-4' }, 'No external/server cache layer with a safe flush mechanism is detected. Use Redetect Caches after enabling OPcache/APCu, Varnish settings, Nginx Helper, or after confirming a LiteSpeed/OpenLiteSpeed cache layer.'),
+			visible.length ? h('div', { className: 'mt-4 divide-y divide-white/5' }, visible.map(renderCandidate)) : h('div', { className: 'text-xs text-zinc-500 mt-4' }, 'No external/server cache layer with a safe flush mechanism is detected. Use Redetect Caches after enabling OPcache/APCu, Varnish settings, Nginx Helper, or after confirming a LiteSpeed/OpenLiteSpeed cache layer.'),
 		]);
 	}
 
@@ -4783,6 +4875,7 @@
 		const uiActionQueueDepthRef = useRef(0);
 		const uiActionSequenceRef = useRef(0);
 		const queuedDashboardPayloadRef = useRef(null);
+		const suppressBeforeUnloadRef = useRef(false);
 		const [uiActionQueueCount, setUiActionQueueCount] = useState(0);
 		const compressionSyncRef = useRef('');
 		const manualObjectCacheTestRef = useRef(null);
@@ -4845,6 +4938,10 @@
 
 		useEffect(() => {
 			const handleBeforeUnload = (event) => {
+				if (suppressBeforeUnloadRef.current) {
+					return undefined;
+				}
+
 				const processActive = !!(process && process.active);
 				const actionActive = hasActiveQueuedDashboardAction();
 				const saveActive = !!(settingsSaveTimerRef.current || settingsSaveInFlightRef.current || hasPendingSettingsPatch());
@@ -6283,6 +6380,18 @@
 			}
 		}
 
+		function updateSafeDeferJs(value) {
+			const enabled = !!value;
+			queueSettingsPatch({ deferJsEnabled: enabled });
+			if (!enabled) {
+				return;
+			}
+			window.setTimeout(() => {
+				const current = settingsRef.current && typeof settingsRef.current.deferJsExcludeList !== 'undefined' ? settingsRef.current.deferJsExcludeList : '';
+				scanSafeDeferInitScriptsAndMerge(current, true);
+			}, 0);
+		}
+
 		async function updateDelayIconFontsAutoDetect(value) {
 			const enabled = !!value;
 			queueSettingsPatch({ delayIconFontsAutoDetectEnabled: enabled });
@@ -6346,6 +6455,29 @@
 			}
 			pushToast({ type: 'success', text: 'Populated ' + label + ' with recommended defaults.' });
 			return value;
+		}
+
+		async function scanSafeDeferInitScriptsAndMerge(currentDraft, saveImmediately) {
+			try {
+				const response = await apiRequest('safe_defer_init_scan', {});
+				const items = Array.isArray(response && response.items) ? response.items : [];
+				if (!items.length) {
+					pushToast({ type: 'info', text: response && response.message ? response.message : 'No likely theme/page-builder init scripts were detected.' });
+					return String(currentDraft || '');
+				}
+				const merged = mergeUniqueSettingLines(currentDraft, items.join('\n'));
+				if (saveImmediately && merged.added) {
+					queueSettingsPatch({ deferJsExcludeList: merged.value });
+				}
+				pushToast({
+					type: merged.added ? 'success' : 'info',
+					text: merged.added ? ('Added ' + merged.added + ' detected theme/page-builder init exclusion(s).') : 'Detected init scripts are already listed in JS Delay / Defer Exclusions.',
+				});
+				return merged.value;
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Safe Defer JS init-script scan failed.' });
+				return null;
+			}
 		}
 
 		async function populateDeferDelayExclusionDefaults(currentDraft) {
@@ -6798,6 +6930,21 @@
 					pushToast({ type: 'warning', title: 'Object Cache setup skipped', text: profile.label + ' profile settings were saved, but Object Cache was not changed. ' + objectCacheWarning });
 				} else {
 					pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Object Cache unchanged.', persistent: true });
+				}
+
+				if (!!mainPatch.deferJsEnabled) {
+					pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: 'Running Safe Defer JS follow-up scan…', persistent: true });
+					const currentExclusions = settingsRef.current && typeof settingsRef.current.deferJsExcludeList !== 'undefined' ? settingsRef.current.deferJsExcludeList : '';
+					const scannedExclusions = await scanSafeDeferInitScriptsAndMerge(currentExclusions, false);
+					if (scannedExclusions !== null) {
+						const scanPatch = { deferJsExcludeList: String(scannedExclusions || '') };
+						const scanOptimistic = Object.assign({}, settingsRef.current || {}, scanPatch);
+						settingsRef.current = scanOptimistic;
+						setSettings(scanOptimistic);
+						const scanResponse = await apiRequest('save_settings', { settings_json: JSON.stringify(scanPatch) });
+						applyDashboardPayload(scanResponse || {});
+						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: String(scanPatch.deferJsExcludeList || '') === String(currentExclusions || '') ? 'Safe Defer JS scan finalized; no new init exclusions were needed.' : 'Safe Defer JS scan exclusions saved.', persistent: true });
+					}
 				}
 
 				return { firstResponse: firstResponse, objectCacheWarning: objectCacheWarning };
@@ -7447,6 +7594,7 @@ async function deleteAllPluginDataAndDeactivate() {
 		return;
 	}
 
+	suppressBeforeUnloadRef.current = true;
 	setBusy(true);
 	try {
 		await syncQueuedSettingsBeforeAction();
@@ -7456,6 +7604,7 @@ async function deleteAllPluginDataAndDeactivate() {
 			window.location.href = 'plugins.php?deactivate=true';
 		}, 1200);
 	} catch (error) {
+		suppressBeforeUnloadRef.current = false;
 		pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to delete/deactivate UltraCache.' });
 		setBusy(false);
 	}
@@ -7538,7 +7687,23 @@ async function deleteAllPluginDataAndDeactivate() {
 		const mediaQueueNeedsRepair = !!effectiveMediaQueueStatus.needsRepair;
 		const mediaQueueIsComplete = !!effectiveMediaQueueStatus.isComplete;
 		const varnishLayer = getExternalCacheLayer(stats, 'varnish');
-		const showVarnishCard = !!(varnishLayer && varnishLayer.detected && varnishLayer.flushable);
+		const varnishDiagnostic = diagnostics && diagnostics.varnish ? diagnostics.varnish : {};
+		const reverseProxyDiagnostic = diagnostics && diagnostics.reverseProxy ? diagnostics.reverseProxy : {};
+		const reverseProxyTextForVarnish = [
+			reverseProxyDiagnostic.provider,
+			reverseProxyDiagnostic.server,
+			reverseProxyDiagnostic.via,
+			reverseProxyDiagnostic.x_cache,
+			reverseProxyDiagnostic.x_cache_status,
+			reverseProxyDiagnostic.message,
+		].join(' ').toLowerCase();
+		const reverseProxyLooksLikeVarnish = !!(reverseProxyDiagnostic && reverseProxyDiagnostic.detected && reverseProxyTextForVarnish.indexOf('varnish') !== -1);
+		const varnishConfigured = !!(
+			(settings && (settings.varnishCliEnabled || settings.varnishCliServers || settings.flushAllIncludeVarnish)) ||
+			(varnishForm && (varnishForm.varnishCliEnabled || varnishForm.varnishCliServers || varnishForm.varnishCliKeyConfigured)) ||
+			(varnishDiagnostic && (varnishDiagnostic.enabled || varnishDiagnostic.available || varnishDiagnostic.servers || varnishDiagnostic.endpointCount))
+		);
+		const showVarnishCard = !!((varnishLayer && varnishLayer.detected) || reverseProxyLooksLikeVarnish || varnishConfigured);
 
 		return h('div', { className: 'max-w-6xl p-6 space-y-8' }, [
 			h('header', { className: 'flex flex-col gap-4 md:flex-row md:justify-between md:items-end', key: 'header' }, [
@@ -7686,7 +7851,7 @@ async function deleteAllPluginDataAndDeactivate() {
 						h('div', { className: 'mt-5', key: 'warm-full-scope-controls' }, [
 							h(MultiSelectField, {
 								label: 'Full-site warm-up sources',
-								description: 'Choose the URL sources for full-site and scheduled warm-up. The counts below help you choose the Scheduled warm limit; the limit itself remains user-controlled.',
+								description: 'Choose the URL sources for full-site and scheduled / cron warm-up. The counts below help you choose the Scheduled / Cron warm limit; the limit itself remains user-controlled.',
 								value: settings.warmFullSiteSources || '',
 								onChange: (value) => updateSetting('warmFullSiteSources', value),
 								disabled: warmBusy,
@@ -7985,16 +8150,16 @@ h(ToggleRow, {
 					},
 					[
 						h(ToggleRow, {
-									label: 'Enable Defer JS',
-									description: 'Add native defer to safe frontend scripts while keeping core, inline-dependent, WooCommerce, and protected scripts in normal blocking flow.',
+									label: 'Safe Defer JS',
+									description: 'Add native defer conservatively. When enabled, UltraCache scans the front page once and appends detected theme/page-builder init scripts to the visible JS Delay / Defer Exclusions list.',
 									checked: settings.deferJsEnabled,
-									onChange: (value) => updateSetting('deferJsEnabled', value),
+									onChange: (value) => updateSafeDeferJs(value),
 									disabled: busy,
 									key: 'defer-stage-one',
 								}),
 h(ToggleRow, {
 									label: 'Defer all JS',
-									description: 'Aggressive manual mode. When Enable Defer JS is on, UltraCache adds native defer to every eligible frontend script. If JS Delay / Defer Exclusions is empty, UltraCache really defers everything eligible. Populate Defaults is optional and only adds visible recommendations; scan suggestions help you build exclusions after testing.',
+									description: 'Aggressive manual mode. When Safe Defer JS is on, UltraCache adds native defer to every eligible frontend script. If JS Delay / Defer Exclusions is empty, UltraCache really defers everything eligible. Populate Defaults is optional and only adds visible recommendations; scan suggestions help you build exclusions after testing.',
 									checked: !!settings.deferAllJsEnabled,
 									onChange: (value) => updateSetting('deferAllJsEnabled', value),
 									disabled: busy || !settings.deferJsEnabled,
@@ -8484,6 +8649,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											disabled: busy,
 											placeholder: 'jquery\njquery-migrate\n/wp-includes/js/\nwp-util\nunderscore\ncart\ncheckout',
 											onPopulateDefaults: populateDeferDelayExclusionDefaults,
+											onSafeInitScan: (currentDraft) => scanSafeDeferInitScriptsAndMerge(currentDraft, false),
 											onScan: runJsDelaySafetyScanForUrl,
 											onRuntimeScan: runBrowserRuntimeJsScanForUrl,
 											onLoadLatestProfileScan: loadLatestJsDelaySafetyScan,
@@ -8555,7 +8721,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'warm-limit',
 						}),
 						h(NumberRow, {
-							label: 'Scheduled warm limit',
+							label: 'Scheduled / Cron warm limit',
 							description: getScheduledWarmLimitSummary(advancedForm, settings),
 							value: advancedForm.scheduledWarmLimit,
 							onChange: (value) => updateAdvancedField('scheduledWarmLimit', value),
@@ -8625,7 +8791,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 			h(ExternalCacheCard, { title: 'LiteSpeed Cache', description: 'Detected LiteSpeed/OpenLiteSpeed cache integration. UltraCache uses the LiteSpeed plugin API when present, otherwise it requests server-level purge with the X-LiteSpeed-Purge response header.', layer: getExternalCacheLayer(stats, 'litespeed'), busy: false, onFlush: flushLiteSpeed, key: 'litespeed-cache-card' }),
 			h(ExternalCacheCard, { title: 'Nginx Cache', description: 'Detected Nginx cache integration. UltraCache flushes Nginx only when a safe WordPress purge hook/integration is available.', layer: getExternalCacheLayer(stats, 'nginx'), busy: false, onFlush: flushNginx, key: 'nginx-cache-card' }),
 			]),
-			h(ExternalCacheFlushSettingsCard, { stats, settings, busy: false, onRedetect: redetectExternalCaches, onToggle: (key, value) => updateSetting(key, value), key: 'external-cache-flush-settings' }),
+			h(ExternalCacheFlushSettingsCard, { stats, diagnostics, settings, busy: false, onRedetect: redetectExternalCaches, onToggle: (key, value) => updateSetting(key, value), key: 'external-cache-flush-settings' }),
 
 				h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
 					h(DiagnosticsCard, { diagnostics, stats, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, busy, onRefreshStorageDiagnostics: refreshStorageDiagnostics, key: 'diagnostics' }),
@@ -8785,7 +8951,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					]),
 						h('div', { className: 'space-y-1' }, [
 							h('div', { className: 'text-zinc-300 font-semibold', key: 'scheduled-title' }, 'Scheduled warm-up'),
-							h('p', { className: 'm-0', key: 'scheduled-1' }, 'Scheduled warm-up uses the selected Full-site warm-up sources. The Scheduled warm limit is a cap, not a target.'),
+							h('p', { className: 'm-0', key: 'scheduled-1' }, 'Scheduled / cron warm-up uses the selected Full-site warm-up sources. The Scheduled / Cron warm limit is a cap, not a target.'),
 							h('p', { className: 'm-0', key: 'scheduled-2' }, 'Priority order: homepage / blog index → menu URLs → pages → posts → categories → tags → other supported sources.'),
 					]),
 						h('div', { className: 'space-y-2' }, [

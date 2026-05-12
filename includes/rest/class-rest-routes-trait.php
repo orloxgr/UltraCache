@@ -268,6 +268,13 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
+                '/safe-defer/init-scan' => array(
+                    array(
+                        'methods'             => WP_REST_Server::CREATABLE,
+                        'callback'            => array($this, 'scan_safe_defer_init_scripts'),
+                        'permission_callback' => array($this, 'check_permission'),
+                    ),
+                ),
                 '/media-ids' => array(
                     array(
                         'methods'             => WP_REST_Server::READABLE,
@@ -838,6 +845,271 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                     $this->ucwp_font_scan_add_item($never_delay, $family, $source . ' @font-face');
                 }
             }
+        }
+
+        private function ucwp_safe_defer_extract_tag_attribute($tag, $attribute)
+        {
+            $tag = (string) $tag;
+            $attribute = preg_quote((string) $attribute, '~');
+            if (preg_match('~\s' . $attribute . '\s*=\s*(["\'])(.*?)\1~i', $tag, $match)) {
+                return html_entity_decode((string) $match[2], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            }
+            if (preg_match('~\s' . $attribute . '\s*=\s*([^\s>]+)~i', $tag, $match)) {
+                return html_entity_decode((string) $match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            }
+            return '';
+        }
+
+        private function ucwp_safe_defer_absolute_url($url, $base_url = '')
+        {
+            $url = trim(html_entity_decode((string) $url, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ('' === $url || 0 === strpos($url, 'data:')) {
+                return '';
+            }
+
+            if (0 === strpos($url, '//')) {
+                $scheme = (string) wp_parse_url(home_url('/'), PHP_URL_SCHEME);
+                $url = ('' !== $scheme ? $scheme : 'https') . ':' . $url;
+            }
+
+            if (wp_http_validate_url($url)) {
+                return esc_url_raw($url);
+            }
+
+            if (0 === strpos($url, '/')) {
+                return esc_url_raw(home_url($url));
+            }
+
+            $base = '' !== (string) $base_url ? (string) $base_url : home_url('/');
+            $base_path = (string) wp_parse_url($base, PHP_URL_PATH);
+            $base_dir = '/' . trim(dirname($base_path), '/');
+            if ('/.' === $base_dir) {
+                $base_dir = '/';
+            }
+
+            return esc_url_raw(home_url(rtrim($base_dir, '/') . '/' . ltrim($url, '/')));
+        }
+
+        private function ucwp_safe_defer_is_same_site_url($url)
+        {
+            $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+            $url_host = strtolower((string) wp_parse_url((string) $url, PHP_URL_HOST));
+            return '' !== $home_host && '' !== $url_host && $home_host === $url_host;
+        }
+
+        private function ucwp_safe_defer_script_path_fragment($url)
+        {
+            $url = (string) $url;
+            if ('' === $url || !$this->ucwp_safe_defer_is_same_site_url($url)) {
+                return '';
+            }
+
+            $path = (string) wp_parse_url($url, PHP_URL_PATH);
+            if ('' === $path || !preg_match('/\.js$/i', $path)) {
+                return '';
+            }
+
+            if (preg_match('~/wp-content/plugins/([^/?#]+/.+\.js)$~i', $path, $match)) {
+                return ltrim((string) $match[1], '/');
+            }
+
+            if (preg_match('~/wp-content/themes/([^/?#]+/.+\.js)$~i', $path, $match)) {
+                return 'themes/' . ltrim((string) $match[1], '/');
+            }
+
+            return '';
+        }
+
+        private function ucwp_safe_defer_is_theme_or_plugin_script($url)
+        {
+            $path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
+            return false !== strpos($path, '/wp-content/plugins/') || false !== strpos($path, '/wp-content/themes/');
+        }
+
+        private function ucwp_safe_defer_is_layout_init_script($url, $handle = '', $id = '')
+        {
+            $url = (string) $url;
+            if ('' === $url || !$this->ucwp_safe_defer_is_same_site_url($url) || !$this->ucwp_safe_defer_is_theme_or_plugin_script($url)) {
+                return false;
+            }
+
+            $path = strtolower((string) wp_parse_url($url, PHP_URL_PATH));
+            if (!preg_match('/\.js$/i', $path)) {
+                return false;
+            }
+
+            $identity = strtolower($path . ' ' . (string) $handle . ' ' . (string) $id);
+
+            // Slider Revolution/SR7 runtime scripts are handled by the dedicated
+            // slider/LCP logic and are outside the Safe Defer assisted scan.
+            // The scan should behave as if these scripts were not present.
+            if (preg_match('/(?:revslider|sliderrevolution|sr7|tp-tools|tptools|rs6|rs-module|themepunch)/i', $identity)) {
+                return false;
+            }
+
+            $builder_markers = array(
+                'elementor', 'elementor-frontend', 'elementor-pro', 'elements-handlers', 'webpack-pro.runtime',
+                'divi', 'et-builder', 'et_pb', 'et-core', 'elegantthemes',
+                'beaver-builder', 'fl-builder', 'bb-plugin', 'beaver-themer',
+                'wpbakery', 'js_composer', 'vc-', 'vc_', 'wpb_', 'vc-waypoints',
+                'visualcomposer', 'visual-composer', 'vcv', 'vcwb',
+                'oxygen', 'oxygen-builder', 'component-framework', 'oxy-',
+                'bricks', 'bricks-builder', 'bricks-frontend',
+                'breakdance', 'breakdance-builder', 'breakdance-frontend',
+                'brizy', 'brizy-frontend', 'brizy-public', 'brz',
+                'seedprod', 'seedprod-lite', 'seedprod-builder', 'sp-frontend',
+                'thrive', 'thrive-architect', 'thrive-theme', 'tve', 'tcb',
+                'themify', 'themify-builder',
+                'kadence', 'kadence-blocks', 'spectra', 'ultimate-addons-for-gutenberg', 'uagb', 'uag',
+                'generateblocks', 'generate-blocks', 'siteorigin', 'siteorigin-panels',
+                'goodlayers', 'gdlr-core', 'gdlr-'
+            );
+            foreach ($builder_markers as $marker) {
+                if ('' !== $marker && false !== strpos($identity, $marker)) {
+                    return true;
+                }
+            }
+
+            $init_markers = array(
+                'builder', 'page-builder', 'frontend', 'front-end', 'script-core', 'masonry', 'isotope',
+                'portfolio', 'gallery', 'carousel', 'slider', 'swiper', 'splide', 'animation', 'animate',
+                'waypoint', 'waypoints', 'parallax', 'lightbox', 'fitvids', 'imagesloaded', 'sticky',
+                'tabs', 'accordion', 'counter'
+            );
+            foreach ($init_markers as $marker) {
+                if (false !== strpos($identity, $marker)) {
+                    return true;
+                }
+            }
+
+            if (false !== strpos($path, '/wp-content/themes/')) {
+                $basename = basename($path);
+                if (in_array($basename, array('script.js', 'scripts.js', 'script-core.js', 'main.js', 'theme.js', 'custom.js', 'frontend.js', 'functions.js'), true)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private function ucwp_safe_defer_add_detected_init_item(&$items, $value, $source, $reason)
+        {
+            $value = trim((string) $value);
+            if ('' === $value || strlen($value) > 220) {
+                return;
+            }
+
+            $key = strtolower($value);
+            if (isset($items[$key])) {
+                return;
+            }
+
+            $items[$key] = array(
+                'value'  => $value,
+                'source' => sanitize_text_field((string) $source),
+                'reason' => sanitize_text_field((string) $reason),
+            );
+        }
+
+        public function scan_safe_defer_init_scripts($request = null)
+        {
+            unset($request);
+
+            $url = home_url('/');
+            $response = wp_remote_get($url, array(
+                'timeout'     => 10,
+                'redirection' => 3,
+                'sslverify'   => false,
+                'headers'     => array(
+                    'Cache-Control' => 'no-cache',
+                    'Pragma'        => 'no-cache',
+                    'User-Agent'    => 'UltraCache-SafeDeferInitScanner/' . (defined('UCWP_VERSION') ? UCWP_VERSION : '1.0') . '; ' . home_url('/'),
+                ),
+            ));
+
+            if (is_wp_error($response)) {
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'message' => 'Safe Defer JS init-script scan failed: ' . $response->get_error_message(),
+                    'items'   => array(),
+                    'details' => array(),
+                ), 500);
+            }
+
+            $html = (string) wp_remote_retrieve_body($response);
+            if ('' === trim($html)) {
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'message' => 'Safe Defer JS init-script scan returned empty HTML.',
+                    'items'   => array(),
+                    'details' => array(),
+                ), 500);
+            }
+
+            $items = array();
+            $details = array();
+            $scanned = 0;
+
+            if (preg_match_all('/<script\b[^>]*>/i', $html, $matches)) {
+                foreach ((array) $matches[0] as $tag) {
+                    $tag = (string) $tag;
+                    $src = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'data-ucwp-original-src');
+                    if ('' === $src) {
+                        $src = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'data-ucwp-src');
+                    }
+                    if ('' === $src) {
+                        $src = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'src');
+                    }
+
+                    $absolute = $this->ucwp_safe_defer_absolute_url($src, $url);
+                    if ('' === $absolute || !$this->ucwp_safe_defer_is_same_site_url($absolute)) {
+                        continue;
+                    }
+
+                    $handle = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'data-ucwp-handle');
+                    $id = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'data-ucwp-id');
+                    if ('' === $id) {
+                        $id = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'id');
+                    }
+
+                    $scanned++;
+                    if (!$this->ucwp_safe_defer_is_layout_init_script($absolute, $handle, $id)) {
+                        continue;
+                    }
+
+                    $fragment = $this->ucwp_safe_defer_script_path_fragment($absolute);
+                    $reason = 'Detected same-site theme/page-builder layout or animation init script in front-page HTML.';
+                    if ('' !== $fragment) {
+                        $this->ucwp_safe_defer_add_detected_init_item($items, $fragment, $absolute, $reason);
+                    }
+                    if ('' !== $handle) {
+                        $this->ucwp_safe_defer_add_detected_init_item($items, $handle, $absolute, $reason);
+                    }
+                    if ('' !== $id) {
+                        $clean_id = preg_replace('/-js$/i', '', (string) $id);
+                        $this->ucwp_safe_defer_add_detected_init_item($items, $clean_id, $absolute, $reason);
+                    }
+                }
+            }
+
+            $details = array_values($items);
+            $values = array_values(array_map(static function ($item) {
+                return (string) $item['value'];
+            }, $details));
+            sort($values, SORT_NATURAL | SORT_FLAG_CASE);
+            $values = array_slice(array_values(array_unique($values)), 0, 120);
+
+            return new WP_REST_Response(array(
+                'success' => true,
+                'url'     => $url,
+                'scannedScripts' => $scanned,
+                'count'   => count($values),
+                'items'   => $values,
+                'details' => array_slice($details, 0, 120),
+                'message' => count($values)
+                    ? sprintf('Detected %d likely theme/page-builder init exclusion pattern(s) on the front page.', count($values))
+                    : 'No likely theme/page-builder init scripts were detected on the front page.',
+            ), 200);
         }
 
         public function scan_frontpage_font_patterns($request = null)

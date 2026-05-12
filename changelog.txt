@@ -1,3 +1,27 @@
+2.57.162 - Delete All Data beforeunload UX fix
+- Suppress the generic browser leave-page prompt after the admin has explicitly confirmed the Delete All Data / deactivate action.
+- Keep the normal leave-page warning for ordinary queued or in-flight settings saves.
+
+2.57.161 - APCu active backend dashboard warning fix
+- Fixes APCu dashboard advisory wording when APCu is the active nested object-cache backend.
+- Detects active APCu from diagnostics.objectCache/objectCache nested status as well as top-level stats fields.
+
+2.57.160 - Safe Defer profile scan and wp-config backup registry
+- Runs the Safe Defer JS assisted init-script scan when a performance profile enables Safe Defer JS.
+- Ignores Slider Revolution/SR7/tp-tools runtime assets during Safe Defer scan suggestions so slider/LCP handling stays separate.
+- Replaces wp-config backup cleanup glob scans with a WordPress option-backed registry of UltraCache-created backups.
+
+2.57.153 - Safe Defer JS assisted scan and LCP preload dedupe
+- Rename Enable Defer JS to Safe Defer JS in the dashboard.
+- Add a front-page scan-assisted append flow for visible theme/page-builder init script exclusions.
+- Add a manual Scan & append detected init scripts button to JS Delay / Defer Exclusions.
+- Dedupe repeated UltraCache-managed LCP image preloads.
+
+2.57.150 - Action jobs DB load/save cache fix
+- Fixed dashboard action jobs loading from the ultracache_action_jobs table after the DB namespace change.
+- Added table-specific action jobs row cache keys and invalidation around action job saves.
+- Kept media, cron warm queue, analytics, profiles, and cache engine behavior unchanged.
+
 2.57.149 - Namespace cleanup and Plugin Check DB compliance
 - Renamed new-install custom database tables from `ucwp_*` to `ultracache_*`.
 - Renamed persistent option/transient keys from `ucwp_*` to `ultracache_*` where they store plugin state.

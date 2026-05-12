@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.57.149
+ * Version: 2.57.164
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 7.4
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.57.149');
+    define('UCWP_VERSION', '2.57.164');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -46,6 +46,9 @@ if (!defined('UCWP_CRAWL_SCOPE_SUMMARY_KEY')) {
 }
 if (!defined('UCWP_WP_CACHE_MANAGED_KEY')) {
     define('UCWP_WP_CACHE_MANAGED_KEY', 'ultracache_wp_cache_managed');
+}
+if (!defined('UCWP_WP_CONFIG_BACKUP_REGISTRY_KEY')) {
+    define('UCWP_WP_CONFIG_BACKUP_REGISTRY_KEY', 'ultracache_wp_config_backup_registry');
 }
 if (!defined('UCWP_CACHE_DIR')) {
     define('UCWP_CACHE_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/');
@@ -587,12 +590,31 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
 
             if (!$allow_refresh) {
-                return array(
+                $passive = array(
                     'success' => true,
                     'dashboardStatsSnapshotCached' => false,
                     'dashboardStatsRefreshInterval' => $max_age,
                     'message' => 'Dashboard stats are passive; no refresh was requested.',
                 );
+
+                // Initial dashboard bootstrap must not run heavy engine/storage stats,
+                // but lightweight runtime-cache cards should still render before the
+                // user presses Redetect Caches. Keep OPcache/APCu/Varnish visibility
+                // independent from cache counter snapshots.
+                if (method_exists(__CLASS__, 'get_opcache_status_summary')) {
+                    $passive['opcache'] = self::get_opcache_status_summary();
+                }
+                if (method_exists(__CLASS__, 'get_apcu_status_summary')) {
+                    $passive['apcu'] = self::get_apcu_status_summary();
+                }
+                if (method_exists(__CLASS__, 'get_external_cache_detection')) {
+                    $passive['externalCaches'] = self::get_external_cache_detection(false);
+                }
+                if (method_exists(__CLASS__, 'get_dashboard_diagnostics')) {
+                    $passive['diagnostics'] = self::get_dashboard_diagnostics();
+                }
+
+                return $passive;
             }
 
             $stats = self::get_engine_stats(false, true, false);
@@ -2739,6 +2761,7 @@ private static function delete_plugin_options_and_transients($keep_settings = fa
         'ultracache_media_conversion_queue',
         'ultracache_media_diagnostics_v1',
         'ultracache_object_cache_last_flush_report',
+        'ultracache_last_css_bundle_summary',
     );
 
     if (!$keep_settings) {
@@ -3465,21 +3488,81 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             return dirname($config) . '/wp-config-backup-' . gmdate('Ymd-His') . '-' . wp_generate_password(6, false, false) . '.php';
         }
 
-        private static function cleanup_wp_config_backups($config, $keep = 5)
+        private static function get_wp_config_backup_registry()
         {
-            $pattern = dirname($config) . '/wp-config-backup-*.php';
-            $matches = glob($pattern);
-            if (!is_array($matches) || count($matches) <= $keep) {
+            $registry = get_option(UCWP_WP_CONFIG_BACKUP_REGISTRY_KEY, array());
+            return is_array($registry) ? array_values(array_filter(array_map('strval', $registry))) : array();
+        }
+
+        private static function save_wp_config_backup_registry(array $registry)
+        {
+            $registry = array_values(array_unique(array_filter(array_map('strval', $registry))));
+            if (empty($registry)) {
+                delete_option(UCWP_WP_CONFIG_BACKUP_REGISTRY_KEY);
                 return;
             }
 
-            usort($matches, static function ($a, $b) {
-                return (int) ucwp_safe_filemtime($b, 'cleanup_wp_config_backups') <=> (int) ucwp_safe_filemtime($a, 'cleanup_wp_config_backups');
+            update_option(UCWP_WP_CONFIG_BACKUP_REGISTRY_KEY, $registry, false);
+        }
+
+        private static function is_tracked_wp_config_backup_for_config($config, $backup)
+        {
+            $config_dir = wp_normalize_path(dirname((string) $config));
+            $backup = wp_normalize_path((string) $backup);
+            if ('' === $backup || wp_normalize_path(dirname($backup)) !== $config_dir) {
+                return false;
+            }
+
+            return (bool) preg_match('/^wp-config-backup-\d{8}-\d{6}-[A-Za-z0-9]+\.php$/', basename($backup));
+        }
+
+        private static function register_wp_config_backup($config, $backup)
+        {
+            if (!self::is_tracked_wp_config_backup_for_config($config, $backup)) {
+                return;
+            }
+
+            $registry = self::get_wp_config_backup_registry();
+            $registry[] = wp_normalize_path((string) $backup);
+            self::save_wp_config_backup_registry($registry);
+        }
+
+        private static function cleanup_wp_config_backups($config, $keep = 5)
+        {
+            $keep = max(1, (int) $keep);
+            $registry = self::get_wp_config_backup_registry();
+            if (empty($registry)) {
+                return;
+            }
+
+            $tracked = array();
+            $other = array();
+            foreach ($registry as $backup) {
+                $backup = wp_normalize_path((string) $backup);
+                if (self::is_tracked_wp_config_backup_for_config($config, $backup)) {
+                    $tracked[] = $backup;
+                } else {
+                    $other[] = $backup;
+                }
+            }
+
+            if (count($tracked) <= $keep) {
+                self::save_wp_config_backup_registry(array_merge($other, $tracked));
+                return;
+            }
+
+            usort($tracked, static function ($a, $b) {
+                $mtime_a = is_readable($a) ? (int) ucwp_safe_filemtime($a, 'cleanup_wp_config_backups') : 0;
+                $mtime_b = is_readable($b) ? (int) ucwp_safe_filemtime($b, 'cleanup_wp_config_backups') : 0;
+                return $mtime_b <=> $mtime_a;
             });
 
-            foreach (array_slice($matches, max(0, (int) $keep)) as $old_backup) {
+            $keep_paths = array_slice($tracked, 0, $keep);
+            foreach (array_slice($tracked, $keep) as $old_backup) {
                 ucwp_safe_unlink($old_backup, 'cleanup_wp_config_backups');
             }
+
+            self::save_wp_config_backup_registry(array_merge($other, $keep_paths));
         }
 
         private static function write_wp_config_atomically($config, $contents)
@@ -3489,6 +3572,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 return new WP_Error('ucwp_wp_config_backup_failed', 'Failed to create a wp-config backup before updating wp-config.php.');
             }
 
+            self::register_wp_config_backup($config, $backup);
             self::cleanup_wp_config_backups($config);
 
             $tmp = $config . '.tmp-' . uniqid('', true);
