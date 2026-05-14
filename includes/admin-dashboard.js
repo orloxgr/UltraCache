@@ -241,11 +241,11 @@
 	];
 	const PERFORMANCE_PROFILE_DISPLAY_ORDER = ['custom', 'off', 'safe', 'balanced', 'aggressive'];
 	const PERFORMANCE_PROFILE_CUSTOM = {
-		label: 'Custom',
-		description: 'Turns on automatically when current settings no longer match a known preset. It preserves your manual choices.',
+		label: __("Custom", 'ultracache'),
+		description: __("Turns on automatically when current settings no longer match a known preset. It preserves your manual choices.", 'ultracache'),
 	};
 	const PERFORMANCE_PROFILES = {
-		off: { label: 'All Off', description: 'Disable optimization modules managed by profiles. Diagnostic counters, Automation & Scheduling, and Varnish settings are preserved.', patch: {
+		off: { label: __("All Off", 'ultracache'), description: __("Disable optimization modules managed by profiles. Diagnostic counters, Automation & Scheduling, and Varnish settings are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
 			deferJsEnabled: false, deferAllJsEnabled: false, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
@@ -253,7 +253,7 @@
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false, cacheSafeTrackingCookiesEnabled: false, varnishCliEnabled: false,
 			homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: false, cssBundleScope: 'homepage', mediaOutputMode: 'auto',
 		} },
-		safe: { label: 'Safe', description: 'Public-safe profile based on the exported Safe settings. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.', patch: {
+		safe: { label: __("Safe", 'ultracache'), description: __("Public-safe profile based on the exported Safe settings. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: true,
 			objectCacheEnabled: true,
 			redisHost: "127.0.0.1",
@@ -346,7 +346,7 @@
 			cacheQueryStringsEnabled: false,
 			cacheSafeTrackingCookiesEnabled: true,
 		} },
-		balanced: { label: 'Balanced', description: 'Balanced profile based on the exported Balanced settings. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.', patch: {
+		balanced: { label: __("Balanced", 'ultracache'), description: __("Balanced profile based on the exported Balanced settings. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: true,
 			objectCacheEnabled: true,
 			redisHost: "127.0.0.1",
@@ -439,7 +439,7 @@
 			cacheQueryStringsEnabled: false,
 			cacheSafeTrackingCookiesEnabled: true,
 		} },
-		aggressive: { label: 'Aggressive', description: 'Aggressive profile based on the exported Aggressive settings. Enables Defer all JS; Runtime Scan is recommended to detect broken JS dependencies and build JS Delay / Defer Exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved.', patch: {
+		aggressive: { label: __("Aggressive", 'ultracache'), description: __("Aggressive profile based on the exported Aggressive settings. Enables Defer all JS; Runtime Scan is recommended to detect broken JS dependencies and build JS Delay / Defer Exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: true,
 			objectCacheEnabled: true,
 			redisHost: "127.0.0.1",
@@ -922,17 +922,17 @@
 
 	function getWarmMenuOptions() {
 		const options = Array.isArray(crawlScopeSummary.menuOptions) ? crawlScopeSummary.menuOptions : [];
-		return [{ value: '', label: 'Select menu' }].concat(options.map((option) => ({ value: String(option.value || option.location || ''), label: String(option.label || option.value || option.location || 'Menu') })).filter((option) => option.value || option.label));
+		return [{ value: '', label: __("Select menu", 'ultracache') }].concat(options.map((option) => ({ value: String(option.value || option.location || ''), label: String(option.label || option.value || option.location || 'Menu') })).filter((option) => option.value || option.label));
 	}
 
 	function getWarmMenuDepthOptions() {
 		const options = Array.isArray(crawlScopeSummary.menuDepthOptions) ? crawlScopeSummary.menuDepthOptions : [];
 		return options.length ? options.map((option) => ({ value: String(option.value || ''), label: String(option.label || option.value || '') })) : [
-			{ value: '', label: 'Select depth' },
-			{ value: '1', label: 'Depth 1' },
-			{ value: '2', label: 'Depth 2' },
-			{ value: '3', label: 'Depth 3' },
-			{ value: 'all', label: 'All depths' },
+			{ value: '', label: __("Select depth", 'ultracache') },
+			{ value: '1', label: __("Depth 1", 'ultracache') },
+			{ value: '2', label: __("Depth 2", 'ultracache') },
+			{ value: '3', label: __("Depth 3", 'ultracache') },
+			{ value: 'all', label: __("All depths", 'ultracache') },
 		];
 	}
 
@@ -1049,9 +1049,9 @@
 		return h('div', { className: 'uc-card uc-cache-stats-panel', key: 'cache-statistics-panel' }, [
 			h('div', { className: 'flex flex-col md:flex-row md:items-start md:justify-between gap-4', key: 'head' }, [
 				h('div', { key: 'copy' }, [
-					h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-1', key: 'eyebrow' }, 'Cache Statistics'),
-					h('h3', { className: 'text-lg font-black tracking-tight text-white m-0', key: 'title' }, 'Count Cache stats'),
-					h('p', { className: 'text-xs text-zinc-500 mt-2 mb-0 max-w-3xl', key: 'desc' }, 'Track cache hits, misses, bypasses and object-cache counters. Disabling this avoids counter writes during frontend requests.'),
+					h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-1', key: 'eyebrow' }, __("Cache Statistics", 'ultracache')),
+					h('h3', { className: 'text-lg font-black tracking-tight text-white m-0', key: 'title' }, __("Count Cache stats", 'ultracache')),
+					h('p', { className: 'text-xs text-zinc-500 mt-2 mb-0 max-w-3xl', key: 'desc' }, __("Track cache hits, misses, bypasses and object-cache counters. Disabling this avoids counter writes during frontend requests.", 'ultracache')),
 				]),
 				h('label', {
 					className: classNames('uc-toggle', busy ? 'opacity-60 pointer-events-none' : ''),
@@ -1067,62 +1067,62 @@
 				]),
 			]),
 			enabled
-				? h('div', { className: 'uc-warning-box mt-4', key: 'warning' }, 'Enabling cache statistics may add a small performance overhead because UltraCache needs to update counters during requests. If you use Varnish, nginx full-page cache, Cloudflare, or another reverse proxy, stats may under-report requests served before WordPress.')
-				: h('div', { className: 'text-xs text-zinc-500 mt-4', key: 'disabled-copy' }, 'Stats are disabled. The dashboard will not refresh or write live request counters until this switch is enabled.'),
+				? h('div', { className: 'uc-warning-box mt-4', key: 'warning' }, __("Enabling cache statistics may add a small performance overhead because UltraCache needs to update counters during requests. If you use Varnish, nginx full-page cache, Cloudflare, or another reverse proxy, stats may under-report requests served before WordPress.", 'ultracache'))
+				: h('div', { className: 'text-xs text-zinc-500 mt-4', key: 'disabled-copy' }, __("Stats are disabled. The dashboard will not refresh or write live request counters until this switch is enabled.", 'ultracache')),
 			enabled && !hasDashboardStatsCounters(stats)
-				? h('div', { className: 'text-xs text-sky-300 bg-sky-500/10 rounded-xl px-3 py-2 mt-3', key: 'stats-refreshing-copy' }, 'Stats are ON. Waiting for the authenticated REST refresh; placeholder values are not shown as zeros.')
+				? h('div', { className: 'text-xs text-sky-300 bg-sky-500/10 rounded-xl px-3 py-2 mt-3', key: 'stats-refreshing-copy' }, __("Stats are ON. Waiting for the authenticated REST refresh; placeholder values are not shown as zeros.", 'ultracache'))
 				: null,
 			enabled
 				? h('details', { className: 'uc-accordion uc-accordion--card mt-4', open: true, key: 'details' }, [
-					h('summary', { key: 'summary' }, 'Show detailed stats'),
+					h('summary', { key: 'summary' }, __("Show detailed stats", 'ultracache')),
 					h('div', { className: 'uc-summary-grid mt-4', key: 'grid' }, [
 						h(StatCard, {
-							label: 'Cached Pages',
+							label: __("Cached Pages", 'ultracache'),
 							value: formatStatsNumber(stats, typeof stats.pagesCached !== 'undefined' ? stats.pagesCached : stats.pageCacheFiles),
 							hint: getStatsRefreshHint(stats, 'Stored HTML cache files'),
 							key: 'pages',
 						}),
 						h(StatCard, {
-							label: 'Optimized Images',
+							label: __("Optimized Images", 'ultracache'),
 							value: formatStatsNumber(stats, typeof stats.imagesOptimized !== 'undefined' ? stats.imagesOptimized : stats.optimizedImages),
 							hint: hasDashboardStatsCounters(stats) ? (formatNumber(typeof stats.avifImagesOptimized !== 'undefined' ? stats.avifImagesOptimized : stats.avifFiles) + ' AVIF · ' + formatNumber(typeof stats.webpImagesOptimized !== 'undefined' ? stats.webpImagesOptimized : stats.webpFiles) + ' WebP') : 'Fetching live REST counters…',
 							key: 'images',
 						}),
 						h(StatCard, {
-							label: 'Object Entries',
+							label: __("Object Entries", 'ultracache'),
 							value: formatObjectEntries(stats),
 							hint: getObjectEntriesHint(stats),
 							action: {
 								label: '+',
-								title: 'Run full object-cache count',
+								title: __("Run full object-cache count", 'ultracache'),
 								onClick: onFullObjectCount,
 								disabled: busy || !!(asyncActions && asyncActions.object_cache_full_count),
 							},
 							key: 'object-cache',
 						}),
-						h(StatCard, { label: 'Cache Size', value: hasDashboardStatsCounters(stats) ? (stats.cacheSizeHuman || '0 B') : 'Refreshing…', hint: getStatsRefreshHint(stats, 'Total cache footprint'), key: 'size' }),
-						h(StatCard, { key: 'hits', label: 'Cache Hits', value: formatStatsNumber(stats, stats.pageCacheHits), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache') }),
-						h(StatCard, { key: 'misses', label: 'Render Misses', value: formatStatsNumber(stats, stats.pageCacheMisses), hint: getStatsRefreshHint(stats, 'Reached WordPress render path') }),
-						h(StatCard, { key: 'bypasses', label: 'Bypasses', value: formatStatsNumber(stats, stats.pageCacheBypasses), hint: getStatsRefreshHint(stats, 'Skipped before buffering') }),
-						h(StatCard, { key: 'ratio', label: 'Hit Ratio', value: formatStatsPercent(stats, stats.pageCacheHitRatio), hint: getStatsRefreshHint(stats, 'Hits ÷ (hits + misses)') }),
+						h(StatCard, { label: __("Cache Size", 'ultracache'), value: hasDashboardStatsCounters(stats) ? (stats.cacheSizeHuman || '0 B') : 'Refreshing…', hint: getStatsRefreshHint(stats, 'Total cache footprint'), key: 'size' }),
+						h(StatCard, { key: 'hits', label: __("Cache Hits", 'ultracache'), value: formatStatsNumber(stats, stats.pageCacheHits), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache') }),
+						h(StatCard, { key: 'misses', label: __("Render Misses", 'ultracache'), value: formatStatsNumber(stats, stats.pageCacheMisses), hint: getStatsRefreshHint(stats, 'Reached WordPress render path') }),
+						h(StatCard, { key: 'bypasses', label: __("Bypasses", 'ultracache'), value: formatStatsNumber(stats, stats.pageCacheBypasses), hint: getStatsRefreshHint(stats, 'Skipped before buffering') }),
+						h(StatCard, { key: 'ratio', label: __("Hit Ratio", 'ultracache'), value: formatStatsPercent(stats, stats.pageCacheHitRatio), hint: getStatsRefreshHint(stats, 'Hits ÷ (hits + misses)') }),
 					]),
 				])
 				: h('details', { className: 'uc-accordion uc-accordion--card mt-4', key: 'manual-details' }, [
-					h('summary', { key: 'summary' }, 'Manual object-cache diagnostics'),
+					h('summary', { key: 'summary' }, __("Manual object-cache diagnostics", 'ultracache')),
 					h('div', { className: 'uc-summary-grid mt-4', key: 'grid' }, [
 						h(StatCard, {
-							label: 'Object Entries',
+							label: __("Object Entries", 'ultracache'),
 							value: formatObjectEntries(stats),
 							hint: getObjectEntriesHint(stats),
 							action: {
 								label: '+',
-								title: 'Run full object-cache count',
+								title: __("Run full object-cache count", 'ultracache'),
 								onClick: onFullObjectCount,
 								disabled: busy || !!(asyncActions && asyncActions.object_cache_full_count),
 							},
 							key: 'object-cache',
 						}),
-						h(StatCard, { label: 'Cache Size', value: stats.cacheSizeHuman || '0 B', hint: 'Static cache footprint', key: 'size' }),
+						h(StatCard, { label: __("Cache Size", 'ultracache'), value: stats.cacheSizeHuman || '0 B', hint: __("Static cache footprint", 'ultracache'), key: 'size' }),
 					]),
 				]),
 		]);
@@ -1837,7 +1837,7 @@
 						type: 'button',
 						className: 'uc-toast__close',
 						onClick: () => onDismiss(toast.id),
-						'aria-label': 'Dismiss notification',
+						'aria-label': __("Dismiss notification", 'ultracache'),
 						key: 'close',
 					}, '×'),
 				]);
@@ -1849,9 +1849,9 @@
 
 	function SupportActionLinks({ compact, onHireClick }) {
 		const items = [
-			{ key: 'hire', label: 'Hire me', href: SUPPORT_LINKS.hire, onClick: onHireClick },
-			{ key: 'feature', label: 'Feature request', href: SUPPORT_LINKS.feature },
-			{ key: 'bug', label: 'Bug report', href: SUPPORT_LINKS.bug },
+			{ key: 'hire', label: __("Hire me", 'ultracache'), href: SUPPORT_LINKS.hire, onClick: onHireClick },
+			{ key: 'feature', label: __("Feature request", 'ultracache'), href: SUPPORT_LINKS.feature },
+			{ key: 'bug', label: __("Bug report", 'ultracache'), href: SUPPORT_LINKS.bug },
 		];
 
 		return h('div', { className: classNames('uc-support-links', 'uc-support-links--actions', compact ? 'uc-support-links--compact' : '') },
@@ -1862,16 +1862,16 @@
 				onClick: item.key === 'hire' && typeof item.onClick === 'function' ? item.onClick : undefined,
 			}, [
 				h('span', { className: 'uc-support-link__label', key: 'label' }, item.label),
-				h('span', { className: 'uc-support-link__amount', key: 'amount' }, 'Email'),
+				h('span', { className: 'uc-support-link__amount', key: 'amount' }, __("Email", 'ultracache')),
 			]))
 		);
 	}
 
 	function SupportLinks({ compact, onHireClick }) {
 		const items = [
-			{ key: 'coffee', label: 'Buy me a coffee', amount: '€5', href: SUPPORT_LINKS.coffee, kind: 'paypal' },
-			{ key: 'beer', label: 'Buy me a beer', amount: '€10', href: SUPPORT_LINKS.beer, kind: 'paypal' },
-			{ key: 'meal', label: 'Buy me a meal', amount: '€15', href: SUPPORT_LINKS.meal, kind: 'paypal' },
+			{ key: 'coffee', label: __("Buy me a coffee", 'ultracache'), amount: '€5', href: SUPPORT_LINKS.coffee, kind: 'paypal' },
+			{ key: 'beer', label: __("Buy me a beer", 'ultracache'), amount: '€10', href: SUPPORT_LINKS.beer, kind: 'paypal' },
+			{ key: 'meal', label: __("Buy me a meal", 'ultracache'), amount: '€15', href: SUPPORT_LINKS.meal, kind: 'paypal' },
 		];
 
 		return h('div', { className: classNames('uc-support-links', compact ? 'uc-support-links--compact' : '') },
@@ -1910,15 +1910,15 @@
 
 		return h('div', { className: classNames('uc-support-inline', isMobile ? 'uc-support-inline--mobile' : '' ) }, [
 			h('div', { className: 'uc-support-inline__copy', key: 'copy' }, [
-				h('div', Object.assign({ className: 'uc-support-inline__title' }, triggerProps), 'Support this plugin'),
-				!isMobile ? h('p', { className: 'uc-support-inline__text' }, 'If UltraCache saves you time, you can support future development or reach out for help.') : null,
+				h('div', Object.assign({ className: 'uc-support-inline__title' }, triggerProps), __("Support this plugin", 'ultracache')),
+				!isMobile ? h('p', { className: 'uc-support-inline__text' }, __("If UltraCache saves you time, you can support future development or reach out for help.", 'ultracache')) : null,
 			]),
 			h('div', { className: 'uc-support-inline__actions', key: 'actions' }, [
 				h('div', { className: 'uc-support-inline__support-group', key: 'support-group' }, [
-					h('div', { className: 'uc-support-inline__group-label' }, 'Support this plugin'),
+					h('div', { className: 'uc-support-inline__group-label' }, __("Support this plugin", 'ultracache')),
 					h(SupportLinks, { compact: isMobile, key: 'paypal-links' }),
 					h('div', { className: 'uc-support-inline__need-support', key: 'need-support' }, [
-						h('div', { className: 'uc-support-inline__group-label', key: 'need-label' }, 'Need Support?'),
+						h('div', { className: 'uc-support-inline__group-label', key: 'need-label' }, __("Need Support?", 'ultracache')),
 						h(SupportActionLinks, { compact: isMobile, key: 'support-actions', onHireClick }),
 				]),
 			]),
@@ -1966,16 +1966,16 @@
 					type: 'button',
 					className: 'uc-support-modal__close',
 					onClick: onClose,
-					'aria-label': 'Close support modal',
+					'aria-label': __("Close support modal", 'ultracache'),
 					key: 'close',
 				}, '×'),
-				h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, 'Support this plugin'),
-				h('h3', { className: 'uc-support-modal__title', id: titleId, key: 'title' }, 'Support this plugin'),
-				h('p', { className: 'uc-support-modal__text', id: descriptionId, key: 'text' }, 'If UltraCache saves you time, you can support future updates or contact Byron directly for paid help.'),
-				h('div', { className: 'uc-support-modal__section-label', key: 'support-label' }, 'Support this plugin'),
+				h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, __("Support this plugin", 'ultracache')),
+				h('h3', { className: 'uc-support-modal__title', id: titleId, key: 'title' }, __("Support this plugin", 'ultracache')),
+				h('p', { className: 'uc-support-modal__text', id: descriptionId, key: 'text' }, __("If UltraCache saves you time, you can support future updates or contact Byron directly for paid help.", 'ultracache')),
+				h('div', { className: 'uc-support-modal__section-label', key: 'support-label' }, __("Support this plugin", 'ultracache')),
 				h(SupportLinks, { compact: isMobile, onHireClick, key: 'links' }),
 					h('div', { className: 'uc-support-modal__need-support', key: 'need-support' }, [
-						h('div', { className: 'uc-support-modal__section-label', key: 'need-label' }, 'Need Support?'),
+						h('div', { className: 'uc-support-modal__section-label', key: 'need-label' }, __("Need Support?", 'ultracache')),
 						h(SupportActionLinks, { compact: isMobile, onHireClick, key: 'support-actions' }),
 					]),
 				]),
@@ -2237,7 +2237,7 @@
 			];
 			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-3 space-y-2 border border-white/5', key: keyPrefix + '-' + index + '-' + line }, [
 				h('div', { className: 'space-y-1' }, [
-					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Suggested exclusion'),
+					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Suggested exclusion", 'ultracache')),
 					h('div', { className: 'flex flex-wrap items-center gap-2' }, [
 						h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
 						line ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled || present, onClick: () => appendJsExclusionLine(line) }, reviewOnly ? (present ? 'Already in exclusions' : 'Append reviewed') : (present ? 'Already in exclusions' : 'Append')) : null,
@@ -2249,7 +2249,7 @@
 				]))),
 				item.reason ? h('div', { className: 'text-zinc-400 leading-relaxed pt-1' }, item.reason) : null,
 				item.sample ? h('div', { className: 'text-zinc-500 leading-relaxed break-all bg-black/15 rounded px-2 py-1.5' }, [
-					h('span', { className: 'text-zinc-400 font-semibold' }, 'Sample: '),
+					h('span', { className: 'text-zinc-400 font-semibold' }, __("Sample: ", 'ultracache')),
 					String(item.sample),
 				]) : null,
 			]);
@@ -2260,46 +2260,46 @@
 			const reason = item && item.reason ? String(item.reason) : '';
 			const text = line + ' ' + reason.toLowerCase();
 			if (/revslider|sr7|tptools|tp-tools|rs6|rs-module|slider revolution/.test(text)) {
-				return { key: 'slider-revolution-sr7', title: 'Slider Revolution / SR7', reason: 'Slider Revolution / SR7 assets or markup were detected on this page. Keep slider runtime assets protected unless visually tested.' };
+				return { key: 'slider-revolution-sr7', title: __("Slider Revolution / SR7", 'ultracache'), reason: 'Slider Revolution / SR7 assets or markup were detected on this page. Keep slider runtime assets protected unless visually tested.' };
 			}
 			if (/swiper|swiper-bundle/.test(text)) {
 				return { key: 'swiper', title: 'Swiper', reason: 'Swiper slider/carousel assets or markup were detected on this page.' };
 			}
 			if (/slick/.test(text)) {
-				return { key: 'slick', title: 'Slick carousel', reason: 'Slick carousel assets or markup were detected on this page.' };
+				return { key: 'slick', title: __("Slick carousel", 'ultracache'), reason: 'Slick carousel assets or markup were detected on this page.' };
 			}
 			if (/splide|owl\.carousel|smartslider|n2-ss|layerslider|masterslider|metaslider|soliloquy|royalslider|flickity|glide/.test(text)) {
-				return { key: 'other-slider-carousel', title: 'Other slider / carousel', reason: 'Slider or carousel assets were detected on this page.' };
+				return { key: 'other-slider-carousel', title: __("Other slider / carousel", 'ultracache'), reason: 'Slider or carousel assets were detected on this page.' };
 			}
 			if (/react|react-dom|wp-element|notes-app-initiator/.test(text)) {
 				return { key: 'react-wp-element', title: 'React / wp-element runtime', reason: 'A browser runtime error points to the WordPress React dependency chain or a dependent script that executed too early.' };
 			}
 			if (/wp-api-fetch|api-fetch|wp-hooks|wp-api-fetch-js-after/.test(text)) {
-				return { key: 'wp-api-fetch', title: 'WordPress apiFetch runtime', reason: 'A WordPress inline-after block or apiFetch configuration ran before its dependency chain was available.' };
+				return { key: 'wp-api-fetch', title: __("WordPress apiFetch runtime", 'ultracache'), reason: 'A WordPress inline-after block or apiFetch configuration ran before its dependency chain was available.' };
 			}
 			if (/elementor|elementormodules|frontend-modules|webpack\.runtime/.test(text)) {
-				return { key: 'elementor', title: 'Elementor runtime', reason: 'Elementor assets or widgets were detected on this page. Keep core runtime dependencies protected unless dependency-safe testing passes.' };
+				return { key: 'elementor', title: __("Elementor runtime", 'ultracache'), reason: 'Elementor assets or widgets were detected on this page. Keep core runtime dependencies protected unless dependency-safe testing passes.' };
 			}
 			if (/divi|et-core|et-builder/.test(text)) {
-				return { key: 'divi', title: 'Divi / Elegant Themes', reason: 'Divi builder assets were detected on this page.' };
+				return { key: 'divi', title: __("Divi / Elegant Themes", 'ultracache'), reason: 'Divi builder assets were detected on this page.' };
 			}
 			if (/wpbakery|vc_|bricks|oxygen|beaver-builder|fl-builder|fusion-builder|avada|thrive|seedprod|siteorigin|spectra|uagb|kadence|generateblocks/.test(text)) {
-				return { key: 'builder-runtime', title: 'Builder runtime', reason: 'Builder/runtime assets were detected on this page.' };
+				return { key: 'builder-runtime', title: __("Builder runtime", 'ultracache'), reason: 'Builder/runtime assets were detected on this page.' };
 			}
 			if (/complianz|cmplz/.test(text)) {
-				return { key: 'complianz', title: 'Complianz consent scripts', reason: 'Complianz consent assets were detected. Consent/cookie scripts are safer outside Delay JS.' };
+				return { key: 'complianz', title: __("Complianz consent scripts", 'ultracache'), reason: 'Complianz consent assets were detected. Consent/cookie scripts are safer outside Delay JS.' };
 			}
 			if (/cookieyes|cookielawinfo|cky-|cookiebot|iubenda|onetrust|optanon/.test(text)) {
-				return { key: 'consent-management', title: 'Cookie / consent management', reason: 'Cookie/consent-management assets were detected. Consent scripts are safer outside Delay JS.' };
+				return { key: 'consent-management', title: __("Cookie / consent management", 'ultracache'), reason: 'Cookie/consent-management assets were detected. Consent scripts are safer outside Delay JS.' };
 			}
 			if (/mailerlite|validation-messages|mailchimp|mc4wp|klaviyo|hubspot|contact-form-7|wpforms|gform|gravityforms|formidable|ninja-forms|fluentform|forminator|recaptcha|hcaptcha|turnstile/.test(text)) {
-				return { key: 'forms-validation', title: 'Forms / validation / newsletter', reason: 'Form, validation, newsletter, or CRM assets were detected on this page.' };
+				return { key: 'forms-validation', title: __("Forms / validation / newsletter", 'ultracache'), reason: 'Form, validation, newsletter, or CRM assets were detected on this page.' };
 			}
 			if (/woocommerce|wc-|cart|checkout|account|add-to-cart|wc-cart-fragments|stripe|paypal|braintree|klarna|afterpay|square/.test(text)) {
-				return { key: 'ecommerce-checkout', title: 'WooCommerce / ecommerce', reason: 'Commerce or checkout-related markers were detected. Review before excluding broadly.' };
+				return { key: 'ecommerce-checkout', title: __("WooCommerce / ecommerce", 'ultracache'), reason: 'Commerce or checkout-related markers were detected. Review before excluding broadly.' };
 			}
 			if (/gtag|gtm|datalayer|adsbygoogle|stats\.wp\.com|_stq|facebook\.net|fbevents|hotjar|clarity|googletagmanager|google-analytics/.test(text)) {
-				return { key: 'tracking-ads', title: 'Tracking / ads', reason: 'Tracking or ads scripts were detected. These are review-only because delaying them often improves performance but may affect tracking timing.' };
+				return { key: 'tracking-ads', title: __("Tracking / ads", 'ultracache'), reason: 'Tracking or ads scripts were detected. These are review-only because delaying them often improves performance but may affect tracking timing.' };
 			}
 			return { key: item && item.category ? String(item.category) : 'other', title: item && item.categoryLabel ? String(item.categoryLabel) : 'Other detected recommendation', reason: reason };
 		}
@@ -2331,7 +2331,7 @@
 				]),
 				group.reason ? h('div', { className: 'text-zinc-500 mt-2' }, group.reason) : null,
 				lines.length ? h('div', { className: 'mt-2 flex flex-wrap gap-1' }, lines.map((line, lineIndex) => h('code', { className: 'font-mono text-[11px] text-emerald-300 bg-black/25 rounded px-2 py-1 break-all', key: keyPrefix + '-line-' + index + '-' + lineIndex }, line))) : null,
-				reviewOnly ? h('div', { className: 'mt-2 text-[11px] text-zinc-500' }, 'Review-only candidates are shown for manual judgement and can be appended one by one. They are never appended automatically.') : null,
+				reviewOnly ? h('div', { className: 'mt-2 text-[11px] text-zinc-500' }, __("Review-only candidates are shown for manual judgement and can be appended one by one. They are never appended automatically.", 'ultracache')) : null,
 				h('div', { className: 'mt-2 space-y-2' }, items.map((item, itemIndex) => renderSuggestionItem(item, keyPrefix + '-detail-' + index, itemIndex))),
 			]);
 		}
@@ -2355,10 +2355,10 @@
 			}
 			return h('details', { className: 'mt-3 rounded-lg bg-black/20 px-3 py-3', open: false, key: 'runtime-errors-captured' }, [
 				h('summary', { className: 'cursor-pointer list-none flex flex-wrap items-center justify-between gap-2' }, [
-					h('span', { className: 'text-zinc-200 font-semibold' }, 'Captured browser runtime errors'),
+					h('span', { className: 'text-zinc-200 font-semibold' }, __("Captured browser runtime errors", 'ultracache')),
 					h('span', { className: 'text-amber-300 font-mono text-[11px]' }, String(errors.length) + ' error(s)'),
 				]),
-				h('div', { className: 'text-[11px] text-zinc-500 mt-2 mb-2' }, 'Raw captured errors are shown for debugging even when no confident exclusion can be suggested.'),
+				h('div', { className: 'text-[11px] text-zinc-500 mt-2 mb-2' }, __("Raw captured errors are shown for debugging even when no confident exclusion can be suggested.", 'ultracache')),
 				h('div', { className: 'space-y-2' }, errors.slice(0, 20).map((error, index) => renderRuntimeErrorItem(error, index))),
 			]);
 		}
@@ -2370,10 +2370,10 @@
 			}
 			return h('details', { className: 'mt-3 rounded-lg bg-black/20 px-3 py-3', open: true, key: 'runtime-resource-errors-captured' }, [
 				h('summary', { className: 'cursor-pointer list-none flex flex-wrap items-center justify-between gap-2' }, [
-					h('span', { className: 'text-zinc-200 font-semibold' }, 'Blocked / failed resources'),
+					h('span', { className: 'text-zinc-200 font-semibold' }, __("Blocked / failed resources", 'ultracache')),
 					h('span', { className: 'text-sky-300 font-mono text-[11px]' }, String(items.length) + ' resource(s)'),
 				]),
-				h('div', { className: 'text-[11px] text-zinc-500 mt-2 mb-2' }, 'These are network/resource load failures. If Chrome shows ERR_BLOCKED_BY_CLIENT, this is usually a browser extension/privacy blocker and is not counted as a missing JS Delay / Defer exclusion.'),
+				h('div', { className: 'text-[11px] text-zinc-500 mt-2 mb-2' }, __("These are network/resource load failures. If Chrome shows ERR_BLOCKED_BY_CLIENT, this is usually a browser extension/privacy blocker and is not counted as a missing JS Delay / Defer exclusion.", 'ultracache')),
 				h('div', { className: 'space-y-2' }, items.slice(0, 20).map((item, index) => {
 					const source = String(item && item.source ? item.source : '');
 					const detail = String(item && item.detail ? item.detail : '');
@@ -2536,8 +2536,8 @@
 		}
 
 		return h('div', { className: 'uc-field-wrap', style: { gridColumn: '1 / -1' } }, [
-			h('label', { className: 'uc-field-label' }, 'JS Delay / Defer Exclusions'),
-			h('div', { className: 'text-xs text-zinc-500 mb-2' }, 'Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, Defer all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Defer, and Main Thread Relief where applicable. Populate Defaults adds only the hard dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.'),
+			h('label', { className: 'uc-field-label' }, __("JS Delay / Defer Exclusions", 'ultracache')),
+			h('div', { className: 'text-xs text-zinc-500 mb-2' }, __("Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, Defer all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Defer, and Main Thread Relief where applicable. Populate Defaults adds only the hard dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.", 'ultracache')),
 			h('textarea', {
 				className: 'uc-field-input uc-field-textarea',
 				value: draft,
@@ -2546,7 +2546,7 @@
 				onChange: (e) => setDraft(e.target.value),
 			}),
 			h('div', { className: 'mt-3 mb-2' }, [
-				h('label', { className: 'uc-field-label' }, 'Page URL to scan'),
+				h('label', { className: 'uc-field-label' }, __("Page URL to scan", 'ultracache')),
 				h('input', {
 					type: 'url',
 					className: 'uc-field-input',
@@ -2558,7 +2558,7 @@
 				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Scan a same-site page. UltraCache profiles the final HTML and shows missing visible exclusions, including inline dependency blocks such as jquery-js-after, wp-i18n-js-after, wp-api-fetch-js-after, and *-js-translations. Nothing is applied automatically by the scan button; Safe Defer JS can append detected init scripts here only when you enable that switch.'),
 			]),
 			h('div', { className: 'mt-2 mb-2 flex flex-wrap items-center text-[11px] text-zinc-500' }, [
-				h('span', { className: 'text-zinc-400', style: { marginRight: '10px' } }, 'Runtime Scan context'),
+				h('span', { className: 'text-zinc-400', style: { marginRight: '10px' } }, __("Runtime Scan context", 'ultracache')),
 				h('select', {
 					className: 'uc-field-input uc-field-select',
 					style: { maxWidth: '260px', marginRight: '8px', paddingLeft: '8px', paddingRight: '34px', paddingTop: '7px', paddingBottom: '7px' },
@@ -2566,8 +2566,8 @@
 					disabled: !!disabled || runtimeScanBusy,
 					onChange: (e) => setRuntimeScanContext(e && e.target ? String(e.target.value || 'anonymous') : 'anonymous'),
 				}, [
-					h('option', { value: 'anonymous' }, 'Anonymous frontend'),
-					h('option', { value: 'logged-in' }, 'Logged-in/admin frontend'),
+					h('option', { value: 'anonymous' }, __("Anonymous frontend", 'ultracache')),
+					h('option', { value: 'logged-in' }, __("Logged-in/admin frontend", 'ultracache')),
 				]),
 				h('span', null, runtimeScanContext === 'anonymous' ? 'Recommended for public cache debugging. Admin cookies are ignored while rendering the scan page.' : 'Useful only for admin-bar/editor/frontend issues.'),
 			]),
@@ -2578,11 +2578,11 @@
 				h(Button, { key: 'runtime-scan', onClick: handleRuntimeScan, disabled: !!disabled || runtimeScanBusy }, runtimeScanBusy ? 'Runtime scanning…' : 'Runtime Scan'),
 				h(Button, { key: 'debug-scan', onClick: handleDebugLoadLatestProfileScan, disabled: !!disabled || debugScanBusy }, debugScanBusy ? 'Loading…' : 'Debug Profile'),
 				h(Button, { key: 'append', onClick: handleAppendSuggestions, disabled: !!disabled || !liveMissingCount }, 'Append Missing' + (liveMissingCount ? ' (' + liveMissingCount + ')' : '')),
-				h(Button, { key: 'save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, 'Save'),
+				h(Button, { key: 'save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __("Save", 'ultracache')),
 			]),
 			h('div', { className: 'mt-3 mb-3 rounded-xl bg-black/20 px-3 py-3 border border-white/5' }, [
 				h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
-					h('span', { className: 'text-zinc-200 font-semibold' }, 'Console Error Handler'),
+					h('span', { className: 'text-zinc-200 font-semibold' }, __("Console Error Handler", 'ultracache')),
 					consoleErrorSuggestions.length ? h('span', { className: missingConsoleErrorSuggestions.length ? 'text-amber-300 font-mono text-[11px]' : 'text-emerald-300 font-mono text-[11px]' }, String(missingConsoleErrorSuggestions.length) + ' missing / ' + String(consoleErrorSuggestions.length) + ' detected') : null,
 				]),
 				h('div', { className: 'text-[11px] text-zinc-500 mb-2' }, 'Paste browser console errors here. UltraCache uses the selected Scan URL/front page to read the same-site JS files loaded by that HTML, resolve missing jQuery plugin methods/globals to their provider scripts where possible, and append clean deduplicated tokens to JS Delay / Defer Exclusions. Broad sources such as jquery.min.js, main.js, functions.js, and same-origin domains are ignored.'),
@@ -2597,22 +2597,22 @@
 				h('div', { className: 'mt-3 flex flex-wrap items-center gap-2' }, [
 					h(Button, { key: 'extract-console-errors', onClick: handleExtractConsoleErrors, disabled: !!disabled || consoleErrorBusy }, consoleErrorBusy ? 'Extracting…' : 'Extract suggestions'),
 					h(Button, { key: 'append-console-errors', onClick: handleAppendConsoleErrors, disabled: !!disabled || !missingConsoleErrorSuggestions.length }, 'Append to exclusions' + (missingConsoleErrorSuggestions.length ? ' (' + missingConsoleErrorSuggestions.length + ')' : '')),
-					h(Button, { key: 'clear-console-errors', onClick: () => { setConsoleErrorInput(''); setConsoleErrorSuggestions([]); setConsoleErrorScan(null); setConsoleErrorStatus(''); }, disabled: !!disabled || (!consoleErrorInput && !consoleErrorSuggestions.length && !consoleErrorScan) }, 'Clear'),
+					h(Button, { key: 'clear-console-errors', onClick: () => { setConsoleErrorInput(''); setConsoleErrorSuggestions([]); setConsoleErrorScan(null); setConsoleErrorStatus(''); }, disabled: !!disabled || (!consoleErrorInput && !consoleErrorSuggestions.length && !consoleErrorScan) }, __("Clear", 'ultracache')),
 				]),
 				consoleErrorStatus ? h('div', { className: 'mt-2 text-[11px] text-sky-300' }, consoleErrorStatus) : null,
 				consoleErrorSuggestions.length ? h('div', { className: 'mt-3' }, [
-					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500 mb-2' }, 'Extracted appendable exclusion preview'),
+					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500 mb-2' }, __("Extracted appendable exclusion preview", 'ultracache')),
 					h('div', { className: 'flex flex-wrap gap-1' }, consoleErrorSuggestions.map((line, index) => h('code', { className: isSuggestionPresentInDraft(draftValue, line) ? 'font-mono text-[11px] text-emerald-300 bg-black/25 rounded px-2 py-1 break-all' : 'font-mono text-[11px] text-amber-300 bg-black/25 rounded px-2 py-1 break-all', key: 'console-error-suggestion-' + index + '-' + line }, line))),
 				]) : null,
 				consoleErrorScan ? h('div', { className: 'mt-3 text-xs bg-black/20 rounded-xl px-3 py-3', key: 'console-error-scan-preview' }, [
 					h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
-						h('span', { className: 'text-zinc-300 font-bold' }, 'Console Extract Suggestions'),
+						h('span', { className: 'text-zinc-300 font-bold' }, __("Console Extract Suggestions", 'ultracache')),
 						h('span', { className: 'text-zinc-500 font-mono break-all' }, consoleErrorScan.scannedUrl ? String(consoleErrorScan.scannedUrl) : ''),
 					]),
 					h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-2 mb-3' }, [
-						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Appendable'), h('div', { className: 'font-mono text-zinc-200' }, String(consoleAppendableSuggestions.length))]),
-						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Review-only'), h('div', { className: missingConsoleReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(consoleReviewOnlySuggestions.length))]),
-						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Script inventory'), h('div', { className: 'font-mono text-zinc-200' }, String(consoleErrorScan.scriptInventoryCount || 0))]),
+						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Appendable", 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(consoleAppendableSuggestions.length))]),
+						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Review-only", 'ultracache')), h('div', { className: missingConsoleReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(consoleReviewOnlySuggestions.length))]),
+						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Script inventory", 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(consoleErrorScan.scriptInventoryCount || 0))]),
 					]),
 					consoleErrorScan.scriptInventorySummary ? h('div', { className: 'text-[11px] text-zinc-500 mb-3 font-mono break-all' }, 'Inventory detail: external ' + String(consoleErrorScan.scriptInventorySummary.external || 0) + ' · inline ' + String(consoleErrorScan.scriptInventorySummary.inline || 0) + ' · delayed ' + String(consoleErrorScan.scriptInventorySummary.delayed || 0) + ' · sourceURL ' + String(consoleErrorScan.scriptInventorySummary.sourceUrl || 0)) : null,
 					renderRuntimeErrorsSection(consoleErrorScan.errors || []),
@@ -2622,23 +2622,23 @@
 			runtimeScanStatus ? h('div', { className: 'uc-js-runtime-scan-status mt-1 mb-2 text-[11px] text-sky-300' }, runtimeScanStatus) : null,
 			scan ? h('div', { className: 'mt-3 mb-2 text-xs bg-black/20 rounded-xl px-3 py-3', style: { padding: '5px' } }, [
 				h('div', { className: 'flex flex-wrap items-center justify-between gap-3 mb-2' }, [
-					h('span', { className: 'text-zinc-300 font-bold' }, 'JS Delay / Defer Safety Scan'),
+					h('span', { className: 'text-zinc-300 font-bold' }, __("JS Delay / Defer Safety Scan", 'ultracache')),
 					h('span', { className: 'text-zinc-500 font-mono break-all' }, [(scan.scanContext || runtimeScanContext) ? ('Context: ' + (String(scan.scanContext || runtimeScanContext) === 'logged-in' ? 'Logged-in/admin frontend' : 'Anonymous frontend') + ' · ') : '', (scan.scannedUrl || scan.profileUrl || scan.url) ? String(scan.scannedUrl || scan.profileUrl || scan.url) : '']),
 				]),
 				h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-2 mb-3' }, [
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Detected'), h('div', { className: 'font-mono text-zinc-200' }, String(totalDetected || suggestions.length || 0))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Recommended'), h('div', { className: 'font-mono text-zinc-200' }, String(appendableSuggestions.length))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Missing'), h('div', { className: liveMissingCount ? 'font-mono text-amber-300' : 'font-mono text-emerald-300' }, String(liveMissingCount))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Already listed'), h('div', { className: 'font-mono text-emerald-300' }, String(liveAlreadyListedCount))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Review-only'), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Blocked resources'), h('div', { className: resourceErrorCount ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(resourceErrorCount || 0))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Detected", 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(totalDetected || suggestions.length || 0))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Recommended", 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(appendableSuggestions.length))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Missing", 'ultracache')), h('div', { className: liveMissingCount ? 'font-mono text-amber-300' : 'font-mono text-emerald-300' }, String(liveMissingCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Already listed", 'ultracache')), h('div', { className: 'font-mono text-emerald-300' }, String(liveAlreadyListedCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Review-only", 'ultracache')), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Blocked resources", 'ultracache')), h('div', { className: resourceErrorCount ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(resourceErrorCount || 0))]),
 				]),
 				renderResourceErrorsSection(resourceErrors),
 				renderRuntimeErrorsSection(runtimeErrors),
 				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing recommended exclusions. The visible JS Delay / Defer Exclusions list already covers the appendable scan results.', 'missing-recommended', 'These are the only lines Append Missing Recommended will add.'),
 				renderSuggestionSection('Already listed recommended', liveAlreadyListedCount, alreadyListedAppendableSuggestions, 'No recommended exclusions are already listed yet.', 'already-listed-recommended', 'Grouped and collapsed by default. These scan matches are already covered by your textarea, including broad fragments that cover variant paths.', { grouped: true, collapsed: true }),
 				renderSuggestionSection('Review-only detected', reviewOnlyCount, reviewOnlySuggestions, 'No review-only candidates were detected.', 'review-only-detected', 'Grouped and collapsed by default. Review-only items can be appended one by one after manual review.', { grouped: true, collapsed: true }),
-			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, 'Enter a same-site URL. JS Delay / Defer Scan reads final HTML; Runtime Scan opens the page in your browser, defaults to anonymous frontend mode, captures console/runtime errors, and turns them into suggested exclusions. Debug Profile loads the last WP-CLI/advanced profile only.'),
+			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, __("Enter a same-site URL. JS Delay / Defer Scan reads final HTML; Runtime Scan opens the page in your browser, defaults to anonymous frontend mode, captures console/runtime errors, and turns them into suggested exclusions. Debug Profile loads the last WP-CLI/advanced profile only.", 'ultracache')),
 		]);
 	}
 
@@ -2723,12 +2723,12 @@
 
 		function renderDiagnosticsResult() {
 			if (!current) {
-				return h('div', { className: 'mt-3 text-[11px] text-zinc-500 bg-black/15 rounded-xl px-3 py-3' }, 'No CSS diagnostics result loaded yet. Enter a same-site URL and click Run CSS Diagnostics.');
+				return h('div', { className: 'mt-3 text-[11px] text-zinc-500 bg-black/15 rounded-xl px-3 py-3' }, __("No CSS diagnostics result loaded yet. Enter a same-site URL and click Run CSS Diagnostics.", 'ultracache'));
 			}
 
 			return h('div', { className: 'mt-4 text-xs bg-black/20 rounded-xl px-3 py-3 space-y-4' }, [
 				h('div', { className: 'flex flex-wrap items-center justify-between gap-3' }, [
-					h('div', { className: 'text-zinc-300 font-bold' }, 'CSS Critical Path / Render Blocking Diagnostics'),
+					h('div', { className: 'text-zinc-300 font-bold' }, __("CSS Critical Path / Render Blocking Diagnostics", 'ultracache')),
 					h('div', { className: 'text-zinc-500 font-mono break-all text-right' }, current.profileUrl || current.url || scanUrl || ''),
 				]),
 				h('div', { className: 'grid grid-cols-1 md:grid-cols-6 gap-2' }, [
@@ -2740,13 +2740,13 @@
 					renderMetric('Protected CSS', formatNumber(criticalChain.protectedStyleCount || protectedStyles.length || 0), 'Slider/hero/safety protected', 'neutral'),
 				]),
 				h('div', { className: 'text-[11px] text-zinc-400 leading-relaxed' }, [
-					h('strong', { className: 'text-zinc-300' }, 'Recommendation: '),
+					h('strong', { className: 'text-zinc-300' }, __("Recommendation: ", 'ultracache')),
 					(leftoverCssBundle.enabled && leftoverCssBundle.success)
 						? 'Leftover CSS consolidation is active. The remaining candidate is the main render-blocking CSS bundle: review critical CSS split or async non-critical bundle mode.'
 						: 'Run/test Consolidate Remaining CSS first if visual output is safe, then review whether the main bundle needs a critical CSS split.',
 				]),
 				sourceTop.length ? h('details', { className: 'rounded-xl bg-black/15 px-3 py-2', open: sourceTopOpen }, [
-					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, 'Top CSS bundle sources by bytes'),
+					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, __("Top CSS bundle sources by bytes", 'ultracache')),
 					h('div', { className: 'mt-3 space-y-2' }, sourceTop.slice(0, 8).map((item, index) => {
 						const suggestion = item && item.suggestedExclusion ? String(item.suggestedExclusion) : '';
 						return h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'cssdiag-source-' + index }, [
@@ -2762,8 +2762,8 @@
 					})),
 				]) : null,
 				asyncCssDiagnostics.available ? h('details', { className: 'rounded-xl bg-black/15 px-3 py-2' }, [
-					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, 'Async Remaining CSS decisions'),
-					h('div', { className: 'mt-3 text-[11px] text-zinc-400 leading-relaxed' }, 'CSS Bundle Exclusions do not disable Async CSS. UltraCache-generated CSS is now classified before async: main/page/frontpage bundles and preserved optimized-css stay blocking because they can affect layout, while leftover and delayed-font CSS can load async when classified as non-critical. Aggressive Async CSS still uses the visible Async CSS Exclude List plus hard admin-only exclusions.'),
+					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, __("Async Remaining CSS decisions", 'ultracache')),
+					h('div', { className: 'mt-3 text-[11px] text-zinc-400 leading-relaxed' }, __("CSS Bundle Exclusions do not disable Async CSS. UltraCache-generated CSS is now classified before async: main/page/frontpage bundles and preserved optimized-css stay blocking because they can affect layout, while leftover and delayed-font CSS can load async when classified as non-critical. Aggressive Async CSS still uses the visible Async CSS Exclude List plus hard admin-only exclusions.", 'ultracache')),
 					asyncCssDiagnostics.reasonCounts ? h('div', { className: 'mt-3 flex flex-wrap gap-2' }, Object.keys(asyncCssDiagnostics.reasonCounts).slice(0, 12).map((key) => h('span', { className: 'font-mono text-[11px] bg-black/25 rounded px-2 py-1', key: 'async-reason-' + key }, key + ': ' + formatNumber(asyncCssDiagnostics.reasonCounts[key] || 0)))) : null,
 					Array.isArray(asyncCssDiagnostics.items) && asyncCssDiagnostics.items.length ? h('div', { className: 'mt-3 space-y-1' }, asyncCssDiagnostics.items.slice(0, 16).map((item, index) => h('div', { className: 'text-[11px] bg-black/20 rounded px-2 py-1', key: 'async-item-' + index }, [
 						h('div', { className: item.status === 'applied' ? 'text-emerald-300 font-bold' : (item.status === 'unresolved' ? 'text-amber-300 font-bold' : 'text-zinc-300 font-bold') }, (item.status || 'unknown') + ' · ' + (item.reason || 'unknown')),
@@ -2771,15 +2771,15 @@
 						h('code', { className: 'block font-mono text-zinc-400 break-all mt-1' }, item.url || item.path || 'unknown stylesheet'),
 					]))) : null,
 				]) : null,				renderBlockingHrefs.length ? h('details', { className: 'rounded-xl bg-black/15 px-3 py-2' }, [
-					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, 'Remaining render-blocking stylesheet URLs'),
+					h('summary', { className: 'cursor-pointer text-zinc-300 font-semibold' }, __("Remaining render-blocking stylesheet URLs", 'ultracache')),
 					h('div', { className: 'mt-3 space-y-1' }, renderBlockingHrefs.slice(0, 12).map((url, index) => h('code', { className: 'block font-mono text-[11px] text-zinc-300 break-all bg-black/20 rounded px-2 py-1', key: 'cssdiag-rb-' + index }, url))),
 				]) : null,
 			]);
 		}
 
 		return h('div', { className: 'uc-field-wrap', style: { gridColumn: '1 / -1' } }, [
-			h('label', { className: 'uc-field-label' }, 'CSS Bundle Exclusions'),
-			h('div', { className: 'text-xs text-zinc-500 mb-2' }, 'Optional newline-separated URL fragments. Matching stylesheets stay outside generated CSS bundles and load normally as their original stylesheet links. Use exclusions only when a stylesheet breaks inside the bundle or tested slower when bundled.'),
+			h('label', { className: 'uc-field-label' }, __("CSS Bundle Exclusions", 'ultracache')),
+			h('div', { className: 'text-xs text-zinc-500 mb-2' }, __("Optional newline-separated URL fragments. Matching stylesheets stay outside generated CSS bundles and load normally as their original stylesheet links. Use exclusions only when a stylesheet breaks inside the bundle or tested slower when bundled.", 'ultracache')),
 			h('textarea', {
 				className: 'uc-field-input uc-field-textarea',
 				value: draft,
@@ -2788,7 +2788,7 @@
 				onChange: (e) => setDraft(e.target.value),
 			}),
 			h('div', { className: 'mt-3 mb-2' }, [
-				h('label', { className: 'uc-field-label' }, 'Page URL to diagnose'),
+				h('label', { className: 'uc-field-label' }, __("Page URL to diagnose", 'ultracache')),
 				h('input', {
 					type: 'url',
 					className: 'uc-field-input',
@@ -2797,14 +2797,14 @@
 					placeholder: defaultScanUrl || 'https://example.com/page/',
 					onChange: (e) => setScanUrl(e.target.value),
 				}),
-				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Run a profile-bypass diagnostic for this same-site URL. Nothing is changed automatically.'),
+				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, __("Run a profile-bypass diagnostic for this same-site URL. Nothing is changed automatically.", 'ultracache')),
 			]),
 			h('div', { className: 'mt-3 mb-3 flex flex-wrap items-center gap-2', style: { justifyContent: 'space-evenly', padding: '5px 0' } }, [
 				h(Button, { key: 'defaults', onClick: handlePopulateDefaults, disabled: !!disabled || populateBusy }, populateBusy ? 'Populating…' : 'Populate Defaults'),
 				h(Button, { key: 'run-css', onClick: handleRunDiagnostics, disabled: !!disabled || scanBusy }, scanBusy ? 'Running…' : 'Run CSS Diagnostics'),
-				h(Button, { key: 'download-css', onClick: onDownloadJson, disabled: !!disabled || !current }, 'Download CSS JSON'),
-				h(Button, { key: 'clear-css', onClick: onClearResult, disabled: !!disabled || !current }, 'Clear CSS Result'),
-				h(Button, { key: 'save-css', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, 'Save Exclusions'),
+				h(Button, { key: 'download-css', onClick: onDownloadJson, disabled: !!disabled || !current }, __("Download CSS JSON", 'ultracache')),
+				h(Button, { key: 'clear-css', onClick: onClearResult, disabled: !!disabled || !current }, __("Clear CSS Result", 'ultracache')),
+				h(Button, { key: 'save-css', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __("Save Exclusions", 'ultracache')),
 			]),
 			renderDiagnosticsResult(),
 		]);
@@ -2990,7 +2990,7 @@
 							h('span', { className: 'slider' }),
 						]),
 					]);
-				}) : h('div', { className: 'text-xs text-zinc-500 px-3 py-3' }, 'No sources detected.')),
+				}) : h('div', { className: 'text-xs text-zinc-500 px-3 py-3' }, __("No sources detected.", 'ultracache'))),
 			]),
 			h('div', { className: 'text-[11px] text-zinc-500 mt-2' }, selected.length ? ('Selected: ' + selected.length) : 'No sources selected. Full-site warm buttons stay off.'),
 		]);
@@ -3018,31 +3018,31 @@
 			: '';
 
 		return h(Card, {
-			title: 'Cache Analytics',
-			description: 'Request counters for cache delivery and cache-generation activity. Warm/preload creates misses and writes, not hits.',
+			title: __("Cache Analytics", 'ultracache'),
+			description: __("Request counters for cache delivery and cache-generation activity. Warm/preload creates misses and writes, not hits.", 'ultracache'),
 		}, [
 			h('div', { className: 'grid grid-cols-2 xl:grid-cols-4 gap-3', key: 'metrics' }, [
-				h(StatCard, { key: 'hits', label: 'Cache Hits', value: formatStatsNumber(stats, stats.pageCacheHits), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache') }),
-				h(StatCard, { key: 'misses', label: 'Render Misses', value: formatStatsNumber(stats, stats.pageCacheMisses), hint: getStatsRefreshHint(stats, 'Reached WordPress render path') }),
-				h(StatCard, { key: 'bypasses', label: 'Bypasses', value: formatStatsNumber(stats, stats.pageCacheBypasses), hint: getStatsRefreshHint(stats, 'Skipped before buffering') }),
-				h(StatCard, { key: 'ratio', label: 'Hit Ratio', value: formatStatsPercent(stats, stats.pageCacheHitRatio), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'PHP-level ratio only; reverse proxy hits excluded' : 'Hits ÷ (hits + misses)') }),
+				h(StatCard, { key: 'hits', label: __("Cache Hits", 'ultracache'), value: formatStatsNumber(stats, stats.pageCacheHits), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'Hits that reached PHP/advanced-cache' : 'Served from advanced-cache') }),
+				h(StatCard, { key: 'misses', label: __("Render Misses", 'ultracache'), value: formatStatsNumber(stats, stats.pageCacheMisses), hint: getStatsRefreshHint(stats, 'Reached WordPress render path') }),
+				h(StatCard, { key: 'bypasses', label: __("Bypasses", 'ultracache'), value: formatStatsNumber(stats, stats.pageCacheBypasses), hint: getStatsRefreshHint(stats, 'Skipped before buffering') }),
+				h(StatCard, { key: 'ratio', label: __("Hit Ratio", 'ultracache'), value: formatStatsPercent(stats, stats.pageCacheHitRatio), hint: getStatsRefreshHint(stats, diagnostics && diagnostics.reverseProxy && diagnostics.reverseProxy.detected ? 'PHP-level ratio only; reverse proxy hits excluded' : 'Hits ÷ (hits + misses)') }),
 			]),
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-6 mt-5', key: 'detail-grid' }, [
 				h('div', { key: 'buckets' }, [
-					h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, 'Served cache buckets'),
-					h(DetailRow, { label: 'Original HTML', value: formatNumber(bucketHits.orig || 0) }),
-					h(DetailRow, { label: 'WebP HTML', value: formatNumber(bucketHits.webp || 0) }),
-					h(DetailRow, { label: 'AVIF HTML', value: formatNumber(bucketHits.avif || 0) }),
-					h(DetailRow, { label: 'Identity encoding', value: formatNumber(encodingHits.identity || 0) }),
-					h(DetailRow, { label: 'Gzip encoding', value: formatNumber(encodingHits.gzip || 0) }),
-					h(DetailRow, { label: 'Brotli encoding', value: formatNumber(encodingHits.brotli || 0) }),
-					h(DetailRow, { label: 'Cache writes', value: formatNumber(stats.pageCacheStores || 0) }),
-					h(DetailRow, { label: 'Write skips', value: formatNumber(stats.pageCacheStoreSkips || 0) }),
-					h(DetailRow, { label: 'Stale hits', value: formatNumber(stats.pageCacheStaleHits || 0) }),
-					h(DetailRow, { label: 'Background refreshes', value: formatNumber(stats.pageCacheBackgroundRevalidations || 0) }),
+					h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, __("Served cache buckets", 'ultracache')),
+					h(DetailRow, { label: __("Original HTML", 'ultracache'), value: formatNumber(bucketHits.orig || 0) }),
+					h(DetailRow, { label: __("WebP HTML", 'ultracache'), value: formatNumber(bucketHits.webp || 0) }),
+					h(DetailRow, { label: __("AVIF HTML", 'ultracache'), value: formatNumber(bucketHits.avif || 0) }),
+					h(DetailRow, { label: __("Identity encoding", 'ultracache'), value: formatNumber(encodingHits.identity || 0) }),
+					h(DetailRow, { label: __("Gzip encoding", 'ultracache'), value: formatNumber(encodingHits.gzip || 0) }),
+					h(DetailRow, { label: __("Brotli encoding", 'ultracache'), value: formatNumber(encodingHits.brotli || 0) }),
+					h(DetailRow, { label: __("Cache writes", 'ultracache'), value: formatNumber(stats.pageCacheStores || 0) }),
+					h(DetailRow, { label: __("Write skips", 'ultracache'), value: formatNumber(stats.pageCacheStoreSkips || 0) }),
+					h(DetailRow, { label: __("Stale hits", 'ultracache'), value: formatNumber(stats.pageCacheStaleHits || 0) }),
+					h(DetailRow, { label: __("Background refreshes", 'ultracache'), value: formatNumber(stats.pageCacheBackgroundRevalidations || 0) }),
 				]),
 				h('div', { key: 'reasons' }, [
-					h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, 'Top bypass reasons'),
+					h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, __("Top bypass reasons", 'ultracache')),
 					reasonEntries.length
 						? h('div', { className: 'space-y-2' }, reasonEntries.map(([reason, count]) =>
 							h('div', { className: 'flex items-center justify-between gap-4 py-2', key: reason }, [
@@ -3050,7 +3050,7 @@
 								h('div', { className: 'text-xs font-mono text-zinc-400' }, formatNumber(count)),
 							])
 						))
-						: h('div', { className: 'text-xs text-zinc-500 pt-2' }, 'No bypasses recorded yet.'),
+						: h('div', { className: 'text-xs text-zinc-500 pt-2' }, __("No bypasses recorded yet.", 'ultracache')),
 				]),
 			]),
 		]);
@@ -3110,26 +3110,26 @@
 			h('details', { className: 'uc-accordion uc-accordion--card', key: 'activity-summary', open: !!open }, [
 				h('summary', { className: 'uc-accordion__summary', onClick: function(event) { event.preventDefault(); if (onToggle) { onToggle(); } } }, [
 					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
-						h('div', { className: 'uc-accordion__title' }, 'Activity Summary'),
-						h('div', { className: 'uc-accordion__description' }, 'Recent operational events and warm/object-cache counters.'),
+						h('div', { className: 'uc-accordion__title' }, __("Activity Summary", 'ultracache')),
+						h('div', { className: 'uc-accordion__description' }, __("Recent operational events and warm/object-cache counters.", 'ultracache')),
 					]),
 					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
 				]),
 				h('div', { className: 'uc-accordion__body' }, [
 			h('div', { className: 'uc-diagnostic-group', key: 'activity-counters' }, [
-				h('div', { className: 'uc-section-title' }, 'Activity counters'),
+				h('div', { className: 'uc-section-title' }, __("Activity counters", 'ultracache')),
 				renderSummaryRows(counterRows),
 			]),
 			h('div', { className: 'uc-diagnostic-group', key: 'activity-status' }, [
-				h('div', { className: 'uc-section-title' }, 'Recent status'),
+				h('div', { className: 'uc-section-title' }, __("Recent status", 'ultracache')),
 				renderSummaryRows(statusRows),
 			]),
 			h('div', { className: 'uc-diagnostic-group', key: 'activity-css-bundle-summary' }, [
-				h('div', { className: 'uc-section-title' }, 'CSS Bundle Summary'),
+				h('div', { className: 'uc-section-title' }, __("CSS Bundle Summary", 'ultracache')),
 				renderSummaryRows(cssSummaryRows),
 			]),
 			h('div', { className: 'uc-diagnostic-group', key: 'activity-timeline' }, [
-				h('div', { className: 'uc-section-title' }, 'Recent activity'),
+				h('div', { className: 'uc-section-title' }, __("Recent activity", 'ultracache')),
 				renderStackRows(timelineRows),
 			]),
 				]),
@@ -3298,22 +3298,22 @@
 			h('details', { className: 'uc-accordion uc-accordion--card', key: 'diagnostics', open: !!open }, [
 				h('summary', { className: 'uc-accordion__summary', onClick: function(event) { event.preventDefault(); if (onToggle) { onToggle(); } } }, [
 					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
-						h('div', { className: 'uc-accordion__title' }, 'Diagnostics'),
-						h('div', { className: 'uc-accordion__description' }, 'Live cache status'),
+						h('div', { className: 'uc-accordion__title' }, __("Diagnostics", 'ultracache')),
+						h('div', { className: 'uc-accordion__description' }, __("Live cache status", 'ultracache')),
 					]),
 					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
 				]),
 				h('div', { className: 'uc-accordion__body' }, [
 			h('div', { className: 'uc-diagnostic-group', key: 'status-group' }, [
-				h('div', { className: 'uc-section-title' }, 'Runtime status'),
+				h('div', { className: 'uc-section-title' }, __("Runtime status", 'ultracache')),
 				renderRows(statusRows),
 			]),
 			h('div', { className: 'uc-diagnostic-group', key: 'runtime-group' }, [
-				h('div', { className: 'uc-section-title' }, 'Runtime files, drop-ins & versions'),
+				h('div', { className: 'uc-section-title' }, __("Runtime files, drop-ins & versions", 'ultracache')),
 				renderRows(runtimeRows),
 			]),
 			h('div', { className: 'uc-diagnostic-group', key: 'cache-storage-summary-group' }, [
-				h('div', { className: 'uc-section-title' }, 'Cache storage diagnostics'),
+				h('div', { className: 'uc-section-title' }, __("Cache storage diagnostics", 'ultracache')),
 				renderRows(storageRows, 'plain'),
 				h('button', {
 					className: 'uc-btn mt-3 text-white py-2 px-3 font-bold',
@@ -3326,7 +3326,7 @@
 				})) : null,
 			]),
 			runtimeConfigRows.length ? h('div', { className: 'uc-diagnostic-group', key: 'runtime-config-group' }, [
-				h('div', { className: 'uc-section-title' }, 'Runtime config in use'),
+				h('div', { className: 'uc-section-title' }, __("Runtime config in use", 'ultracache')),
 				renderRows(runtimeConfigRows),
 			]) : null,
 				]),
@@ -3465,19 +3465,19 @@
 			return h('div', { className: 'rounded bg-black/10 p-4', key: 'path-' + label }, [
 				h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400 mb-2' }, label),
 				h('div', { className: 'space-y-3' }, [
-					h(DetailRow, { label: 'Path', value: diag.path, mono: true }),
-					h(DetailRow, { label: 'Exists', value: diag.exists ? 'Yes' : 'No' }),
-					h(DetailRow, { label: 'Readable', value: diag.readable ? 'Yes' : 'No' }),
-					h(DetailRow, { label: 'Writable', value: diag.writable ? 'Yes' : 'No' }),
-					!diag.exists ? h(DetailRow, { label: 'Parent writable', value: diag.parentWritable ? 'Yes' : 'No' }) : null,
-					diag.managed ? h(DetailRow, { label: 'Managed by UltraCache', value: 'Yes' }) : null,
-					diag.dropInBuild ? h(DetailRow, { label: 'Generated build', value: diag.dropInBuild }) : null,
-					diag.storageFormat ? h(DetailRow, { label: 'Storage format', value: diag.storageFormat }) : null,
-					diag.size ? h(DetailRow, { label: 'Size', value: formatBytes(diag.size) }) : null,
-					diag.modified ? h(DetailRow, { label: 'Modified', value: formatLooseTime(diag.modified) }) : null,
-					diag.valid ? h(DetailRow, { label: 'Valid', value: 'Yes' }) : null,
-					diag.validJson ? h(DetailRow, { label: 'Valid JSON', value: 'Yes' }) : null,
-					diag.readError ? h(DetailRow, { label: 'Read error', value: diag.readError }) : null,
+					h(DetailRow, { label: __("Path", 'ultracache'), value: diag.path, mono: true }),
+					h(DetailRow, { label: __("Exists", 'ultracache'), value: diag.exists ? 'Yes' : 'No' }),
+					h(DetailRow, { label: __("Readable", 'ultracache'), value: diag.readable ? 'Yes' : 'No' }),
+					h(DetailRow, { label: __("Writable", 'ultracache'), value: diag.writable ? 'Yes' : 'No' }),
+					!diag.exists ? h(DetailRow, { label: __("Parent writable", 'ultracache'), value: diag.parentWritable ? 'Yes' : 'No' }) : null,
+					diag.managed ? h(DetailRow, { label: __("Managed by UltraCache", 'ultracache'), value: 'Yes' }) : null,
+					diag.dropInBuild ? h(DetailRow, { label: __("Generated build", 'ultracache'), value: diag.dropInBuild }) : null,
+					diag.storageFormat ? h(DetailRow, { label: __("Storage format", 'ultracache'), value: diag.storageFormat }) : null,
+					diag.size ? h(DetailRow, { label: __("Size", 'ultracache'), value: formatBytes(diag.size) }) : null,
+					diag.modified ? h(DetailRow, { label: __("Modified", 'ultracache'), value: formatLooseTime(diag.modified) }) : null,
+					diag.valid ? h(DetailRow, { label: __("Valid", 'ultracache'), value: 'Yes' }) : null,
+					diag.validJson ? h(DetailRow, { label: __("Valid JSON", 'ultracache'), value: 'Yes' }) : null,
+					diag.readError ? h(DetailRow, { label: __("Read error", 'ultracache'), value: diag.readError }) : null,
 					extraRows || null,
 				]),
 			]);
@@ -3487,8 +3487,8 @@
 			h('details', { className: 'uc-accordion uc-accordion--card', key: 'advanced-diagnostics' }, [
 				h('summary', { className: 'uc-accordion__summary' }, [
 					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
-						h('div', { className: 'uc-accordion__title' }, 'Advanced Diagnostics'),
-						h('div', { className: 'uc-accordion__description' }, 'Expanded server, PHP, media, proxy, cache-write, and bypass inspection.'),
+						h('div', { className: 'uc-accordion__title' }, __("Advanced Diagnostics", 'ultracache')),
+						h('div', { className: 'uc-accordion__description' }, __("Expanded server, PHP, media, proxy, cache-write, and bypass inspection.", 'ultracache')),
 					]),
 					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
 				]),
@@ -3496,30 +3496,30 @@
 					h(SettingsTransparencyPanel, { diagnostics: diagnostics, key: 'advanced-diagnostics-settings-transparency' }),
 					h(SecurityCorrectnessPanel, { diagnostics: diagnostics, key: 'advanced-diagnostics-security-correctness' }),
 					h('div', { className: 'uc-diagnostic-group', key: 'last-cache-write' }, [
-						h('div', { className: 'uc-section-title' }, 'Last page cache write'),
+						h('div', { className: 'uc-section-title' }, __("Last page cache write", 'ultracache')),
 						(lastCacheWrite && (lastCacheWrite.path || lastCacheWrite.pageFiles)) ? h('div', { className: 'rounded bg-black/10 p-4 space-y-3' }, [
-							h(DetailRow, { label: 'Page cache files', value: formatNumber(lastCacheWrite.pageFiles || 0) }),
-							h(DetailRow, { label: 'Last modified', value: formatLooseTime(lastCacheWrite.modified || 0) }),
-							h(DetailRow, { label: 'Last file size', value: formatBytes(lastCacheWrite.size || 0) }),
-							h(DetailRow, { label: 'Last file path', value: lastCacheWrite.path || '', mono: true }),
-							lastCacheWrite.error ? h(DetailRow, { label: 'Scan error', value: lastCacheWrite.error }) : null,
-						]) : h('div', { className: 'text-xs text-zinc-500 pt-2' }, 'No page cache files have been detected yet.'),
+							h(DetailRow, { label: __("Page cache files", 'ultracache'), value: formatNumber(lastCacheWrite.pageFiles || 0) }),
+							h(DetailRow, { label: __("Last modified", 'ultracache'), value: formatLooseTime(lastCacheWrite.modified || 0) }),
+							h(DetailRow, { label: __("Last file size", 'ultracache'), value: formatBytes(lastCacheWrite.size || 0) }),
+							h(DetailRow, { label: __("Last file path", 'ultracache'), value: lastCacheWrite.path || '', mono: true }),
+							lastCacheWrite.error ? h(DetailRow, { label: __("Scan error", 'ultracache'), value: lastCacheWrite.error }) : null,
+						]) : h('div', { className: 'text-xs text-zinc-500 pt-2' }, __("No page cache files have been detected yet.", 'ultracache')),
 					]),
 					(runtimeConfigDiag.path || analyticsDiag.path || advancedCacheDiag.path || objectCacheDiag.path || cacheDirDiag.path || objectCacheDirDiag.path)
 						? h('div', { className: 'uc-diagnostic-group', key: 'path-grid' }, [
-							h('div', { className: 'uc-section-title' }, 'Path details'),
+							h('div', { className: 'uc-section-title' }, __("Path details", 'ultracache')),
 							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
 								renderPathDetails('advanced-cache.php', advancedCacheDiag),
 								renderPathDetails('object-cache.php', objectCacheDiag),
-								renderPathDetails('runtime-config.php', runtimeConfigDiag, runtimeConfigDiag.keys && runtimeConfigDiag.keys.length ? h(DetailRow, { label: 'Keys', value: runtimeConfigDiag.keys.join(', ') }) : null),
-								analyticsDiag.table ? renderPathDetails('Analytics DB table', Object.assign({}, analyticsDiag, { path: analyticsDiag.table, readable: analyticsDiag.exists, writable: analyticsDiag.exists }), analyticsDiag.keys && analyticsDiag.keys.length ? h(DetailRow, { label: 'Top keys', value: analyticsDiag.keys.join(', ') }) : null) : null,
+								renderPathDetails('runtime-config.php', runtimeConfigDiag, runtimeConfigDiag.keys && runtimeConfigDiag.keys.length ? h(DetailRow, { label: __("Keys", 'ultracache'), value: runtimeConfigDiag.keys.join(', ') }) : null),
+								analyticsDiag.table ? renderPathDetails('Analytics DB table', Object.assign({}, analyticsDiag, { path: analyticsDiag.table, readable: analyticsDiag.exists, writable: analyticsDiag.exists }), analyticsDiag.keys && analyticsDiag.keys.length ? h(DetailRow, { label: __("Top keys", 'ultracache'), value: analyticsDiag.keys.join(', ') }) : null) : null,
 								renderPathDetails('Cache directory', cacheDirDiag),
 								renderPathDetails('Object cache directory', objectCacheDirDiag),
 							]),
 						])
 						: null,
 					h('div', { className: 'uc-diagnostic-group', key: 'cache-storage-diagnostics' }, [
-						h('div', { className: 'uc-section-title' }, 'Cache storage diagnostics'),
+						h('div', { className: 'uc-section-title' }, __("Cache storage diagnostics", 'ultracache')),
 						renderRows(storageRows, 'plain'),
 						h('button', {
 							className: 'uc-btn mt-3 text-white py-2 px-3 font-bold',
@@ -3532,24 +3532,24 @@
 						})) : null,
 					]),
 					h('div', { className: 'uc-diagnostic-group', key: 'css-bundle-storage-diagnostics' }, [
-						h('div', { className: 'uc-section-title' }, 'CSS bundle storage'),
+						h('div', { className: 'uc-section-title' }, __("CSS bundle storage", 'ultracache')),
 						renderRows(cssStorageRows, 'plain'),
 						storageCssBundles.message ? h('div', { className: storageCssBundles.warningLevel === 'ok' ? 'mt-3 text-xs text-zinc-500' : 'mt-3 text-xs text-cyan-300' }, storageCssBundles.message) : null,
 						storageCssBundles.cleanupPolicyMessage ? h('div', { className: 'mt-2 text-xs text-zinc-400' }, storageCssBundles.cleanupPolicyMessage) : null,
 						storageCssBundles.recentProtectedMessage ? h('div', { className: 'mt-2 text-xs text-cyan-300' }, storageCssBundles.recentProtectedMessage) : null,
 						storageCssBundles.oldEligibleMessage ? h('div', { className: 'mt-2 text-xs text-amber-300' }, storageCssBundles.oldEligibleMessage) : null,
 						Array.isArray(storageCssBundles.largestFiles) && storageCssBundles.largestFiles.length ? h('div', { className: 'mt-4 rounded bg-black/10 p-4 space-y-3' }, [
-							h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400' }, 'Largest CSS bundle files'),
+							h('div', { className: 'text-xs font-bold tracking-widest text-zinc-400' }, __("Largest CSS bundle files", 'ultracache')),
 							storageCssBundles.largestFiles.map(function(file) {
 								return h(DetailRow, { key: file.name, label: file.name, value: formatBytes(file.bytes || 0) + ' · ' + formatLooseTime(file.modified || 0), mono: true });
 							}),
 						]) : null,
 					]),
 					reverseProxy.detected ? h('div', { className: 'uc-diagnostic-group', key: 'proxy-box' }, [
-						h('div', { className: 'uc-section-title' }, 'Reverse Proxy Details'),
+						h('div', { className: 'uc-section-title' }, __("Reverse Proxy Details", 'ultracache')),
 						h('div', { className: 'rounded bg-black/10 p-4 space-y-3' }, [
-							h(DetailRow, { label: 'Provider', value: reverseProxy.provider || 'Detected' }),
-							h(DetailRow, { label: 'Server', value: reverseProxy.server || '' }),
+							h(DetailRow, { label: __("Provider", 'ultracache'), value: reverseProxy.provider || 'Detected' }),
+							h(DetailRow, { label: __("Server", 'ultracache'), value: reverseProxy.server || '' }),
 							h(DetailRow, { label: 'Via', value: reverseProxy.via || '' }),
 							h(DetailRow, { label: 'X-Cache', value: reverseProxy.x_cache || '' }),
 							h(DetailRow, { label: 'X-Cache-Status', value: reverseProxy.x_cache_status || '' }),
@@ -3558,24 +3558,24 @@
 							h(DetailRow, { label: 'X-LiteSpeed-Cache', value: reverseProxy.x_litespeed_cache || '' }),
 							h(DetailRow, { label: 'X-QC-Cache', value: reverseProxy.x_qc_cache || '' }),
 							h(DetailRow, { label: 'CF-Cache-Status', value: reverseProxy.cf_cache_status || '' }),
-							h(DetailRow, { label: 'Age', value: reverseProxy.age || '' }),
+							h(DetailRow, { label: __("Age", 'ultracache'), value: reverseProxy.age || '' }),
 						]),
 					]) : null,
 					h('div', { className: 'uc-diagnostic-group', key: 'environment-group' }, [
-						h('div', { className: 'uc-section-title' }, 'Server & PHP environment'),
+						h('div', { className: 'uc-section-title' }, __("Server & PHP environment", 'ultracache')),
 						renderRows(environmentRows, 'neutral'),
 					]),
 					h('div', { className: 'uc-diagnostic-group', key: 'media-runtime-group' }, [
-						h('div', { className: 'uc-section-title' }, 'Media runtime diagnostics'),
+						h('div', { className: 'uc-section-title' }, __("Media runtime diagnostics", 'ultracache')),
 						renderRows(mediaRuntimeRows, 'neutral'),
 					]),
 					h(FontPipelineDiagnosticsPanel, { diagnostics, key: 'font-pipeline-diagnostics-panel' }),
 					h('div', { className: 'uc-diagnostic-group', key: 'cache-group' }, [
-						h('div', { className: 'uc-section-title' }, 'Cache diagnostics'),
+						h('div', { className: 'uc-section-title' }, __("Cache diagnostics", 'ultracache')),
 						renderRows(cacheDetailRows, 'neutral'),
 					]),
 					h('div', { className: 'uc-diagnostic-group', key: 'reasons-group' }, [
-						h('div', { className: 'uc-section-title' }, 'Top bypass reasons'),
+						h('div', { className: 'uc-section-title' }, __("Top bypass reasons", 'ultracache')),
 						reasonEntries.length
 							? renderRows(reasonEntries.map(([reason, count]) => [reason, false, statsDisabled ? 'Stats disabled' : formatNumber(count)]), 'neutral')
 							: h('div', { className: 'text-xs text-zinc-500 pt-2' }, statsDisabled ? 'Cache Statistics are OFF, so bypass counters are not collected.' : 'No bypasses recorded yet.'),
@@ -3642,7 +3642,7 @@
 				]),
 			]),
 			h('div', { className: 'flex justify-between text-xs mb-2', key: 'meta' }, [
-				h('span', { className: 'text-zinc-400' }, 'Overall Progress'),
+				h('span', { className: 'text-zinc-400' }, __("Overall Progress", 'ultracache')),
 				h(
 					'span',
 					{ className: 'text-emerald-400 font-mono' },
@@ -3744,55 +3744,55 @@
 		return h('details', { className: 'uc-card uc-accordion uc-performance-profiler', key: 'performance-profiler' }, [
 			h('summary', { className: 'uc-accordion__summary uc-performance-profiler__summary', key: 'summary' }, [
 				h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
-					h('div', { className: 'uc-accordion__title', key: 'title' }, 'Speed Diagnostics'),
-					h('div', { className: 'uc-accordion__description', key: 'description' }, 'Find what slows down the first uncached page build.'),
+					h('div', { className: 'uc-accordion__title', key: 'title' }, __("Speed Diagnostics", 'ultracache')),
+					h('div', { className: 'uc-accordion__description', key: 'description' }, __("Find what slows down the first uncached page build.", 'ultracache')),
 				]),
 				h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
 			]),
 			h('div', { className: 'uc-accordion__body uc-performance-profiler__body', key: 'body' }, [
 				h('div', { className: 'uc-card-warning mb-4', key: 'warning' }, [
-					h('strong', { key: 'title' }, 'Use this when the first visit after purge feels slow. '),
-					'Quick Speed Check shows the main timing breakdown. Full Speed Breakdown adds deeper details. Analyze WordPress Hooks shows which plugin, theme, or WordPress core area costs time.',
+					h('strong', { key: 'title' }, __("Use this when the first visit after purge feels slow. ", 'ultracache')),
+					__("Quick Speed Check shows the main timing breakdown. Full Speed Breakdown adds deeper details. Analyze WordPress Hooks shows which plugin, theme, or WordPress core area costs time.", 'ultracache'),
 				]),
 				inlineCssWarning ? h('div', { className: 'uc-card-warning mb-4', key: 'inline-css-warning' }, [
-					h('strong', { key: 'title' }, 'Inline CSS Bundling generated large cached HTML. '),
+					h('strong', { key: 'title' }, __("Inline CSS Bundling generated large cached HTML. ", 'ultracache')),
 					'Last profile: inline CSS ' + formatBytes(cssBundle.inlineStyleBytes || 0) + ', final HTML ' + formatBytes(cssBundle.finalHtmlBytes || 0) + '. This setting is still respected; UltraCache will not silently switch it to external CSS. Disable Inline CSS Bundling if this size is too high for the site/server.'
 				]) : null,
 				cssBundleCriticalWarning ? h('div', { className: 'uc-card-warning mb-4', key: 'css-bundle-critical-warning' }, [
-					h('strong', { key: 'title' }, 'Large render-blocking CSS bundle detected. '),
+					h('strong', { key: 'title' }, __("Large render-blocking CSS bundle detected. ", 'ultracache')),
 					'Last profile: bundle ' + formatBytes(cssBundle.fileBytes || 0) + ' from ' + formatNumber(cssBundle.sourceUrlCount || 0) + ' source stylesheet(s). This is diagnostic only; UltraCache is not changing CSS loading automatically.'
 				]) : null,
 				h('div', { className: 'uc-profiler-actions mb-4', key: 'actions' }, [
 					h(Button, { key: 'compact', variant: 'primary', disabled: !!busy, onClick: () => onRun('compact') }, busy ? 'Analyzing…' : 'Quick Speed Check'),
-					h(Button, { key: 'verbose', disabled: !!busy, onClick: () => onRun('verbose') }, 'Full Speed Breakdown'),
-					h(Button, { key: 'callback', disabled: !!busy, onClick: () => onRun('callback') }, 'Analyze WordPress Hooks'),
-					h(Button, { key: 'download', disabled: !!busy || !current, onClick: onDownload }, 'Download Diagnostic Data'),
-					h(Button, { key: 'clear', variant: 'danger', disabled: !!busy || !current, onClick: onClear }, 'Clear Last Speed Report'),
+					h(Button, { key: 'verbose', disabled: !!busy, onClick: () => onRun('verbose') }, __("Full Speed Breakdown", 'ultracache')),
+					h(Button, { key: 'callback', disabled: !!busy, onClick: () => onRun('callback') }, __("Analyze WordPress Hooks", 'ultracache')),
+					h(Button, { key: 'download', disabled: !!busy || !current, onClick: onDownload }, __("Download Diagnostic Data", 'ultracache')),
+					h(Button, { key: 'clear', variant: 'danger', disabled: !!busy || !current, onClick: onClear }, __("Clear Last Speed Report", 'ultracache')),
 				]),
-				current ? h('div', { className: 'uc-detail-list mb-4', key: 'summary-list' }, summaryRows.map((row) => h(DetailRow, { key: row[0], label: row[0], value: row[1] }))) : h('div', { className: 'text-sm text-zinc-500', key: 'empty' }, 'No speed report loaded yet.'),
+				current ? h('div', { className: 'uc-detail-list mb-4', key: 'summary-list' }, summaryRows.map((row) => h(DetailRow, { key: row[0], label: row[0], value: row[1] }))) : h('div', { className: 'text-sm text-zinc-500', key: 'empty' }, __("No speed report loaded yet.", 'ultracache')),
 				current && overheadProbe && overheadProbe.available ? h('div', { className: 'mt-4 mb-4 bg-black/20 rounded-2xl px-4 py-4', key: 'ultracache-overhead-probe' }, [
 					h('div', { className: 'flex items-center justify-between gap-4 mb-3', key: 'heading' }, [
 						h('div', { key: 'copy' }, [
-							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, 'UltraCache Overhead Probe'),
-							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, 'Breaks down UltraCache request-path work such as cacheability checks, early HIT lookup, CSS ref validation, and cache output processing.'),
+							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, __("UltraCache Overhead Probe", 'ultracache')),
+							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, __("Breaks down UltraCache request-path work such as cacheability checks, early HIT lookup, CSS ref validation, and cache output processing.", 'ultracache')),
 						]),
 						h('span', { className: (overheadProbe.maybeStartBufferingMs || 0) > 100 ? 'font-mono text-amber-300 shrink-0' : 'font-mono text-emerald-300 shrink-0', key: 'status' }, 'buffering ' + formatNumber(overheadProbe.maybeStartBufferingMs || 0) + ' ms'),
 					]),
 					h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-3 text-xs mb-3', key: 'cards' }, [
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'maybe' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Buffering entry'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Buffering entry", 'ultracache')),
 							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(overheadProbe.maybeStartBufferingMs || 0) + ' ms'),
-							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, 'template_redirect → buffer/bypass/HIT'),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, __("template_redirect → buffer/bypass/HIT", 'ultracache')),
 						]),
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'bypass' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Cacheability checks'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Cacheability checks", 'ultracache')),
 							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(overheadProbe.shouldBypassMs || 0) + ' ms'),
-							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, 'should_bypass_cache breakdown'),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, __("should_bypass_cache breakdown", 'ultracache')),
 						]),
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'output' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Output callback'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Output callback", 'ultracache')),
 							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(overheadProbe.cacheOutputCallbackMs || 0) + ' ms'),
-							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, 'HTML rewrites + cache write'),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, __("HTML rewrites + cache write", 'ultracache')),
 						]),
 					]),
 					overheadProbeItems.length ? h('div', { className: 'space-y-2', key: 'items' }, overheadProbeItems.slice(0, 10).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'uc-overhead-' + index }, [
@@ -3803,7 +3803,7 @@
 						item.description ? h('div', { className: 'text-zinc-500 mt-1', key: 'desc' }, item.description) : null,
 					]))) : null,
 					overheadProbeDeltas.length ? h('details', { className: 'mt-3', key: 'deltas' }, [
-						h('summary', { className: 'text-[11px] text-zinc-500 cursor-pointer', key: 'summary' }, 'Show checkpoint deltas'),
+						h('summary', { className: 'text-[11px] text-zinc-500 cursor-pointer', key: 'summary' }, __("Show checkpoint deltas", 'ultracache')),
 						h('div', { className: 'space-y-1 mt-2', key: 'delta-items' }, overheadProbeDeltas.slice(0, 12).map((item, index) => h('div', { className: 'text-[11px] text-zinc-400 flex items-center justify-between gap-3', key: 'uc-delta-' + index }, [
 							h('span', { className: 'break-all', key: 'stage' }, item.stage || 'checkpoint'),
 							h('span', { className: 'font-mono shrink-0', key: 'delta' }, formatNumber(item.deltaMs || 0) + ' ms'),
@@ -3813,21 +3813,21 @@
 				current && frontendRewriteBreakdown && frontendRewriteBreakdown.available ? h('div', { className: 'mt-4 mb-4 bg-black/20 rounded-2xl px-4 py-4', key: 'frontend-rewrite-breakdown' }, [
 					h('div', { className: 'flex items-center justify-between gap-4 mb-3', key: 'heading' }, [
 						h('div', { key: 'copy' }, [
-							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, 'Frontend Rewrite Stage Breakdown'),
-							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, 'Breaks down the HTML optimization work inside the STORE output callback. Diagnostic only; no loading behavior is changed.'),
+							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, __("Frontend Rewrite Stage Breakdown", 'ultracache')),
+							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, __("Breaks down the HTML optimization work inside the STORE output callback. Diagnostic only; no loading behavior is changed.", 'ultracache')),
 						]),
 						h('span', { className: (frontendRewriteBreakdown.frontendTotalMs || 0) > 500 ? 'font-mono text-amber-300 shrink-0' : 'font-mono text-zinc-300 shrink-0', key: 'status' }, formatNumber(frontendRewriteBreakdown.frontendTotalMs || 0) + ' ms total'),
 					]),
 					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-3 text-xs mb-3', key: 'cards' }, [
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'parent' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Parent rewrite time'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Parent rewrite time", 'ultracache')),
 							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(frontendRewriteBreakdown.frontendTotalMs || 0) + ' ms'),
 							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, 'frontend_performance_optimizations_total'),
 						]),
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'visible' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Measured sub-steps'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Measured sub-steps", 'ultracache')),
 							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(frontendRewriteItems.length || 0)),
-							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, 'sorted by duration'),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, __("sorted by duration", 'ultracache')),
 						]),
 					]),
 					frontendRewriteItems.length ? h('div', { className: 'space-y-2', key: 'items' }, frontendRewriteItems.slice(0, 14).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'frontend-stage-' + index }, [
@@ -3841,8 +3841,8 @@
 				]) : null,				current && cssLinkDuplication && cssLinkDuplication.available && cssDuplicateItems.length ? h('div', { className: 'mt-4 mb-4 bg-black/20 rounded-2xl px-4 py-4', key: 'css-link-duplication' }, [
 					h('div', { className: 'flex items-center justify-between gap-4 mb-3', key: 'heading' }, [
 						h('div', { key: 'copy' }, [
-							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, 'CSS Duplicate / Mixed-Status Links'),
-							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, 'Highlights stylesheet URLs that appear more than once or appear both blocking and non-blocking. Diagnostic only.'),
+							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, __("CSS Duplicate / Mixed-Status Links", 'ultracache')),
+							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, __("Highlights stylesheet URLs that appear more than once or appear both blocking and non-blocking. Diagnostic only.", 'ultracache')),
 						]),
 						h('span', { className: cssLinkDuplication.mixedStatusCount ? 'font-mono text-amber-300 shrink-0' : 'font-mono text-zinc-300 shrink-0', key: 'status' }, formatNumber(cssLinkDuplication.duplicateCount || 0) + ' duplicate'),
 					]),
@@ -3858,45 +3858,45 @@
 				current ? h('div', { className: 'mt-4 mb-4 bg-black/20 rounded-2xl px-4 py-4', key: 'css-critical-path-diagnostics' }, [
 					h('div', { className: 'flex items-center justify-between gap-4 mb-3', key: 'heading' }, [
 						h('div', { key: 'copy' }, [
-							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, 'CSS Critical Path / Render Blocking Diagnostics'),
-							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, 'Summary of the CSS calls left in the first render path. Diagnostic only; no CSS loading behavior is changed automatically.'),
+							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, __("CSS Critical Path / Render Blocking Diagnostics", 'ultracache')),
+							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'hint' }, __("Summary of the CSS calls left in the first render path. Diagnostic only; no CSS loading behavior is changed automatically.", 'ultracache')),
 						]),
 						h('span', { className: ((cssBundle.renderBlockingStylesheets || 0) > 0 ? 'font-mono text-amber-300 shrink-0' : 'font-mono text-emerald-300 shrink-0'), key: 'status' }, formatNumber(cssBundle.renderBlockingStylesheets || 0) + ' blocking CSS'),
 					]),
 					h('div', { className: 'grid grid-cols-1 md:grid-cols-4 gap-3 text-xs', key: 'cards' }, [
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'main' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Main bundle'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Main bundle", 'ultracache')),
 							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, cssBundle.fileExists ? formatBytes(cssBundle.fileBytes || 0) : 'Not built'),
 							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, formatNumber(cssBundle.sourceUrlCount || 0) + ' source stylesheet(s)' + (cssBundle.mode ? ' · ' + cssBundle.mode : '')),
 						]),
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'leftover' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Leftover bundle'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Leftover bundle", 'ultracache')),
 							h('div', { className: leftoverCssBundle.enabled && leftoverCssBundle.success ? 'text-emerald-300 font-bold mt-1' : 'text-zinc-200 font-bold mt-1', key: 'value' }, leftoverCssBundle.enabled ? (leftoverCssBundle.success ? 'Built' : 'Skipped') : 'Disabled'),
 							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, formatNumber(leftoverCssBundle.replacedLinkCount || 0) + ' replaced · ' + formatBytes(leftoverCssBundle.bundleBytes || 0)),
 						]),
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'links' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Final CSS links'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Final CSS links", 'ultracache')),
 							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(cssBundle.stylesheetLinks || 0)),
 							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, formatNumber(cssBundle.renderBlockingBundleLinks || 0) + ' bundle · ' + formatNumber(cssBundle.renderBlockingNonBundleLinks || 0) + ' outside bundle'),
 						]),
 						h('div', { className: 'bg-black/20 rounded-xl px-3 py-3', key: 'protected' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, 'Protected CSS'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]', key: 'label' }, __("Protected CSS", 'ultracache')),
 							h('div', { className: 'text-zinc-200 font-bold mt-1', key: 'value' }, formatNumber(criticalChain.protectedStyleCount || 0)),
-							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, 'Slider/hero or safety protected'),
+							h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, __("Slider/hero or safety protected", 'ultracache')),
 						]),
 					]),
 					(cssBundle.renderBlockingStylesheets || 0) > 0 ? h('div', { className: 'mt-3 text-[11px] text-zinc-400 leading-relaxed', key: 'recommendation' }, [
-						h('strong', { className: 'text-zinc-300', key: 'title' }, 'Recommended next check: '),
+						h('strong', { className: 'text-zinc-300', key: 'title' }, __("Recommended next check: ", 'ultracache')),
 						(leftoverCssBundle.enabled && leftoverCssBundle.success) ? 'Leftover CSS consolidation is active. The remaining larger issue is the main render-blocking CSS bundle, so the next optimization candidate is critical CSS split / async non-critical bundle mode.' : 'Test Consolidate Remaining CSS first if visual output is safe, then review whether the main bundle needs a critical CSS split.',
 					]) : null,
 				]) : null,
 					current && (criticalStyleCandidates.length || criticalScriptCandidates.length) ? h('div', { className: 'mt-4', key: 'critical-chain' }, [
 						h('div', { className: 'flex items-center justify-between gap-4 mb-2', key: 'heading' }, [
-							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, 'Critical Request Chain Candidates'),
-							h('div', { className: 'text-[11px] text-zinc-500 text-right', key: 'hint' }, 'Diagnostic only: shows why CSS/JS remains blocking, delayed, or protected.'),
+							h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase', key: 'label' }, __("Critical Request Chain Candidates", 'ultracache')),
+							h('div', { className: 'text-[11px] text-zinc-500 text-right', key: 'hint' }, __("Diagnostic only: shows why CSS/JS remains blocking, delayed, or protected.", 'ultracache')),
 						]),
 						criticalStyleCandidates.length ? h('div', { className: 'mb-3', key: 'styles' }, [
-							h('div', { className: 'text-[11px] text-zinc-500 uppercase tracking-wider mb-2', key: 'styles-label' }, 'Styles'),
+							h('div', { className: 'text-[11px] text-zinc-500 uppercase tracking-wider mb-2', key: 'styles-label' }, __("Styles", 'ultracache')),
 							h('div', { className: 'space-y-2', key: 'style-items' }, criticalStyleCandidates.slice(0, 10).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'critical-style-' + index }, [
 								h('div', { className: 'flex items-center justify-between gap-4', key: 'main' }, [
 									h('span', { className: 'break-all', key: 'url' }, item.url || item.path || 'unknown stylesheet'),
@@ -3908,7 +3908,7 @@
 							]))),
 						]) : null,
 						criticalScriptCandidates.length ? h('div', { key: 'scripts' }, [
-							h('div', { className: 'text-[11px] text-zinc-500 uppercase tracking-wider mb-2', key: 'scripts-label' }, 'Scripts'),
+							h('div', { className: 'text-[11px] text-zinc-500 uppercase tracking-wider mb-2', key: 'scripts-label' }, __("Scripts", 'ultracache')),
 							h('div', { className: 'space-y-2', key: 'script-items' }, criticalScriptCandidates.slice(0, 12).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'critical-script-' + index }, [
 								h('div', { className: 'flex items-center justify-between gap-4', key: 'main' }, [
 									h('span', { className: 'break-all', key: 'url' }, item.url || item.path || 'unknown script'),
@@ -3921,17 +3921,17 @@
 						]) : null,
 					]) : null,
 				current ? h('div', { className: 'mt-4', key: 'origin-summary' }, [
-					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, 'Plugin / Theme Time Summary'),
+					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, __("Plugin / Theme Time Summary", 'ultracache')),
 					originTop.length ? h('div', { className: 'space-y-2', key: 'items' }, originTop.slice(0, 12).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'origin-' + index }, [
 						h('div', { className: 'flex items-center justify-between gap-4', key: 'main' }, [
 							h('span', { key: 'name' }, (item.originName || 'unknown') + ' · ' + (item.originType || 'origin')),
 							h('span', { className: 'font-mono text-amber-300', key: 'ms' }, formatNumber(item.totalMs || 0) + 'ms'),
 						]),
 						h('div', { className: 'text-zinc-500 mt-1', key: 'meta' }, formatNumber(item.callbackCount || 0) + ' callback groups' + (item.topCallback ? ' · slowest: ' + item.topCallback + ' (' + formatNumber(item.topCallbackMs || 0) + 'ms)' : '')),
-					]))) : h('div', { className: 'text-xs text-zinc-500 bg-black/20 rounded-xl px-3 py-2', key: 'empty' }, 'Analyze WordPress Hooks to see total delay grouped by plugin, theme, and WordPress core.'),
+					]))) : h('div', { className: 'text-xs text-zinc-500 bg-black/20 rounded-xl px-3 py-2', key: 'empty' }, __("Analyze WordPress Hooks to see total delay grouped by plugin, theme, and WordPress core.", 'ultracache')),
 				]) : null,
 				current && slowCheckpoints.length ? h('div', { className: 'mt-4', key: 'slow' }, [
-					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, 'Slow checkpoints'),
+					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, __("Slow checkpoints", 'ultracache')),
 					h('div', { className: 'space-y-2', key: 'items' }, slowCheckpoints.slice(0, 6).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'slow-' + index }, [
 						h('span', { className: 'font-mono text-amber-300', key: 'ms' }, formatNumber(item.deltaMs || 0) + 'ms '),
 						h('span', { key: 'stage' }, item.stage || 'unknown'),
@@ -3940,7 +3940,7 @@
 					]))),
 				]) : null,
 				current && callbackTop.length ? h('div', { className: 'mt-4', key: 'callbacks' }, [
-					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, 'Top slow callbacks'),
+					h('div', { className: 'text-xs tracking-widest text-zinc-500 uppercase mb-2', key: 'label' }, __("Top slow callbacks", 'ultracache')),
 					h('div', { className: 'space-y-2', key: 'items' }, callbackTop.slice(0, 8).map((item, index) => h('div', { className: 'text-xs text-zinc-300 bg-black/20 rounded-xl px-3 py-2', key: 'cb-' + index }, [
 						h('span', { className: 'font-mono text-amber-300', key: 'ms' }, formatNumber(item.totalMs || 0) + 'ms '),
 						h('span', { key: 'callback' }, item.callback || 'unknown callback'),
@@ -3962,12 +3962,12 @@
 		}
 
 		return h('div', { id: 'ucwp-cache-conflict-review', className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-3' }, [
-			h('div', { className: 'font-bold text-amber-200 mb-2', key: 'title' }, 'Conflicting WordPress cache helpers detected'),
+			h('div', { className: 'font-bold text-amber-200 mb-2', key: 'title' }, __("Conflicting WordPress cache helpers detected", 'ultracache')),
 			h('div', { className: 'space-y-1 mb-2', key: 'dropins' }, dropins.map((item) => h('div', { key: 'dropin-' + item.file }, [
 				h('span', { className: 'font-mono text-amber-100' }, item.file || 'drop-in'),
 				h('span', {}, ' — owner: ' + (item.owner || 'Unknown') + (item.removable ? ' · removable' : '')),
 			]))),
-			h('div', { className: 'text-amber-100/90', key: 'message' }, 'UltraCache can back up and remove these conflicting WordPress drop-ins. It will not delete plugin folders or settings from other plugins.'),
+			h('div', { className: 'text-amber-100/90', key: 'message' }, __("UltraCache can back up and remove these conflicting WordPress drop-ins. It will not delete plugin folders or settings from other plugins.", 'ultracache')),
 			h('div', { className: 'flex flex-wrap gap-3 mt-3', key: 'actions' }, [
 				removableDropins.length ? h(Button, { onClick: onRemove, disabled: busy, variant: 'danger', key: 'remove' }, busy ? 'Working…' : 'Remove conflicting cache helpers') : null,
 				h(Button, { onClick: onRecheck, disabled: busy, variant: 'light', key: 'recheck' }, busy ? 'Working…' : 'Re-check'),
@@ -4009,8 +4009,8 @@
 		const modeLabel = isAdminMode ? 'Admin secret' : 'HTTP frontend';
 
 		return h(Card, {
-			title: 'Varnish Cache',
-			description: 'Varnish integration supports two purge methods: HTTP frontend endpoint mode and admin-secret mode. Use the method your host exposes; HTTP mode is optional and is not required when admin-secret mode is configured.',
+			title: __("Varnish Cache", 'ultracache'),
+			description: __("Varnish integration supports two purge methods: HTTP frontend endpoint mode and admin-secret mode. Use the method your host exposes; HTTP mode is optional and is not required when admin-secret mode is configured.", 'ultracache'),
 		}, [
 			h(ToggleRow, {
 				label: isAdminMode ? 'Enable Varnish admin-secret purge' : 'Enable Varnish HTTP endpoint purge',
@@ -4021,18 +4021,18 @@
 			}),
 			
 			!isAdminMode && endpointWarningMessages.length ? h('div', { className: 'space-y-2 mt-4' }, endpointWarningMessages.map((message, index) => h('div', { className: 'text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2', key: 'varnish-endpoint-warning-' + index }, message))) : null,
-			formHasUnsafeEndpoint ? h('div', { className: 'mt-4 text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2' }, 'This endpoint appears to point at the public WordPress frontend instead of a Varnish listener. External Varnish infrastructure and custom ports are allowed when intentionally configured.') : null,
+			formHasUnsafeEndpoint ? h('div', { className: 'mt-4 text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2' }, __("This endpoint appears to point at the public WordPress frontend instead of a Varnish listener. External Varnish infrastructure and custom ports are allowed when intentionally configured.", 'ultracache')) : null,
 			h(CacheHelperConflictNotice, { diagnostics, busy, onRemove: onRemoveConflictingDropins, onRecheck: onRecheckConflicts }),
 			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(SelectField, {
-					label: 'Purge mode',
-					description: 'Choose HTTP only when your host exposes a local Varnish HTTP purge listener. Choose Admin when your host provides the Varnish admin secret/socket.',
+					label: __("Purge mode", 'ultracache'),
+					description: __("Choose HTTP only when your host exposes a local Varnish HTTP purge listener. Choose Admin when your host provides the Varnish admin secret/socket.", 'ultracache'),
 					value: form.varnishCliMode || 'http',
 					onChange: (value) => onFieldChange('varnishCliMode', value),
 					disabled: busy,
 					options: [
-						{ value: 'http', label: 'HTTP frontend endpoint' },
-						{ value: 'admin', label: 'Admin secret' },
+						{ value: 'http', label: __("HTTP frontend endpoint", 'ultracache') },
+						{ value: 'admin', label: __("Admin secret", 'ultracache') },
 					],
 					key: 'mode',
 				}),
@@ -4055,7 +4055,7 @@
 					key: 'key',
 				}),
 				h(SelectField, {
-					label: 'Command type',
+					label: __("Command type", 'ultracache'),
 					description: isAdminMode ? 'Admin mode uses the Varnish admin interface. BAN is the effective action even if you change this selector.' : 'BAN is safer across most builds. PURGE sends PURGE only; choose BAN if your Varnish setup does not explicitly support PURGE.',
 					value: form.varnishCliMethod || 'BAN',
 					onChange: (value) => onFieldChange('varnishCliMethod', value),
@@ -4067,7 +4067,7 @@
 					key: 'method',
 				}),
 				h(NumberRow, {
-					label: 'Timeout (seconds)',
+					label: __("Timeout (seconds)", 'ultracache'),
 					description: isAdminMode ? 'Connection and read timeout for each Varnish admin endpoint. Maximum: 15 seconds.' : 'Connection and read timeout for each Varnish HTTP endpoint. Maximum: 15 seconds.',
 					value: form.varnishCliTimeoutSeconds || 2,
 					onChange: (value) => onFieldChange('varnishCliTimeoutSeconds', value),
@@ -4084,37 +4084,37 @@
 				h(Button, { onClick: onFlushAll, disabled: busy || !form.varnishCliEnabled || !varnish.available || actionsBlocked, variant: 'light' }, busy ? 'Working…' : 'Flush Varnish for This Site'),
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
-				h('div', { className: 'uc-section-title' }, 'Status'),
+				h('div', { className: 'uc-section-title' }, __("Status", 'ultracache')),
 				h('div', { className: 'space-y-3' }, [
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Support'),
+						h('div', { className: 'text-sm text-white' }, __("Support", 'ultracache')),
 						h(StatusPill, { ok: !!varnish.available, text: varnish.available ? 'Available' : 'Unavailable', tone: varnish.available ? 'success' : 'neutral' }),
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Configured mode'),
+						h('div', { className: 'text-sm text-white' }, __("Configured mode", 'ultracache')),
 						h(StatusPill, { ok: true, text: modeLabel, tone: 'neutral' }),
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Effective purge method'),
+						h('div', { className: 'text-sm text-white' }, __("Effective purge method", 'ultracache')),
 						h(StatusPill, { ok: true, text: effectiveMethod, tone: 'neutral' }),
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Configured endpoints'),
+						h('div', { className: 'text-sm text-white' }, __("Configured endpoints", 'ultracache')),
 						h(StatusPill, { ok: endpointCount > 0, text: endpointCount > 0 ? (endpointCount + ' endpoint(s)') : '—', tone: endpointCount > 0 ? 'neutral' : 'warning' }),
 					]),
 					isAdminMode ? h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Admin secret'),
+						h('div', { className: 'text-sm text-white' }, __("Admin secret", 'ultracache')),
 						h(StatusPill, { ok: secretConfigured, text: secretConfigured ? 'Configured' : 'Missing', tone: secretConfigured ? 'success' : 'warning' }),
 					]) : h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Admin-secret mode'),
-						h(StatusPill, { ok: false, text: 'Not used', tone: 'neutral' }),
+						h('div', { className: 'text-sm text-white' }, __("Admin-secret mode", 'ultracache')),
+						h(StatusPill, { ok: false, text: __("Not used", 'ultracache'), tone: 'neutral' }),
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'HTTP endpoint mode'),
+						h('div', { className: 'text-sm text-white' }, __("HTTP endpoint mode", 'ultracache')),
 						h(StatusPill, { ok: !isAdminMode, text: isAdminMode ? 'Not used' : 'Used', tone: 'neutral' }),
 					]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Last result'),
+						h('div', { className: 'text-sm text-white' }, __("Last result", 'ultracache')),
 						h(StatusPill, { ok: !!last.success, text: last.message || 'No Varnish action yet', tone: last.message ? (!!last.success ? 'success' : 'warning') : 'neutral' }),
 					]),
 				]),
@@ -4123,7 +4123,7 @@
 				detailLines ? h('div', { className: 'text-xs text-zinc-400 mt-3 whitespace-pre-wrap break-all' }, detailLines) : null,
 			]),
 			h('div', { className: 'mt-5 space-y-2' }, [
-				isAdminMode ? h('p', { className: 'uc-stat-label mt-1 mb-0' }, 'Security warning: Varnish admin mode uses a plain TCP socket. Local/private endpoints are safest, but external infrastructure endpoints are allowed when intentionally configured and firewalled. The saved secret is never shown in diagnostics or REST settings.') : null,
+				isAdminMode ? h('p', { className: 'uc-stat-label mt-1 mb-0' }, __("Security warning: Varnish admin mode uses a plain TCP socket. Local/private endpoints are safest, but external infrastructure endpoints are allowed when intentionally configured and firewalled. The saved secret is never shown in diagnostics or REST settings.", 'ultracache')) : null,
 				h('p', { className: 'uc-stat-label mt-1 mb-0' }, isAdminMode ? 'Current mode: admin-secret. HTTP endpoint tests are not used, but HTTP mode remains available for other servers that expose a local Varnish frontend purge listener.' : 'Current mode: HTTP endpoint. External Varnish infrastructure and custom ports are supported when intentionally configured. Admin-secret mode remains available for hosts that expose the Varnish admin socket and shared secret.'),
 			]),
 		]);
@@ -4155,13 +4155,13 @@
 
 		return h(Card, {
 			title: 'OPcache',
-			description: 'Production-safe visibility into PHP OPcache memory usage, hit rate, and restart state, with a manual flush control for post-deployment opcode invalidation when application code changes.',
+			description: __("Production-safe visibility into PHP OPcache memory usage, hit rate, and restart state, with a manual flush control for post-deployment opcode invalidation when application code changes.", 'ultracache'),
 		}, [
 			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
 				h(Button, { onClick: onFlush, disabled: busy || !isAvailable || !isEnabled, variant: 'primary' }, busy ? 'Working…' : 'Flush OPcache'),
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
-				h('div', { className: 'uc-section-title' }, 'Status'),
+				h('div', { className: 'uc-section-title' }, __("Status", 'ultracache')),
 				h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 					h('div', { className: 'text-sm text-white' }, row[0]),
 					h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
@@ -4250,22 +4250,22 @@
 
 		return h(Card, {
 			title: 'APCu',
-			description: 'Local shared-memory cache used for lightweight hit analytics and as the safe local object-cache fallback when Redis is unavailable.',
+			description: __("Local shared-memory cache used for lightweight hit analytics and as the safe local object-cache fallback when Redis is unavailable.", 'ultracache'),
 		}, [
 			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
 				h(Button, { onClick: onFlush, disabled: busy || !isAvailable || !isEnabled, variant: 'primary' }, busy ? 'Working…' : 'Flush APCu Cache'),
 			]),
 			h('div', { className: 'mt-4' }, [
 				h(ToggleField, {
-					label: 'Include APCu Flush on Scheduled Cache Cleanup',
-					description: 'Warning: this clears the whole APCu user cache for this PHP runtime, including entries used by other plugins/apps in the same PHP-FPM context.',
+					label: __("Include APCu Flush on Scheduled Cache Cleanup", 'ultracache'),
+					description: __("Warning: this clears the whole APCu user cache for this PHP runtime, including entries used by other plugins/apps in the same PHP-FPM context.", 'ultracache'),
 					checked: !!(settings && settings.apcuFlushOnScheduledCleanup),
 					onChange: onToggleScheduledCleanup,
 					disabled: busy,
 				}),
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
-				h('div', { className: 'uc-section-title' }, 'Status'),
+				h('div', { className: 'uc-section-title' }, __("Status", 'ultracache')),
 				h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 					h('div', { className: 'text-sm text-white' }, row[0]),
 					h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
@@ -4298,7 +4298,7 @@
 				h(Button, { onClick: onFlush, disabled: busy || !layer.flushable, variant: 'primary' }, busy ? 'Working…' : ('Flush ' + title)),
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
-				h('div', { className: 'uc-section-title' }, 'Detection'),
+				h('div', { className: 'uc-section-title' }, __("Detection", 'ultracache')),
 				h('div', { className: 'space-y-3' }, rows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
 					h('div', { className: 'text-sm text-white' }, row[0]),
 					h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
@@ -4329,11 +4329,11 @@
 		);
 		const showVarnishCandidate = !!((varnishLayer && varnishLayer.detected) || reverseProxyLooksLikeVarnish || varnishConfigured);
 		const candidates = [
-			{ key: 'opcache', setting: 'flushAllIncludeOpcache', label: 'OPcache', description: 'Also reset PHP OPcache when Flush All Cache runs.' },
-			{ key: 'apcu', setting: 'flushAllIncludeApcu', label: 'APCu', description: 'Also clear the APCu user cache when Flush All Cache runs.' },
-			{ key: 'litespeed', setting: 'flushAllIncludeLiteSpeed', label: 'LiteSpeed Cache', description: 'Also purge LiteSpeed Cache when Flush All Cache runs. Uses the LiteSpeed plugin API when present, otherwise the server-level X-LiteSpeed-Purge response header.' },
-			{ key: 'nginx', setting: 'flushAllIncludeNginx', label: 'Nginx Cache', description: 'Also trigger the detected Nginx Helper purge hook when Flush All Cache runs.' },
-			{ key: 'varnish', setting: 'flushAllIncludeVarnish', label: 'Varnish Cache', description: 'Also flush the configured UltraCache Varnish endpoint when Flush All Cache runs.' },
+			{ key: 'opcache', setting: 'flushAllIncludeOpcache', label: 'OPcache', description: __("Also reset PHP OPcache when Flush All Cache runs.", 'ultracache') },
+			{ key: 'apcu', setting: 'flushAllIncludeApcu', label: 'APCu', description: __("Also clear the APCu user cache when Flush All Cache runs.", 'ultracache') },
+			{ key: 'litespeed', setting: 'flushAllIncludeLiteSpeed', label: __("LiteSpeed Cache", 'ultracache'), description: __("Also purge LiteSpeed Cache when Flush All Cache runs. Uses the LiteSpeed plugin API when present, otherwise the server-level X-LiteSpeed-Purge response header.", 'ultracache') },
+			{ key: 'nginx', setting: 'flushAllIncludeNginx', label: __("Nginx Cache", 'ultracache'), description: __("Also trigger the detected Nginx Helper purge hook when Flush All Cache runs.", 'ultracache') },
+			{ key: 'varnish', setting: 'flushAllIncludeVarnish', label: __("Varnish Cache", 'ultracache'), description: __("Also flush the configured UltraCache Varnish endpoint when Flush All Cache runs.", 'ultracache') },
 		];
 		const visible = candidates.filter((item) => {
 			const layer = layers[item.key] || {};
@@ -4361,14 +4361,14 @@
 			});
 		};
 		return h(Card, {
-			title: 'External Cache Flush',
-			description: 'Also empty detected external/server cache layers with each Flush All Cache. Detected or configured Varnish is shown even when purge integration still needs to be enabled/tested.',
+			title: __("External Cache Flush", 'ultracache'),
+			description: __("Also empty detected external/server cache layers with each Flush All Cache. Detected or configured Varnish is shown even when purge integration still needs to be enabled/tested.", 'ultracache'),
 		}, [
 			h('div', { className: 'flex flex-wrap items-center justify-between gap-3 mt-2' }, [
 				h('div', { className: 'text-xs text-zinc-500', key: 'detected-at' }, detection.detectedAtHuman ? ('Last detected: ' + detection.detectedAtHuman) : 'No cache detection result saved yet.'),
 				h(Button, { onClick: onRedetect, disabled: busy, variant: 'light', key: 'redetect' }, busy ? 'Working…' : 'Redetect Caches'),
 			]),
-			visible.length ? h('div', { className: 'mt-4 divide-y divide-white/5' }, visible.map(renderCandidate)) : h('div', { className: 'text-xs text-zinc-500 mt-4' }, 'No external/server cache layer with a safe flush mechanism is detected. Use Redetect Caches after enabling OPcache/APCu, Varnish settings, Nginx Helper, or after confirming a LiteSpeed/OpenLiteSpeed cache layer.'),
+			visible.length ? h('div', { className: 'mt-4 divide-y divide-white/5' }, visible.map(renderCandidate)) : h('div', { className: 'text-xs text-zinc-500 mt-4' }, __("No external/server cache layer with a safe flush mechanism is detected. Use Redetect Caches after enabling OPcache/APCu, Varnish settings, Nginx Helper, or after confirming a LiteSpeed/OpenLiteSpeed cache layer.", 'ultracache')),
 		]);
 	}
 
@@ -4419,9 +4419,9 @@
 			? ('Active backend: ' + backendLabel(activeBackend) + (fallbackActive ? ' fallback' : ''))
 			: (objectCache.enabled ? ('Configured backend: ' + backendLabel(selectedBackend)) : 'Object cache is disabled.');
 		const backendChoices = [
-			{ value: 'redis', label: 'Redis', description: 'Recommended production backend. Fallback behavior is controlled by the Object Cache Fallback dropdown below.' },
-			{ value: 'apcu', label: 'APCu', description: 'Local memory backend for single-server sites. APCu is cleared on PHP-FPM restart.' },
-			{ value: 'disk', label: 'Disk', description: 'Advanced/debug only. Not recommended for production because it can create many small files.' },
+			{ value: 'redis', label: 'Redis', description: __("Recommended production backend. Fallback behavior is controlled by the Object Cache Fallback dropdown below.", 'ultracache') },
+			{ value: 'apcu', label: 'APCu', description: __("Local memory backend for single-server sites. APCu is cleared on PHP-FPM restart.", 'ultracache') },
+			{ value: 'disk', label: 'Disk', description: __("Advanced/debug only. Not recommended for production because it can create many small files.", 'ultracache') },
 		];
 		const renderBackendChoice = (choice) => {
 			const selected = backend === choice.value;
@@ -4446,11 +4446,11 @@
 			]);
 		};
 				return h(Card, {
-			title: 'Object Cache',
+			title: __("Object Cache", 'ultracache'),
 			description: 'Enable the WordPress object-cache.php drop-in. The selected backend and the active runtime backend are shown separately so Redis/APCu/runtime fallbacks are visible.',
 		}, [
 			h(ToggleField, {
-				label: 'Enable Object Cache',
+				label: __("Enable Object Cache", 'ultracache'),
 				description: 'Enable the WordPress object-cache.php drop-in. Configure the primary backend and fallback policy below.',
 				checked: !!objectCacheEnabled,
 				onChange: onObjectCacheEnabledChange,
@@ -4458,15 +4458,15 @@
 				key: 'object-cache-enabled',
 			}),
 			h(CacheHelperConflictNotice, { diagnostics, busy, onRemove: onRemoveConflictingDropins, onRecheck: onRecheckConflicts }),
-			h('div', { className: 'objectcache uc-object-cache-backend-grid mt-4', role: 'group', 'aria-label': 'Object Cache backend selector' }, backendChoices.map(renderBackendChoice)),
-			backend === 'apcu' ? h('div', { className: 'mt-4 text-xs text-zinc-500' }, 'APCu has no connection credentials; use the test button to verify that the PHP APCu extension is available for the frontend runtime.') : null,
-			backend === 'disk' ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, 'Disk object cache is advanced/debug only and may add filesystem I/O, but it will be used if configured or if fallback activates.') : null,
+			h('div', { className: 'objectcache uc-object-cache-backend-grid mt-4', role: 'group', 'aria-label': __("Object Cache backend selector", 'ultracache') }, backendChoices.map(renderBackendChoice)),
+			backend === 'apcu' ? h('div', { className: 'mt-4 text-xs text-zinc-500' }, __("APCu has no connection credentials; use the test button to verify that the PHP APCu extension is available for the frontend runtime.", 'ultracache')) : null,
+			backend === 'disk' ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, __("Disk object cache is advanced/debug only and may add filesystem I/O, but it will be used if configured or if fallback activates.", 'ultracache')) : null,
 			h('div', { className: 'mt-4 flex items-center justify-between gap-4 py-4' }, [
 				h('div', { className: 'min-w-0 pr-4' }, [
-					h('div', { className: 'uc-field-label' }, 'Object Cache Fallback'),
-					h('div', { className: 'text-xs text-zinc-500 mt-1' }, 'Used only when the selected backend cannot connect or is unavailable. Runtime-only cache is always the final emergency fallback.'),
+					h('div', { className: 'uc-field-label' }, __("Object Cache Fallback", 'ultracache')),
+					h('div', { className: 'text-xs text-zinc-500 mt-1' }, __("Used only when the selected backend cannot connect or is unavailable. Runtime-only cache is always the final emergency fallback.", 'ultracache')),
 					h('div', { className: 'text-xs text-zinc-400 mt-1' }, 'Fallback policy: ' + ('none' === fallbackPolicy ? 'None / runtime-only' : backendLabel(fallbackPolicy)) + '. Fallback status: ' + fallbackStatusText + '.'),
-					'disk' === fallbackPolicy ? h('div', { className: 'text-xs text-amber-300 mt-1' }, 'Disk fallback is advanced/debug only and may add filesystem I/O.') : null,
+					'disk' === fallbackPolicy ? h('div', { className: 'text-xs text-amber-300 mt-1' }, __("Disk fallback is advanced/debug only and may add filesystem I/O.", 'ultracache')) : null,
 				]),
 				h('div', { className: 'uc-select-wrap shrink-0 w-56 max-w-full' }, [
 					h('select', {
@@ -4475,9 +4475,9 @@
 						disabled: !!busy,
 						onChange: (e) => onFieldChange('objectCacheFallbackBackend', e.target.value),
 					}, [
-						h('option', { value: 'none', key: 'none' }, 'None / runtime-only'),
+						h('option', { value: 'none', key: 'none' }, __("None / runtime-only", 'ultracache')),
 						h('option', { value: 'apcu', key: 'apcu' }, 'APCu'),
-						h('option', { value: 'disk', key: 'disk' }, 'Disk (advanced/debug)'),
+						h('option', { value: 'disk', key: 'disk' }, __("Disk (advanced/debug)", 'ultracache')),
 					]),
 					h('span', { className: 'uc-select-icon', 'aria-hidden': true }, '▾'),
 				]),
@@ -4485,8 +4485,8 @@
 			fallbackActive ? h('div', { className: 'mt-4 text-xs text-zinc-500' }, fallbackMessage) : null,
 			backend === 'redis' ? h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4' }, [
 				h(TextRow, {
-					label: 'Redis host',
-					description: 'Common default: 127.0.0.1. External Redis hosts are supported when intentionally configured.',
+					label: __("Redis host", 'ultracache'),
+					description: __("Common default: 127.0.0.1. External Redis hosts are supported when intentionally configured.", 'ultracache'),
 					value: form.redisHost || '127.0.0.1',
 					onChange: (value) => onFieldChange('redisHost', value),
 					disabled: busy,
@@ -4494,8 +4494,8 @@
 					key: 'redis-host',
 				}),
 				h(NumberRow, {
-					label: 'Redis port',
-					description: 'Common default: 6379. Custom Redis ports are supported.',
+					label: __("Redis port", 'ultracache'),
+					description: __("Common default: 6379. Custom Redis ports are supported.", 'ultracache'),
 					value: form.redisPort || 6379,
 					onChange: (value) => onFieldChange('redisPort', value),
 					disabled: busy,
@@ -4504,8 +4504,8 @@
 					key: 'redis-port',
 				}),
 				h(TextRow, {
-					label: 'Redis username',
-					description: 'Optional. Required only for Redis ACL users. Leave empty for password-only Redis.',
+					label: __("Redis username", 'ultracache'),
+					description: __("Optional. Required only for Redis ACL users. Leave empty for password-only Redis.", 'ultracache'),
 					value: form.redisUsername || '',
 					onChange: (value) => onFieldChange('redisUsername', value),
 					disabled: busy,
@@ -4514,7 +4514,7 @@
 					key: 'redis-username',
 				}),
 				h(TextRow, {
-					label: 'Redis password',
+					label: __("Redis password", 'ultracache'),
 					description: form.redisPasswordConfigured ? 'A saved Redis password already exists. Leave blank to keep it, or enter a new one to replace it.' : 'Leave empty when the server does not require auth.',
 					value: form.redisPassword || '',
 					onChange: (value) => onFieldChange('redisPassword', value),
@@ -4525,8 +4525,8 @@
 					key: 'redis-password',
 				}),
 				h(NumberRow, {
-					label: 'Redis database',
-					description: 'Usually 0. Typical range: 0-15.',
+					label: __("Redis database", 'ultracache'),
+					description: __("Usually 0. Typical range: 0-15.", 'ultracache'),
 					value: typeof form.redisDatabase === 'undefined' ? 0 : form.redisDatabase,
 					onChange: (value) => onFieldChange('redisDatabase', value),
 					disabled: busy,
@@ -4535,17 +4535,17 @@
 					key: 'redis-db',
 				}),
 				h(TextRow, {
-					label: 'Redis prefix / namespace',
-					description: 'Optional. Leave blank for automatic site-specific prefix.',
+					label: __("Redis prefix / namespace", 'ultracache'),
+					description: __("Optional. Leave blank for automatic site-specific prefix.", 'ultracache'),
 					value: form.redisPrefix || '',
 					onChange: (value) => onFieldChange('redisPrefix', value),
 					disabled: busy,
-					placeholder: 'leave blank for auto',
+					placeholder: __("leave blank for auto", 'ultracache'),
 					key: 'redis-prefix',
 				}),
 				h(NumberRow, {
-					label: 'Connect timeout (ms)',
-					description: 'Advanced. Default: 200ms. Maximum: 15000ms.',
+					label: __("Connect timeout (ms)", 'ultracache'),
+					description: __("Advanced. Default: 200ms. Maximum: 15000ms.", 'ultracache'),
 					value: typeof form.redisConnectTimeoutMs === 'undefined' ? 200 : form.redisConnectTimeoutMs,
 					onChange: (value) => onFieldChange('redisConnectTimeoutMs', value),
 					disabled: busy,
@@ -4555,8 +4555,8 @@
 					key: 'redis-connect-timeout',
 				}),
 				h(NumberRow, {
-					label: 'Read timeout (ms)',
-					description: 'Advanced. Default: 200ms. Maximum: 15000ms.',
+					label: __("Read timeout (ms)", 'ultracache'),
+					description: __("Advanced. Default: 200ms. Maximum: 15000ms.", 'ultracache'),
 					value: typeof form.redisReadTimeoutMs === 'undefined' ? 200 : form.redisReadTimeoutMs,
 					onChange: (value) => onFieldChange('redisReadTimeoutMs', value),
 					disabled: busy,
@@ -4566,16 +4566,16 @@
 					key: 'redis-read-timeout',
 				}),
 				h(ToggleField, {
-					label: 'Persistent connection',
-					description: 'Advanced. Saves immediately. Reuse the Redis connection across PHP worker requests when supported.',
+					label: __("Persistent connection", 'ultracache'),
+					description: __("Advanced. Saves immediately. Reuse the Redis connection across PHP worker requests when supported.", 'ultracache'),
 					checked: !!form.redisPersistent,
 					onChange: (value) => onFieldChange('redisPersistent', value),
 					disabled: busy,
 					key: 'redis-persistent',
 				}),
 				h(ToggleField, {
-					label: 'Use TLS',
-					description: 'Saves immediately. Enable for managed Redis providers that require TLS/SSL transport.',
+					label: __("Use TLS", 'ultracache'),
+					description: __("Saves immediately. Enable for managed Redis providers that require TLS/SSL transport.", 'ultracache'),
 					checked: !!form.redisUseTls,
 					onChange: (value) => onFieldChange('redisUseTls', value),
 					disabled: busy,
@@ -4588,14 +4588,14 @@
 				h(Button, { onClick: onFlush, disabled: busy, variant: 'primary' }, busy ? 'Working…' : flushButtonLabel),
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5' }, [
-				h('div', { className: 'uc-section-title' }, 'Status'),
+				h('div', { className: 'uc-section-title' }, __("Status", 'ultracache')),
 				h('div', { className: 'space-y-3' }, [
 						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-							h('div', { className: 'text-sm text-white' }, 'Drop-in installable'),
+							h('div', { className: 'text-sm text-white' }, __("Drop-in installable", 'ultracache')),
 							h(StatusPill, { ok: dropinInstallable, text: dropinInstallable ? 'Yes' : 'No', tone: dropinInstallable ? 'success' : 'warning' }),
 						]),
 						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-							h('div', { className: 'text-sm text-white' }, 'Configured backend'),
+							h('div', { className: 'text-sm text-white' }, __("Configured backend", 'ultracache')),
 							h(StatusPill, {
 								ok: selectedBackendSupported,
 								text: backendLabel(selectedBackend),
@@ -4603,39 +4603,39 @@
 							}),
 						]),
 						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-							h('div', { className: 'text-sm text-white' }, 'Active backend'),
+							h('div', { className: 'text-sm text-white' }, __("Active backend", 'ultracache')),
 							h(StatusPill, { ok: !!objectCache.active, text: objectCache.active ? backendLabel(activeBackend) : (objectCache.enabled ? 'Drop-in inactive' : 'Disabled'), tone: fallbackActive ? 'warning' : (objectCache.active ? 'success' : 'neutral') }),
 						]),
 						h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-							h('div', { className: 'text-sm text-white' }, 'Fallback status'),
+							h('div', { className: 'text-sm text-white' }, __("Fallback status", 'ultracache')),
 							h(StatusPill, { ok: !fallbackActive, text: fallbackStatusText, tone: fallbackActive ? 'warning' : 'neutral' }),
 						]),
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Redis support'),
+						h('div', { className: 'text-sm text-white' }, __("Redis support", 'ultracache')),
 						h(StatusPill, { ok: !!redis.available, text: redis.available ? 'Available' : 'Unavailable', tone: redis.available ? 'success' : 'warning' }),
 					]),
 						showApcuSupport ? h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'APCu support'),
+						h('div', { className: 'text-sm text-white' }, __("APCu support", 'ultracache')),
 						h(StatusPill, { ok: !!apcu.available, text: apcu.available ? 'Available' : 'Unavailable in this runtime', tone: apcu.available ? 'success' : 'neutral' }),
 					]) : null,
 						backend === 'redis' && redisManualTestKnown ? h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-							h('div', { className: 'text-sm text-white' }, 'Redis manual test'),
+							h('div', { className: 'text-sm text-white' }, __("Redis manual test", 'ultracache')),
 							h(StatusPill, { ok: !!redis.readWrite || !!redis.connected || !!redis.success, text: redisManualTestText, tone: (!!redis.readWrite || !!redis.success) ? 'success' : 'warning' }),
 						]) : null,
 						manualPayloadProbeKnown ? h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-							h('div', { className: 'text-sm text-white' }, 'Object payload probe'),
+							h('div', { className: 'text-sm text-white' }, __("Object payload probe", 'ultracache')),
 							h(StatusPill, { ok: !!manualPayloadProbe.success, text: manualPayloadProbeText, tone: manualPayloadProbe.success ? 'success' : 'warning' }),
 						]) : null,
 						redisDropinError ? h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-							h('div', { className: 'text-sm text-white' }, 'Redis drop-in error'),
+							h('div', { className: 'text-sm text-white' }, __("Redis drop-in error", 'ultracache')),
 							h('div', { className: 'text-xs text-amber-300 text-right break-all max-w-xl' }, redisDropinError),
 						]) : null,
 					h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Runtime status'),
+						h('div', { className: 'text-sm text-white' }, __("Runtime status", 'ultracache')),
 						h(StatusPill, { ok: !!objectCache.active, text: statusText, tone: objectCache.active ? 'success' : 'neutral' }),
 					]),
 					backend === 'redis' ? h('div', { className: 'flex items-center justify-between gap-4 py-2' }, [
-						h('div', { className: 'text-sm text-white' }, 'Redis prefix'),
+						h('div', { className: 'text-sm text-white' }, __("Redis prefix", 'ultracache')),
 						h('code', { className: 'text-xs text-zinc-300 break-all' }, redis.prefix || 'auto'),
 					]) : null,
 				]),
@@ -4661,15 +4661,15 @@
 		].join(' · ');
 
 		return h('div', { className: 'uc-diagnostic-group', key: 'font-pipeline-diagnostics-lite' }, [
-			h('div', { className: 'uc-section-title', key: 'title' }, 'Font Pipeline Diagnostics'),
-			h('div', { className: 'text-xs text-zinc-500 mb-3', key: 'description' }, 'Read-only summary for local font CSS, delayed icon-font CSS, and bundle font metadata.'),
+			h('div', { className: 'uc-section-title', key: 'title' }, __("Font Pipeline Diagnostics", 'ultracache')),
+			h('div', { className: 'text-xs text-zinc-500 mb-3', key: 'description' }, __("Read-only summary for local font CSS, delayed icon-font CSS, and bundle font metadata.", 'ultracache')),
 			h('div', { className: 'space-y-3', key: 'rows' }, [
 				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'status' }, [
-					h('div', { className: 'text-sm text-white' }, 'Status'),
+					h('div', { className: 'text-sm text-white' }, __("Status", 'ultracache')),
 					h(StatusPill, { ok: !hasMissing, text: hasMissing ? 'Needs attention' : 'OK', tone: hasMissing ? 'warning' : 'success' }),
 				]),
 				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'settings' }, [
-					h('div', { className: 'text-sm text-white' }, 'Settings'),
+					h('div', { className: 'text-sm text-white' }, __("Settings", 'ultracache')),
 					h('div', { className: 'text-xs text-zinc-300 text-right break-all' }, settingLine),
 				]),
 				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'font-css' }, [
@@ -4677,15 +4677,15 @@
 					h('div', { className: 'text-xs text-zinc-300 text-right' }, String(fontCss.files || 0) + ' file(s) · ' + formatBytes(fontCss.bytes || 0) + ' · Delayed: ' + String(fontCss.delayedFiles || 0) + ' · ' + formatBytes(fontCss.delayedBytes || 0)),
 				]),
 				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'bundle-fonts' }, [
-					h('div', { className: 'text-sm text-white' }, 'Bundle font metadata'),
+					h('div', { className: 'text-sm text-white' }, __("Bundle font metadata", 'ultracache')),
 					h('div', { className: 'text-xs text-zinc-300 text-right' }, String(bundles.entriesWithDelayedFonts || 0) + '/' + String(bundles.manifestEntries || 0) + ' delayed entries · Font-face blocks: ' + String(bundles.delayedFontFaceBlocks || 0)),
 				]),
 				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'google-imports' }, [
-					h('div', { className: 'text-sm text-white' }, 'Google @import rewrites'),
+					h('div', { className: 'text-sm text-white' }, __("Google @import rewrites", 'ultracache')),
 					h('div', { className: 'text-xs text-zinc-300 text-right' }, String(optimizedCss.localGoogleImportRules || 0) + ' local · ' + String(optimizedCss.remoteGoogleImportRules || 0) + ' remote · ' + String(optimizedCss.filesWithGoogleImportRules || 0) + ' file(s)'),
 				]),
 				h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'google-local' }, [
-					h('div', { className: 'text-sm text-white' }, 'Local Google Fonts'),
+					h('div', { className: 'text-sm text-white' }, __("Local Google Fonts", 'ultracache')),
 					h('div', { className: 'text-xs text-zinc-300 text-right' }, String(google.cssFiles || 0) + ' CSS · ' + String(google.fontFilesOrAssets || 0) + ' asset(s) · ' + formatBytes((google.cssBytes || 0) + (google.fontBytesOrAssetBytes || 0))),
 				]),
 			]),
@@ -4727,9 +4727,9 @@
 					String(item && item.key ? item.key : ''),
 					' · ',
 					String(item && item.area ? item.area : 'General'),
-					' · current ',
+					__(" · current ", 'ultracache'),
 					String(currentCount),
-					' · default ',
+					__(" · default ", 'ultracache'),
 					String(defaultCount),
 				]),
 			]);
@@ -4751,8 +4751,8 @@
 			h('details', { className: 'uc-accordion uc-accordion--card', key: 'details' }, [
 				h('summary', { className: 'uc-accordion__summary' }, [
 					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
-						h('div', { className: 'uc-accordion__title' }, 'Settings Transparency'),
-						h('div', { className: 'uc-accordion__description' }, 'Read-only map of visible safeguard lists, engine-only safety floors, and reset/default coverage.'),
+						h('div', { className: 'uc-accordion__title' }, __("Settings Transparency", 'ultracache')),
+						h('div', { className: 'uc-accordion__description' }, __("Read-only map of visible safeguard lists, engine-only safety floors, and reset/default coverage.", 'ultracache')),
 					]),
 					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
 				]),
@@ -4766,15 +4766,15 @@
 					]),
 					h('div', { className: 'mt-4 text-xs text-zinc-500', key: 'reset' }, summary.resetUsesDashboardDefaults ? 'Reset Settings uses the dashboard defaults payload, so recommended exclusion defaults are restored during full reset.' : 'Reset defaults status is unavailable.'),
 					h('div', { className: 'mt-4', key: 'visible-section' }, [
-						h('div', { className: 'uc-section-title' }, 'Visible / editable safeguard lists'),
-						visibleLists.length ? h('div', { className: 'space-y-2 mt-2' }, visibleLists.map(renderVisibleListRow)) : h('div', { className: 'text-xs text-zinc-500' }, 'No visible list diagnostics were reported.'),
+						h('div', { className: 'uc-section-title' }, __("Visible / editable safeguard lists", 'ultracache')),
+						visibleLists.length ? h('div', { className: 'space-y-2 mt-2' }, visibleLists.map(renderVisibleListRow)) : h('div', { className: 'text-xs text-zinc-500' }, __("No visible list diagnostics were reported.", 'ultracache')),
 					]),
 					h('div', { className: 'mt-4', key: 'engine-section' }, [
-						h('div', { className: 'uc-section-title' }, 'Engine-only safety floors'),
-						engineOnly.length ? h('div', { className: 'space-y-2 mt-2' }, engineOnly.map(renderEngineSafeguard)) : h('div', { className: 'text-xs text-zinc-500' }, 'No engine-only safeguards were reported.'),
+						h('div', { className: 'uc-section-title' }, __("Engine-only safety floors", 'ultracache')),
+						engineOnly.length ? h('div', { className: 'space-y-2 mt-2' }, engineOnly.map(renderEngineSafeguard)) : h('div', { className: 'text-xs text-zinc-500' }, __("No engine-only safeguards were reported.", 'ultracache')),
 					]),
 					legacyLists.length ? h('div', { className: 'mt-4', key: 'legacy-section' }, [
-						h('div', { className: 'uc-section-title' }, 'Legacy mapped lists'),
+						h('div', { className: 'uc-section-title' }, __("Legacy mapped lists", 'ultracache')),
 						h('div', { className: 'space-y-2 mt-2' }, legacyLists.map((item, index) => h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'legacy-' + index }, [
 							h('div', { className: 'text-zinc-200 font-semibold', key: 'label' }, item.label || item.key || 'Legacy list'),
 							h('div', { className: 'text-[11px] text-zinc-500 mt-1', key: 'message' }, item.message || ''),
@@ -4807,8 +4807,8 @@
 			h('details', { className: 'uc-accordion uc-accordion--card', key: 'details' }, [
 				h('summary', { className: 'uc-accordion__summary' }, [
 					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
-						h('div', { className: 'uc-accordion__title' }, 'Security / Cache Correctness'),
-						h('div', { className: 'uc-accordion__description' }, 'Read-only audit of cache-poisoning safeguards, secret redaction, and runtime config protection.'),
+						h('div', { className: 'uc-accordion__title' }, __("Security / Cache Correctness", 'ultracache')),
+						h('div', { className: 'uc-accordion__description' }, __("Read-only audit of cache-poisoning safeguards, secret redaction, and runtime config protection.", 'ultracache')),
 					]),
 					h('span', { className: ok ? 'text-emerald-300 font-mono text-[11px]' : 'text-amber-300 font-mono text-[11px]', key: 'status' }, ok ? 'Guarded' : 'Review'),
 					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
@@ -4823,20 +4823,20 @@
 					]),
 					missing.length ? h('div', { className: 'mt-3 rounded-lg bg-amber-500/10 text-amber-200 text-xs px-3 py-2', key: 'missing' }, 'These sensitive query args are enforced by the engine but are not in the visible exclusion textarea: ' + missing.join(', ')) : null,
 					h('div', { className: 'mt-4', key: 'engine' }, [
-						h('div', { className: 'uc-section-title' }, 'Engine safety floors'),
+						h('div', { className: 'uc-section-title' }, __("Engine safety floors", 'ultracache')),
 						engineOnly.length ? h('div', { className: 'space-y-2 mt-2' }, engineOnly.map((item, index) => h('div', { className: 'flex items-center justify-between gap-3 rounded-lg bg-black/20 px-3 py-2', key: 'guard-' + index }, [
 							h('span', { className: 'text-sm text-zinc-200' }, item.label || 'Safety floor'),
 							h('span', { className: 'font-mono text-[11px] text-sky-300' }, item.status || 'reported'),
-						]))) : h('div', { className: 'text-xs text-zinc-500' }, 'No security safeguards were reported.'),
+						]))) : h('div', { className: 'text-xs text-zinc-500' }, __("No security safeguards were reported.", 'ultracache')),
 					]),
 					h('div', { className: 'mt-4 grid grid-cols-1 md:grid-cols-2 gap-3', key: 'files' }, [
 						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'runtime' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Runtime config protection'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Runtime config protection", 'ultracache')),
 							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'runtime-config.php: ' + (runtime.runtimeConfigExists ? 'exists' : 'missing')),
 							h('div', { className: 'text-xs text-zinc-300 mt-1' }, '.htaccess: ' + (runtime.htaccessProtectionFile ? 'present' : 'missing') + ' · web.config: ' + (runtime.webConfigProtectionFile ? 'present' : 'missing')),
 						]),
 						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'secrets' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, 'Secret sidecar files'),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Secret sidecar files", 'ultracache')),
 							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Runtime secret: ' + (secretFiles.runtimeSecret && secretFiles.runtimeSecret.exists ? 'exists' : 'missing')),
 							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Redis secret: ' + (secretFiles.objectCacheRedisSecret && secretFiles.objectCacheRedisSecret.exists ? 'exists' : 'missing')),
 						]),
@@ -5022,7 +5022,7 @@
 					pushToast({
 						id: 'system-reverse-proxy',
 						type: 'warning',
-						title: 'Reverse proxy detected',
+						title: __("Reverse proxy detected", 'ultracache'),
 						text: reverseProxy.message || 'UltraCache hit counters reflect only requests that reach PHP/advanced-cache and may under-report public hits served before WordPress.',
 						persistent: false,
 						duration: SYSTEM_NOTICE_DELAY,
@@ -5051,13 +5051,13 @@
 			pushToast({
 				id: 'cache-plugin-conflict',
 				type: 'warning',
-				title: 'Potential cache plugin conflict',
+				title: __("Potential cache plugin conflict", 'ultracache'),
 				text: (conflicts.message || 'Another cache/performance plugin is active and may conflict with UltraCache.') + ' Detected: ' + pluginNames + '.',
 				persistent: true,
 				actions: [
-					{ label: 'Review', onClick: () => scrollToCacheConflictReview() },
-					{ label: 'Dismiss', onClick: () => { markSystemNoticeShown(noticeKey); dismissToast('cache-plugin-conflict'); } },
-					{ label: 'Don’t show again', onClick: () => { dismissPersistentNotice(noticeKey); dismissToast('cache-plugin-conflict'); } },
+					{ label: __("Review", 'ultracache'), onClick: () => scrollToCacheConflictReview() },
+					{ label: __("Dismiss", 'ultracache'), onClick: () => { markSystemNoticeShown(noticeKey); dismissToast('cache-plugin-conflict'); } },
+					{ label: __("Don’t show again", 'ultracache'), onClick: () => { dismissPersistentNotice(noticeKey); dismissToast('cache-plugin-conflict'); } },
 				],
 			});
 		}, [diagnostics && diagnostics.legacyCacheConflicts ? JSON.stringify(diagnostics.legacyCacheConflicts.activeCachePlugins || []) : '', pushToast, dismissToast]);
@@ -5260,7 +5260,7 @@
 					if (response && response.diagnostics) {
 						setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(response.diagnostics));
 					}
-					pushToast({ type: 'warning', text: 'UltraCache automatically turned off compression that is already handled by your server or proxy.' });
+					pushToast({ type: 'warning', text: __("UltraCache automatically turned off compression that is already handled by your server or proxy.", 'ultracache') });
 				} catch (error) {
 					compressionSyncRef.current = '';
 					pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to synchronize compression safety settings.' });
@@ -5452,7 +5452,7 @@
 		async function recheckCacheConflicts() {
 			try {
 				await refreshStats();
-				pushToast({ type: 'info', text: 'Cache conflict diagnostics refreshed.' });
+				pushToast({ type: 'info', text: __("Cache conflict diagnostics refreshed.", 'ultracache') });
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Cache conflict re-check failed.' });
 			}
@@ -5465,7 +5465,7 @@
 
 			const confirmed = window.confirm('UltraCache will back up and remove the detected advanced-cache.php/object-cache.php files that are not managed by UltraCache. Plugin folders and settings from other plugins will not be deleted. Continue?');
 			if (!confirmed) {
-				pushToast({ type: 'info', text: 'Cache helper removal cancelled.' });
+				pushToast({ type: 'info', text: __("Cache helper removal cancelled.", 'ultracache') });
 				return;
 			}
 
@@ -5999,7 +5999,7 @@
 
 		async function syncQueuedSettingsBeforeAction() {
 			if (settingsSaveTimerRef.current || hasPendingSettingsPatch()) {
-				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Saving queued settings before running action…', persistent: true });
+				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: __("Saving queued settings before running action…", 'ultracache'), persistent: true });
 				await flushQueuedSettings();
 			}
 
@@ -6008,7 +6008,7 @@
 			}
 
 			if (hasPendingSettingsPatch()) {
-				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: 'Saving queued settings before running action…', persistent: true });
+				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: __("Saving queued settings before running action…", 'ultracache'), persistent: true });
 				await flushQueuedSettings();
 				if (!(await waitForSettingsSaveToSettle())) {
 					throw new Error('Settings are still saving. Please wait for the save to finish before running this action.');
@@ -6088,7 +6088,7 @@
 				}
 				const id = (response.performanceProfile && response.performanceProfile.requestId) ? response.performanceProfile.requestId : Date.now();
 				triggerFileDownload('ultracache-performance-profile-' + String(id).slice(0, 32) + '.json', JSON.stringify(response.profile, null, 2), 'application/json');
-				pushToast({ type: 'success', text: 'Profiler JSON prepared.' });
+				pushToast({ type: 'success', text: __("Profiler JSON prepared.", 'ultracache') });
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to download profiler JSON.' });
 			}
@@ -6098,7 +6098,7 @@
 			try {
 				await apiRequest('performance_profile_clear', {});
 				setPerformanceProfile(null);
-				pushToast({ type: 'success', text: 'Last performance profile cleared.' });
+				pushToast({ type: 'success', text: __("Last performance profile cleared.", 'ultracache') });
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to clear performance profile.' });
 			}
@@ -6108,7 +6108,7 @@
 		async function runCssDiagnosticsForUrl(url) {
 			const targetUrl = String(url || '').trim() || ((typeof ucwp !== 'undefined' && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || '') : '');
 			if (!targetUrl) {
-				pushToast({ type: 'warning', text: 'Enter a same-site URL to diagnose.' });
+				pushToast({ type: 'warning', text: __("Enter a same-site URL to diagnose.", 'ultracache') });
 				return null;
 			}
 			setCssDiagnosticsBusy(true);
@@ -6140,7 +6140,7 @@
 				const profile = response.performanceProfile || {};
 				const id = profile.requestId || Date.now();
 				triggerFileDownload('ultracache-css-diagnostics-' + String(id).slice(0, 32) + '.json', JSON.stringify(response.profile, null, 2), 'application/json');
-				pushToast({ type: 'success', text: 'CSS diagnostics JSON prepared.' });
+				pushToast({ type: 'success', text: __("CSS diagnostics JSON prepared.", 'ultracache') });
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to download CSS diagnostics JSON.' });
 			}
@@ -6153,13 +6153,13 @@
 		async function copyCssBundleExclusionSuggestion(value) {
 			const text = String(value || '').trim();
 			if (!text) {
-				pushToast({ type: 'warning', text: 'No CSS exclusion suggestion is available for this source.' });
+				pushToast({ type: 'warning', text: __("No CSS exclusion suggestion is available for this source.", 'ultracache') });
 				return;
 			}
 			try {
 				if (window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText) {
 					await window.navigator.clipboard.writeText(text);
-					pushToast({ type: 'success', text: 'CSS bundle exclusion line copied.' });
+					pushToast({ type: 'success', text: __("CSS bundle exclusion line copied.", 'ultracache') });
 					return;
 				}
 			} catch (error) {
@@ -6229,7 +6229,7 @@
 		async function warmFrontpageHtml() {
 			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				pushToast({ type: 'warning', text: __("Please enable Page Caching first or select a profile before warming cache.", 'ultracache') });
 				return;
 			}
 			setHomepageHtmlBusy(true);
@@ -6245,11 +6245,11 @@
 		async function warmFrontpageHtmlCss() {
 			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				pushToast({ type: 'warning', text: __("Please enable Page Caching first or select a profile before warming cache.", 'ultracache') });
 				return;
 			}
 			if (!(settingsRef.current && settingsRef.current.homepageCssBundleEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
+				pushToast({ type: 'warning', text: __("Please enable CSS Bundling before using CSS bundle warm actions.", 'ultracache') });
 				return;
 			}
 			setHomepageHtmlCssBusy(true);
@@ -6265,15 +6265,15 @@
 		async function startWarmingAllWithFrontpageCss(forceRestart = false) {
 			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				pushToast({ type: 'warning', text: __("Please enable Page Caching first or select a profile before warming cache.", 'ultracache') });
 				return;
 			}
 			if (!(settingsRef.current && settingsRef.current.homepageCssBundleEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
+				pushToast({ type: 'warning', text: __("Please enable CSS Bundling before using CSS bundle warm actions.", 'ultracache') });
 				return;
 			}
 			if (!hasFullSiteWarmScope(settingsRef.current)) {
-				pushToast({ type: 'warning', text: 'Select at least one full-site warm source first.' });
+				pushToast({ type: 'warning', text: __("Select at least one full-site warm source first.", 'ultracache') });
 				return;
 			}
 
@@ -6321,11 +6321,11 @@
 		async function startMenuWarming(forceRestart = false) {
 			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				pushToast({ type: 'warning', text: __("Please enable Page Caching first or select a profile before warming cache.", 'ultracache') });
 				return;
 			}
 			if (!hasMenuWarmScope(settingsRef.current)) {
-				pushToast({ type: 'warning', text: 'Select a frontend menu and depth first.' });
+				pushToast({ type: 'warning', text: __("Select a frontend menu and depth first.", 'ultracache') });
 				return;
 			}
 			const controls = getJobControls('warm_menu');
@@ -6341,7 +6341,7 @@
 			await runJob({
 				type: 'warm_menu',
 				scope: 'menu',
-				label: 'Warming Menu HTML Cache',
+				label: __("Warming Menu HTML Cache", 'ultracache'),
 				cursor: '',
 				nextCursor: '',
 				processed: 0,
@@ -6358,15 +6358,15 @@
 		async function startMenuWarmingWithFrontpageCss(forceRestart = false) {
 			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				pushToast({ type: 'warning', text: __("Please enable Page Caching first or select a profile before warming cache.", 'ultracache') });
 				return;
 			}
 			if (!(settingsRef.current && settingsRef.current.homepageCssBundleEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable CSS Bundling before using CSS bundle warm actions.' });
+				pushToast({ type: 'warning', text: __("Please enable CSS Bundling before using CSS bundle warm actions.", 'ultracache') });
 				return;
 			}
 			if (!hasMenuWarmScope(settingsRef.current)) {
-				pushToast({ type: 'warning', text: 'Select a frontend menu and depth first.' });
+				pushToast({ type: 'warning', text: __("Select a frontend menu and depth first.", 'ultracache') });
 				return;
 			}
 
@@ -6477,7 +6477,7 @@
 
 			const response = await scanFrontpageFontPatterns();
 			if (!response || !Array.isArray(response.delayIconFontsList) || !response.delayIconFontsList.length) {
-				pushToast({ type: 'warning', text: 'Auto-detect is enabled, but no likely icon fonts were detected on the front page.' });
+				pushToast({ type: 'warning', text: __("Auto-detect is enabled, but no likely icon fonts were detected on the front page.", 'ultracache') });
 				return;
 			}
 
@@ -6487,7 +6487,7 @@
 				queueSettingsPatch({ delayIconFontsList: merged.value });
 				pushToast({ type: 'success', text: 'Auto-detect added ' + merged.added + ' front-page icon font pattern(s).' });
 			} else {
-				pushToast({ type: 'info', text: 'Detected icon font patterns are already listed.' });
+				pushToast({ type: 'info', text: __("Detected icon font patterns are already listed.", 'ultracache') });
 			}
 		}
 
@@ -6507,7 +6507,7 @@
 				const response = await apiRequest('populate_query_allowlist', {});
 				const items = Array.isArray(response && response.items) ? response.items : [];
 				if (!items.length) {
-					pushToast({ type: 'warning', text: 'No taxonomy/attribute query-string keys were detected.' });
+					pushToast({ type: 'warning', text: __("No taxonomy/attribute query-string keys were detected.", 'ultracache') });
 					return String(currentDraft || '');
 				}
 				const merged = mergeLineListAppendOnly(currentDraft, items);
@@ -6569,7 +6569,7 @@
 			// tracking, popup, and form fragments are left to Scan/Runtime Scan
 			// or manual user additions so defaults do not over-protect heavy JS.
 			if (!defaults.trim()) {
-				pushToast({ type: 'warning', text: 'No recommended JS Delay / Defer defaults are defined.' });
+				pushToast({ type: 'warning', text: __("No recommended JS Delay / Defer defaults are defined.", 'ultracache') });
 				return String(currentDraft || '');
 			}
 			const merged = mergeUniqueSettingLines(currentDraft, defaults);
@@ -6584,7 +6584,7 @@
 				? String(defaultsPayload.homepageCssBundleExcludeList || '')
 				: '';
 			if (!defaults.trim()) {
-				pushToast({ type: 'warning', text: 'No recommended CSS Bundle Exclusion defaults are defined.' });
+				pushToast({ type: 'warning', text: __("No recommended CSS Bundle Exclusion defaults are defined.", 'ultracache') });
 				return String(currentDraft || '');
 			}
 			const merged = mergeUniqueSettingLines(currentDraft, defaults);
@@ -6612,7 +6612,7 @@
 				}
 				const items = Array.isArray(response.delayIconFontsList) ? response.delayIconFontsList : [];
 				if (!items.length) {
-					pushToast({ type: 'warning', text: 'No likely icon font patterns were detected on the front page.' });
+					pushToast({ type: 'warning', text: __("No likely icon font patterns were detected on the front page.", 'ultracache') });
 					return String(currentDraft || '');
 				}
 				const merged = mergeUniqueSettingLines(currentDraft, items.join('\n'));
@@ -6627,7 +6627,7 @@
 				}
 				const items = Array.isArray(response.delayIconFontsExcludeList) ? response.delayIconFontsExcludeList : [];
 				if (!items.length) {
-					pushToast({ type: 'warning', text: 'No non-icon front-page font patterns were detected.' });
+					pushToast({ type: 'warning', text: __("No non-icon front-page font patterns were detected.", 'ultracache') });
 					return String(currentDraft || '');
 				}
 				const merged = mergeUniqueSettingLines(currentDraft, items.join('\n'));
@@ -6645,7 +6645,7 @@
 				}
 				const scan = profile && profile.jsDelaySafetyScan ? profile.jsDelaySafetyScan : null;
 				if (!scan || !scan.available) {
-					pushToast({ type: 'warning', text: 'No JS Delay Safety Scan is available. Run a Speed Diagnostics check for the page first.' });
+					pushToast({ type: 'warning', text: __("No JS Delay Safety Scan is available. Run a Speed Diagnostics check for the page first.", 'ultracache') });
 					return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0 };
 				}
 				pushToast({ type: scan.missingCount ? 'warning' : 'success', text: scan.missingCount ? ('Found ' + scan.missingCount + ' missing suggested Defer/Delay exclusion(s).') : 'No missing JS delay exclusions found in the latest profile.' });
@@ -6762,7 +6762,7 @@
 			const popup = window.open(runtimeUrl, 'ucwpRuntimeJsScan', 'width=1280,height=900');
 			if (!popup) {
 				setRuntimeStatus('Popup was blocked. Allow popups for this admin page and try again. Diagnostic URL: ' + runtimeUrl);
-				pushToast({ type: 'error', text: 'Browser blocked the runtime scan window. Allow popups for this admin page and try again.' });
+				pushToast({ type: 'error', text: __("Browser blocked the runtime scan window. Allow popups for this admin page and try again.", 'ultracache') });
 				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scanContext: scanContext, scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl), debugUrl: runtimeUrl };
 			}
 
@@ -6797,7 +6797,7 @@
 
 			if (!latestReport) {
 				setRuntimeStatus('No runtime report returned. The diagnostic page may have been served from cache or blocked.');
-				pushToast({ type: 'warning', text: 'Runtime scan did not return a report. Check that the diagnostic page opened and that cache bypass is active.' });
+				pushToast({ type: 'warning', text: __("Runtime scan did not return a report. Check that the diagnostic page opened and that cache bypass is active.", 'ultracache') });
 				return { available: false, source: 'browser-runtime', suggestions: [], suggestionCount: 0, missingCount: 0, scanContext: scanContext, scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl) };
 			}
 
@@ -6809,7 +6809,7 @@
 				pushToast({ type: missingCount ? 'warning' : 'info', text: 'Runtime scan captured ' + runtimeErrorCount + ' browser error(s)' + (missingCount ? ' and found ' + missingCount + ' missing exclusion suggestion(s).' : '.') });
 			} else {
 				setRuntimeStatus('Runtime scan completed with no browser JS errors captured.');
-				pushToast({ type: 'success', text: 'Runtime scan completed with no browser JS errors captured.' });
+				pushToast({ type: 'success', text: __("Runtime scan completed with no browser JS errors captured.", 'ultracache') });
 			}
 			return result;
 		}
@@ -6831,7 +6831,7 @@
 			const profile = result && result.performanceProfile ? result.performanceProfile : null;
 			const scan = profile && profile.jsDelaySafetyScan ? profile.jsDelaySafetyScan : null;
 			if (!scan || !scan.available) {
-				pushToast({ type: 'warning', text: 'No JS delay dependency suggestions were found for this URL.' });
+				pushToast({ type: 'warning', text: __("No JS delay dependency suggestions were found for this URL.", 'ultracache') });
 				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl };
 			}
 			const enrichedScan = Object.assign({}, scan, {
@@ -6968,14 +6968,14 @@
 					cacheMaxStaleMinutes: Object.prototype.hasOwnProperty.call(mainPatch, 'cacheMaxStaleMinutes') ? mainPatch.cacheMaxStaleMinutes : prev.cacheMaxStaleMinutes,
 				}));
 
-				pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: 'Saving profile settings…', persistent: true });
+				pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: __("Saving profile settings…", 'ultracache'), persistent: true });
 				const firstResponse = await apiRequest('save_settings', { settings_json: JSON.stringify(mainPatch) });
 				applyDashboardPayload(firstResponse || {});
-				pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Profile settings saved.', persistent: true });
+				pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: __("Profile settings saved.", 'ultracache'), persistent: true });
 
 				let objectCachePatch = {};
 				let objectCacheWarning = '';
-				pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: 'Setting up Object Cache…', persistent: true });
+				pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: __("Setting up Object Cache…", 'ultracache'), persistent: true });
 				if (profileKey === 'off') {
 					objectCachePatch = Object.assign({}, splitPatch.objectPatch, { objectCacheEnabled: false });
 				} else if (Object.prototype.hasOwnProperty.call(splitPatch.objectPatch, 'objectCacheEnabled') && !splitPatch.objectPatch.objectCacheEnabled) {
@@ -6997,13 +6997,13 @@
 					applyDashboardPayload(objectResponse || {});
 					pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: objectCachePatch.objectCacheEnabled === false ? 'Object Cache disabled.' : 'Object Cache set up.', persistent: true });
 				} else if (objectCacheWarning) {
-					pushToast({ type: 'warning', title: 'Object Cache setup skipped', text: profile.label + ' profile settings were saved, but Object Cache was not changed. ' + objectCacheWarning });
+					pushToast({ type: 'warning', title: __("Object Cache setup skipped", 'ultracache'), text: profile.label + ' profile settings were saved, but Object Cache was not changed. ' + objectCacheWarning });
 				} else {
-					pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Object Cache unchanged.', persistent: true });
+					pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: __("Object Cache unchanged.", 'ultracache'), persistent: true });
 				}
 
 				if (!!mainPatch.deferJsEnabled) {
-					pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: 'Running Safe Defer JS follow-up scan…', persistent: true });
+					pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: __("Running Safe Defer JS follow-up scan…", 'ultracache'), persistent: true });
 					const currentExclusions = settingsRef.current && typeof settingsRef.current.deferJsExcludeList !== 'undefined' ? settingsRef.current.deferJsExcludeList : '';
 					const scannedExclusions = await scanSafeDeferInitScriptsAndMerge(currentExclusions, false);
 					if (scannedExclusions !== null) {
@@ -7180,7 +7180,7 @@
 						});
 						persistJobState(state);
 						updateProcessState(state, { active: false, cancellable: false });
-						pushToast({ type: 'success', text: 'Job paused. You can resume it later.' });
+						pushToast({ type: 'success', text: __("Job paused. You can resume it later.", 'ultracache') });
 						break;
 					}
 
@@ -7320,11 +7320,11 @@
 		async function startWarming(forceRestart = false) {
 			await syncQueuedSettingsBeforeAction();
 			if (!(settingsRef.current && settingsRef.current.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: 'Please enable Page Caching first or select a profile before warming cache.' });
+				pushToast({ type: 'warning', text: __("Please enable Page Caching first or select a profile before warming cache.", 'ultracache') });
 				return;
 			}
 			if (!hasFullSiteWarmScope(settingsRef.current)) {
-				pushToast({ type: 'warning', text: 'Select at least one full-site warm source first.' });
+				pushToast({ type: 'warning', text: __("Select at least one full-site warm source first.", 'ultracache') });
 				return;
 			}
 			const controls = getJobControls('warm');
@@ -7339,7 +7339,7 @@
 
 			await runJob({
 				type: 'warm',
-				label: 'Warming Full Site HTML Cache',
+				label: __("Warming Full Site HTML Cache", 'ultracache'),
 				cursor: '',
 				nextCursor: '',
 				processed: 0,
@@ -7382,7 +7382,7 @@
 						active: false,
 						showWhenInactive: true,
 						cancellable: false,
-						label: 'Media conversion complete',
+						label: __("Media conversion complete", 'ultracache'),
 						current: Math.max(0, Number(preflight.total || 0)),
 						processed: Math.max(0, Number(preflight.total || 0)),
 						total: Math.max(0, Number(preflight.total || 0)),
@@ -7400,7 +7400,7 @@
 
 				await runJob({
 					type: 'media',
-					label: 'Checking Media',
+					label: __("Checking Media", 'ultracache'),
 					cursor: preflight.cursor || 0,
 					nextCursor: preflight.nextCursor || 0,
 					processed: 0,
@@ -7529,7 +7529,7 @@
 						};
 						persistJobState(pausedJob);
 						setProcess((prev) => Object.assign({}, prev, { active: false, cancellable: false, cancelRequested: true, logs: (prev.logs || []).concat(['Paused by user.']).slice(-50) }));
-						pushToast({ type: 'success', text: 'Media queue rebuild paused. You can resume it later.' });
+						pushToast({ type: 'success', text: __("Media queue rebuild paused. You can resume it later.", 'ultracache') });
 						return;
 					}
 					loops += 1;
@@ -7557,11 +7557,11 @@
 					cancellable: false,
 					cancelRequested: false,
 					showWhenInactive: true,
-					label: 'Media Queue Rebuild complete',
+					label: __("Media Queue Rebuild complete", 'ultracache'),
 					logs: (prev.logs || []).concat([response && response.message ? String(response.message) : 'Media queue rebuild finished.', statusText]).slice(-50),
 				}));
 			persistJobState(null);
-				pushToast({ type: 'success', text: 'Media queue rebuilt.' });
+				pushToast({ type: 'success', text: __("Media queue rebuilt.", 'ultracache') });
 				await refreshStats();
 			} catch (error) {
 				setProcess((prev) => Object.assign({}, prev, {
@@ -7621,7 +7621,7 @@
 				if (response && response.diagnostics) {
 					setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(response.diagnostics));
 				}
-				pushToast({ type: 'success', text: 'Storage diagnostics refreshed.' });
+				pushToast({ type: 'success', text: __("Storage diagnostics refreshed.", 'ultracache') });
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Storage diagnostics refresh failed.' });
 			} finally {
@@ -7636,7 +7636,7 @@
 				const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 				const filename = 'ultracache-settings-' + (ucwp.version || 'export') + '-' + stamp + '.json';
 				triggerFileDownload(filename, JSON.stringify(payload, null, 2), 'application/json');
-				pushToast({ type: 'success', text: 'Settings exported.' });
+				pushToast({ type: 'success', text: __("Settings exported.", 'ultracache') });
 			} catch (error) {
 				pushToast({
 					type: 'error',
@@ -7703,7 +7703,7 @@
 
 			const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
 			if (!Object.keys(defaultsPayload).length) {
-				pushToast({ type: 'error', text: 'Default settings are not available in this build.' });
+				pushToast({ type: 'error', text: __("Default settings are not available in this build.", 'ultracache') });
 				return;
 			}
 
@@ -7725,7 +7725,7 @@
 					setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(response.diagnostics));
 				}
 				setInspectResult(null);
-				pushToast({ type: 'success', text: 'UltraCache settings were reset to defaults, including visible safeguard lists.' });
+				pushToast({ type: 'success', text: __("UltraCache settings were reset to defaults, including visible safeguard lists.", 'ultracache') });
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to reset UltraCache settings.' });
 			} finally {
@@ -7781,7 +7781,7 @@ async function deleteAllPluginDataAndDeactivate() {
 
 	const typed = window.prompt('Type DELETE to confirm this UltraCache delete/deactivate action.');
 	if (String(typed || '').trim() !== 'DELETE') {
-		pushToast({ type: 'info', text: 'UltraCache delete/deactivate cancelled.' });
+		pushToast({ type: 'info', text: __("UltraCache delete/deactivate cancelled.", 'ultracache') });
 		return;
 	}
 
@@ -7903,7 +7903,7 @@ async function deleteAllPluginDataAndDeactivate() {
 					h(
 						'p',
 						{ className: 'text-zinc-500 text-xs tracking-widest mt-2 mb-0' },
-						'Page cache, object cache, compression, warmups, fonts, and next-gen images'
+						__("Page cache, object cache, compression, warmups, fonts, and next-gen images", 'ultracache')
 					),
 				]),
 				h('div', { className: 'flex flex-wrap gap-3', key: 'actions' }, [
@@ -7935,8 +7935,8 @@ async function deleteAllPluginDataAndDeactivate() {
 				h(
 				Card,
 				{
-					title: 'Select profile',
-					description: 'Select a known preset below. Profiles apply their settings immediately and can be adjusted manually afterwards.',
+					title: __("Select profile", 'ultracache'),
+					description: __("Select a known preset below. Profiles apply their settings immediately and can be adjusted manually afterwards.", 'ultracache'),
 					key: 'performance-profile-card',
 				},
 				[
@@ -7946,7 +7946,7 @@ async function deleteAllPluginDataAndDeactivate() {
 						checked: activePerformanceProfile === 'custom',
 						onChange: (value) => {
 							if (!value) { return; }
-							pushToast({ type: 'info', text: 'Custom turns on automatically when settings do not match a preset.' });
+							pushToast({ type: 'info', text: __("Custom turns on automatically when settings do not match a preset.", 'ultracache') });
 						},
 						disabled: busy,
 						key: 'performance-profile-custom',
@@ -7974,8 +7974,8 @@ async function deleteAllPluginDataAndDeactivate() {
 				h(
 					Card,
 					{
-						title: 'Warm Cache',
-						description: 'Crawl public URLs and prebuild static cache files.',
+						title: __("Warm Cache", 'ultracache'),
+						description: __("Crawl public URLs and prebuild static cache files.", 'ultracache'),
 						key: 'warm',
 					},
 					[
@@ -8002,16 +8002,16 @@ async function deleteAllPluginDataAndDeactivate() {
 						]),
 						h('div', { className: 'mt-5 grid grid-cols-1 gap-4', key: 'warm-menu-scope-controls' }, [
 							h(SelectField, {
-								label: 'Menu warm-up',
-								description: 'Choose any saved WordPress menu. Assigned/frontend menus are listed first; other saved menus run only when selected.',
+								label: __("Menu warm-up", 'ultracache'),
+								description: __("Choose any saved WordPress menu. Assigned/frontend menus are listed first; other saved menus run only when selected.", 'ultracache'),
 								value: settings.warmMenuLocation || '',
 								onChange: (value) => updateSetting('warmMenuLocation', value),
 								disabled: warmBusy,
 								options: getWarmMenuOptions(),
 							}),
 							h(SelectField, {
-								label: 'Menu depth',
-								description: 'Depth 1 = top-level only. All = every child item in the selected menu.',
+								label: __("Menu depth", 'ultracache'),
+								description: __("Depth 1 = top-level only. All = every child item in the selected menu.", 'ultracache'),
 								value: settings.warmMenuDepth || '',
 								onChange: (value) => updateSetting('warmMenuDepth', value),
 								disabled: warmBusy,
@@ -8048,8 +8048,8 @@ async function deleteAllPluginDataAndDeactivate() {
 
 						h('div', { className: 'mt-5', key: 'warm-full-scope-controls' }, [
 							h(MultiSelectField, {
-								label: 'Full-site warm-up sources',
-								description: 'Choose the URL sources for full-site and scheduled / cron warm-up. The counts below help you choose the Scheduled / Cron warm limit; the limit itself remains user-controlled.',
+								label: __("Full-site warm-up sources", 'ultracache'),
+								description: __("Choose the URL sources for full-site and scheduled / cron warm-up. The counts below help you choose the Scheduled / Cron warm limit; the limit itself remains user-controlled.", 'ultracache'),
 								value: settings.warmFullSiteSources || '',
 								onChange: (value) => updateSetting('warmFullSiteSources', value),
 								disabled: warmBusy,
@@ -8089,25 +8089,25 @@ async function deleteAllPluginDataAndDeactivate() {
 			h(
 				Card,
 				{
-					title: 'AVIF / WebP Batch Conversion',
-					description: 'Queue-based conversion for existing uploads. This box is separate from cache warm-up and only shows media conversion operations.',
+					title: __("AVIF / WebP Batch Conversion", 'ultracache'),
+					description: __("Queue-based conversion for existing uploads. This box is separate from cache warm-up and only shows media conversion operations.", 'ultracache'),
 					key: 'batch-media-conversion',
 				},
 				[
 					h('div', { className: 'text-xs text-zinc-500 mt-1', key: 'media-batch-support-summary' }, 'Conversion support: Imagick ' + (avifSupport.imagick ? 'Yes' : 'No') + ' · Imagick AVIF ' + (avifSupport.imagick_avif ? 'Yes' : 'No') + ' · Imagick WebP ' + (avifSupport.imagick_webp ? 'Yes' : 'No') + ' · GD AVIF ' + (avifSupport.gd_avif ? 'Yes' : 'No') + ' · GD WebP ' + (avifSupport.gd_webp ? 'Yes' : 'No')),
 					h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4 mt-4', key: 'media-batch-summary' }, [
 						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'optimized-files' }, [
-							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Optimized image files'),
+							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Optimized image files", 'ultracache')),
 							h('div', { className: 'text-2xl font-black text-white mt-1' }, formatNumber(optimizedImagesTotal || 0)),
 							h('div', { className: 'text-xs text-zinc-500 mt-1' }, formatNumber(optimizedAvifTotal || 0) + ' AVIF · ' + formatNumber(optimizedWebpTotal || 0) + ' WebP'),
 						]),
 						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'queue-status' }, [
-							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Media queue'),
+							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Media queue", 'ultracache')),
 							h('div', { className: 'text-2xl font-black text-white mt-1' }, formatNumber(mediaQueueTotal)),
 							h('div', { className: 'text-xs text-zinc-500 mt-1' }, formatNumber(mediaQueuePending) + ' pending · ' + formatNumber(mediaQueueAlreadyOptimized) + ' already optimized · ' + formatNumber(mediaQueueFailed) + ' failed'),
 						]),
 						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'queue-health' }, [
-							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Queue health'),
+							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Queue health", 'ultracache')),
 							h('div', { className: mediaQueueNeedsRepair ? 'text-lg font-black text-amber-300 mt-1' : 'text-lg font-black text-emerald-300 mt-1' }, mediaQueueNeedsRepair ? 'Needs repair' : (mediaQueueIsComplete ? 'Complete' : 'Ready')),
 							h('div', { className: 'text-xs text-zinc-500 mt-1' }, 'Target policy: ' + (settings.mediaOutputMode || 'auto') + ' · queue format: best'),
 						]),
@@ -8119,7 +8119,7 @@ async function deleteAllPluginDataAndDeactivate() {
 								onClick: () => startMediaOptimization(false),
 								disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported,
 							}, busy ? 'Engine Busy' : (getJobControls('media').canResume ? 'Resume Media Conversion' : 'Start / Resume Conversion')),
-							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Processes the next pending media items. Existing optimized files are checked and marked already optimized.'),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Processes the next pending media items. Existing optimized files are checked and marked already optimized.", 'ultracache')),
 						]),
 						h('div', { key: 'rebuild' }, [
 							h('button', {
@@ -8127,7 +8127,7 @@ async function deleteAllPluginDataAndDeactivate() {
 								onClick: () => rebuildMediaQueue(false),
 								disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported,
 							}, busy ? 'Engine Busy' : (getJobControls('media_rebuild').canResume ? 'Resume Media Queue Rebuild' : 'Rebuild Media Queue')),
-							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Scans the media library and rebuilds the attachment queue. Use after large imports or when the queue looks outdated.'),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Scans the media library and rebuilds the attachment queue. Use after large imports or when the queue looks outdated.", 'ultracache')),
 						]),
 						getJobControls('media_rebuild').canRestart ? h('div', { key: 'rebuild-restart' }, [
 								h('button', {
@@ -8135,7 +8135,7 @@ async function deleteAllPluginDataAndDeactivate() {
 									onClick: () => rebuildMediaQueue(true),
 									disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported,
 								}, busy ? 'Engine Busy' : 'Restart Media Queue Rebuild'),
-								h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Starts the rebuild from the beginning instead of resuming the saved offset.'),
+								h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Starts the rebuild from the beginning instead of resuming the saved offset.", 'ultracache')),
 							]) : null,
 							h('div', { key: 'refresh-storage' }, [
 							h('button', {
@@ -8143,7 +8143,7 @@ async function deleteAllPluginDataAndDeactivate() {
 								onClick: refreshMediaStorageStats,
 								disabled: busy || !mediaOptimizationEnabled,
 							}, busy ? 'Engine Busy' : 'Refresh Storage Stats'),
-							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Runs a capped manual scan of uploads/uc-images. Normal dashboard/status refreshes stay passive and do not crawl media directories.'),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Runs a capped manual scan of uploads/uc-images. Normal dashboard/status refreshes stay passive and do not crawl media directories.", 'ultracache')),
 						]),
 						h('div', { key: 'repair' }, [
 							h('button', {
@@ -8151,7 +8151,7 @@ async function deleteAllPluginDataAndDeactivate() {
 								onClick: repairMediaQueue,
 								disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported,
 							}, busy ? 'Engine Busy' : 'Verify / Repair Queue'),
-							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Checks whether optimized output storage is missing and re-queues completed items when repair is needed.'),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Checks whether optimized output storage is missing and re-queues completed items when repair is needed.", 'ultracache')),
 						]),
 						h('div', { key: 'retry' }, [
 							h('button', {
@@ -8159,7 +8159,7 @@ async function deleteAllPluginDataAndDeactivate() {
 								onClick: retryFailedMediaQueue,
 								disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported || mediaQueueFailed <= 0,
 							}, busy ? 'Engine Busy' : 'Retry Failed'),
-							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Moves failed queue rows back to pending so they can be processed again.'),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Moves failed queue rows back to pending so they can be processed again.", 'ultracache')),
 						]),
 						h('div', { key: 'clear-completed' }, [
 							h('button', {
@@ -8167,10 +8167,10 @@ async function deleteAllPluginDataAndDeactivate() {
 								onClick: clearCompletedMediaQueue,
 								disabled: busy || !mediaOptimizationEnabled || mediaQueueAlreadyOptimized <= 0,
 							}, busy ? 'Engine Busy' : 'Clear Completed Queue Rows'),
-							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Removes completed queue rows only. It does not delete AVIF/WebP files.'),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Removes completed queue rows only. It does not delete AVIF/WebP files.", 'ultracache')),
 						]),
 					]),
-					h('div', { className: 'text-xs text-zinc-500 mt-4', key: 'media-batch-note' }, 'Cache warm-up operations keep using the Warm Cache box above. This panel is used only for media queue actions.'),
+					h('div', { className: 'text-xs text-zinc-500 mt-4', key: 'media-batch-note' }, __("Cache warm-up operations keep using the Warm Cache box above. This panel is used only for media queue actions.", 'ultracache')),
 				]
 			)
 			]),
@@ -8189,38 +8189,38 @@ async function deleteAllPluginDataAndDeactivate() {
 								h(
 					Card,
 					{
-						title: 'Cache Engine',
-						description: 'Core page cache behavior, WooCommerce bypasses, compression variants, and safe prefetch hints.',
+						title: __("Cache Engine", 'ultracache'),
+						description: __("Core page cache behavior, WooCommerce bypasses, compression variants, and safe prefetch hints.", 'ultracache'),
 						key: 'cache-engine',
 					},
 					[
 						h(ToggleRow, {
-							label: 'Page Caching',
-							description: 'Store public pages as static HTML files.',
+							label: __("Page Caching", 'ultracache'),
+							description: __("Store public pages as static HTML files.", 'ultracache'),
 							checked: settings.pageCacheEnabled,
 							onChange: (value) => updateSetting('pageCacheEnabled', value),
 							disabled: busy,
 							key: 'page',
 						}),
 h(ToggleRow, {
-							label: 'Pre-render on Save',
-							description: 'Warm the updated page after content changes.',
+							label: __("Pre-render on Save", 'ultracache'),
+							description: __("Warm the updated page after content changes.", 'ultracache'),
 							checked: settings.preRenderOnSave,
 							onChange: (value) => updateSetting('preRenderOnSave', value),
 							disabled: busy,
 							key: 'preload',
 						}),
 h(ToggleRow, {
-							label: 'WooCommerce Safe Mode',
-							description: 'Bypass cart, checkout, account, order endpoints, and cart-changing requests.',
+							label: __("WooCommerce Safe Mode", 'ultracache'),
+							description: __("Bypass cart, checkout, account, order endpoints, and cart-changing requests.", 'ultracache'),
 							checked: settings.woocommerceSafeModeEnabled,
 							onChange: (value) => updateSetting('woocommerceSafeModeEnabled', value),
 							disabled: busy,
 							key: 'woo-safe',
 						}),
 h(ToggleRow, {
-							label: 'Browser Cache Headers (.htaccess)',
-							description: 'Write long-lived browser cache headers for CSS, JS, fonts, static images, AVIF, and WebP on Apache-compatible hosts.',
+							label: __('Browser Cache Headers', 'ultracache') + ' (.htaccess)',
+							description: __("Write long-lived browser cache headers for CSS, JS, fonts, static images, AVIF, and WebP on Apache-compatible hosts.", 'ultracache'),
 							checked: settings.browserCacheRulesEnabled,
 							onChange: (value) => updateSetting('browserCacheRulesEnabled', value),
 							disabled: busy,
@@ -8243,16 +8243,16 @@ h(ToggleRow, {
 								key: 'brotli',
 							}),
 							h(ToggleRow, {
-								label: 'Speculation Rules Prefetch',
-								description: 'Inject a safe prefetch-only speculationrules block for likely next-page internal navigations. Logged-in users, query-string links, WooCommerce flows, admin-like paths, nofollow links, and target/download links stay excluded.',
+								label: __("Speculation Rules Prefetch", 'ultracache'),
+								description: __("Inject a safe prefetch-only speculationrules block for likely next-page internal navigations. Logged-in users, query-string links, WooCommerce flows, admin-like paths, nofollow links, and target/download links stay excluded.", 'ultracache'),
 								checked: settings.speculationRulesEnabled,
 								onChange: (value) => updateSetting('speculationRulesEnabled', value),
 								disabled: busy,
 								key: 'cache-engine-speculation-rules',
 							}),
 h(ToggleRow, {
-								label: 'Cache Pages with Safe Tracking Cookies',
-								description: 'Allow public HTML cache storage when the response sets only cookies from the Safe Tracking Cookies list. UltraCache still never stores or replays Set-Cookie headers. Disable for strict mode where any Set-Cookie must skip cache.',
+								label: __("Cache Pages with Safe Tracking Cookies", 'ultracache'),
+								description: __("Allow public HTML cache storage when the response sets only cookies from the Safe Tracking Cookies list. UltraCache still never stores or replays Set-Cookie headers. Disable for strict mode where any Set-Cookie must skip cache.", 'ultracache'),
 								checked: !!settings.cacheSafeTrackingCookiesEnabled,
 								onChange: (value) => updateSetting('cacheSafeTrackingCookiesEnabled', value),
 								disabled: busy,
@@ -8265,78 +8265,78 @@ h(ToggleRow, {
 				h(
 				Card,
 				{
-					title: 'Media Optimization',
-					description: 'Controls frontend AVIF/WebP URL rewriting and the related upload, batch, and missing-media queue tools.',
+					title: __("Media Optimization", 'ultracache'),
+					description: __("Controls frontend AVIF/WebP URL rewriting and the related upload, batch, and missing-media queue tools.", 'ultracache'),
 					key: 'media-optimization',
 				},
 				[
 					h(ToggleRow, {
-						label: 'Enable Media Rewrite',
-						description: 'Enable AVIF/WebP media URL rewriting according to the selected output policy. The actual media files must already exist or be generated through batch conversion, generate on upload, or queue missing media on demand.',
+						label: __("Enable Media Rewrite", 'ultracache'),
+						description: __("Enable AVIF/WebP media URL rewriting according to the selected output policy. The actual media files must already exist or be generated through batch conversion, generate on upload, or queue missing media on demand.", 'ultracache'),
 						checked: mediaOptimizationEnabled,
 						onChange: (value) => updateMediaOptimizationSetting(value),
 						disabled: busy,
 						key: 'media-optimization-enabled',
 					}),
 					h(ToggleRow, {
-						label: 'Automatic Format',
-						description: 'AVIF is preferred first, with WebP kept as the compatibility fallback.',
+						label: __("Automatic Format", 'ultracache'),
+						description: __("AVIF is preferred first, with WebP kept as the compatibility fallback.", 'ultracache'),
 						checked: !settings.mediaOutputMode || 'auto' === settings.mediaOutputMode,
 						onChange: (value) => { if (value) { updateSetting('mediaOutputMode', 'auto'); } },
 						disabled: busy || !mediaOptimizationEnabled,
 						key: 'media-output-auto',
 					}),
 					h(ToggleRow, {
-						label: 'AVIF Format',
-						description: 'Generate and prefer AVIF variants only.',
+						label: __("AVIF Format", 'ultracache'),
+						description: __("Generate and prefer AVIF variants only.", 'ultracache'),
 						checked: 'avif' === settings.mediaOutputMode,
 						onChange: (value) => { if (value) { updateSetting('mediaOutputMode', 'avif'); } },
 						disabled: busy || !mediaOptimizationEnabled,
 						key: 'media-output-avif',
 					}),
 					h(ToggleRow, {
-						label: 'WebP Format',
-						description: 'Generate and prefer WebP variants only.',
+						label: __("WebP Format", 'ultracache'),
+						description: __("Generate and prefer WebP variants only.", 'ultracache'),
 						checked: 'webp' === settings.mediaOutputMode,
 						onChange: (value) => { if (value) { updateSetting('mediaOutputMode', 'webp'); } },
 						disabled: busy || !mediaOptimizationEnabled,
 						key: 'media-output-webp',
 					}),
 					h(ToggleRow, {
-						label: 'Generate on Upload',
-						description: 'When enabled, newly uploaded images and their registered thumbnail sizes are queued for next-gen conversion.',
+						label: __("Generate on Upload", 'ultracache'),
+						description: __("When enabled, newly uploaded images and their registered thumbnail sizes are queued for next-gen conversion.", 'ultracache'),
 						checked: !!settings.mediaGenerateOnUploadEnabled,
 						onChange: (value) => updateSetting('mediaGenerateOnUploadEnabled', value),
 						disabled: busy || !mediaOptimizationEnabled,
 						key: 'media-generate-upload',
 					}),
 					h(ToggleRow, {
-						label: 'Queue Missing Media on Demand',
-						description: 'When enabled, UltraCache queues missing AVIF/WebP variants discovered during frontend, warm-up, cron warm, or stale rewrites. The current request never performs image conversion; the existing background media queue handles generation.',
+						label: __("Queue Missing Media on Demand", 'ultracache'),
+						description: __("When enabled, UltraCache queues missing AVIF/WebP variants discovered during frontend, warm-up, cron warm, or stale rewrites. The current request never performs image conversion; the existing background media queue handles generation.", 'ultracache'),
 						checked: !!settings.mediaGenerateOnDemandEnabled,
 						onChange: (value) => updateSetting('mediaGenerateOnDemandEnabled', value),
 						disabled: busy || !mediaOptimizationEnabled,
 						key: 'media-generate-demand',
 					}),
 					h(ToggleRow, {
-						label: 'Safe CLS Dimensions',
-						description: 'Inject missing width and height on local images using attachment metadata first and local file dimensions as fallback.',
+						label: __("Safe CLS Dimensions", 'ultracache'),
+						description: __("Inject missing width and height on local images using attachment metadata first and local file dimensions as fallback.", 'ultracache'),
 						checked: settings.clsDimensionsEnabled,
 						onChange: (value) => updateSetting('clsDimensionsEnabled', value),
 						disabled: busy,
 						key: 'media-cls-dimensions',
 					}),
 					h(ToggleRow, {
-						label: 'LCP Image Priority',
-						description: 'Prioritize likely hero/LCP images. In normal mode UltraCache can mark the detected candidate and inject a preload; when Fix sliders / hero sections is active, it uses SR7/Revolution Slider first-slide discovery plus a lifecycle-safe runtime guard.',
+						label: __("LCP Image Priority", 'ultracache'),
+						description: __("Prioritize likely hero/LCP images. In normal mode UltraCache can mark the detected candidate and inject a preload; when Fix sliders / hero sections is active, it uses SR7/Revolution Slider first-slide discovery plus a lifecycle-safe runtime guard.", 'ultracache'),
 						checked: settings.lcpImagePriorityEnabled,
 						onChange: (value) => updateSetting('lcpImagePriorityEnabled', value),
 						disabled: busy,
 						key: 'media-lcp-priority',
 					}),
 					h(ToggleRow, {
-						label: 'Lazy load & async images',
-						description: 'Adds native loading="lazy" and decoding="async" to eligible images. If LCP Image Priority is enabled, UltraCache only lazy-loads images printed after the detected LCP image.',
+						label: __("Lazy load & async images", 'ultracache'),
+						description: __("Adds native loading=\"lazy\" and decoding=\"async\" to eligible images. If LCP Image Priority is enabled, UltraCache only lazy-loads images printed after the detected LCP image.", 'ultracache'),
 						checked: !!settings.lazyLoadImagesEnabled,
 						onChange: (value) => updateSetting('lazyLoadImagesEnabled', value),
 						disabled: busy,
@@ -8349,7 +8349,7 @@ h(ToggleRow, {
 								className:
 									'mt-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-xs',
 							},
-							'This server cannot generate AVIF or WebP yet. Install Imagick with AVIF/WebP support or a GD build that includes imageavif()/imagewebp().'
+							__("This server cannot generate AVIF or WebP yet. Install Imagick with AVIF/WebP support or a GD build that includes imageavif()/imagewebp().", 'ultracache')
 						 )
 						: null,
 				]
@@ -8357,37 +8357,37 @@ h(ToggleRow, {
 				h(
 					Card,
 					{
-						title: 'Frontend JS & Request Chains',
-						description: 'Defer/delay safe scripts and prioritize known critical request chains.',
+						title: __("Frontend JS & Request Chains", 'ultracache'),
+						description: __("Defer/delay safe scripts and prioritize known critical request chains.", 'ultracache'),
 						key: 'frontend-js-request-chains-card',
 					},
 					[
 						h(ToggleRow, {
-									label: 'Safe Defer JS',
-									description: 'Add native defer conservatively. When enabled, UltraCache scans the front page once and appends detected theme/page-builder init scripts to the visible JS Delay / Defer Exclusions list.',
+									label: __("Safe Defer JS", 'ultracache'),
+									description: __("Add native defer conservatively. When enabled, UltraCache scans the front page once and appends detected theme/page-builder init scripts to the visible JS Delay / Defer Exclusions list.", 'ultracache'),
 									checked: settings.deferJsEnabled,
 									onChange: (value) => updateSafeDeferJs(value),
 									disabled: busy,
 									key: 'defer-stage-one',
 								}),
 h(ToggleRow, {
-									label: 'Defer all JS',
-									description: 'Aggressive manual mode. When Safe Defer JS is on, UltraCache adds native defer to every eligible frontend script. If JS Delay / Defer Exclusions is empty, UltraCache really defers everything eligible. Populate Defaults is optional and only adds visible recommendations; scan suggestions help you build exclusions after testing.',
+									label: __("Defer all JS", 'ultracache'),
+									description: __("Aggressive manual mode. When Safe Defer JS is on, UltraCache adds native defer to every eligible frontend script. If JS Delay / Defer Exclusions is empty, UltraCache really defers everything eligible. Populate Defaults is optional and only adds visible recommendations; scan suggestions help you build exclusions after testing.", 'ultracache'),
 									checked: !!settings.deferAllJsEnabled,
 									onChange: (value) => updateSetting('deferAllJsEnabled', value),
 									disabled: busy || !settings.deferJsEnabled,
 									key: 'defer-all-js',
 								}),
 h(ToggleRow, {
-									label: 'Delay safe third-party JS',
-									description: 'Delay analytics, pixels, ads, tracking, and marketing scripts until user interaction or a late safe fallback timeout, keeping them out of the initial PageSpeed/LCP/TBT critical window. Examples: Google Analytics, gtag, GTM, Google Site Kit event providers, Meta Pixel, TikTok Pixel, LinkedIn Insight, Pinterest Tag, Bing UET, Hotjar, Clarity, DoubleClick, Google Ads, Taboola, Outbrain, and Yahoo tracking.',
+									label: __("Delay safe third-party JS", 'ultracache'),
+									description: __("Delay analytics, pixels, ads, tracking, and marketing scripts until user interaction or a late safe fallback timeout, keeping them out of the initial PageSpeed/LCP/TBT critical window. Examples: Google Analytics, gtag, GTM, Google Site Kit event providers, Meta Pixel, TikTok Pixel, LinkedIn Insight, Pinterest Tag, Bing UET, Hotjar, Clarity, DoubleClick, Google Ads, Taboola, Outbrain, and Yahoo tracking.", 'ultracache'),
 									checked: settings.delaySafeThirdPartyJsEnabled,
 									onChange: (value) => updateSetting('delaySafeThirdPartyJsEnabled', value),
 									disabled: busy,
 									key: 'delay-safe-third-party-js',
 								}),
 h(ToggleRow, {
-									label: 'Lazy MailerLite nonce refresh',
+									label: __("Lazy MailerLite nonce refresh", 'ultracache'),
 									description: 'Prevents MailerLite forms from calling wp-admin/admin-ajax.php on page load for ml_create_nonce. The nonce is refreshed on first form interaction or before submit, so cached pages avoid the load-time admin-ajax request.',
 									checked: !!settings.lazyMailerliteNonceEnabled,
 									onChange: (value) => updateSetting('lazyMailerliteNonceEnabled', value),
@@ -8395,48 +8395,48 @@ h(ToggleRow, {
 									key: 'lazy-mailerlite-nonce-refresh',
 								}),
 	h(ToggleRow, {
-									label: 'Delay known functional third-party JS',
-									description: 'Delay matched third-party scripts that provide visible functionality, such as cookie banners, captcha, maps, chat widgets, booking widgets, embedded forms, opt-in popups, newsletter widgets, and review widgets. Matching is based on the visible include/exclude patterns below. If a form, map, captcha, checkout, or cookie banner misbehaves, add its script keyword to exclusions.',
+									label: __("Delay known functional third-party JS", 'ultracache'),
+									description: __("Delay matched third-party scripts that provide visible functionality, such as cookie banners, captcha, maps, chat widgets, booking widgets, embedded forms, opt-in popups, newsletter widgets, and review widgets. Matching is based on the visible include/exclude patterns below. If a form, map, captcha, checkout, or cookie banner misbehaves, add its script keyword to exclusions.", 'ultracache'),
 									checked: !!settings.delayFunctionalThirdPartyJsEnabled,
 									onChange: (value) => updateSetting('delayFunctionalThirdPartyJsEnabled', value),
 									disabled: busy,
 									key: 'delay-functional-third-party-js',
 								}),
 	h(ToggleRow, {
-										label: 'Delay all third-party JS',
-										description: 'Delays external scripts loaded from third-party domains until user interaction or a safe fallback timeout. JS Delay / Defer Exclusions is respected; use exclusions for captcha, payments, consent, login, booking, or critical form scripts that must run immediately.',
+										label: __("Delay all third-party JS", 'ultracache'),
+										description: __("Delays external scripts loaded from third-party domains until user interaction or a safe fallback timeout. JS Delay / Defer Exclusions is respected; use exclusions for captcha, payments, consent, login, booking, or critical form scripts that must run immediately.", 'ultracache'),
 										checked: !!settings.delayAllThirdPartyJsEnabled,
 										onChange: (value) => updateSetting('delayAllThirdPartyJsEnabled', value),
 										disabled: busy,
 										key: 'delay-all-third-party-js',
 									}),
 					h(ToggleRow, {
-						label: 'Delay non-critical/local JS',
-						description: 'Delay selected same-host enhancement scripts such as popups, sliders, filters, consent extras, marketing helpers, and other local footer scripts unless protected or excluded here.',
+						label: __("Delay non-critical/local JS", 'ultracache'),
+						description: __("Delay selected same-host enhancement scripts such as popups, sliders, filters, consent extras, marketing helpers, and other local footer scripts unless protected or excluded here.", 'ultracache'),
 						checked: settings.delayNonCriticalJsEnabled,
 						onChange: (value) => updateSetting('delayNonCriticalJsEnabled', value),
 						disabled: busy,
 						key: 'defer-stage-three',
 					}),
 h(ToggleRow, {
-									label: 'Main Thread Relief',
-									description: 'Load delayed scripts gradually during browser idle time instead of releasing the full delayed queue at once. Works with Stage two and Stage three delayed scripts.',
+									label: __("Main Thread Relief", 'ultracache'),
+									description: __("Load delayed scripts gradually during browser idle time instead of releasing the full delayed queue at once. Works with Stage two and Stage three delayed scripts.", 'ultracache'),
 									checked: settings.mainThreadReliefEnabled,
 									onChange: (value) => updateSetting('mainThreadReliefEnabled', value),
 									disabled: busy,
 									key: 'main-thread-relief',
 								}),
 h(ToggleRow, {
-									label: 'Critical Request Chain Relief',
-									description: 'Preload known critical requests and let selected non-critical chained assets be delayed so the browser has a shorter critical network chain.',
+									label: __("Critical Request Chain Relief", 'ultracache'),
+									description: __("Preload known critical requests and let selected non-critical chained assets be delayed so the browser has a shorter critical network chain.", 'ultracache'),
 									checked: settings.criticalRequestChainReliefEnabled,
 									onChange: (value) => updateSetting('criticalRequestChainReliefEnabled', value),
 									disabled: busy,
 									key: 'critical-request-chain-relief',
 								}),
 h(ToggleRow, {
-									label: 'LCP Boundary Defer',
-									description: 'Uses the LCP image detected by LCP Image Priority as a visual boundary. Eligible local scripts printed after that image in the HTML are delayed.',
+									label: __("LCP Boundary Defer", 'ultracache'),
+									description: __("Uses the LCP image detected by LCP Image Priority as a visual boundary. Eligible local scripts printed after that image in the HTML are delayed.", 'ultracache'),
 									checked: !!settings.lcpBoundaryDeferEnabled,
 									onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
 										disabled: busy || !settings.lcpImagePriorityEnabled,
@@ -8447,75 +8447,75 @@ h(ToggleRow, {
 h(
 					Card,
 					{
-						title: 'CSS Delivery',
-						description: 'Bundle eligible CSS and async low-risk stylesheets without changing media-related controls.',
+						title: __("CSS Delivery", 'ultracache'),
+						description: __("Bundle eligible CSS and async low-risk stylesheets without changing media-related controls.", 'ultracache'),
 						key: 'css-delivery-lcp-card',
 					},
 					[
 						h(ToggleRow, {
-							label: 'CSS Bundling',
-                                description: 'Create local UltraCache CSS bundles for eligible stylesheet links. Safe mode is the public default. Aggressive and Full CSS Bundle are experimental and should be enabled only after visual testing.',
+							label: __("CSS Bundling", 'ultracache'),
+                                description: __("Create local UltraCache CSS bundles for eligible stylesheet links. Safe mode is the public default. Aggressive and Full CSS Bundle are experimental and should be enabled only after visual testing.", 'ultracache'),
 							checked: settings.homepageCssBundleEnabled,
 							onChange: (value) => updateSetting('homepageCssBundleEnabled', value),
 							disabled: busy,
 							key: 'homepage-css-bundle',
 						}),
 						h('div', { className: 'uc-css-bundle-scope-field', key: 'css-bundle-scope-wrap' }, h(SelectField, {
-							label: 'CSS Bundling Scope',
-                                description: 'Choose exactly one scope for generated CSS bundles. Homepage only is safest, shared reuses the homepage bundle where possible, and per-page creates separate bundles for cacheable pages.',
+							label: __("CSS Bundling Scope", 'ultracache'),
+                                description: __("Choose exactly one scope for generated CSS bundles. Homepage only is safest, shared reuses the homepage bundle where possible, and per-page creates separate bundles for cacheable pages.", 'ultracache'),
 							value: settings.cssBundleScope || 'homepage',
 							onChange: (value) => updateSetting('cssBundleScope', value),
 							disabled: busy || !settings.homepageCssBundleEnabled,
 							options: [
-								{ value: 'homepage', label: 'Homepage only' },
-								{ value: 'shared', label: 'Shared site bundle' },
-								{ value: 'per-page', label: 'Per-page bundles' },
+								{ value: 'homepage', label: __("Homepage only", 'ultracache') },
+								{ value: 'shared', label: __("Shared site bundle", 'ultracache') },
+								{ value: 'per-page', label: __("Per-page bundles", 'ultracache') },
 							],
 						})),
 	h('div', { className: 'uc-css-bundle-mode-field', key: 'css-bundle-mode-wrap' }, h(SelectField, {
-								label: 'CSS Bundle Mode',
-								description: 'Choose how broadly UltraCache combines eligible local stylesheet links. Safe is recommended for public defaults; Aggressive and Full CSS Bundle are experimental and can increase blocking CSS or break layouts on some themes.',
+								label: __("CSS Bundle Mode", 'ultracache'),
+								description: __("Choose how broadly UltraCache combines eligible local stylesheet links. Safe is recommended for public defaults; Aggressive and Full CSS Bundle are experimental and can increase blocking CSS or break layouts on some themes.", 'ultracache'),
 								value: settings.homepageCssBundleMode || 'safe',
 								onChange: (value) => updateSetting('homepageCssBundleMode', value),
 								disabled: busy || !settings.homepageCssBundleEnabled,
 								options: [
-									{ value: 'safe', label: 'Safe' },
-									{ value: 'aggressive', label: 'Aggressive' },
-									{ value: 'full', label: 'Full CSS Bundle' },
+									{ value: 'safe', label: __("Safe", 'ultracache') },
+									{ value: 'aggressive', label: __("Aggressive", 'ultracache') },
+									{ value: 'full', label: __("Full CSS Bundle", 'ultracache') },
 								],
 							})),
 
 h(ToggleRow, {
-							label: 'Inline CSS Bundling',
-							description: 'Inline the generated page CSS bundle directly into the document head. This is user-controlled and can greatly increase cached HTML size when the generated bundle is large; STORE profiler now shows final HTML size, inline CSS bytes, and fallback counts.',
+							label: __("Inline CSS Bundling", 'ultracache'),
+							description: __("Inline the generated page CSS bundle directly into the document head. This is user-controlled and can greatly increase cached HTML size when the generated bundle is large; STORE profiler now shows final HTML size, inline CSS bytes, and fallback counts.", 'ultracache'),
 							checked: settings.homepageCssBundleInlineEnabled,
 							onChange: (value) => updateSetting('homepageCssBundleInlineEnabled', value),
 							disabled: busy || !settings.homepageCssBundleEnabled,
 							key: 'homepage-css-bundle-inline',
 						}),
 h(ToggleRow, {
-							label: 'Consolidate Remaining CSS',
-							description: 'After the main CSS bundle is injected, combine eligible leftover non-protected local stylesheet links into one extra CSS file. SR7/Revolution/Swiper/Slick hero CSS remains protected; this targets small leftover plugin/theme CSS calls that still block rendering.',
+							label: __("Consolidate Remaining CSS", 'ultracache'),
+							description: __("After the main CSS bundle is injected, combine eligible leftover non-protected local stylesheet links into one extra CSS file. SR7/Revolution/Swiper/Slick hero CSS remains protected; this targets small leftover plugin/theme CSS calls that still block rendering.", 'ultracache'),
 							checked: !!settings.leftoverCssBundleEnabled,
 							onChange: (value) => updateSetting('leftoverCssBundleEnabled', value),
 							disabled: busy || !settings.homepageCssBundleEnabled,
 							key: 'leftover-css-bundle',
 						}),
 h('div', { className: 'uc-css-bundle-first-visit-field', key: 'css-bundle-first-visit-wrap' }, h(SelectField, {
-							label: 'First Visit CSS Bundle Handling',
-							description: 'Choose what happens when a visitor opens a page before its CSS bundle exists.',
+							label: __("First Visit CSS Bundle Handling", 'ultracache'),
+							description: __("Choose what happens when a visitor opens a page before its CSS bundle exists.", 'ultracache'),
 							value: getFirstVisitCssBundleHandling(settings),
 							onChange: (value) => queueSettingsPatch(getFirstVisitCssBundlePatch(value)),
 							disabled: busy || !settings.homepageCssBundleEnabled,
 							options: [
-								{ value: 'none', label: 'Do nothing' },
-								{ value: 'on_entry', label: 'Build CSS bundle on entry' },
-								{ value: 'async', label: 'Build CSS bundle async' },
+								{ value: 'none', label: __("Do nothing", 'ultracache') },
+								{ value: 'on_entry', label: __("Build CSS bundle on entry", 'ultracache') },
+								{ value: 'async', label: __("Build CSS bundle async", 'ultracache') },
 							],
 						})),
 h(ToggleRow, {
-							label: 'Async Remaining CSS',
-							description: 'Rewrite low-risk local stylesheet links and UltraCache-generated external CSS bundles/optimized CSS to non-blocking print+onload loading with a noscript fallback. This complements CSS Bundling.',
+							label: __("Async Remaining CSS", 'ultracache'),
+							description: __("Rewrite low-risk local stylesheet links and UltraCache-generated external CSS bundles/optimized CSS to non-blocking print+onload loading with a noscript fallback. This complements CSS Bundling.", 'ultracache'),
 							checked: settings.asyncCssEnabled,
 							onChange: (value) => updateSetting('asyncCssEnabled', value),
 							disabled: busy,
@@ -8526,22 +8526,22 @@ h(ToggleRow, {
 h(
 					Card,
 					{
-						title: 'Fonts Optimization',
-						description: 'Optimize remote Google Fonts, local @font-face display behavior, self-hosted font CSS delivery, and optional delayed icon-font loading.',
+						title: __("Fonts Optimization", 'ultracache'),
+						description: __("Optimize remote Google Fonts, local @font-face display behavior, self-hosted font CSS delivery, and optional delayed icon-font loading.", 'ultracache'),
 						key: 'fonts-optimization-card',
 					},
 					[
 						h(ToggleRow, {
-							label: 'Font Display Optimization',
-							description: 'Adds font-display: swap to local @font-face declarations when missing and appends display=swap to remote Google Fonts requests. Uses the existing Google Fonts Swap setting internally for backward compatibility.',
+							label: __("Font Display Optimization", 'ultracache'),
+							description: __("Adds font-display: swap to local @font-face declarations when missing and appends display=swap to remote Google Fonts requests. Uses the existing Google Fonts Swap setting internally for backward compatibility.", 'ultracache'),
 							checked: settings.googleFontsSwapEnabled,
 							onChange: (value) => updateSetting('googleFontsSwapEnabled', value),
 							disabled: busy,
 							key: 'fonts-swap',
 						}),
 h(ToggleRow, {
-							label: 'Local Google Fonts Optimization',
-							description: 'Opt-in feature. Download Google Fonts CSS and WOFF2 files into the UltraCache cache, rewrite frontend Google Fonts links and Google Fonts @import rules found in loaded same-origin CSS, and keep font-display: swap on localized CSS. This feature makes outbound requests to Google Fonts when building the local cache.',
+							label: __("Local Google Fonts Optimization", 'ultracache'),
+							description: __("Opt-in feature. Download Google Fonts CSS and WOFF2 files into the UltraCache cache, rewrite frontend Google Fonts links and Google Fonts @import rules found in loaded same-origin CSS, and keep font-display: swap on localized CSS. This feature makes outbound requests to Google Fonts when building the local cache.", 'ultracache'),
 							checked: settings.googleFontsLocalOptimizationEnabled,
 							onChange: updateGoogleFontsLocalOptimization,
 							disabled: busy,
@@ -8552,32 +8552,32 @@ h('div', { className: 'uc-muted mt-2 text-xs', key: 'google-fonts-cache-status' 
 							googleFontsLastScanText ? h('div', { className: 'mt-1 text-[11px] text-zinc-500', key: 'google-fonts-last-scan' }, googleFontsLastScanText) : null,
 						]),
 h(ToggleRow, {
-							label: 'Optimize Self-Hosted Font CSS',
-							description: 'Rewrite local and inline @font-face CSS to add font-display: swap, prefer matching WOFF2 sources when available, normalize font URLs, and preload up to two likely first-paint WOFF2 files.',
+							label: __("Optimize Self-Hosted Font CSS", 'ultracache'),
+							description: __("Rewrite local and inline @font-face CSS to add font-display: swap, prefer matching WOFF2 sources when available, normalize font URLs, and preload up to two likely first-paint WOFF2 files.", 'ultracache'),
 							checked: settings.selfHostedFontCssOptimizationEnabled,
 							onChange: (value) => updateSetting('selfHostedFontCssOptimizationEnabled', value),
 							disabled: busy,
 							key: 'self-hosted-fonts',
 						}),
 h(ToggleRow, {
-							label: 'Delay icon font-face blocks',
-							description: 'Detect matching icon-font @font-face blocks in bundled or standalone CSS and load them through a non-render-blocking delayed font stylesheet. This can reduce critical font loading, but icons may appear slightly later.',
+							label: __("Delay icon font-face blocks", 'ultracache'),
+							description: __("Detect matching icon-font @font-face blocks in bundled or standalone CSS and load them through a non-render-blocking delayed font stylesheet. This can reduce critical font loading, but icons may appear slightly later.", 'ultracache'),
 							checked: !!settings.delayIconFontsEnabled,
 							onChange: (value) => updateSetting('delayIconFontsEnabled', value),
 							disabled: busy,
 							key: 'delay-icon-fonts',
 						}),
 h(ToggleRow, {
-							label: 'Auto-detect likely icon fonts',
-							description: 'Use broad icon-font heuristics such as Font Awesome, eicons, dashicons, icomoon, flaticon, theme icon fonts, private unicode glyph usage, and /icons/ or /webfonts/ paths. The visible include/exclude lists below still win.',
+							label: __("Auto-detect likely icon fonts", 'ultracache'),
+							description: __("Use broad icon-font heuristics such as Font Awesome, eicons, dashicons, icomoon, flaticon, theme icon fonts, private unicode glyph usage, and /icons/ or /webfonts/ paths. The visible include/exclude lists below still win.", 'ultracache'),
 							checked: !!settings.delayIconFontsAutoDetectEnabled,
 							onChange: updateDelayIconFontsAutoDetect,
 							disabled: busy || !settings.delayIconFontsEnabled,
 							key: 'delay-icon-fonts-auto-detect',
 						}),
 h(ToggleRow, {
-							label: 'Advanced Runtime Font CSS Rewrite',
-							description: 'Advanced opt-in / experimental. Uses a MutationObserver to rewrite late-injected local font stylesheet links. Keep off unless a site specifically needs runtime font-link rewriting.',
+							label: __("Advanced Runtime Font CSS Rewrite", 'ultracache'),
+							description: __("Advanced opt-in / experimental. Uses a MutationObserver to rewrite late-injected local font stylesheet links. Keep off unless a site specifically needs runtime font-link rewriting.", 'ultracache'),
 							checked: settings.selfHostedFontRuntimeRewriteEnabled,
 							onChange: (value) => updateSetting('selfHostedFontRuntimeRewriteEnabled', value),
 							disabled: busy || !settings.selfHostedFontCssOptimizationEnabled,
@@ -8588,15 +8588,15 @@ h(ToggleRow, {
 h(
 					Card,
 					{
-						title: 'Safe Asset Cleanup',
-						description: 'Optional cleanup for WooCommerce product/gallery/filter assets when they are not detected as needed.',
+						title: __("Safe Asset Cleanup", 'ultracache'),
+						description: __("Optional cleanup for WooCommerce product/gallery/filter assets when they are not detected as needed.", 'ultracache'),
 						key: 'asset-cleanup-section-card',
 					},
 					[
-						h(ToggleRow, { label: 'Enable Asset Chain Cleanup', description: 'Cleans selected unnecessary frontend assets from cached HTML and late WordPress queues. Test homepage, shop, product, cart, checkout, and header search after enabling.', checked: settings.assetChainCleanupEnabled, onChange: (value) => updateSetting('assetChainCleanupEnabled', value), disabled: busy, key: 'asset-chain-cleanup-enabled' }),
-h(ToggleRow, { label: 'Clean WooCommerce product/gallery assets outside product pages', description: 'Removes zoom, flexslider, PhotoSwipe, variation, and single-product assets when the cached HTML is not a single product page.', checked: settings.assetCleanupWooProductAssetsEnabled, onChange: (value) => updateSetting('assetCleanupWooProductAssetsEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-woo-product-assets' }),
-h(ToggleRow, { label: 'Clean product filter assets when no filter is detected', description: 'Removes WOOF/filter scripts and styles when UltraCache cannot detect filter markup in the generated HTML.', checked: settings.assetCleanupProductFilterAssetsEnabled, onChange: (value) => updateSetting('assetCleanupProductFilterAssetsEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-product-filter-assets' }),
-h(ToggleRow, { label: 'Clean WooCommerce Blocks CSS when no Woo blocks are detected', description: 'Removes wc-blocks.css from cached HTML when no WooCommerce block markup is present.', checked: settings.assetCleanupWooBlocksCssEnabled, onChange: (value) => updateSetting('assetCleanupWooBlocksCssEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-woo-blocks-css' })
+						h(ToggleRow, { label: __("Enable Asset Chain Cleanup", 'ultracache'), description: __("Cleans selected unnecessary frontend assets from cached HTML and late WordPress queues. Test homepage, shop, product, cart, checkout, and header search after enabling.", 'ultracache'), checked: settings.assetChainCleanupEnabled, onChange: (value) => updateSetting('assetChainCleanupEnabled', value), disabled: busy, key: 'asset-chain-cleanup-enabled' }),
+h(ToggleRow, { label: __("Clean WooCommerce product/gallery assets outside product pages", 'ultracache'), description: __("Removes zoom, flexslider, PhotoSwipe, variation, and single-product assets when the cached HTML is not a single product page.", 'ultracache'), checked: settings.assetCleanupWooProductAssetsEnabled, onChange: (value) => updateSetting('assetCleanupWooProductAssetsEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-woo-product-assets' }),
+h(ToggleRow, { label: __("Clean product filter assets when no filter is detected", 'ultracache'), description: __("Removes WOOF/filter scripts and styles when UltraCache cannot detect filter markup in the generated HTML.", 'ultracache'), checked: settings.assetCleanupProductFilterAssetsEnabled, onChange: (value) => updateSetting('assetCleanupProductFilterAssetsEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-product-filter-assets' }),
+h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are detected", 'ultracache'), description: 'Removes wc-blocks.css from cached HTML when no WooCommerce block markup is present.', checked: settings.assetCleanupWooBlocksCssEnabled, onChange: (value) => updateSetting('assetCleanupWooBlocksCssEnabled', value), disabled: busy || !settings.assetChainCleanupEnabled, key: 'asset-cleanup-woo-blocks-css' })
 					]
 				),
 			]),
@@ -8605,39 +8605,39 @@ h(ToggleRow, { label: 'Clean WooCommerce Blocks CSS when no Woo blocks are detec
 h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-advanced-settings-exclusions' }, [
 									h('summary', { className: 'uc-accordion__summary' }, [
 										h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
-											h('div', { className: 'uc-accordion__title' }, 'Advanced Settings & Exclusions'),
-											h('div', { className: 'uc-accordion__description' }, 'Manual include/exclude lists and higher-risk toggles for frontend delivery, CSS/JS handling, asset cleanup, and LCP image handling.'),
+											h('div', { className: 'uc-accordion__title' }, __("Advanced Settings & Exclusions", 'ultracache')),
+											h('div', { className: 'uc-accordion__description' }, __("Manual include/exclude lists and higher-risk toggles for frontend delivery, CSS/JS handling, asset cleanup, and LCP image handling.", 'ultracache')),
 										]),
 										h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
 									]),
 									h('div', { className: 'uc-accordion__body space-y-4' }, [
 										h(ToggleRow, {
-											label: 'Fix sliders / hero sections',
-											description: 'When Revolution Slider, SR7, Swiper, Slick, or similar hero/slider markup is detected, UltraCache protects slider/runtime assets, skips risky structural rewrites, and keeps SR7 first-slide LCP priority on the lifecycle-safe path when LCP Image Priority is enabled.',
+											label: __("Fix sliders / hero sections", 'ultracache'),
+											description: __("When Revolution Slider, SR7, Swiper, Slick, or similar hero/slider markup is detected, UltraCache protects slider/runtime assets, skips risky structural rewrites, and keeps SR7 first-slide LCP priority on the lifecycle-safe path when LCP Image Priority is enabled.", 'ultracache'),
 											checked: !!settings.sliderSafeModeEnabled,
 											onChange: (value) => updateSliderSafeModeSetting(value),
 											disabled: busy,
 											key: 'slider-safe-mode',
 										}),
 										h(ToggleRow, {
-											label: 'Enable Debug',
-											description: 'Allow request-triggered UltraCache debug/source headers such as X-Ultra-Cache-Source when X-UltraCache-Debug: 1 is sent. Keep OFF on production unless actively debugging.',
+											label: __("Enable Debug", 'ultracache'),
+											description: __("Allow request-triggered UltraCache debug/source headers such as X-Ultra-Cache-Source when X-UltraCache-Debug: 1 is sent. Keep OFF on production unless actively debugging.", 'ultracache'),
 											checked: !!settings.debugHeadersEnabled,
 											onChange: (value) => updateSetting('debugHeadersEnabled', value),
 											disabled: busy,
 											key: 'enable-debug-headers',
 										}),
 										h(ToggleRow, {
-											label: 'Aggressive Async CSS',
-											description: 'Optional advanced mode. Rewrite almost all remaining local stylesheet links, including late footer output, to non-blocking print+onload loading with a noscript fallback. Use the exclude list for styles that must stay blocking.',
+											label: __("Aggressive Async CSS", 'ultracache'),
+											description: __("Optional advanced mode. Rewrite almost all remaining local stylesheet links, including late footer output, to non-blocking print+onload loading with a noscript fallback. Use the exclude list for styles that must stay blocking.", 'ultracache'),
 											checked: settings.aggressiveAsyncCssEnabled,
 											onChange: (value) => updateSetting('aggressiveAsyncCssEnabled', value),
 											disabled: busy,
 											key: 'aggressive-async-css',
 										}),
 										h(ToggleRow, {
-								label: 'Enable query-string args caching',
-								description: 'Allow UltraCache to cache URL variants that include query-string args. Excluded query-string args always bypass cache. If the whitelist below is empty, all non-excluded query-string variants can be cached.',
+								label: __("Enable query-string args caching", 'ultracache'),
+								description: __("Allow UltraCache to cache URL variants that include query-string args. Excluded query-string args always bypass cache. If the whitelist below is empty, all non-excluded query-string variants can be cached.", 'ultracache'),
 								checked: !!settings.cacheQueryStringsEnabled,
 								onChange: (value) => updateSetting('cacheQueryStringsEnabled', value),
 								disabled: busy,
@@ -8645,61 +8645,61 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							}),
 											h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'cache-engine-advanced-fields' }, [
 											h(SaveableTextAreaField, {
-												label: 'Exclude Paths From Caching',
-												description: 'One path per line. This is the visible/editable cache path safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.',
+												label: __("Exclude Paths From Caching", 'ultracache'),
+												description: __("One path per line. This is the visible/editable cache path safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.", 'ultracache'),
 												value: settings.cacheExceptionPaths || '',
 												onSave: (value) => updateSetting('cacheExceptionPaths', value),
 												disabled: busy,
 												placeholder: '/cart/\n/checkout/\n/my-account/',
 												saveLabel: 'Save Excluded Paths',
-												populateLabel: 'Populate Defaults',
+												populateLabel: __("Populate Defaults", 'ultracache'),
 												populateWarning: 'Your current excluded paths will be replaced with the recommended defaults.',
 												onPopulate: () => populateDefaultSettingList('cacheExceptionPaths', 'excluded paths'),
 												key: 'exclude-paths-from-caching',
 											}),
 											h(SaveableTextAreaField, {
-												label: 'Excluded query-string args from Caching',
-												description: 'One query key per line. This is the visible/editable unsafe query-arg safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.',
+												label: __("Excluded query-string args from Caching", 'ultracache'),
+												description: __("One query key per line. This is the visible/editable unsafe query-arg safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.", 'ultracache'),
 												value: settings.cacheExceptionQueryArgs || '',
 												onSave: (value) => updateSetting('cacheExceptionQueryArgs', value),
 												disabled: busy,
 												placeholder: 'preview\nadd-to-cart\nwc-ajax',
 												saveLabel: 'Save Excluded Query-string Args',
-												populateLabel: 'Populate Defaults',
+												populateLabel: __("Populate Defaults", 'ultracache'),
 												populateWarning: 'Your current excluded query-string args will be replaced with the recommended defaults.',
 												onPopulate: () => populateDefaultSettingList('cacheExceptionQueryArgs', 'excluded query-string args'),
 												key: 'excluded-query-string-args-from-caching',
 											}),
 											h(SaveableTextAreaField, {
-												label: 'Query-string args whitelist',
-												description: 'Optional. One query key per line. When query-string caching is enabled, UltraCache caches a query-string URL only when every query arg is listed here. Populate appends detected attributes, taxonomies, categories and tags without removing custom entries.',
+												label: __("Query-string args whitelist", 'ultracache'),
+												description: __("Optional. One query key per line. When query-string caching is enabled, UltraCache caches a query-string URL only when every query arg is listed here. Populate appends detected attributes, taxonomies, categories and tags without removing custom entries.", 'ultracache'),
 												value: settings.cacheQueryStringAllowlist || '',
 												onSave: (value) => updateSetting('cacheQueryStringAllowlist', value),
 												disabled: busy,
 												placeholder: 'product_cat\nproduct_tag\ncategory_name\ntag\nfilter_format\nquery_type_format\npa_format',
 												saveLabel: 'Save Query-string Whitelist',
-												populateLabel: 'Populate',
+												populateLabel: __("Populate", 'ultracache'),
 												populateWarning: 'Detected taxonomy/attribute query args will be appended. Existing custom entries are preserved.',
 												onPopulate: populateQueryStringAllowlist,
 												key: 'query-string-args-whitelist',
 											}),
 											h(SaveableTextAreaField, {
-												label: 'Additional URLs for Google Fonts scanning',
+												label: __("Additional URLs for Google Fonts scanning", 'ultracache'),
 												description: 'Optional local site URLs, one per line. When Local Google Fonts Optimization is enabled, UltraCache scans the homepage plus these URLs from admin/save or manual rebuild, downloads Google Fonts CSS/WOFF2 into wp-content/cache/ultracache/google-fonts, and never builds them on live frontend requests.',
 												value: settings.googleFontsAdditionalScanUrls || '',
 												onSave: saveGoogleFontsAdditionalScanUrls,
 												disabled: busy || !settings.googleFontsLocalOptimizationEnabled,
 												placeholder: '/shop/\n/category/books/\n/product/example-book/',
 												saveLabel: 'Save Google Fonts URLs',
-												populateLabel: 'Rebuild Google Fonts Cache',
-												populateBusyLabel: 'Rebuilding…',
+												populateLabel: __("Rebuild Google Fonts Cache", 'ultracache'),
+												populateBusyLabel: __("Rebuilding…", 'ultracache'),
 												populateWarning: 'This will rebuild the local Google Fonts cache from the homepage and the URLs listed here. Existing Google Fonts cache files will be replaced. Flush All Cache will not delete this font cache.',
 												onPopulate: rebuildGoogleFontsCacheFromSettings,
 												key: 'google-fonts-additional-scan-urls',
 											}),
 											h(SaveableTextAreaField, {
-												label: 'Defer those scripts',
-												description: 'Optional newline-separated handle or URL fragments. Matching frontend scripts are forced to native defer even when Defer JS is off or the script would normally be protected. Use carefully for scripts you explicitly want deferred.',
+												label: __("Defer those scripts", 'ultracache'),
+												description: __("Optional newline-separated handle or URL fragments. Matching frontend scripts are forced to native defer even when Defer JS is off or the script would normally be protected. Use carefully for scripts you explicitly want deferred.", 'ultracache'),
 												value: settings.deferJsForceList || '',
 												onSave: (value) => updateSetting('deferJsForceList', value),
 												disabled: busy,
@@ -8709,34 +8709,34 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											}),
 											null,
 											h(SaveableTextAreaField, {
-												label: 'Safe Third-Party Delay Patterns',
-												description: 'Visible/default patterns used by Delay safe third-party JS. Matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded. Safe third-party scripts use a later automatic fallback than functional/local delayed scripts.',
+												label: __("Safe Third-Party Delay Patterns", 'ultracache'),
+												description: __("Visible/default patterns used by Delay safe third-party JS. Matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded. Safe third-party scripts use a later automatic fallback than functional/local delayed scripts.", 'ultracache'),
 												value: settings.delaySafeThirdPartyJsPatterns || '',
 												onSave: (value) => updateSetting('delaySafeThirdPartyJsPatterns', value),
 												disabled: busy || !settings.delaySafeThirdPartyJsEnabled,
 												placeholder: 'googletagmanager.com\ngoogle-analytics.com\nconnect.facebook.net\nclarity.ms',
 												saveLabel: 'Save Safe Third-Party Patterns',
-												populateLabel: 'Populate Defaults',
+												populateLabel: __("Populate Defaults", 'ultracache'),
 												populateWarning: 'Your current safe third-party delay patterns will be replaced with the recommended defaults.',
 												onPopulate: () => populateDefaultSettingList('delaySafeThirdPartyJsPatterns', 'safe third-party delay patterns'),
 												key: 'delay-safe-third-party-patterns',
 											}),
 											h(SaveableTextAreaField, {
-												label: 'Known Functional Third-Party Delay Patterns',
-												description: 'Visible/default patterns used by Delay known functional third-party JS. Matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded.',
+												label: __("Known Functional Third-Party Delay Patterns", 'ultracache'),
+												description: __("Visible/default patterns used by Delay known functional third-party JS. Matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded.", 'ultracache'),
 												value: settings.delayFunctionalThirdPartyJsPatterns || '',
 												onSave: (value) => updateSetting('delayFunctionalThirdPartyJsPatterns', value),
 												disabled: busy || !settings.delayFunctionalThirdPartyJsEnabled,
 												placeholder: 'recaptcha\nhcaptcha\nmaps.googleapis.com\ncomplianz\ncmplz',
 												saveLabel: 'Save Known Functional Third-Party Patterns',
-												populateLabel: 'Populate Defaults',
+												populateLabel: __("Populate Defaults", 'ultracache'),
 												populateWarning: 'Your current known functional third-party delay patterns will be replaced with the recommended defaults.',
 												onPopulate: () => populateDefaultSettingList('delayFunctionalThirdPartyJsPatterns', 'known functional third-party delay patterns'),
 												key: 'delay-functional-third-party-patterns',
 											}),
 											h(SaveableTextAreaField, {
-												label: 'Priority Preloads',
-												description: 'Optional newline-separated priority resources for early discovery. Prefix each line with image, style, script, font, or fetch. Use fetch for dynamic frontend requests, slider JSON/assets, or request chains that are not discovered early in the initial HTML. Image entries receive fetchpriority=high.',
+												label: __("Priority Preloads", 'ultracache'),
+												description: __("Optional newline-separated priority resources for early discovery. Prefix each line with image, style, script, font, or fetch. Use fetch for dynamic frontend requests, slider JSON/assets, or request chains that are not discovered early in the initial HTML. Image entries receive fetchpriority=high.", 'ultracache'),
 												value: settings.criticalResourcePreloadList || '',
 												onSave: (value) => updateSetting('criticalResourcePreloadList', value),
 												disabled: busy || !settings.criticalRequestChainReliefEnabled,
@@ -8745,8 +8745,8 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 												key: 'critical-resource-preload-list',
 											}),
 											h(SaveableTextAreaField, {
-												label: 'Delay Non-Critical Request Chains',
-												description: 'Optional newline-separated handle or URL fragments. Matching local scripts are delayed and matching stylesheets are converted to async print/onload loading.',
+												label: __("Delay Non-Critical Request Chains", 'ultracache'),
+												description: __("Optional newline-separated handle or URL fragments. Matching local scripts are delayed and matching stylesheets are converted to async print/onload loading.", 'ultracache'),
 												value: settings.criticalRequestChainDelayList || '',
 												onSave: (value) => updateSetting('criticalRequestChainDelayList', value),
 												disabled: busy || !settings.criticalRequestChainReliefEnabled,
@@ -8755,22 +8755,22 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 												key: 'critical-request-chain-delay-list',
 											}),
 											h(SaveableTextAreaField, {
-												label: 'Asset Cleanup Exclusions',
-												description: 'Optional newline-separated handle, URL, or HTML fragments. This is the visible/editable Asset Cleanup safeguard list for builders, search, carts, checkout, and custom widgets.',
+												label: __("Asset Cleanup Exclusions", 'ultracache'),
+												description: __("Optional newline-separated handle, URL, or HTML fragments. This is the visible/editable Asset Cleanup safeguard list for builders, search, carts, checkout, and custom widgets.", 'ultracache'),
 												value: settings.assetCleanupExcludeList || '',
 												onSave: (value) => updateSetting('assetCleanupExcludeList', value),
 												disabled: busy || !settings.assetChainCleanupEnabled,
 												placeholder: 'elementor\nrevslider\nfibosearch\ncart\ncheckout',
 												saveLabel: 'Save Asset Exclusions',
-												populateLabel: 'Populate Defaults',
+												populateLabel: __("Populate Defaults", 'ultracache'),
 												populateWarning: 'Your current Asset Cleanup exclusions will be replaced with the recommended defaults.',
 												onPopulate: () => populateDefaultSettingList('assetCleanupExcludeList', 'Asset Cleanup exclusions'),
 												key: 'asset-cleanup-exclude-list',
 											}),
 											null,
 											h(SaveableTextAreaField, {
-												label: 'Async CSS Exclude List',
-												description: 'Optional newline-separated handle or URL fragments. Matching stylesheets stay in the normal blocking flow for both Enable Async CSS and Aggressive Async CSS. This is the single visible/editable Async CSS safeguard list.',
+												label: __("Async CSS Exclude List", 'ultracache'),
+												description: __("Optional newline-separated handle or URL fragments. Matching stylesheets stay in the normal blocking flow for both Enable Async CSS and Aggressive Async CSS. This is the single visible/editable Async CSS safeguard list.", 'ultracache'),
 												value: settings.asyncCssExcludeList || '',
 												onSave: (value) => updateSetting('asyncCssExcludeList', value),
 												disabled: busy || (!settings.asyncCssEnabled && !settings.aggressiveAsyncCssEnabled),
@@ -8779,8 +8779,8 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 												key: 'async-css-exclude-list',
 											}),
 										h(SaveableTextAreaField, {
-											label: 'Manual LCP selector',
-											description: 'Optional newline-separated CSS selectors, plain IDs, or image URL/fragments for the main above-the-fold hero/LCP target. CSS entries scope LCP discovery to that block; image entries become manual LCP preload targets.',
+											label: __("Manual LCP selector", 'ultracache'),
+											description: __("Optional newline-separated CSS selectors, plain IDs, or image URL/fragments for the main above-the-fold hero/LCP target. CSS entries scope LCP discovery to that block; image entries become manual LCP preload targets.", 'ultracache'),
 											value: settings.manualLcpHeroSelector || '',
 											onSave: (value) => updateSetting('manualLcpHeroSelector', value),
 											disabled: busy || !settings.lcpImagePriorityEnabled,
@@ -8791,55 +8791,55 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 										]),
 										h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'font-pattern-exclusions-grid' }, [
 										h(SaveableTextAreaField, {
-											label: 'Delay These Fonts / Patterns',
-											description: 'Newline-separated font-family, filename, or URL fragments. Scan the front page or add manual patterns. Matching @font-face blocks from bundled or standalone CSS are moved into a delayed non-render-blocking font stylesheet. Use this mainly for icon fonts.',
+											label: __("Delay These Fonts / Patterns", 'ultracache'),
+											description: __("Newline-separated font-family, filename, or URL fragments. Scan the front page or add manual patterns. Matching @font-face blocks from bundled or standalone CSS are moved into a delayed non-render-blocking font stylesheet. Use this mainly for icon fonts.", 'ultracache'),
 											value: settings.delayIconFontsList || '',
 											onSave: (value) => updateSetting('delayIconFontsList', value),
 											disabled: busy,
-											placeholder: 'Scan the front page to detect likely icon font families/files. You can also add manual fragments, one per line.',
+											placeholder: __("Scan the front page to detect likely icon font families/files. You can also add manual fragments, one per line.", 'ultracache'),
 											saveLabel: 'Save Delayed Font Patterns',
-											populateLabel: 'Scan Front Page',
-											populateBusyLabel: 'Scanning…',
+											populateLabel: __("Scan Front Page", 'ultracache'),
+											populateBusyLabel: __("Scanning…", 'ultracache'),
 											onPopulate: populateDelayIconFontsDefaults,
 											populateWarning: 'Detected front-page icon font patterns will be appended to your current list.',
 											key: 'delay-icon-fonts-list',
 										}),
 										h(SaveableTextAreaField, {
-											label: 'Never Delay These Fonts / Patterns',
-											description: 'Newline-separated font-family, filename, or URL fragments that must stay inside the normal CSS flow. Scan the front page to append detected non-icon text/brand fonts, then add manual safeguards if needed.',
+											label: __("Never Delay These Fonts / Patterns", 'ultracache'),
+											description: __("Newline-separated font-family, filename, or URL fragments that must stay inside the normal CSS flow. Scan the front page to append detected non-icon text/brand fonts, then add manual safeguards if needed.", 'ultracache'),
 											value: settings.delayIconFontsExcludeList || '',
 											onSave: (value) => updateSetting('delayIconFontsExcludeList', value),
 											disabled: busy,
-											placeholder: 'Scan the front page to detect non-icon text/brand font families. You can also add manual fragments, one per line.',
+											placeholder: __("Scan the front page to detect non-icon text/brand font families. You can also add manual fragments, one per line.", 'ultracache'),
 											saveLabel: 'Save Font Exclusions',
-											populateLabel: 'Scan Front Page',
-											populateBusyLabel: 'Scanning…',
+											populateLabel: __("Scan Front Page", 'ultracache'),
+											populateBusyLabel: __("Scanning…", 'ultracache'),
 											onPopulate: populateDelayIconFontExclusionDefaults,
 											populateWarning: 'Detected front-page non-icon fonts will be appended to your current list.',
 											key: 'delay-icon-fonts-exclude-list',
 										}),
 										h(SaveableTextAreaField, {
-											label: 'Safe Tracking Cookies',
-											description: 'Cookie names or fragments that may be ignored for public cache eligibility and safe Set-Cookie storage decisions. Use this only for analytics/marketing identifiers that do not change the HTML. UltraCache never stores or replays Set-Cookie headers.',
+											label: __("Safe Tracking Cookies", 'ultracache'),
+											description: __("Cookie names or fragments that may be ignored for public cache eligibility and safe Set-Cookie storage decisions. Use this only for analytics/marketing identifiers that do not change the HTML. UltraCache never stores or replays Set-Cookie headers.", 'ultracache'),
 											value: settings.safeTrackingCookieList || '',
 											onSave: (value) => updateSetting('safeTrackingCookieList', value),
 											disabled: busy,
 											placeholder: '_fbp\n_fbc\n_ga\n_gid\n_clck\n_clsk',
 											saveLabel: 'Save Safe Tracking Cookies',
-											populateLabel: 'Populate Defaults',
+											populateLabel: __("Populate Defaults", 'ultracache'),
 											populateWarning: 'Your current safe tracking cookie list will be replaced with the recommended defaults.',
 											onPopulate: () => populateDefaultSettingList('safeTrackingCookieList', 'safe tracking cookies'),
 											key: 'safe-tracking-cookie-list',
 										}),
 										h(SaveableTextAreaField, {
-											label: 'Never Cache When These Cookies Exist',
-											description: 'Cookie names or fragments that can change visible HTML, cart/session/account state, prices, wishlist, compare, checkout, protected content, or comment forms. Matching requests bypass public HTML cache.',
+											label: __("Never Cache When These Cookies Exist", 'ultracache'),
+											description: __("Cookie names or fragments that can change visible HTML, cart/session/account state, prices, wishlist, compare, checkout, protected content, or comment forms. Matching requests bypass public HTML cache.", 'ultracache'),
 											value: settings.unsafeCacheCookieList || '',
 											onSave: (value) => updateSetting('unsafeCacheCookieList', value),
 											disabled: busy,
 											placeholder: 'wordpress_logged_in_\nwp_woocommerce_session_\nwoocommerce_items_in_cart\nwoocommerce_cart_hash',
 											saveLabel: 'Save Unsafe Cookies',
-											populateLabel: 'Populate Defaults',
+											populateLabel: __("Populate Defaults", 'ultracache'),
 											populateWarning: 'Your current unsafe cookie list will be replaced with the recommended defaults.',
 											onPopulate: () => populateDefaultSettingList('unsafeCacheCookieList', 'unsafe cache cookies'),
 											key: 'unsafe-cache-cookie-list',
@@ -8881,47 +8881,47 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 			h(
 				Card,
 				{
-					title: 'Automation & Scheduling',
-					description: 'Scheduled cache cleanup, background warmup queue, and stale cache timing controls.',
+					title: __("Automation & Scheduling", 'ultracache'),
+					description: __("Scheduled cache cleanup, background warmup queue, and stale cache timing controls.", 'ultracache'),
 					key: 'automation-scheduling-reworked',
 				},
 				[
 					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
 						h(ToggleRow, {
-							label: 'Scheduled Cache Cleanup',
-							description: 'Run an automatic full cache purge using the interval below.',
+							label: __("Scheduled Cache Cleanup", 'ultracache'),
+							description: __("Run an automatic full cache purge using the interval below.", 'ultracache'),
 							checked: settings.cacheCleanupEnabled,
 							onChange: (value) => updateSetting('cacheCleanupEnabled', value),
 							disabled: busy,
 							key: 'cleanup',
 						}),
 						h(ToggleRow, {
-							label: 'Cron Warm Up',
-							description: 'Enable the minute-by-minute background warm queue. Homepage is warmed first. If CSS Bundling and bundle-on-entry/warm are enabled, missing CSS bundles may be prepared before HTML is cached; otherwise the queue warms HTML only.',
+							label: __("Cron Warm Up", 'ultracache'),
+							description: __("Enable the minute-by-minute background warm queue. Homepage is warmed first. If CSS Bundling and bundle-on-entry/warm are enabled, missing CSS bundles may be prepared before HTML is cached; otherwise the queue warms HTML only.", 'ultracache'),
 							checked: settings.cronWarmEnabled,
 							onChange: (value) => updateSetting('cronWarmEnabled', value),
 							disabled: busy,
 							key: 'cron-warm-enabled',
 						}),
 						h(ToggleRow, {
-							label: 'Start Cron Warm Up after Scheduled Cleanup',
-							description: 'Start the cron warm queue after the scheduled cleanup purge completes.',
+							label: __("Start Cron Warm Up after Scheduled Cleanup", 'ultracache'),
+							description: __("Start the cron warm queue after the scheduled cleanup purge completes.", 'ultracache'),
 							checked: settings.cronWarmStartAfterCleanup,
 							onChange: (value) => updateSetting('cronWarmStartAfterCleanup', value),
 							disabled: busy || !settings.cacheCleanupEnabled || !settings.cronWarmEnabled,
 							key: 'cleanup-warm',
 						}),
 						h(ToggleRow, {
-							label: 'Start Cron Warm Up after Flush All Cache',
-							description: 'Start the cron warm queue after a manual full cache purge.',
+							label: __("Start Cron Warm Up after Flush All Cache", 'ultracache'),
+							description: __("Start the cron warm queue after a manual full cache purge.", 'ultracache'),
 							checked: !!settings.cronWarmStartAfterManualPurge,
 							onChange: (value) => updateSetting('cronWarmStartAfterManualPurge', value),
 							disabled: busy || !settings.cronWarmEnabled,
 							key: 'manual-purge-warm',
 						}),
 						h(NumberRow, {
-							label: 'Cleanup interval (hours)',
-							description: 'Use 24 for daily, 168 for weekly, or any custom number of hours.',
+							label: __("Cleanup interval (hours)", 'ultracache'),
+							description: __("Use 24 for daily, 168 for weekly, or any custom number of hours.", 'ultracache'),
 							value: advancedForm.cacheCleanupIntervalHours,
 							onChange: (value) => updateAdvancedField('cacheCleanupIntervalHours', value),
 							disabled: busy,
@@ -8929,8 +8929,8 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'cleanup-hours',
 						}),
 						h(NumberRow, {
-							label: 'Cron warm pages per minute',
-							description: 'How many HTML URLs to warm per minute in the cron warm-up queue. Homepage is always warmed first. If CSS Bundling is enabled, missing bundles may be prepared before HTML is cached. Lower values are safer on slower servers. Set 0 to pause queue processing.',
+							label: __("Cron warm pages per minute", 'ultracache'),
+							description: __("How many HTML URLs to warm per minute in the cron warm-up queue. Homepage is always warmed first. If CSS Bundling is enabled, missing bundles may be prepared before HTML is cached. Lower values are safer on slower servers. Set 0 to pause queue processing.", 'ultracache'),
 							value: advancedForm.cronWarmPagesPerMinute,
 							onChange: (value) => updateAdvancedField('cronWarmPagesPerMinute', value),
 							disabled: busy,
@@ -8938,7 +8938,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'warm-limit',
 						}),
 						h(NumberRow, {
-							label: 'Scheduled / Cron warm limit',
+							label: __("Scheduled / Cron warm limit", 'ultracache'),
 							description: getScheduledWarmLimitSummary(advancedForm, settings),
 							value: advancedForm.scheduledWarmLimit,
 							onChange: (value) => updateAdvancedField('scheduledWarmLimit', value),
@@ -8947,16 +8947,16 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'scheduled-warm-limit',
 						}),
 						h(ToggleRow, {
-							label: 'Stale While Revalidate',
-							description: 'Serve stale HTML only within the max stale window while UltraCache refreshes it in the background.',
+							label: __("Stale While Revalidate", 'ultracache'),
+							description: __("Serve stale HTML only within the max stale window while UltraCache refreshes it in the background.", 'ultracache'),
 							checked: settings.staleWhileRevalidateEnabled,
 							onChange: (value) => updateSetting('staleWhileRevalidateEnabled', value),
 							disabled: busy,
 							key: 'swr-toggle',
 						}),
 						h(NumberRow, {
-							label: 'Fresh TTL (minutes)',
-							description: 'Serve a normal cache hit while the file age stays within this freshness window. Default: 15 minutes.',
+							label: __("Fresh TTL (minutes)", 'ultracache'),
+							description: __("Serve a normal cache hit while the file age stays within this freshness window. Default: 15 minutes.", 'ultracache'),
 							value: advancedForm.cacheFreshTtlMinutes,
 							onChange: (value) => updateAdvancedField('cacheFreshTtlMinutes', value),
 							disabled: busy || !settings.staleWhileRevalidateEnabled,
@@ -8964,8 +8964,8 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'fresh-ttl',
 						}),
 						h(NumberRow, {
-							label: 'Max stale window (minutes)',
-							description: 'After freshness expires, UltraCache may still serve the stale file until this limit while it refreshes in the background. Default: 720 minutes (12 hours).',
+							label: __("Max stale window (minutes)", 'ultracache'),
+							description: __("After freshness expires, UltraCache may still serve the stale file until this limit while it refreshes in the background. Default: 720 minutes (12 hours).", 'ultracache'),
 							value: advancedForm.cacheMaxStaleMinutes,
 							onChange: (value) => updateAdvancedField('cacheMaxStaleMinutes', value),
 							disabled: busy || !settings.staleWhileRevalidateEnabled,
@@ -8973,8 +8973,8 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'max-stale',
 						}),
 						h(NumberRow, {
-							label: 'CSS bundle cleanup grace window (hours)',
-							description: 'How long orphan-like CSS bundle files stay protected before cleanup may delete them. This helps stale HTML from Varnish, browser cache, or page cache keep valid CSS references. Default: 48 hours. Range: 1–168.',
+							label: __("CSS bundle cleanup grace window (hours)", 'ultracache'),
+							description: __("How long orphan-like CSS bundle files stay protected before cleanup may delete them. This helps stale HTML from Varnish, browser cache, or page cache keep valid CSS references. Default: 48 hours. Range: 1–168.", 'ultracache'),
 							value: advancedForm.cssBundleCleanupGraceHours,
 							onChange: (value) => updateAdvancedField('cssBundleCleanupGraceHours', value),
 							disabled: busy,
@@ -8984,8 +8984,8 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							key: 'css-cleanup-grace-hours',
 						}),
 						h(NumberRow, {
-							label: 'CSS bundle cleanup delete limit',
-							description: 'Maximum orphan-like CSS bundle files to delete per cleanup run. Lower values are safer on shared hosting; higher values clear test/build leftovers faster. Default: 60. Range: 5–500.',
+							label: __("CSS bundle cleanup delete limit", 'ultracache'),
+							description: __("Maximum orphan-like CSS bundle files to delete per cleanup run. Lower values are safer on shared hosting; higher values clear test/build leftovers faster. Default: 60. Range: 5–500.", 'ultracache'),
 							value: advancedForm.cssBundleCleanupDeleteLimit,
 							onChange: (value) => updateAdvancedField('cssBundleCleanupDeleteLimit', value),
 							disabled: busy,
@@ -9005,8 +9005,8 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 			h('div', { className: 'uc-info-grid', key: 'php-cache-cards' }, [
 			h(OPcacheCard, { stats, busy: false, onFlush: flushOpcache, key: 'opcache-card' }),
 			h(APCuCard, { stats, settings, busy: false, onFlush: flushApcu, onToggleScheduledCleanup: (value) => updateSetting('apcuFlushOnScheduledCleanup', value), key: 'apcu-card' }),
-			h(ExternalCacheCard, { title: 'LiteSpeed Cache', description: 'Detected LiteSpeed/OpenLiteSpeed cache integration. UltraCache uses the LiteSpeed plugin API when present, otherwise it requests server-level purge with the X-LiteSpeed-Purge response header.', layer: getExternalCacheLayer(stats, 'litespeed'), busy: false, onFlush: flushLiteSpeed, key: 'litespeed-cache-card' }),
-			h(ExternalCacheCard, { title: 'Nginx Cache', description: 'Detected Nginx cache integration. UltraCache flushes Nginx only when a safe WordPress purge hook/integration is available.', layer: getExternalCacheLayer(stats, 'nginx'), busy: false, onFlush: flushNginx, key: 'nginx-cache-card' }),
+			h(ExternalCacheCard, { title: __("LiteSpeed Cache", 'ultracache'), description: __("Detected LiteSpeed/OpenLiteSpeed cache integration. UltraCache uses the LiteSpeed plugin API when present, otherwise it requests server-level purge with the X-LiteSpeed-Purge response header.", 'ultracache'), layer: getExternalCacheLayer(stats, 'litespeed'), busy: false, onFlush: flushLiteSpeed, key: 'litespeed-cache-card' }),
+			h(ExternalCacheCard, { title: __("Nginx Cache", 'ultracache'), description: __("Detected Nginx cache integration. UltraCache flushes Nginx only when a safe WordPress purge hook/integration is available.", 'ultracache'), layer: getExternalCacheLayer(stats, 'nginx'), busy: false, onFlush: flushNginx, key: 'nginx-cache-card' }),
 			]),
 			h(ExternalCacheFlushSettingsCard, { stats, diagnostics, settings, busy: false, onRedetect: redetectExternalCaches, onToggle: (key, value) => updateSetting(key, value), key: 'external-cache-flush-settings' }),
 
@@ -9028,18 +9028,18 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 			h(
 				Card,
 				{
-					title: 'Cache Decision Tester',
-					description: 'Inspect how UltraCache evaluates a frontend URL without using your current admin session cookies.',
+					title: __("Cache Decision Tester", 'ultracache'),
+					description: __("Inspect how UltraCache evaluates a frontend URL without using your current admin session cookies.", 'ultracache'),
 					key: 'inspector',
 				},
 				[
 					h(TextField, {
-						label: 'URL or path',
-						description: 'Paste a full local URL or just a path like /checkout/ or /product/widget/?add-to-cart=12.',
+						label: __("URL or path", 'ultracache'),
+						description: __("Paste a full local URL or just a path like /checkout/ or /product/widget/?add-to-cart=12.", 'ultracache'),
 						value: inspectUrl,
 						onChange: setInspectUrl,
 						disabled: inspectBusy,
-						placeholder: '/sample-page/?utm_source=test',
+						placeholder: __("/sample-page/?utm_source=test", 'ultracache'),
 						onKeyDown: (event) => {
 							if ('Enter' === event.key) {
 								event.preventDefault();
@@ -9056,41 +9056,41 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					inspectResult
 						? h('div', { className: 'mt-5 grid grid-cols-1 md:grid-cols-2 gap-6' }, [
 							h('div', { className: 'space-y-0' }, [
-								h(DetailRow, { label: 'Reason', value: inspectResult.reasonLabel || inspectResult.reason }),
-								h(DetailRow, { label: 'Normalized URL', value: inspectResult.normalizedUrl || inspectResult.url, mono: true }),
-								h(DetailRow, { label: 'Normalized path', value: inspectResult.normalizedPath || inspectResult.path, mono: true }),
-								h(DetailRow, { label: 'Query string', value: inspectResult.query || '—', mono: true }),
-								h(DetailRow, { label: 'Matched excluded path rule', value: inspectResult.matchedExcludedPathRule, mono: true }),
-								h(DetailRow, { label: 'Matched excluded query arg', value: inspectResult.matchedExcludedQueryArg, mono: true }),
-								h(DetailRow, { label: 'Non-allowlisted query arg', value: inspectResult.matchedNonAllowlistedQueryArg, mono: true }),
-								h(DetailRow, { label: 'Matched WooCommerce rule', value: inspectResult.matchedWooRule ? ((inspectResult.matchedWooRuleType || 'rule') + ': ' + inspectResult.matchedWooRule) : '', mono: true }),
-								h(DetailRow, { label: 'Query arg keys', value: Array.isArray(inspectResult.queryArgKeys) && inspectResult.queryArgKeys.length ? inspectResult.queryArgKeys.join(', ') : '' }),
-								h(DetailRow, { label: 'Notes', value: inspectResult.simulationNote }),
+								h(DetailRow, { label: __("Reason", 'ultracache'), value: inspectResult.reasonLabel || inspectResult.reason }),
+								h(DetailRow, { label: __("Normalized URL", 'ultracache'), value: inspectResult.normalizedUrl || inspectResult.url, mono: true }),
+								h(DetailRow, { label: __("Normalized path", 'ultracache'), value: inspectResult.normalizedPath || inspectResult.path, mono: true }),
+								h(DetailRow, { label: __("Query string", 'ultracache'), value: inspectResult.query || '—', mono: true }),
+								h(DetailRow, { label: __("Matched excluded path rule", 'ultracache'), value: inspectResult.matchedExcludedPathRule, mono: true }),
+								h(DetailRow, { label: __("Matched excluded query arg", 'ultracache'), value: inspectResult.matchedExcludedQueryArg, mono: true }),
+								h(DetailRow, { label: __("Non-allowlisted query arg", 'ultracache'), value: inspectResult.matchedNonAllowlistedQueryArg, mono: true }),
+								h(DetailRow, { label: __("Matched WooCommerce rule", 'ultracache'), value: inspectResult.matchedWooRule ? ((inspectResult.matchedWooRuleType || 'rule') + ': ' + inspectResult.matchedWooRule) : '', mono: true }),
+								h(DetailRow, { label: __("Query arg keys", 'ultracache'), value: Array.isArray(inspectResult.queryArgKeys) && inspectResult.queryArgKeys.length ? inspectResult.queryArgKeys.join(', ') : '' }),
+								h(DetailRow, { label: __("Notes", 'ultracache'), value: inspectResult.simulationNote }),
 							]),
 							h('div', { className: 'space-y-0' }, [
-								h(DetailRow, { label: 'Local URL', value: inspectResult.local ? 'Yes' : 'No' }),
-								h(DetailRow, { label: 'Page cache enabled', value: inspectResult.pageCacheEnabled ? 'Yes' : 'No' }),
-								h(DetailRow, { label: 'WooCommerce safe mode', value: inspectResult.wooSafeModeEnabled ? 'Yes' : 'No' }),
-								h(DetailRow, { label: 'Cache query strings', value: inspectResult.cacheQueryStrings ? 'Yes' : 'No' }),
+								h(DetailRow, { label: __("Local URL", 'ultracache'), value: inspectResult.local ? 'Yes' : 'No' }),
+								h(DetailRow, { label: __("Page cache enabled", 'ultracache'), value: inspectResult.pageCacheEnabled ? 'Yes' : 'No' }),
+								h(DetailRow, { label: __("WooCommerce safe mode", 'ultracache'), value: inspectResult.wooSafeModeEnabled ? 'Yes' : 'No' }),
+								h(DetailRow, { label: __("Cache query strings", 'ultracache'), value: inspectResult.cacheQueryStrings ? 'Yes' : 'No' }),
 								inspectResult.cacheable && inspectResult.cachePaths
 									? h('div', { className: 'pt-2' }, [
-										h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, 'Expected cache files'),
-										h(DetailRow, { label: 'Original HTML', value: inspectResult.cachePaths.orig, mono: true }),
-										h(DetailRow, { label: 'WebP HTML', value: inspectResult.cachePaths.webp, mono: true }),
-										h(DetailRow, { label: 'AVIF HTML', value: inspectResult.cachePaths.avif, mono: true }),
+										h('div', { className: 'text-[11px] tracking-widest text-zinc-500 mb-2' }, __("Expected cache files", 'ultracache')),
+										h(DetailRow, { label: __("Original HTML", 'ultracache'), value: inspectResult.cachePaths.orig, mono: true }),
+										h(DetailRow, { label: __("WebP HTML", 'ultracache'), value: inspectResult.cachePaths.webp, mono: true }),
+										h(DetailRow, { label: __("AVIF HTML", 'ultracache'), value: inspectResult.cachePaths.avif, mono: true }),
 									])
 									: null,
 							]),
 						])
-						: h('div', { className: 'mt-4 text-xs text-zinc-500' }, 'Enter a local URL or path to see the exact cache decision and matching bypass rule.'),
+						: h('div', { className: 'mt-4 text-xs text-zinc-500' }, __("Enter a local URL or path to see the exact cache decision and matching bypass rule.", 'ultracache')),
 				]
 			),
 
 			h(
 				Card,
 				{
-					title: 'Export / Import Settings',
-					description: 'Download a JSON backup of UltraCache dashboard settings or restore them on another site.',
+					title: __("Export / Import Settings", 'ultracache'),
+					description: __("Download a JSON backup of UltraCache dashboard settings or restore them on another site.", 'ultracache'),
 					key: 'export-import',
 				},
 				[
@@ -9103,14 +9103,14 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 						key: 'file-input',
 					}),
 					h('div', { className: 'space-y-3', key: 'copy' }, [
-						h('div', { className: 'text-sm text-white' }, 'Export creates a portable JSON file from the current UltraCache dashboard settings.'),
-						h('div', { className: 'text-xs text-zinc-500' }, 'Import applies only supported dashboard options. Generated cache files, drop-ins, and runtime state are rebuilt by the existing save flow.'),
+						h('div', { className: 'text-sm text-white' }, __("Export creates a portable JSON file from the current UltraCache dashboard settings.", 'ultracache')),
+						h('div', { className: 'text-xs text-zinc-500' }, __("Import applies only supported dashboard options. Generated cache files, drop-ins, and runtime state are rebuilt by the existing save flow.", 'ultracache')),
 					]),
 					h('div', { className: 'mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-start', key: 'uninstall-policy' }, [
 						h('div', { key: 'label' }, [
-							h('div', { className: 'text-sm text-white' }, 'Delete / uninstall cleanup policy'),
+							h('div', { className: 'text-sm text-white' }, __("Delete / uninstall cleanup policy", 'ultracache')),
 							h('div', { className: 'text-xs text-zinc-500 mt-1' }, getUninstallCleanupPolicyDescription((settings || {}).uninstallCleanupPolicy)),
-							h('div', { className: 'text-xs text-amber-200/80 mt-2' }, 'Generated images under uploads/uc-images are never deleted automatically.'),
+							h('div', { className: 'text-xs text-amber-200/80 mt-2' }, __("Generated images under uploads/uc-images are never deleted automatically.", 'ultracache')),
 						]),
 						h(CustomSelect, {
 							key: 'select',
@@ -9119,10 +9119,10 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							disabled: busy,
 							onChange: (nextValue) => updateSetting('uninstallCleanupPolicy', normalizeUninstallCleanupPolicy(nextValue)),
 							options: [
-								{ value: 'plugin_only', label: 'Only delete/deactivate plugin' },
-								{ value: 'keep_settings', label: 'Keep plugin settings' },
-								{ value: 'keep_settings_tables', label: 'Keep plugin settings and tables' },
-								{ value: 'delete_everything', label: 'Delete everything' },
+								{ value: 'plugin_only', label: __("Only delete/deactivate plugin", 'ultracache') },
+								{ value: 'keep_settings', label: __("Keep plugin settings", 'ultracache') },
+								{ value: 'keep_settings_tables', label: __("Keep plugin settings and tables", 'ultracache') },
+								{ value: 'delete_everything', label: __("Delete everything", 'ultracache') },
 							],
 						}),
 					]),
@@ -9132,7 +9132,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					h(Button, { onClick: resetSettingsToDefaults, disabled: busy, variant: 'light' }, busy ? 'Working…' : 'Reset Settings'),
 					h(Button, { onClick: deleteAllPluginDataAndDeactivate, disabled: busy, variant: 'danger' }, busy ? 'Working…' : 'Delete all plugin data and deactivate plugin'),
 					]),
-					h('div', { className: 'mt-4 text-xs text-zinc-500', key: 'hint' }, 'Recommended flow: export from the known-good site, then import into the target site and review Diagnostics once.'),
+					h('div', { className: 'mt-4 text-xs text-zinc-500', key: 'hint' }, __("Recommended flow: export from the known-good site, then import into the target site and review Diagnostics once.", 'ultracache')),
 					h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'delete-hint' }, 'Delete/deactivate follows the selected cleanup policy. Generated media remains under wp-content/uploads/uc-images/ and must be removed manually if you want it deleted.'),
 				]
 			),
@@ -9152,31 +9152,31 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 					key: 'notes',
 				},
 				[
-					h('p', { className: 'mb-2 font-bold text-zinc-300' }, 'Quick start & examples'),
+					h('p', { className: 'mb-2 font-bold text-zinc-300' }, __("Quick start & examples", 'ultracache')),
 					h('div', { className: 'space-y-4' }, [
-						h('p', { className: 'm-0' }, 'For most sites, begin with the Balanced profile. It enables the safest high-impact optimizations without pushing CSS or JavaScript too aggressively.'),
-						h('p', { className: 'm-0' }, 'After applying a profile, run Flush All Cache once and warm the homepage.'),
+						h('p', { className: 'm-0' }, __("For most sites, begin with the Balanced profile. It enables the safest high-impact optimizations without pushing CSS or JavaScript too aggressively.", 'ultracache')),
+						h('p', { className: 'm-0' }, __("After applying a profile, run Flush All Cache once and warm the homepage.", 'ultracache')),
 						h('div', { className: 'space-y-1' }, [
-							h('div', { className: 'text-zinc-300 font-semibold', key: 'css-title' }, 'For better CSS results'),
-							h('p', { className: 'm-0', key: 'css-1' }, 'Start with Safe CSS Bundling. If the frontend and PageSpeed remain stable, test Aggressive CSS Bundling.'),
-							h('p', { className: 'm-0', key: 'css-2' }, 'When testing Aggressive or Full CSS Bundling, review the CSS Bundle Summary. If the bundle becomes too large or performance gets worse, exclude the 2–3 largest or most problematic CSS files from bundling, then warm again.'),
+							h('div', { className: 'text-zinc-300 font-semibold', key: 'css-title' }, __("For better CSS results", 'ultracache')),
+							h('p', { className: 'm-0', key: 'css-1' }, __("Start with Safe CSS Bundling. If the frontend and PageSpeed remain stable, test Aggressive CSS Bundling.", 'ultracache')),
+							h('p', { className: 'm-0', key: 'css-2' }, __("When testing Aggressive or Full CSS Bundling, review the CSS Bundle Summary. If the bundle becomes too large or performance gets worse, exclude the 2–3 largest or most problematic CSS files from bundling, then warm again.", 'ultracache')),
 					]),
 						h('div', { className: 'space-y-1' }, [
-							h('div', { className: 'text-zinc-300 font-semibold', key: 'js-title' }, 'For better JavaScript results'),
-							h('p', { className: 'm-0', key: 'js-1' }, 'Enable defer/delay options gradually, then run Runtime JS Scan after JavaScript changes.'),
-							h('p', { className: 'm-0', key: 'js-2' }, 'If the scan reports dependency errors, add the affected scripts to the visible exclusions and test again. Pay extra attention to Elementor, WooCommerce cart/checkout, search/filter pages, mobile menu, sliders/hero sections, forms, and third-party scripts.'),
+							h('div', { className: 'text-zinc-300 font-semibold', key: 'js-title' }, __("For better JavaScript results", 'ultracache')),
+							h('p', { className: 'm-0', key: 'js-1' }, __("Enable defer/delay options gradually, then run Runtime JS Scan after JavaScript changes.", 'ultracache')),
+							h('p', { className: 'm-0', key: 'js-2' }, __("If the scan reports dependency errors, add the affected scripts to the visible exclusions and test again. Pay extra attention to Elementor, WooCommerce cart/checkout, search/filter pages, mobile menu, sliders/hero sections, forms, and third-party scripts.", 'ultracache')),
 					]),
 						h('div', { className: 'space-y-1' }, [
-							h('div', { className: 'text-zinc-300 font-semibold', key: 'scheduled-title' }, 'Scheduled warm-up'),
-							h('p', { className: 'm-0', key: 'scheduled-1' }, 'Scheduled / cron warm-up uses the selected Full-site warm-up sources. The Scheduled / Cron warm limit is a cap, not a target.'),
-							h('p', { className: 'm-0', key: 'scheduled-2' }, 'Priority order: homepage / blog index → menu URLs → pages → posts → categories → tags → other supported sources.'),
+							h('div', { className: 'text-zinc-300 font-semibold', key: 'scheduled-title' }, __("Scheduled warm-up", 'ultracache')),
+							h('p', { className: 'm-0', key: 'scheduled-1' }, __("Scheduled / cron warm-up uses the selected Full-site warm-up sources. The Scheduled / Cron warm limit is a cap, not a target.", 'ultracache')),
+							h('p', { className: 'm-0', key: 'scheduled-2' }, __("Priority order: homepage / blog index → menu URLs → pages → posts → categories → tags → other supported sources.", 'ultracache')),
 					]),
 						h('div', { className: 'space-y-2' }, [
-							h('div', { className: 'text-zinc-300 font-semibold', key: 'cli-title' }, 'Media optimization with WP-CLI'),
-							h('p', { className: 'm-0', key: 'cli-copy' }, 'Use WP-CLI when you want to generate, repair, or complete AVIF/WebP files for the media library.'),
+							h('div', { className: 'text-zinc-300 font-semibold', key: 'cli-title' }, __("Media optimization with WP-CLI", 'ultracache')),
+							h('p', { className: 'm-0', key: 'cli-copy' }, __("Use WP-CLI when you want to generate, repair, or complete AVIF/WebP files for the media library.", 'ultracache')),
 							h('pre', { className: 'm-0 whitespace-pre-wrap rounded-xl bg-black/25 p-3 font-mono text-[11px] text-zinc-300', key: 'cli-code' }, 'wp ultracache media status\nwp ultracache media rebuild --only-missing --media-format=both\nwp ultracache media retry-failed\nwp ultracache media process\nwp ultracache --help'),
 					]),
-						h('p', { className: 'm-0' }, 'After major changes, test the homepage, key landing pages, product pages, cart, checkout, account pages, search/filter pages, forms, mobile menu, sliders, and hero sections.'),
+						h('p', { className: 'm-0' }, __("After major changes, test the homepage, key landing pages, product pages, cart, checkout, account pages, search/filter pages, forms, mobile menu, sliders, and hero sections.", 'ultracache')),
 					]),
 
 				]
