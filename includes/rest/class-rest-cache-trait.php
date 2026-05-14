@@ -60,6 +60,9 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             $success = (bool) $engine->purge_all();
             $response = array('success' => $success);
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_warmup_generation')) {
+                $response['warmupGeneration'] = Ultra_Cache_WP::get_warmup_generation();
+            }
             if (!$success) {
                 $response['message'] = 'Flush All Cache is already running or the purge lock could not be acquired.';
             }
@@ -94,7 +97,33 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             return new WP_REST_Response(is_array($settings) ? array_diff_key($settings, array_flip(array('redisPassword', 'varnishCliKey'))) : array(), 200);
         }
 
-        private function request_may_mutate_files(WP_REST_Request $request, array $current)
+        private function get_explicit_settings_patch(WP_REST_Request $request, array $allowed_keys)
+        {
+            $patch = array();
+            $json_params = $request->get_json_params();
+            $json_params = is_array($json_params) ? $json_params : array();
+            $all_params = $request->get_params();
+            $all_params = is_array($all_params) ? $all_params : array();
+
+            foreach ($allowed_keys as $key) {
+                if (array_key_exists($key, $json_params)) {
+                    $patch[$key] = $json_params[$key];
+                    continue;
+                }
+
+                // Keep WP_REST_Request::set_param() compatibility for tests and
+                // internal callers without treating absent optional args as user
+                // intent. Optional route args do not appear here unless the caller
+                // explicitly supplied them.
+                if (array_key_exists($key, $all_params)) {
+                    $patch[$key] = $all_params[$key];
+                }
+            }
+
+            return $patch;
+        }
+
+        private function request_may_mutate_files(WP_REST_Request $request, array $current, array $patch = array())
         {
             $file_mutating_keys = array(
                 'pageCacheEnabled',
@@ -105,17 +134,13 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             );
 
             foreach ($file_mutating_keys as $key) {
-                if (null !== $request->get_param($key)) {
-                    return true;
-                }
-
-                if (!empty($current[$key]) && in_array($key, array('pageCacheEnabled', 'objectCacheEnabled', 'browserCacheRulesEnabled'), true)) {
+                if (array_key_exists($key, $patch)) {
                     return true;
                 }
             }
 
             foreach (array('redisPassword', 'varnishCliKey') as $secret_key) {
-                if (null !== $request->get_param($secret_key) && '' !== trim((string) $request->get_param($secret_key))) {
+                if (array_key_exists($secret_key, $patch) && '' !== trim((string) $patch[$secret_key])) {
                     return true;
                 }
             }
@@ -138,25 +163,27 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function update_settings(WP_REST_Request $request)
         {
             $allowed_keys = array_keys($this->get_settings_update_args());
+            $patch = $this->get_explicit_settings_patch($request, $allowed_keys);
 
-            $current = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')
-                ? Ultra_Cache_WP::get_dashboard_settings()
-                : (array) get_option(UCWP_SETTINGS_KEY, array());
+            $stored = get_option(UCWP_SETTINGS_KEY, array());
+            $stored = is_array($stored) ? $stored : array();
+            $current = $stored;
 
-            if ($this->request_may_mutate_files($request, is_array($current) ? $current : array()) && !$this->check_file_mutation_permission($request)) {
+            if ($this->request_may_mutate_files($request, $stored, $patch) && !$this->check_file_mutation_permission($request)) {
                 return $this->file_mutation_forbidden_response();
             }
 
-            foreach ($allowed_keys as $key) {
-                if (null !== $request->get_param($key)) {
-                    $current[$key] = $request->get_param($key);
-                }
+            if (!empty($patch)) {
+                $current = array_merge($stored, $patch);
             }
+
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'persist_dashboard_settings')) {
                 $response = Ultra_Cache_WP::persist_dashboard_settings($current);
                 if (is_wp_error($response)) {
                     return new WP_REST_Response(array('success' => false, 'message' => $response->get_error_message()), 500);
                 }
+
+                $response['patchKeys'] = array_keys($patch);
 
                 if (!empty($response['settings']) && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
                     $response['settings'] = Ultra_Cache_WP::get_dashboard_settings_for_client();
@@ -167,7 +194,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             update_option(UCWP_SETTINGS_KEY, $current);
             $client_settings = is_array($current) ? array_diff_key($current, array_flip(array('redisPassword', 'varnishCliKey'))) : array();
-            return new WP_REST_Response(array('success' => true, 'settings' => $client_settings), 200);
+            return new WP_REST_Response(array('success' => true, 'settings' => $client_settings, 'patchKeys' => array_keys($patch)), 200);
         }
 
 

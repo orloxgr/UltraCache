@@ -40,6 +40,39 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
         private function __construct()
         {
             add_action('rest_api_init', array($this, 'register_routes'));
+            add_filter('rest_post_dispatch', array($this, 'add_no_cache_headers_to_ultracache_rest_response'), 10, 3);
+        }
+
+        public function add_no_cache_headers_to_ultracache_rest_response($response, $server, $request)
+        {
+            unset($server);
+
+            if (!$request instanceof WP_REST_Request) {
+                return $response;
+            }
+
+            $route = (string) $request->get_route();
+            if (0 !== strpos($route, '/ultracache/v1/')) {
+                return $response;
+            }
+
+            if (!defined('DONOTCACHEPAGE')) {
+                // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress cache plugins use DONOTCACHEPAGE as the standard no-cache signal.
+                define('DONOTCACHEPAGE', true);
+            }
+
+            if ($response instanceof WP_REST_Response || $response instanceof WP_HTTP_Response) {
+                $response->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, private');
+                $response->header('Pragma', 'no-cache');
+                $response->header('Expires', 'Wed, 11 Jan 1984 05:00:00 GMT');
+                $response->header('X-Accel-Expires', '0');
+                $response->header('Surrogate-Control', 'no-store');
+                $response->header('CDN-Cache-Control', 'no-store');
+                $response->header('X-LiteSpeed-Cache-Control', 'no-cache');
+                $response->header('X-UltraCache-Admin-No-Cache', '1');
+            }
+
+            return $response;
         }
 
         public function register_routes()

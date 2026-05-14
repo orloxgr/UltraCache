@@ -19,6 +19,71 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
             );
         }
 
+
+        public static function is_ultracache_admin_dashboard_request()
+        {
+            if (!function_exists('is_admin') || !is_admin()) {
+                return false;
+            }
+
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only admin page detection; no state-changing action is performed.
+            $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : '';
+            if ('ultracache' === $page) {
+                return true;
+            }
+
+            if (function_exists('get_current_screen')) {
+                $screen = get_current_screen();
+                if ($screen && 'toplevel_page_ultracache' === (string) $screen->id) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public static function send_ultracache_admin_no_cache_headers()
+        {
+            if (headers_sent()) {
+                return;
+            }
+
+            if (function_exists('nocache_headers')) {
+                nocache_headers();
+            }
+
+            header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private', true);
+            header('Pragma: no-cache', true);
+            header('Expires: Wed, 11 Jan 1984 05:00:00 GMT', true);
+            header('X-Accel-Expires: 0', true);
+            header('Surrogate-Control: no-store', true);
+            header('CDN-Cache-Control: no-store', true);
+            header('X-LiteSpeed-Cache-Control: no-cache', true);
+            header('X-UltraCache-Admin-No-Cache: 1', true);
+        }
+
+        public function maybe_mark_ultracache_admin_no_cache()
+        {
+            if (!self::is_ultracache_admin_dashboard_request()) {
+                return;
+            }
+
+            if (!defined('DONOTCACHEPAGE')) {
+                // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress cache plugins use DONOTCACHEPAGE as the standard no-cache signal.
+                define('DONOTCACHEPAGE', true);
+            }
+        }
+
+        public function maybe_send_ultracache_admin_no_cache_headers()
+        {
+            if (!self::is_ultracache_admin_dashboard_request()) {
+                return;
+            }
+
+            $this->maybe_mark_ultracache_admin_no_cache();
+            self::send_ultracache_admin_no_cache_headers();
+        }
+
         public function render_dashboard()
         {
             $version_label = self::maybe_translate_sprintf(
@@ -92,6 +157,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                     'avifSupport'  => self::get_media_support_status(),
                     'diagnostics'  => $dashboard_diagnostics,
                     'crawlScopeSummary' => self::get_crawl_scope_summary(),
+                    'warmupGeneration' => method_exists(__CLASS__, 'get_warmup_generation') ? self::get_warmup_generation() : 0,
                 )
             );
         }

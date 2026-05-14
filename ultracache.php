@@ -269,6 +269,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                 add_action('plugins_loaded', array($this, 'reconcile_object_cache_dropin'), 20);
                 add_action('plugins_loaded', array($this, 'reconcile_runtime_config'), 21);
             }
+            add_action('init', array($this, 'maybe_mark_ultracache_admin_no_cache'), 0);
+            add_action('admin_init', array($this, 'maybe_send_ultracache_admin_no_cache_headers'), 0);
             add_action('admin_menu', array($this, 'register_admin_menu'));
             add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
             add_action('admin_enqueue_scripts', array($this, 'suppress_conflicting_admin_assets'), 999);
@@ -1194,6 +1196,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'unsafe_cache_cookie_patterns'    => !empty($settings['unsafe_cache_cookie_patterns']) ? self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) $settings['unsafe_cache_cookie_patterns'])) : array(),
                 'woo_safe_mode'                   => !empty($settings['woo_safe_mode']),
                 'cache_stats_enabled'             => !empty($settings['cache_stats_enabled']),
+                'debug_headers_enabled'           => !empty($settings['debug_headers_enabled']),
                 'object_cache_enabled'            => !empty($settings['object_cache_enabled']),
                 'object_cache_backend'            => self::sanitize_object_cache_backend($settings['object_cache_backend'] ?? 'redis'),
                 'object_cache_fallback_backend'   => self::sanitize_object_cache_fallback_backend($settings['object_cache_fallback_backend'] ?? 'apcu'),
@@ -2710,8 +2713,21 @@ if (!class_exists('Ultra_Cache_WP')) {
             return $state;
         }
 
+        public static function get_warmup_generation()
+        {
+            return max(0, (int) get_option('ultracache_warmup_generation', 0));
+        }
+
+        public static function bump_warmup_generation($reason = 'cache_flush')
+        {
+            $generation = max(0, (int) get_option('ultracache_warmup_generation', 0)) + 1;
+            update_option('ultracache_warmup_generation', $generation, false);
+            return $generation;
+        }
+
         public static function reset_cron_warmup_queue_after_cache_flush($reason = 'cache_flush')
         {
+            $generation = self::bump_warmup_generation($reason);
             $state = self::get_default_cron_warm_state();
             $state['active'] = false;
             $state['stopped'] = true;
@@ -2720,6 +2736,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $state['finishedAt'] = time();
             $state['updatedAt'] = time();
             $state['lastMessage'] = self::maybe_translate('Cron warm up queue reset after cache flush.');
+            $state['warmupGeneration'] = $generation;
             self::clear_cron_warm_queue_table();
             self::save_cron_warm_state($state);
             self::unschedule_cron_warm_events();
@@ -2776,6 +2793,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'invokedBy' => (string) $state['invokedBy'],
                 'nextScheduledAt' => (int) $next,
                 'serverCronCommand' => self::get_cron_warm_server_cron_command(),
+                'warmupGeneration' => self::get_warmup_generation(),
             );
         }
 
@@ -2836,6 +2854,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     'stopped'        => false,
                     'stopReason'     => '',
                     'invokedBy'      => '',
+                    'warmupGeneration' => self::get_warmup_generation(),
                 ));
 
                 self::unschedule_cron_warm_events();
@@ -3422,10 +3441,34 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
     );
 }
 
+        private static function rollback_dashboard_settings_after_failed_critical_save(array $previous_settings)
+        {
+            $restore = self::sanitize_dashboard_settings($previous_settings, false);
+            $restore['redisPassword'] = '';
+            $restore['varnishCliKey'] = '';
+            update_option(UCWP_SETTINGS_KEY, $restore, false);
+            self::reset_settings_cache();
+            self::sync_runtime_config();
+
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
+                Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
+            }
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
+                Ultra_Cache_Object_Cache_Manager::sync_dropin();
+            }
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
+                Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
+            }
+        }
+
         public static function persist_dashboard_settings(array $settings)
         {
             $previous_settings = self::get_dashboard_settings();
             $current_settings = self::sanitize_dashboard_settings(self::merge_protected_dashboard_settings($settings, $previous_settings));
+            $critical_validation = self::validate_critical_settings_support_before_persist($current_settings, $previous_settings);
+            if (is_wp_error($critical_validation)) {
+                return $critical_validation;
+            }
             $varnish_validation = self::validate_varnish_settings($current_settings);
             if (is_wp_error($varnish_validation)) {
                 return $varnish_validation;
@@ -3455,6 +3498,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
 
             $page_cache_sync = self::sync_page_cache_bootstrap(!empty($current_settings['pageCacheEnabled']));
             if (is_wp_error($page_cache_sync)) {
+                self::rollback_dashboard_settings_after_failed_critical_save($previous_settings);
                 return $page_cache_sync;
             }
 
@@ -3478,19 +3522,26 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             self::sync_scheduled_events();
             $browser_cache_sync = self::sync_browser_cache_rules();
             if (false === $browser_cache_sync) {
+                self::rollback_dashboard_settings_after_failed_critical_save($previous_settings);
                 return new WP_Error('ucwp_browser_cache_rules_not_writable', self::maybe_translate('Browser Cache Headers could not be written to .htaccess. Check file permissions or disable Browser Cache Headers.'));
             }
 
+            $object_cache_sync = null;
             if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
                 if (method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
                     Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
                 }
                 if (method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
-                    Ultra_Cache_Object_Cache_Manager::sync_dropin();
+                    $object_cache_sync = Ultra_Cache_Object_Cache_Manager::sync_dropin();
                 }
                 if (method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
                     Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
                 }
+            }
+
+            if (!empty($current_settings['objectCacheEnabled']) && true !== $object_cache_sync) {
+                self::rollback_dashboard_settings_after_failed_critical_save($previous_settings);
+                return new WP_Error('ucwp_object_cache_dropin_sync_failed', self::maybe_translate('Object Cache could not be enabled because the UltraCache object-cache drop-in could not be installed or verified. Check wp-content/object-cache.php permissions and conflicting object-cache drop-ins.'));
             }
 
             $google_fonts_job = null;

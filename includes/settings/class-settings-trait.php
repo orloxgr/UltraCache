@@ -1552,51 +1552,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             unset($settings['frontendSafeModeEnabled']);
 
             if ($validate_support) {
-                $compression_support = self::get_compression_support_status();
-                if (empty($compression_support['brotli'])) {
-                    $settings['brotliEnabled'] = false;
-                }
-                if (empty($compression_support['gzip'])) {
-                    $settings['gzipEnabled'] = false;
-                }
-
-                $frontend_compression = self::get_frontend_compression_probe_status(false);
-                if (!empty($frontend_compression['brotli']) || !empty($frontend_compression['brokenBrotli'])) {
-                    $settings['brotliEnabled'] = false;
-                }
-                if (!empty($frontend_compression['gzip']) || !empty($frontend_compression['brokenGzip'])) {
-                    $settings['gzipEnabled'] = false;
-                }
-
-                $live_support_checks = self::should_use_live_settings_support_checks();
-                ucwp_request_profile_checkpoint(
-                    $live_support_checks ? 'sanitize_settings_before_object_cache_support_live' : 'sanitize_settings_before_object_cache_support_cached'
-                );
-                $object_cache_support = self::get_object_cache_support_status($live_support_checks);
-                ucwp_request_profile_checkpoint(
-                    $live_support_checks ? 'sanitize_settings_after_object_cache_support_live' : 'sanitize_settings_after_object_cache_support_cached',
-                    array(
-                        'available' => !empty($object_cache_support['available']) ? 'true' : 'false',
-                        'source' => isset($object_cache_support['source']) ? (string) $object_cache_support['source'] : '',
-                    )
-                );
-                if (empty($object_cache_support['available'])) {
-                    $settings['objectCacheEnabled'] = false;
-                }
-
-                $media_support = self::get_media_support_status();
-                if (empty($media_support['supported'])) {
-                    $settings['mediaOptimizationEnabled'] = false;
-                    $settings['mediaGenerateOnUploadEnabled'] = false;
-                    $settings['mediaGenerateOnDemandEnabled'] = false;
-                }
-
-                ucwp_request_profile_checkpoint('sanitize_settings_before_varnish_support');
-                $varnish_support = self::get_varnish_support_status();
-                ucwp_request_profile_checkpoint('sanitize_settings_after_varnish_support', array('available' => !empty($varnish_support['available']) ? 'true' : 'false'));
-                if (empty($varnish_support['available'])) {
-                    $settings['varnishCliEnabled'] = false;
-                }
+                ucwp_request_profile_checkpoint('sanitize_settings_support_checks_not_mutating_values');
             } else {
                 ucwp_request_profile_checkpoint('sanitize_settings_support_checks_skipped_runtime');
             }
@@ -1611,6 +1567,67 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings = array_intersect_key($settings, $defaults);
 
             return $settings;
+        }
+
+        private static function setting_was_enabled_by_patch(array $current, array $previous, $key)
+        {
+            return !empty($current[$key]) && empty($previous[$key]);
+        }
+
+        private static function validate_critical_settings_support_before_persist(array $current, array $previous)
+        {
+            if (self::setting_was_enabled_by_patch($current, $previous, 'brotliEnabled')) {
+                $compression_support = self::get_compression_support_status();
+                if (empty($compression_support['brotli'])) {
+                    return new WP_Error('ucwp_brotli_unavailable', self::maybe_translate('Brotli compression is not available on this server, so Brotli Cache Compression was not enabled.'));
+                }
+
+                $frontend_compression = self::get_frontend_compression_probe_status(false);
+                if (!empty($frontend_compression['brotli']) || !empty($frontend_compression['brokenBrotli'])) {
+                    return new WP_Error('ucwp_brotli_frontend_conflict', self::maybe_translate('Brotli compression appears to be handled or conflicted before WordPress, so Brotli Cache Compression was not enabled.'));
+                }
+            }
+
+            if (self::setting_was_enabled_by_patch($current, $previous, 'gzipEnabled')) {
+                $compression_support = self::get_compression_support_status();
+                if (empty($compression_support['gzip'])) {
+                    return new WP_Error('ucwp_gzip_unavailable', self::maybe_translate('Gzip compression is not available on this server, so Gzip Cache Compression was not enabled.'));
+                }
+
+                $frontend_compression = self::get_frontend_compression_probe_status(false);
+                if (!empty($frontend_compression['gzip']) || !empty($frontend_compression['brokenGzip'])) {
+                    return new WP_Error('ucwp_gzip_frontend_conflict', self::maybe_translate('Gzip compression appears to be handled or conflicted before WordPress, so Gzip Cache Compression was not enabled.'));
+                }
+            }
+
+            if (self::setting_was_enabled_by_patch($current, $previous, 'objectCacheEnabled')) {
+                $object_cache_support = self::get_object_cache_support_status(true);
+                if (empty($object_cache_support['available'])) {
+                    $message = !empty($object_cache_support['message']) ? (string) $object_cache_support['message'] : self::maybe_translate('Object Cache cannot be enabled because the UltraCache object-cache drop-in helper is unavailable.');
+                    return new WP_Error('ucwp_object_cache_unavailable', $message);
+                }
+            }
+
+            if (
+                self::setting_was_enabled_by_patch($current, $previous, 'mediaOptimizationEnabled')
+                || self::setting_was_enabled_by_patch($current, $previous, 'mediaGenerateOnUploadEnabled')
+                || self::setting_was_enabled_by_patch($current, $previous, 'mediaGenerateOnDemandEnabled')
+            ) {
+                $media_support = self::get_media_support_status();
+                if (empty($media_support['supported'])) {
+                    return new WP_Error('ucwp_media_optimization_unavailable', self::maybe_translate('Media optimization is not available on this server, so the media optimization setting was not enabled.'));
+                }
+            }
+
+            if (self::setting_was_enabled_by_patch($current, $previous, 'varnishCliEnabled')) {
+                $varnish_support = self::get_varnish_support_status();
+                if (empty($varnish_support['available'])) {
+                    $message = !empty($varnish_support['message']) ? (string) $varnish_support['message'] : self::maybe_translate('Varnish integration is not available on this server, so Varnish was not enabled.');
+                    return new WP_Error('ucwp_varnish_unavailable', $message);
+                }
+            }
+
+            return true;
         }
 
         public static function reset_settings_cache()

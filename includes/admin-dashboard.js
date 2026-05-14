@@ -24,6 +24,7 @@
 	const initialDiagnostics = ucwp.diagnostics || initialStats.diagnostics || {};
 	const initialDefaults = ucwp.defaults || {};
 	let crawlScopeSummary = ucwp.crawlScopeSummary || {};
+	const initialWarmupGeneration = Math.max(0, Number(ucwp.warmupGeneration || 0));
 	const frontendProbeUrl = ucwp.frontendProbeUrl || '/';
 
 	const CLEAR_NOTICE_DELAY = 4200;
@@ -1543,8 +1544,11 @@
 			response = await ucwpFetch(requestUrl, {
 				method: route.method,
 				credentials: 'same-origin',
+				cache: 'no-store',
 				headers: {
 					'X-WP-Nonce': ucwpRestNonce || '',
+					'Cache-Control': 'no-cache, no-store, max-age=0',
+					'Pragma': 'no-cache',
 					...(route.method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
 				},
 				...(route.method !== 'GET' ? { body: JSON.stringify(payload) } : {}),
@@ -4897,6 +4901,8 @@
 		const [allUrlsCssBusy, setAllUrlsCssBusy] = useState(false);
 		const [menuUrlsCssBusy, setMenuUrlsCssBusy] = useState(false);
 		const [savedJob, setSavedJob] = useState(loadSavedJob());
+		const [warmupGeneration, setWarmupGeneration] = useState(initialWarmupGeneration);
+		const warmupGenerationRef = useRef(initialWarmupGeneration);
 		const cancelRequestedRef = useRef(false);
 		const importFileInputRef = useRef(null);
 		const statsRefreshInFlightRef = useRef(false);
@@ -5379,12 +5385,24 @@
 
 		async function saveRedisSettings() {
 			return enqueueUiOperation('object_cache_settings_save', 'Save object-cache settings', async () => {
-				const next = Object.assign({}, settingsRef.current || settings || {}, redisForm || {});
-				delete next.redisPasswordConfigured;
-				if (!String((redisForm && redisForm.redisPassword) || '').trim()) {
-					delete next.redisPassword;
+				const form = Object.assign({}, redisForm || {});
+				const patch = {
+					objectCacheBackend: form.objectCacheBackend || 'redis',
+					objectCacheFallbackBackend: form.objectCacheFallbackBackend || 'apcu',
+					redisHost: form.redisHost || '127.0.0.1',
+					redisPort: form.redisPort,
+					redisUsername: form.redisUsername || '',
+					redisDatabase: form.redisDatabase,
+					redisPrefix: form.redisPrefix || '',
+					redisUseTls: !!form.redisUseTls,
+					redisPersistent: !!form.redisPersistent,
+					redisConnectTimeoutMs: form.redisConnectTimeoutMs,
+					redisReadTimeoutMs: form.redisReadTimeoutMs,
+				};
+				if (String(form.redisPassword || '').trim()) {
+					patch.redisPassword = String(form.redisPassword || '');
 				}
-				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(next) });
+				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
 				applyDashboardPayload(response || {});
 				return response;
 			}, { processingText: 'Processing object-cache settings save…', successText: 'Object cache backend settings saved.', failedText: 'Failed to save object cache settings.' });
@@ -5477,13 +5495,19 @@
 
 		async function saveVarnishSettings() {
 			return enqueueUiOperation('varnish_settings_save', 'Save Varnish settings', async () => {
-				const submittedSecret = String((varnishForm && varnishForm.varnishCliKey) || '').trim();
-				const next = Object.assign({}, settingsRef.current || settings || {}, varnishForm || {});
-				delete next.varnishCliKeyConfigured;
-				if (!submittedSecret) {
-					delete next.varnishCliKey;
+				const form = Object.assign({}, varnishForm || {});
+				const submittedSecret = String(form.varnishCliKey || '').trim();
+				const patch = {
+					varnishCliEnabled: !!form.varnishCliEnabled,
+					varnishCliMode: form.varnishCliMode || 'http',
+					varnishCliServers: form.varnishCliServers || '',
+					varnishCliTimeoutSeconds: form.varnishCliTimeoutSeconds,
+					varnishCliMethod: form.varnishCliMethod || 'BAN',
+				};
+				if (submittedSecret) {
+					patch.varnishCliKey = submittedSecret;
 				}
-				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(next) });
+				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
 				if (submittedSecret) {
 					setVarnishForm((current) => Object.assign({}, current || {}, { varnishCliKey: '', varnishCliKeyConfigured: true }));
 				}
@@ -5710,7 +5734,7 @@
 				return current || null;
 			}
 			const next = Object.assign({}, current || {});
-			['stats', 'diagnostics', 'settings', 'performanceProfile', 'opcache', 'apcu', 'externalCaches', 'mediaRuntime', 'crawlScopeSummary'].forEach((key) => {
+			['stats', 'diagnostics', 'settings', 'performanceProfile', 'opcache', 'apcu', 'externalCaches', 'mediaRuntime', 'crawlScopeSummary', 'warmupGeneration'].forEach((key) => {
 				if (Object.prototype.hasOwnProperty.call(payload, key)) {
 					next[key] = payload[key];
 				}
@@ -5750,6 +5774,11 @@
 				crawlScopeSummary = responseCrawlScopeSummary;
 				ucwp.crawlScopeSummary = responseCrawlScopeSummary;
 				setCrawlScopeVersion((version) => version + 1);
+			}
+
+			const responseWarmupGeneration = typeof payload.warmupGeneration !== 'undefined' ? payload.warmupGeneration : (payload.result && typeof payload.result.warmupGeneration !== 'undefined' ? payload.result.warmupGeneration : null);
+			if (null !== responseWarmupGeneration) {
+				setCurrentWarmupGeneration(responseWarmupGeneration);
 			}
 
 			const responseSettings = payload.settings || (payload.result && payload.result.settings);
@@ -6279,6 +6308,7 @@
 					logs: ['Starting full site crawler + ' + bundleLabel + '…'],
 					startTime: Date.now(),
 					batchSize: DEFAULT_QUEUE_BATCH_SIZE,
+					warmupGeneration: Number(warmupGenerationRef.current || 0),
 				}, !!forceRestart);
 			} finally {
 				setAllUrlsCssBusy(false);
@@ -6318,6 +6348,7 @@
 				logs: ['Starting menu URL crawler…'],
 				startTime: Date.now(),
 				batchSize: DEFAULT_QUEUE_BATCH_SIZE,
+				warmupGeneration: Number(warmupGenerationRef.current || 0),
 			}, !!forceRestart);
 		}
 
@@ -6371,6 +6402,7 @@
 					logs: ['Starting menu URL crawler + ' + bundleLabel + '…'],
 					startTime: Date.now(),
 					batchSize: DEFAULT_QUEUE_BATCH_SIZE,
+					warmupGeneration: Number(warmupGenerationRef.current || 0),
 				}, !!forceRestart);
 			} finally {
 				setMenuUrlsCssBusy(false);
@@ -7051,9 +7083,16 @@
 			}
 		}
 
+		function setCurrentWarmupGeneration(value) {
+			const next = Math.max(0, Number(value || 0));
+			warmupGenerationRef.current = next;
+			ucwp.warmupGeneration = next;
+			setWarmupGeneration(next);
+		}
+
 		function getJobControls(type) {
 			if (!savedJob || savedJob.type !== type) {
-				return { canResume: false, canRestart: false };
+				return { canResume: false, canRestart: false, staleAfterFlush: false };
 			}
 
 			const processed = Math.max(0, Number(savedJob.processed || 0));
@@ -7061,10 +7100,12 @@
 			const hasPending = Array.isArray(savedJob.pendingItems) && savedJob.pendingItems.length > 0;
 			const hasProgress = processed > 0 || total > 0 || hasPending || (Array.isArray(savedJob.logs) && savedJob.logs.length > 0);
 			const incomplete = hasPending || !!savedJob.hasMore || total === 0 || processed < total;
+			const staleAfterFlush = isWarmJobType(type) && typeof savedJob.warmupGeneration !== 'undefined' && Number(savedJob.warmupGeneration || 0) !== Number(warmupGenerationRef.current || 0);
 
 			return {
-				canResume: hasProgress && incomplete,
-				canRestart: hasProgress,
+				canResume: hasProgress && incomplete && !staleAfterFlush,
+				canRestart: hasProgress && incomplete && !staleAfterFlush,
+				staleAfterFlush,
 			};
 		}
 
@@ -7118,6 +7159,7 @@
 				successCount: forceRestart ? 0 : Math.max(0, Number(job.successCount || 0)),
 				skippedCount: forceRestart ? 0 : Math.max(0, Number(job.skippedCount || 0)),
 				failedCount: forceRestart ? 0 : Math.max(0, Number(job.failedCount || 0)),
+				warmupGeneration: isWarmJobType(job.type) ? Number(warmupGenerationRef.current || 0) : job.warmupGeneration,
 			});
 			let completed = false;
 			cancelRequestedRef.current = false;
@@ -7304,6 +7346,7 @@
 				logs: ['Starting full site crawler…'],
 				startTime: Date.now(),
 				batchSize: DEFAULT_QUEUE_BATCH_SIZE,
+				warmupGeneration: Number(warmupGenerationRef.current || 0),
 			}, !!forceRestart);
 		}
 
@@ -7437,8 +7480,10 @@
 			}
 		}
 
-		async function rebuildMediaQueue() {
-			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+		async function rebuildMediaQueue(forceRestart = false) {
+			const controls = getJobControls('media_rebuild');
+			const isResume = !forceRestart && controls.canResume;
+			if (!isResume && typeof window !== 'undefined' && typeof window.confirm === 'function') {
 				if (!window.confirm('Rebuild the full media queue? This scans the media library in safe chunks. Existing optimized image files are not deleted.')) {
 					return;
 				}
@@ -7447,56 +7492,84 @@
 				return;
 			}
 			setBusy(true);
+			cancelRequestedRef.current = false;
+			const startedAt = Date.now();
+			let totalScanned = isResume ? Math.max(0, Number(savedJob && savedJob.scanned ? savedJob.scanned : 0)) : 0;
+			let totalQueued = isResume ? Math.max(0, Number(savedJob && savedJob.queued ? savedJob.queued : 0)) : 0;
 			setProcess({
-				type: 'media',
+				type: 'media_rebuild',
 				active: true,
 				showWhenInactive: true,
-				label: 'Rebuilding Media Queue',
-				current: 0,
-				total: 0,
-				logs: ['Starting chunked media queue rebuild…'],
-				startTime: Date.now(),
-				cancellable: false,
+				label: isResume ? 'Resuming Media Queue Rebuild' : 'Rebuilding Media Queue',
+				current: isResume ? Math.max(0, Number(savedJob && savedJob.processed ? savedJob.processed : 0)) : 0,
+				total: isResume ? Math.max(0, Number(savedJob && savedJob.total ? savedJob.total : 0)) : 0,
+				logs: isResume && savedJob && Array.isArray(savedJob.logs) ? savedJob.logs.concat(['Resuming chunked media queue rebuild…']).slice(-50) : ['Starting chunked media queue rebuild…'],
+				startTime: startedAt,
+				cancellable: true,
 				cancelRequested: false,
 			});
 			try {
-				let reset = true;
+				let reset = forceRestart || !isResume;
 				let loops = 0;
-				let totalScanned = 0;
-				let totalQueued = 0;
 				let response = null;
 				do {
+					if (cancelRequestedRef.current) {
+						const pausedJob = {
+							type: 'media_rebuild',
+							processed: response && response.buildOffset ? Number(response.buildOffset) : totalScanned,
+							total: response && response.total ? Number(response.total) : 0,
+							scanned: totalScanned,
+							queued: totalQueued,
+							hasMore: true,
+							logs: ['Media queue rebuild paused by user.'],
+							startTime: startedAt,
+						};
+						persistJobState(pausedJob);
+						setProcess((prev) => Object.assign({}, prev, { active: false, cancellable: false, cancelRequested: true, logs: (prev.logs || []).concat(['Paused by user.']).slice(-50) }));
+						pushToast({ type: 'success', text: 'Media queue rebuild paused. You can resume it later.' });
+						return;
+					}
 					loops += 1;
 					response = await apiRequest('media_queue_rebuild', { media_format: getSelectedMediaQueueFormat(), limit: 0, reset: reset, time_budget: 20 });
 					reset = false;
 					totalScanned += Math.max(0, Number(response && response.scanned ? response.scanned : 0));
 					totalQueued += Math.max(0, Number(response && response.queued ? response.queued : 0));
 					applyMediaQueueStatus(response);
+					const current = Math.max(0, Number(response && response.buildOffset ? response.buildOffset : totalScanned));
+					const total = Math.max(0, Number(response && response.total ? response.total : 0));
+					const logLine = 'Scanned ' + formatNumber(totalScanned) + ', queued ' + formatNumber(totalQueued) + '.';
 					setProcess((prev) => Object.assign({}, prev, {
-						current: Math.max(0, Number(response && response.buildOffset ? response.buildOffset : totalScanned)),
-						total: Math.max(0, Number(response && response.total ? response.total : 0)),
-						logs: (prev.logs || []).concat(['Scanned ' + formatNumber(totalScanned) + ', queued ' + formatNumber(totalQueued) + '.']).slice(-50),
+						current,
+						total,
+						cancellable: true,
+						logs: (prev.logs || []).concat([logLine]).slice(-50),
 					}));
+					persistJobState({ type: 'media_rebuild', processed: current, total, scanned: totalScanned, queued: totalQueued, hasMore: !!(response && response.hasMore), logs: [logLine], startTime: startedAt });
 					await sleep(80);
 				} while (response && response.hasMore && loops < 5000);
 
 				const statusText = 'Queue: ' + formatNumber(response && response.total ? response.total : 0) + ' attachment(s), ' + formatNumber(response && response.pending ? response.pending : 0) + ' pending.';
 				setProcess((prev) => Object.assign({}, prev, {
 					active: false,
+					cancellable: false,
+					cancelRequested: false,
 					showWhenInactive: true,
 					label: 'Media Queue Rebuild complete',
 					logs: (prev.logs || []).concat([response && response.message ? String(response.message) : 'Media queue rebuild finished.', statusText]).slice(-50),
 				}));
+			persistJobState(null);
 				pushToast({ type: 'success', text: 'Media queue rebuilt.' });
 				await refreshStats();
 			} catch (error) {
 				setProcess((prev) => Object.assign({}, prev, {
 					active: false,
+					cancellable: false,
 					showWhenInactive: true,
 					logs: (prev.logs || []).concat([error && error.message ? error.message : 'Media queue rebuild failed.']).slice(-50),
 				}));
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Media queue rebuild failed.' });
 			} finally {
+				cancelRequestedRef.current = false;
 				setBusy(false);
 			}
 		}
@@ -7963,6 +8036,13 @@ async function deleteAllPluginDataAndDeactivate() {
 								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (!menuWarmScopeReady ? 'Select Menu + Depth First' : (warmBusy && !menuUrlsCssBusy ? 'Engine Busy' : (menuUrlsCssBusy ? 'Warming Menu HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(menuCssWarmJobType).canResume ? 'Resume ' + menuCssButtonLabel : menuCssButtonLabel)))))
 							),
 						]),
+							(getJobControls('warm_menu').canRestart || getJobControls(menuCssWarmJobType).canRestart) ? h('button', {
+								className: 'uc-btn flex-1 min-w-[220px] text-white py-3 font-bold',
+								style: { marginTop: '12px' },
+								onClick: () => (getJobControls(menuCssWarmJobType).canRestart ? startMenuWarmingWithFrontpageCss(true) : startMenuWarming(true)),
+								disabled: !pageCacheReady || warmBusy || !menuWarmScopeReady,
+							}, getJobControls(menuCssWarmJobType).canRestart ? 'Restart ' + menuCssButtonLabel : 'Restart Warm Up Menu HTML Cache') : null,
+
 						h('div', { className: 'mt-5', key: 'warm-full-scope-controls' }, [
 							h(MultiSelectField, {
 								label: 'Full-site warm-up sources',
@@ -7993,7 +8073,14 @@ async function deleteAllPluginDataAndDeactivate() {
 								},
 								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (!fullSiteWarmScopeReady ? 'Select Full-Site Sources First' : (warmBusy && !allUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Warming Full Site HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(fullCssWarmJobType).canResume ? 'Resume ' + fullCssButtonLabel : fullCssButtonLabel)))))
 							),
-						])
+						]),
+							(getJobControls('warm').canRestart || getJobControls(fullCssWarmJobType).canRestart) ? h('button', {
+								className: 'uc-btn flex-1 min-w-[220px] text-white py-3 font-bold',
+								style: { marginTop: '12px' },
+								onClick: () => (getJobControls(fullCssWarmJobType).canRestart ? startWarmingAllWithFrontpageCss(true) : startWarming(true)),
+								disabled: !pageCacheReady || warmBusy || !fullSiteWarmScopeReady,
+							}, getJobControls(fullCssWarmJobType).canRestart ? 'Restart ' + fullCssButtonLabel : 'Restart Warm Up Full Site HTML Cache') : null,
+
 					]
 				),
 			h(
@@ -8034,12 +8121,20 @@ async function deleteAllPluginDataAndDeactivate() {
 						h('div', { key: 'rebuild' }, [
 							h('button', {
 								className: 'uc-btn w-full text-white py-3 font-bold',
-								onClick: rebuildMediaQueue,
+								onClick: () => rebuildMediaQueue(false),
 								disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported,
-							}, busy ? 'Engine Busy' : 'Rebuild Media Queue'),
+							}, busy ? 'Engine Busy' : (getJobControls('media_rebuild').canResume ? 'Resume Media Queue Rebuild' : 'Rebuild Media Queue')),
 							h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Scans the media library and rebuilds the attachment queue. Use after large imports or when the queue looks outdated.'),
 						]),
-						h('div', { key: 'refresh-storage' }, [
+						getJobControls('media_rebuild').canRestart ? h('div', { key: 'rebuild-restart' }, [
+								h('button', {
+									className: 'uc-btn w-full text-white py-3 font-bold',
+									onClick: () => rebuildMediaQueue(true),
+									disabled: busy || !mediaOptimizationEnabled || !avifSupport.supported,
+								}, busy ? 'Engine Busy' : 'Restart Media Queue Rebuild'),
+								h('div', { className: 'text-xs text-zinc-500 mt-2' }, 'Starts the rebuild from the beginning instead of resuming the saved offset.'),
+							]) : null,
+							h('div', { key: 'refresh-storage' }, [
 							h('button', {
 								className: 'uc-btn w-full text-white py-3 font-bold',
 								onClick: refreshMediaStorageStats,
