@@ -773,7 +773,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 if ('' === $path) {
                     continue;
                 }
-                $css = function_exists('ucwp_safe_file_get_contents') ? ucwp_safe_file_get_contents($path, 'font_pattern_frontpage_scan', true) : file_get_contents($path); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+                $css = function_exists('ucwp_guarded_asset_file_get_contents') ? ucwp_guarded_asset_file_get_contents($path, 'font-css', 'font_pattern_frontpage_scan', true) : '';
                 if (!is_string($css) || '' === trim($css)) {
                     continue;
                 }

@@ -232,7 +232,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 return false;
             }
 
-            $this->cleanup_stale_page_generation_locks(10 * MINUTE_IN_SECONDS, 50);
+            $this->maybe_cleanup_stale_page_generation_locks(10 * MINUTE_IN_SECONDS, 50);
 
             if (!$this->acquire_page_generation_global_slot()) {
                 if ($this->wait_for_page_cache_file($file_path, $this->get_page_generation_global_slot_wait_seconds())) {
@@ -332,6 +332,31 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $lock_name = $this->page_cache_generation_global_lock_name;
             $this->page_cache_generation_global_lock_name = '';
             $this->release_runtime_lock($lock_name);
+        }
+
+        private function maybe_cleanup_stale_page_generation_locks($age_seconds = 600, $max_delete = 50)
+        {
+            static $checked = false;
+
+            if ($checked) {
+                return 0;
+            }
+
+            $checked = true;
+            $probability = 2;
+            if (function_exists('apply_filters')) {
+                $probability = (int) apply_filters('ucwp_page_generation_lock_cleanup_probability', $probability);
+            }
+            $probability = max(0, min(100, (int) $probability));
+
+            if ($probability < 100) {
+                $roll = wp_rand(1, 100);
+                if ($roll > $probability) {
+                    return 0;
+                }
+            }
+
+            return $this->cleanup_stale_page_generation_locks($age_seconds, $max_delete);
         }
 
         private function cleanup_stale_page_generation_locks($age_seconds = 600, $max_delete = 50)
@@ -788,6 +813,10 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         private function should_send_source_debug_header()
         {
+            $settings = $this->get_settings();
+            if (empty($settings['debug_headers_enabled']) && empty($settings['debugHeadersEnabled'])) {
+                return false;
+            }
             $flag = function_exists('ucwp_server_value') ? strtolower(trim((string) ucwp_server_value('HTTP_X_ULTRACACHE_DEBUG'))) : '';
             return in_array($flag, array('1', 'true', 'yes', 'on'), true);
         }

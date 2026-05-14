@@ -143,15 +143,19 @@ if (!function_exists('ucwp_dropin_safe_readfile')) {
 }
 
 if (!function_exists('ucwp_dropin_safe_stream_socket_client')) {
-    function ucwp_dropin_safe_stream_socket_client($remote_socket, $timeout, &$errno = null, &$errstr = null) {
-        $timeout = max(0.1, (float) $timeout);
-        return stream_socket_client($remote_socket, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT);
+    function ucwp_dropin_safe_stream_socket_client($remote_socket, $timeout, &$errno = null, &$errstr = null, $flags = STREAM_CLIENT_CONNECT) {
+        $timeout = max(0.05, (float) $timeout);
+        return @stream_socket_client($remote_socket, $errno, $errstr, $timeout, $flags);
     }
 }
 
 
 if (!function_exists('ucwp_advanced_cache_debug_headers_enabled')) {
     function ucwp_advanced_cache_debug_headers_enabled() {
+        global $runtime_config;
+        if (empty($runtime_config['debug_headers_enabled'])) {
+            return false;
+        }
         $flag = isset($_SERVER['HTTP_X_ULTRACACHE_DEBUG']) ? strtolower(trim((string) $_SERVER['HTTP_X_ULTRACACHE_DEBUG'])) : '';
         return in_array($flag, array('1', 'true', 'yes', 'on'), true);
     }
@@ -336,92 +340,6 @@ $ucwp_cache_base_dir = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache';
 $ucwp_is_cache_path = static function ($path, $base_dir = null, $must_exist = false) use ($ucwp_cache_base_dir) {
     $base_dir = is_string($base_dir) && '' !== trim($base_dir) ? $base_dir : $ucwp_cache_base_dir;
     return ucwp_is_cache_path($path, $base_dir, (bool) $must_exist);
-};
-
-$ucwp_validate_generated_css_refs = static function ($cache_file) use ($ucwp_read_file, $ucwp_delete_file, $ucwp_is_cache_path, $ucwp_cache_base_dir) {
-    $cache_file = is_string($cache_file) ? trim($cache_file) : '';
-    if ('' === $cache_file || !$ucwp_is_cache_path($cache_file, null, true) || !is_readable($cache_file)) {
-        return false;
-    }
-
-    $html = $ucwp_read_file($cache_file);
-    if (!is_string($html) || '' === $html) {
-        return false;
-    }
-
-    if (false === stripos($html, '/cache/ultracache/')) {
-        return true;
-    }
-
-    $has_generated_css = (false !== stripos($html, '/cache/ultracache/css-bundles/'))
-        || (false !== stripos($html, '/cache/ultracache/font-css/'))
-        || (false !== stripos($html, '/cache/ultracache/optimized-css/'));
-    if (!$has_generated_css) {
-        return true;
-    }
-
-    $patterns = array(
-        "~(?:https?:)?//[^\\s\"'<>]+/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\\s\"'<>?#)]+\\.css~i",
-        "~/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\\s\"'<>?#)]+\\.css~i",
-    );
-
-    $refs = array();
-    foreach ($patterns as $pattern) {
-        $matches = array();
-        $matched = preg_match_all($pattern, $html, $matches);
-        if (false === $matched || empty($matches[0]) || !is_array($matches[0])) {
-            continue;
-        }
-        $refs = array_merge($refs, $matches[0]);
-    }
-
-    if (empty($refs)) {
-        return true;
-    }
-
-    $allowed_dirs = array(
-        'css-bundles' => rtrim($ucwp_cache_base_dir, '/\\') . '/css-bundles/',
-        'font-css' => rtrim($ucwp_cache_base_dir, '/\\') . '/font-css/',
-        'optimized-css' => rtrim($ucwp_cache_base_dir, '/\\') . '/optimized-css/',
-    );
-
-    $missing = array();
-    foreach (array_values(array_unique(array_map('strval', $refs))) as $ref) {
-        $path = parse_url($ref, PHP_URL_PATH);
-        if (!is_string($path) || '' === $path) {
-            $path = $ref;
-        }
-        $path = rawurldecode((string) $path);
-
-        if (!preg_match('#/wp-content/cache/ultracache/(css-bundles|font-css|optimized-css)/([^/]+\.css)$#i', $path, $match)) {
-            continue;
-        }
-
-        $bucket = strtolower((string) $match[1]);
-        $basename = basename((string) $match[2]);
-        if ('' === $basename || empty($allowed_dirs[$bucket]) || !preg_match('/^[A-Za-z0-9_.-]+\.css$/', $basename)) {
-            continue;
-        }
-
-        $file = $allowed_dirs[$bucket] . $basename;
-        clearstatcache(true, $file);
-        if (!$ucwp_is_cache_path($file, null, false) || !is_readable($file) || filesize($file) <= 0) {
-            $missing[$bucket . '/' . $basename] = true;
-        }
-    }
-
-    if (empty($missing)) {
-        return true;
-    }
-
-    $ucwp_delete_file($cache_file);
-    $ucwp_delete_file($cache_file . '.gz');
-    $ucwp_delete_file($cache_file . '.br');
-    if (!headers_sent()) {
-        header('X-Ultra-Cache-Stale-Generated-CSS: invalidated');
-    }
-
-    return false;
 };
 
 $method = strtoupper((string) ucwp_server_var('REQUEST_METHOD', 'GET'));
@@ -613,31 +531,17 @@ $ucwp_normalize_runtime_config = static function ($config) use ($runtime_config,
         'redis_prefix'                   => isset($config['redis_prefix']) && is_scalar($config['redis_prefix']) ? preg_replace('/[^A-Za-z0-9:_\-]/', '', (string) $config['redis_prefix']) : '',
         'redis_use_tls'                  => !empty($config['redis_use_tls']),
         'redis_persistent'               => !empty($config['redis_persistent']),
-        'redis_connect_timeout_ms'       => max(50, min(5000, (int) ($config['redis_connect_timeout_ms'] ?? 200))),
-        'redis_read_timeout_ms'          => max(50, min(5000, (int) ($config['redis_read_timeout_ms'] ?? 200))),
+        'redis_connect_timeout_ms'       => max(50, min(15000, (int) ($config['redis_connect_timeout_ms'] ?? 200))),
+        'redis_read_timeout_ms'          => max(50, min(15000, (int) ($config['redis_read_timeout_ms'] ?? 200))),
     );
 };
 $runtime_config = $ucwp_normalize_runtime_config($runtime_config);
 
 $runtime_config_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/runtime-config.php';
 if ($ucwp_is_cache_path($runtime_config_file, null, true) && is_file($runtime_config_file) && is_readable($runtime_config_file)) {
-    if (function_exists('opcache_invalidate')) {
-        @opcache_invalidate($runtime_config_file, true);
-    }
     $loaded_runtime = require $runtime_config_file;
     if (is_array($loaded_runtime)) {
         $runtime_config = $ucwp_normalize_runtime_config(array_merge($runtime_config, $loaded_runtime));
-    }
-} else {
-    $legacy_runtime_config_file = rtrim(WP_CONTENT_DIR, '/\\') . '/cache/ultracache/runtime-config.json';
-    if ($ucwp_is_cache_path($legacy_runtime_config_file, null, true) && is_file($legacy_runtime_config_file) && is_readable($legacy_runtime_config_file)) {
-        $loaded_runtime_raw = $ucwp_read_file($legacy_runtime_config_file);
-        if (is_string($loaded_runtime_raw) && '' !== $loaded_runtime_raw) {
-            $loaded_runtime = json_decode($loaded_runtime_raw, true);
-            if (is_array($loaded_runtime)) {
-                $runtime_config = $ucwp_normalize_runtime_config(array_merge($runtime_config, $loaded_runtime));
-            }
-        }
     }
 }
 
@@ -1145,26 +1049,6 @@ $ucwp_queue_revalidate = static function ($target_url, $secret) {
     $separator = false !== strpos($target_url, '?') ? '&' : '?';
     $request_url = $target_url . $separator . 'ucwp_revalidate=1&ucwp_rt=' . rawurlencode($token);
 
-    if (function_exists('curl_init')) {
-        $ch = curl_init();
-        if ($ch) {
-            curl_setopt($ch, CURLOPT_URL, $request_url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
-            curl_setopt($ch, CURLOPT_HEADER, false);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
-            curl_setopt($ch, CURLOPT_TIMEOUT_MS, 1000);
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, 500);
-            curl_setopt($ch, CURLOPT_NOSIGNAL, true);
-            curl_setopt($ch, CURLOPT_FORBID_REUSE, true);
-            curl_setopt($ch, CURLOPT_FRESH_CONNECT, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, array('X-UltraCache-Revalidate: 1', 'X-UltraCache-Token: ' . $token, 'Connection: close'));
-            $result = curl_exec($ch);
-            $errno = curl_errno($ch);
-            curl_close($ch);
-            return false !== $result && 0 === (int) $errno;
-        }
-    }
-
     $parts = parse_url($request_url);
     if (empty($parts['host'])) {
         return false;
@@ -1175,30 +1059,42 @@ $ucwp_queue_revalidate = static function ($target_url, $secret) {
     $port = isset($parts['port']) ? (int) $parts['port'] : ('https' === $scheme ? 443 : 80);
     $path = (!empty($parts['path']) ? (string) $parts['path'] : '/') . (!empty($parts['query']) ? '?' . (string) $parts['query'] : '');
     $remote = ('https' === $scheme ? 'ssl://' : 'tcp://') . $host . ':' . $port;
+    $host_header = $host;
+    if (!(('http' === $scheme && 80 === $port) || ('https' === $scheme && 443 === $port))) {
+        $host_header .= ':' . (string) $port;
+    }
 
+    // Prefer fire-and-forget sockets. This keeps stale HIT serving out of the 1s cURL wait path.
     $errno = 0;
     $errstr = '';
-    $fp = ucwp_dropin_safe_stream_socket_client($remote, 0.5, $errno, $errstr);
-    if (!$fp) {
-        return false;
+    $flags = STREAM_CLIENT_CONNECT;
+    if (defined('STREAM_CLIENT_ASYNC_CONNECT')) {
+        $flags |= STREAM_CLIENT_ASYNC_CONNECT;
     }
+    $fp = ucwp_dropin_safe_stream_socket_client($remote, 0.15, $errno, $errstr, $flags);
+    if ($fp) {
+        stream_set_blocking($fp, false);
+        stream_set_timeout($fp, 0, 150000);
+        $out = "GET {$path} HTTP/1.1
+";
+        $out .= "Host: {$host_header}
+";
+        $out .= "Connection: Close
+";
+        $out .= "X-UltraCache-Revalidate: 1
+";
+        $out .= "X-UltraCache-Token: {$token}
 
-    stream_set_blocking($fp, false);
-    $out = "GET {$path} HTTP/1.1
 ";
-    $out .= "Host: {$host}
-";
-    $out .= "Connection: Close
-";
-    $out .= "X-UltraCache-Revalidate: 1
-
-";
-    if (false === fwrite($fp, $out)) {
+        $written = @fwrite($fp, $out);
         fclose($fp);
-        return false;
+        if (false !== $written) {
+            return true;
+        }
     }
-    fclose($fp);
-    return true;
+
+    // No cURL fallback here: stale revalidation must never run a blocking HTTP client in the visitor path.
+    return false;
 };
 
 $normalize_path = static function ($path) {
@@ -1595,9 +1491,6 @@ if (!$ucwp_is_cache_path($cache_file) || !file_exists($cache_file) || !is_readab
     return;
 }
 
-if (!$ucwp_validate_generated_css_refs($cache_file)) {
-    return;
-}
 
 $encoding = strtolower((string) ucwp_server_var('HTTP_ACCEPT_ENCODING', ''));
 $serve_file = $cache_file;
@@ -1629,15 +1522,10 @@ if ($age > $serve_until) {
 
 if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_ttl && $age <= $max_stale) {
     $lock_file = $ucwp_get_revalidate_lock_path($cache_file);
-    $queued = false;
+    $should_revalidate = false;
     if ($ucwp_can_queue_revalidate($lock_file, $max_stale)) {
         $ucwp_write_revalidate_lock($lock_file);
-        $queued = $ucwp_queue_revalidate($normalized, (string) ($runtime_config['revalidate_secret'] ?? ''));
-        if ($queued) {
-            $ucwp_record_background_revalidation();
-        } else {
-            $ucwp_delete_file($lock_file);
-        }
+        $should_revalidate = true;
     }
 
     $ucwp_record_hit($bucket, $encoding_bucket, true);
@@ -1648,8 +1536,30 @@ if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_t
         header('X-Ultra-Cache-Source: advanced-cache');
     }
     header('X-Ultra-Cache-Age: ' . (string) $age);
-    header('X-Ultra-Cache-Revalidate: ' . ($queued ? 'queued' : 'pending'));
-    $ucwp_dropin_safe_readfile($serve_file);
+    header('X-Ultra-Cache-Revalidate: ' . ($should_revalidate ? 'queued' : 'pending'));
+    if ('HEAD' !== $method) {
+        $ucwp_dropin_safe_readfile($serve_file);
+    }
+
+    if ($should_revalidate) {
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        } else {
+            if (function_exists('ob_get_level')) {
+                while (ob_get_level() > 0) {
+                    @ob_end_flush();
+                }
+            }
+            @flush();
+        }
+
+        $queued = $ucwp_queue_revalidate($normalized, (string) ($runtime_config['revalidate_secret'] ?? ''));
+        if ($queued) {
+            $ucwp_record_background_revalidation();
+        } else {
+            $ucwp_delete_file($lock_file);
+        }
+    }
     exit;
 }
 
@@ -1662,5 +1572,7 @@ if (ucwp_advanced_cache_debug_headers_enabled()) {
     header('X-Ultra-Cache-Source: advanced-cache');
 }
 header('X-Ultra-Cache-Age: ' . (string) $age);
-$ucwp_dropin_safe_readfile($serve_file);
+if ('HEAD' !== $method) {
+    $ucwp_dropin_safe_readfile($serve_file);
+}
 exit;

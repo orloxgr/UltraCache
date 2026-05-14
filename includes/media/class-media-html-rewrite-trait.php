@@ -537,7 +537,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 								$avif = $this->get_avif_url_from_public_url($candidate);
 							}
 							if (!$avif && 'avif' !== $mode && $this->media_output_mode_allows('webp')) {
-								$webp = $this->get_webp_url_from_public_url($candidate, true);
+								$webp = $this->get_webp_url_from_public_url($candidate);
 							}
 							$original = $this->sanitize_css_image_original_url($candidate);
 							if (!$avif && !$webp) {
@@ -1145,21 +1145,6 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			return $mode === $format;
 		}
 
-		private function get_on_demand_request_started_at() {
-			if (null !== $this->on_demand_request_started_at) {
-				return $this->on_demand_request_started_at;
-			}
-
-			if (isset($_SERVER['REQUEST_TIME_FLOAT'])) {
-				$this->on_demand_request_started_at = (float) $_SERVER['REQUEST_TIME_FLOAT'];
-			} else {
-				$this->on_demand_request_started_at = microtime(true);
-			}
-
-			return $this->on_demand_request_started_at;
-		}
-
-
 		private function get_media_generation_context() {
 			$context = strtolower((string) $this->media_generation_context);
 			if (in_array($context, array('warm', 'cron', 'stale', 'manual'), true)) {
@@ -1181,53 +1166,6 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			return 'frontend';
 		}
 
-		private function is_safe_warm_generation_context() {
-			return in_array($this->get_media_generation_context(), array('warm', 'cron', 'stale', 'manual'), true);
-		}
-
-		private function get_on_demand_max_conversions_per_request() {
-			$context = $this->get_media_generation_context();
-			// Frontend/page-cache/warm/stale renders must not become bulk image converters.
-			// Explicit admin/CLI media queue and bulk conversion paths call generate_attachment_formats()
-			// directly and are intentionally not limited by this on-demand budget.
-			if ('manual' === $context) {
-				$default = 100;
-			} elseif (in_array($context, array('warm', 'cron', 'stale'), true)) {
-				$default = 2;
-			} else {
-				$default = 1;
-			}
-			if (defined('UCWP_MEDIA_ON_DEMAND_MAX_PER_REQUEST')) {
-				$default = (int) UCWP_MEDIA_ON_DEMAND_MAX_PER_REQUEST;
-			}
-			$limit = (int) apply_filters('ucwp_media_on_demand_max_conversions_per_request', $default, $context);
-			$upper = 'manual' === $context ? 100 : 10;
-			return max(0, min($upper, $limit));
-		}
-
-		private function get_on_demand_timeout_seconds() {
-			$context = $this->get_media_generation_context();
-			if ('manual' === $context) {
-				$default = 10.0;
-			} elseif (in_array($context, array('warm', 'cron', 'stale'), true)) {
-				$default = 2.5;
-			} else {
-				$default = 1.5;
-			}
-			if (defined('UCWP_MEDIA_ON_DEMAND_TIMEOUT_SECONDS')) {
-				$default = (float) UCWP_MEDIA_ON_DEMAND_TIMEOUT_SECONDS;
-			}
-			$timeout = (float) apply_filters('ucwp_media_on_demand_timeout_seconds', $default, $context);
-			$upper = 'manual' === $context ? 60.0 : 10.0;
-			return max(0.1, min($upper, $timeout));
-		}
-
-		private function get_on_demand_lock_ttl_seconds() {
-			$default = defined('UCWP_MEDIA_ON_DEMAND_LOCK_TTL') ? (int) UCWP_MEDIA_ON_DEMAND_LOCK_TTL : 120;
-			$ttl = (int) apply_filters('ucwp_media_on_demand_lock_ttl_seconds', $default);
-			return max(10, min(DAY_IN_SECONDS, $ttl));
-		}
-
 		private function is_frontend_on_demand_request() {
 			if (is_admin() || wp_doing_ajax() || (defined('REST_REQUEST') && REST_REQUEST)) {
 				return false;
@@ -1241,162 +1179,4 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			return in_array($method, array('GET', 'HEAD'), true);
 		}
 
-		private function can_start_on_demand_conversion() {
-			if (!$this->is_safe_warm_generation_context() && !$this->is_frontend_on_demand_request()) {
-				return false;
-			}
-
-			$max = $this->get_on_demand_max_conversions_per_request();
-			if ($max <= 0 || $this->on_demand_conversions_started >= $max) {
-				return false;
-			}
-
-			$elapsed = microtime(true) - $this->get_on_demand_request_started_at();
-			return $elapsed < $this->get_on_demand_timeout_seconds();
-		}
-
-		private function get_on_demand_lock_dir() {
-			if (!defined('UCWP_CACHE_DIR') || '' === (string) UCWP_CACHE_DIR) {
-				return false;
-			}
-
-			$dir = trailingslashit(UCWP_CACHE_DIR) . 'media-locks/';
-			if (!$this->optimized_storage_ensure_directory($dir) || !ucwp_path_is_writable($dir)) {
-				return false;
-			}
-
-			$index = trailingslashit($dir) . 'index.php';
-			if (!$this->optimized_storage_path_exists($index)) {
-				ucwp_safe_file_put_contents($index, "<?php\n// Silence is golden.\n", 0, 'media_on_demand_lock_index');
-				$this->optimized_storage_forget_path($index);
-			}
-
-			return trailingslashit($dir);
-		}
-
-		private function acquire_on_demand_image_lock($source_file, $format) {
-			$lock_dir = $this->get_on_demand_lock_dir();
-			if (!$lock_dir) {
-				return false;
-			}
-
-			$source_real = realpath($source_file);
-			if (!is_string($source_real) || '' === $source_real) {
-				return false;
-			}
-
-			$key = hash('sha256', strtolower((string) $format) . '|' . $this->normalize_local_path_for_compare($source_real));
-			$lock_file = $lock_dir . 'image-' . $key . '.lock';
-			$ttl = $this->get_on_demand_lock_ttl_seconds();
-
-			if (file_exists($lock_file)) {
-				$mtime = (int) @filemtime($lock_file);
-				if ($mtime > 0 && (time() - $mtime) > $ttl) {
-					ucwp_safe_unlink($lock_file);
-				}
-			}
-
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Atomic on-demand image conversion lock requires native exclusive create semantics.
-			$handle = @fopen($lock_file, 'x');
-			if (!is_resource($handle)) {
-				return false;
-			}
-
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Writes only to a path-guarded UltraCache lock file.
-			@fwrite($handle, json_encode(array(
-				'pid' => function_exists('getmypid') ? (int) getmypid() : 0,
-				'time' => time(),
-				'format' => strtolower((string) $format),
-				'source' => $source_real,
-			)) . "\n");
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle.
-			@fclose($handle);
-
-			return $lock_file;
-		}
-
-		private function release_on_demand_image_lock($lock_file) {
-			if (!is_string($lock_file) || '' === $lock_file || !$this->optimized_storage_path_exists($lock_file, true)) {
-				return;
-			}
-
-			$lock_dir = $this->get_on_demand_lock_dir();
-			if (!$lock_dir || !$this->path_is_within_root($lock_file, $lock_dir)) {
-				return;
-			}
-
-			ucwp_safe_unlink($lock_file);
-		}
-
-		private function ensure_generated_variant($source_file, $format, $force_generation_budget = false) {
-			$source_file = (string) $source_file;
-			$format      = strtolower((string) $format);
-
-			if (!$this->is_media_optimization_enabled() || !$this->is_generate_on_demand_enabled() || !$this->media_output_mode_allows($format)) {
-				return false;
-			}
-
-			// 2.57.135: on-demand generation must not run during frontend/cache, warm,
-			// cron or stale HTML rewrites. Those paths may only use already-existing
-			// optimized variants; explicit media conversion jobs handle generation.
-			if ('manual' !== $this->get_media_generation_context()) {
-				return false;
-			}
-
-			if ('' === $source_file || !in_array($format, array('avif', 'webp'), true) || !$this->optimized_storage_readable_source_exists($source_file)) {
-				return false;
-			}
-
-			if (!$this->is_allowed_source_file($source_file)) {
-				return false;
-			}
-
-			$existing = ('avif' === $format)
-				? $this->get_avif_path_from_source($source_file)
-				: $this->get_webp_path_from_source($source_file);
-
-			if (!$existing) {
-				return false;
-			}
-
-			if ($this->optimized_storage_path_exists($existing)) {
-				return true;
-			}
-
-			$force_generation_budget = (bool) $force_generation_budget && 'manual' === $this->get_media_generation_context();
-			if (!$force_generation_budget && !$this->can_start_on_demand_conversion()) {
-				return false;
-			}
-
-			$lock_file = $this->acquire_on_demand_image_lock($source_file, $format);
-			if (!$lock_file) {
-				return false;
-			}
-
-			try {
-				if ($this->optimized_storage_path_exists($existing, true)) {
-					return true;
-				}
-
-				if (!$force_generation_budget && !$this->can_start_on_demand_conversion()) {
-					return false;
-				}
-
-				// Count every on-demand conversion. Frontend, warm, cron and stale page renders
-				// must obey the same small budget so cache builds cannot become bulk media jobs.
-				$this->on_demand_conversions_started++;
-
-				$generated = ('avif' === $format)
-					? (bool) $this->to_avif($source_file)
-					: (bool) $this->to_webp($source_file);
-
-				if ($generated && method_exists($this, 'sync_media_queue_after_on_demand_generation')) {
-					$this->sync_media_queue_after_on_demand_generation($source_file, $format);
-				}
-
-				return $generated;
-			} finally {
-				$this->release_on_demand_image_lock($lock_file);
-			}
-		}
 }

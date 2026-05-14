@@ -222,7 +222,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				return $status;
 			}
 
-			$contents = file_get_contents($dropin);
+			$contents = ucwp_safe_file_get_contents($dropin, 'object_cache_dropin_status_read', true);
 			if (!is_string($contents) || '' === $contents) {
 				$status['reason'] = 'empty_or_read_failed';
 				return $status;

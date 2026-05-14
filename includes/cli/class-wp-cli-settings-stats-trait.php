@@ -311,14 +311,6 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 'warning'
             );
 
-            $invalid_lcp_combo = !empty($settings['frontendSafeModeEnabled']) && !empty($settings['lcpBoundaryDeferEnabled']);
-            $this->self_test_add_check(
-                $checks,
-                'LCP Boundary Defer guard',
-                !$invalid_lcp_combo,
-                $invalid_lcp_combo ? 'LCP Boundary Defer is enabled while Frontend Safe Mode is active.' : 'LCP Boundary Defer setting is compatible with current safe-mode settings.'
-            );
-
             $cache_dir = defined('UCWP_CACHE_DIR') ? UCWP_CACHE_DIR : WP_CONTENT_DIR . '/cache/ultracache';
             $this->self_test_add_check(
                 $checks,
@@ -387,7 +379,8 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
 
             $manifest_path = trailingslashit($cache_dir) . 'css-bundles/manifest.json';
             $css_bundle_expected = !empty($settings['homepageCssBundleEnabled']);
-            $manifest_ok = !$css_bundle_expected || (file_exists($manifest_path) && is_readable($manifest_path) && is_array(json_decode((string) file_get_contents($manifest_path), true)));
+            $manifest_raw = ($css_bundle_expected && file_exists($manifest_path) && is_readable($manifest_path)) ? ucwp_safe_file_get_contents($manifest_path, 'wp_cli_css_bundle_manifest_read', true) : '';
+            $manifest_ok = !$css_bundle_expected || (is_string($manifest_raw) && is_array(json_decode((string) $manifest_raw, true)));
             $this->self_test_add_check(
                 $checks,
                 'CSS bundle manifest',

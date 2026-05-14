@@ -54,7 +54,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'delayIconFontsExcludeList'  => '',
                 'cssBundleScope'            => 'homepage',
                 'pageCssBundleOnEntryEnabled' => false,
-                'frontendSafeModeEnabled'    => false,
+                'pageAsyncBundleOnEntryEnabled' => false,
                 'sliderSafeModeEnabled'       => false,
                 'clsDimensionsEnabled'       => false,
                 'asyncCssEnabled'            => false,
@@ -104,11 +104,12 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cronWarmStartAfterCleanup'  => false,
                 'cronWarmStartAfterManualPurge' => false,
                 'cronWarmPagesPerMinute'     => 2,
-                'scheduledWarmLimit'         => 8,
+                'scheduledWarmLimit'         => 9,
                 'warmMenuLocation'           => '',
                 'warmMenuDepth'              => '',
                 'warmFullSiteSources'        => '',
                 'staleWhileRevalidateEnabled'=> false,
+                'debugHeadersEnabled'        => false,
                 'cacheFreshTtlMinutes'       => 15,
                 'cacheMaxStaleMinutes'       => 720,
                 'cacheExceptionPaths'        => implode("\n", self::get_default_excluded_paths()),
@@ -513,7 +514,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'contentUrlCount' => 0,
                 'estimatedTotal' => 0,
                 'maxUrls' => 5000,
-                'defaultScheduledWarmLimit' => 8,
+                'defaultScheduledWarmLimit' => 9,
                 'suggestedScheduledWarmLimit' => 0,
                 'scheduledWarmLimitDerived' => false,
                 'scheduledWarmLimitSource' => 'user_cap',
@@ -689,6 +690,28 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
         private static function sanitize_excluded_paths_setting($value, $limit = 200)
         {
             return self::normalize_multiline_setting_with_callback($value, array(__CLASS__, 'sanitize_excluded_path_line'), $limit);
+        }
+
+        private static function sanitize_positive_integer_setting($value, $default, $min = 1)
+        {
+            $default = max((int) $min, (int) $default);
+            $min = max(0, (int) $min);
+
+            if (is_string($value)) {
+                $value = trim($value);
+                if ('' === $value || !preg_match('/^\d+$/', $value)) {
+                    return $default;
+                }
+                $value = (int) $value;
+            } elseif (is_int($value)) {
+                $value = (int) $value;
+            } elseif (is_float($value) && floor($value) === $value) {
+                $value = (int) $value;
+            } else {
+                return $default;
+            }
+
+            return max($min, $value);
         }
 
         private static function sanitize_bounded_integer_setting($value, $default, $min, $max)
@@ -1441,6 +1464,19 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $defaults = self::get_dashboard_defaults();
             $settings = wp_parse_args($settings, $defaults);
 
+            // Canonicalize every boolean dashboard setting before any runtime
+            // mapping or !empty() checks. This prevents imported/CLI/direct
+            // option values such as "false", "0", "off", or null from
+            // being treated as enabled.
+            foreach ($defaults as $setting_key => $default_value) {
+                if (is_bool($default_value)) {
+                    $settings[$setting_key] = self::normalize_boolean_setting_value(
+                        $settings[$setting_key] ?? $default_value,
+                        $default_value
+                    );
+                }
+            }
+
             $settings['cronWarmPagesPerMinute']    = max(0, min(600, absint($settings['cronWarmPagesPerMinute'])));
             $settings['warmMenuLocation']          = sanitize_key((string) $settings['warmMenuLocation']);
             $settings['warmMenuDepth']             = in_array((string) $settings['warmMenuDepth'], array('1', '2', '3', 'all'), true) ? (string) $settings['warmMenuDepth'] : '';
@@ -1460,10 +1496,10 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 }
             }
             $settings['warmFullSiteSources']       = implode(',', array_keys($warm_full_site_clean));
-            $settings['scheduledWarmLimit']        = max(0, min(5000, absint($settings['scheduledWarmLimit'])));
-            $settings['varnishCliTimeoutSeconds']  = max(1, min(30, absint($settings['varnishCliTimeoutSeconds'])));
-            $settings['cacheFreshTtlMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1, 1440);
-            $settings['cacheMaxStaleMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], (int) $settings['cacheFreshTtlMinutes'], 10080);
+            $settings['scheduledWarmLimit']        = max(1, min(5000, absint($settings['scheduledWarmLimit'])));
+            $settings['varnishCliTimeoutSeconds']  = max(1, min(15, absint($settings['varnishCliTimeoutSeconds'])));
+            $settings['cacheFreshTtlMinutes']      = self::sanitize_positive_integer_setting($settings['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1);
+            $settings['cacheMaxStaleMinutes']      = max((int) $settings['cacheFreshTtlMinutes'], self::sanitize_positive_integer_setting($settings['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], 1));
             $settings['cacheExceptionPaths']       = self::sanitize_excluded_paths_setting($settings['cacheExceptionPaths']);
             $settings['cacheExceptionQueryArgs']   = self::sanitize_setting_key_list($settings['cacheExceptionQueryArgs']);
             $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
@@ -1484,6 +1520,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['delayIconFontsExcludeList'] = self::normalize_textarea_setting($settings['delayIconFontsExcludeList']);
             $settings['homepageCssBundleMode'] = self::sanitize_homepage_css_bundle_mode($settings['homepageCssBundleMode']);
             $settings['cssBundleScope'] = self::sanitize_css_bundle_scope($settings['cssBundleScope'] ?? 'homepage');
+            if (!empty($settings['pageAsyncBundleOnEntryEnabled'])) {
+                $settings['pageCssBundleOnEntryEnabled'] = false;
+            }
             $settings['asyncCssExcludeList']       = self::normalize_textarea_setting($settings['asyncCssExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = self::normalize_textarea_setting($settings['delayNonCriticalJsExcludeList']);
             $settings['assetCleanupExcludeList'] = self::normalize_textarea_setting($settings['assetCleanupExcludeList']);
@@ -1503,20 +1542,14 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['redisPrefix']               = self::sanitize_redis_prefix($settings['redisPrefix']);
             $settings['redisUseTls']               = !empty($settings['redisUseTls']);
             $settings['redisPersistent']           = !empty($settings['redisPersistent']);
-            $settings['redisConnectTimeoutMs']     = self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], $defaults['redisConnectTimeoutMs'], 50, 5000);
-            $settings['redisReadTimeoutMs']        = self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], $defaults['redisReadTimeoutMs'], 50, 5000);
+            $settings['redisConnectTimeoutMs']     = self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], $defaults['redisConnectTimeoutMs'], 50, 15000);
+            $settings['redisReadTimeoutMs']        = self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], $defaults['redisReadTimeoutMs'], 50, 15000);
             $settings['varnishCliMode']            = self::sanitize_varnish_mode($settings['varnishCliMode']);
             $settings['varnishCliServers']         = self::sanitize_varnish_servers_string($settings['varnishCliServers'], $settings['varnishCliMode']);
             $settings['varnishCliKey']             = trim((string) $settings['varnishCliKey']);
             $settings['varnishCliMethod']          = ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN';
 
-            // LCP Boundary Defer stays unavailable in broad Frontend Safe Mode, but it remains
-            // user-controllable with Slider/Hero Safe Mode. Slider/Hero mode now uses the same
-            // conservative boundary deferral path while keeping slider/runtime assets protected.
-            if (!empty($settings['frontendSafeModeEnabled'])) {
-                $settings['lcpBoundaryDeferEnabled'] = false;
-                $settings['lazyLoadImagesEnabled'] = false;
-            }
+            unset($settings['frontendSafeModeEnabled']);
 
             if ($validate_support) {
                 $compression_support = self::get_compression_support_status();
@@ -1782,6 +1815,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $defer_stage_balanced = $delay_safe_third_party_js_enabled || $delay_functional_third_party_js_enabled || $delay_all_third_party_js_enabled || $defer_stage_aggressive;
             $defer_stage_safe = $defer_js_enabled || $defer_stage_balanced;
             $manual_lcp_selector_split = self::split_manual_lcp_selector_setting($ui['manualLcpHeroSelector'] ?? '');
+            $defaults = self::get_dashboard_defaults();
 
             self::$settings_cache = array(
                 'enabled'                      => !empty($ui['pageCacheEnabled']),
@@ -1796,8 +1830,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'redis_prefix'                 => self::sanitize_redis_prefix($ui['redisPrefix']),
                 'redis_use_tls'                => !empty($ui['redisUseTls']),
                 'redis_persistent'             => !empty($ui['redisPersistent']),
-                'redis_connect_timeout_ms'     => self::sanitize_bounded_integer_setting($ui['redisConnectTimeoutMs'], 200, 50, 5000),
-                'redis_read_timeout_ms'        => self::sanitize_bounded_integer_setting($ui['redisReadTimeoutMs'], 200, 50, 5000),
+                'redis_connect_timeout_ms'     => self::sanitize_bounded_integer_setting($ui['redisConnectTimeoutMs'], 200, 50, 15000),
+                'redis_read_timeout_ms'        => self::sanitize_bounded_integer_setting($ui['redisReadTimeoutMs'], 200, 50, 15000),
                 'cache_logged_in_users'        => false,
                 'cache_query_strings'          => !empty($ui['cacheQueryStringsEnabled']),
                 'cache_query_allowlist'        => $query_allowlist,
@@ -1832,8 +1866,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'delay_icon_fonts_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsExcludeList'])),
                 'homepage_css_bundle_mode'    => self::sanitize_homepage_css_bundle_mode($ui['homepageCssBundleMode']),
                 'css_bundle_scope'            => self::sanitize_css_bundle_scope($ui['cssBundleScope'] ?? 'homepage'),
-                'page_css_bundle_on_entry'    => !empty($ui['pageCssBundleOnEntryEnabled']),
-                'frontend_safe_mode'          => !empty($ui['frontendSafeModeEnabled']),
+                'page_css_bundle_on_entry'    => !empty($ui['pageCssBundleOnEntryEnabled']) && empty($ui['pageAsyncBundleOnEntryEnabled']),
+                'page_css_bundle_async_on_entry' => !empty($ui['pageAsyncBundleOnEntryEnabled']),
                 'slider_safe_mode'            => !empty($ui['sliderSafeModeEnabled']),
                 'cls_dimensions'               => !empty($ui['clsDimensionsEnabled']),
                 'async_css'                    => !empty($ui['asyncCssEnabled']),
@@ -1867,7 +1901,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'varnish_cli_mode'             => self::sanitize_varnish_mode($ui['varnishCliMode']),
                 'varnish_cli_servers'          => self::sanitize_varnish_servers_string($ui['varnishCliServers'], self::sanitize_varnish_mode($ui['varnishCliMode'])),
                 'varnish_cli_key'              => trim((string) $ui['varnishCliKey']),
-                'varnish_cli_timeout_seconds'  => max(1, min(30, absint($ui['varnishCliTimeoutSeconds']))),
+                'varnish_cli_timeout_seconds'  => max(1, min(15, absint($ui['varnishCliTimeoutSeconds']))),
                 'varnish_cli_method'           => ('PURGE' === strtoupper(trim((string) $ui['varnishCliMethod']))) ? 'PURGE' : 'BAN',
                 'media_optimization_enabled'   => !empty($ui['mediaOptimizationEnabled']),
                 'media_generate_on_upload'     => !empty($ui['mediaGenerateOnUploadEnabled']),
@@ -1887,14 +1921,15 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cron_warm_enabled'            => !empty($ui['cronWarmEnabled']),
                 'cron_warm_start_after_cleanup'=> !empty($ui['cronWarmStartAfterCleanup']),
                 'cron_warm_start_after_manual_purge'=> !empty($ui['cronWarmStartAfterManualPurge']),
+                'debug_headers_enabled'        => !empty($ui['debugHeadersEnabled']),
                 'cron_warm_pages_per_minute'   => max(0, absint($ui['cronWarmPagesPerMinute'])),
-                'scheduled_warm_limit'         => max(0, absint($ui['scheduledWarmLimit'])),
+                'scheduled_warm_limit'         => max(1, absint($ui['scheduledWarmLimit'])),
                 'warm_menu_location'           => sanitize_key((string) ($ui['warmMenuLocation'] ?? '')),
                 'warm_menu_depth'              => in_array((string) ($ui['warmMenuDepth'] ?? ''), array('1', '2', '3', 'all'), true) ? (string) $ui['warmMenuDepth'] : '',
                 'warm_full_site_sources'       => self::parse_textarea_setting(str_replace(',', "\n", (string) ($ui['warmFullSiteSources'] ?? ''))),
                 'stale_while_revalidate_enabled' => !empty($ui['staleWhileRevalidateEnabled']),
-                'cache_fresh_ttl_minutes'      => max(1, absint($ui['cacheFreshTtlMinutes'])),
-                'cache_max_stale_minutes'      => max(absint($ui['cacheFreshTtlMinutes']), absint($ui['cacheMaxStaleMinutes'])),
+                'cache_fresh_ttl_minutes'      => self::sanitize_positive_integer_setting($ui['cacheFreshTtlMinutes'] ?? $defaults['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1),
+                'cache_max_stale_minutes'      => max(self::sanitize_positive_integer_setting($ui['cacheFreshTtlMinutes'] ?? $defaults['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1), self::sanitize_positive_integer_setting($ui['cacheMaxStaleMinutes'] ?? $defaults['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], 1)),
                 'excluded_paths'               => $excluded_paths,
                 'excluded_query_args'          => $excluded_query_args,
             );

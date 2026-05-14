@@ -9,11 +9,12 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Media_Queue_Trait
 {
-	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- UltraCache uses a private custom media conversion queue table with validated table identifiers.
+	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache uses private custom media conversion queue tables with validated table identifiers.
 
 		private function get_media_queue_table_name() {
 			global $wpdb;
-			return $wpdb->prefix . 'ultracache_media_queue';
+			$table = $wpdb->prefix . 'ultracache_media_queue';
+			return function_exists('ucwp_validate_custom_table_name') ? ucwp_validate_custom_table_name($table, 'media_queue') : $table;
 		}
 
 		private function media_queue_table_exists() {
@@ -50,6 +51,7 @@ trait Ultra_Cache_Media_Queue_Trait
 				PRIMARY KEY  (id),
 				UNIQUE KEY attachment_format (attachment_id, format),
 				KEY status_id (status, id),
+				KEY format_status_id (format, status, id),
 				KEY updated_at (updated_at)
 			) {$charset_collate};";
 
@@ -222,11 +224,12 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 
 			$count = $wpdb->query($wpdb->prepare(
-				"UPDATE %i SET status = 'pending', last_error = %s, updated_at = %s, started_at = NULL, completed_at = NULL WHERE format = %s AND status IN ('done','skipped')",
+				"UPDATE %i SET status = 'pending', last_error = %s, updated_at = %s, started_at = NULL, completed_at = NULL WHERE format = %s AND status IN ('done','skipped') LIMIT %d",
 				$table,
 				'Optimized image files were missing; queued for repair.',
 				current_time('mysql'),
-				$format
+				$format,
+				1000
 			));
 
 			return array_merge(array('repaired' => true, 'requeued' => is_numeric($count) ? (int) $count : 0, 'reason' => 'optimized_storage_missing'), $health);
@@ -248,7 +251,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$signature = $this->get_attachment_source_signature($attachment_id);
 			$now = current_time('mysql');
 
-			$existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, source_mtime, source_size, attempts FROM {$table} WHERE attachment_id = %d AND format = %s", $attachment_id, $format), ARRAY_A);
+			$existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, source_mtime, source_size, attempts FROM %i WHERE attachment_id = %d AND format = %s", $table, $attachment_id, $format), ARRAY_A);
 			if (is_array($existing) && !empty($existing['id'])) {
 				$next_status = $status;
 				if ('pending' === $status && in_array((string) $existing['status'], array('done', 'skipped'), true)) {
@@ -343,7 +346,8 @@ trait Ultra_Cache_Media_Queue_Trait
 
 		private function get_media_page_refs_table_name() {
 			global $wpdb;
-			return $wpdb->prefix . 'ultracache_media_page_refs';
+			$table = $wpdb->prefix . 'ultracache_media_page_refs';
+			return function_exists('ucwp_validate_custom_table_name') ? ucwp_validate_custom_table_name($table, 'media_page_refs') : $table;
 		}
 
 		private function media_page_refs_table_exists() {
@@ -523,7 +527,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			$table = $this->get_media_page_refs_table_name();
 			$now = current_time('mysql');
 			$row = $wpdb->get_row($wpdb->prepare(
-				"SELECT id, missing_formats, status FROM {$table} WHERE page_url_hash = %s AND attachment_id = %d AND format = %s LIMIT 1",
+				"SELECT id, missing_formats, status FROM %i WHERE page_url_hash = %s AND attachment_id = %d AND format = %s LIMIT 1",
+				$table,
 				$page_key,
 				$attachment_id,
 				$format
@@ -532,7 +537,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			if (is_array($row) && !empty($row['id'])) {
 				$missing_formats = $this->merge_on_demand_missing_format($row['missing_formats'] ?? '', $missing_format);
 				$wpdb->query($wpdb->prepare(
-					"UPDATE {$table} SET page_url = %s, missing_formats = %s, status = 'pending', updated_at = %s, purged_at = NULL, purge_ready_at = NULL WHERE id = %d",
+					"UPDATE %i SET page_url = %s, missing_formats = %s, status = 'pending', updated_at = %s, purged_at = NULL, purge_ready_at = NULL WHERE id = %d",
+					$table,
 					$page_url,
 					$missing_formats,
 					$now,
@@ -574,7 +580,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			$converted = !empty($result['converted']) || !empty($result['alreadyOptimized']) || ((int) ($result['skippedExisting'] ?? 0) > 0) || (((int) ($result['avif'] ?? 0) + (int) ($result['webp'] ?? 0)) > 0);
 
 			$page_rows = $wpdb->get_results($wpdb->prepare(
-				"SELECT DISTINCT page_url_hash FROM {$table} WHERE attachment_id = %d AND format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00') LIMIT 250",
+				"SELECT DISTINCT page_url_hash FROM %i WHERE attachment_id = %d AND format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00') LIMIT 250",
+				$table,
 				$attachment_id,
 				$format
 			), ARRAY_A);
@@ -584,7 +591,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 
 			$wpdb->query($wpdb->prepare(
-				"UPDATE {$table} SET status = 'complete', converted = %d, completed_at = %s, updated_at = %s WHERE attachment_id = %d AND format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+				"UPDATE %i SET status = 'complete', converted = %d, completed_at = %s, updated_at = %s WHERE attachment_id = %d AND format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+				$table,
 				$converted ? 1 : 0,
 				$now,
 				$now,
@@ -600,7 +608,8 @@ trait Ultra_Cache_Media_Queue_Trait
 				}
 
 				$summary = $wpdb->get_row($wpdb->prepare(
-					"SELECT MAX(page_url) AS page_url, SUM(CASE WHEN status <> 'complete' THEN 1 ELSE 0 END) AS pending_media, SUM(CASE WHEN converted = 1 THEN 1 ELSE 0 END) AS converted_media FROM {$table} WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+					"SELECT MAX(page_url) AS page_url, SUM(CASE WHEN status <> 'complete' THEN 1 ELSE 0 END) AS pending_media, SUM(CASE WHEN converted = 1 THEN 1 ELSE 0 END) AS converted_media FROM %i WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+					$table,
 					$page_key
 				), ARRAY_A);
 
@@ -613,7 +622,8 @@ trait Ultra_Cache_Media_Queue_Trait
 				$page_url = isset($summary['page_url']) ? esc_url_raw((string) $summary['page_url']) : '';
 				if ($pending <= 0 && $converted_count > 0 && '' !== $page_url) {
 					$wpdb->query($wpdb->prepare(
-						"UPDATE {$table} SET purge_ready_at = %s, updated_at = %s WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+						"UPDATE %i SET purge_ready_at = %s, updated_at = %s WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+						$table,
 						$now,
 						$now,
 						$page_key
@@ -638,7 +648,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			foreach ($urls as $url) {
 				$page_key = md5($url);
 				$updated = $wpdb->query($wpdb->prepare(
-					"UPDATE {$table} SET purged_at = %s, updated_at = %s WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+					"UPDATE %i SET purged_at = %s, updated_at = %s WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+					$table,
 					$now,
 					$now,
 					$page_key
@@ -753,32 +764,10 @@ trait Ultra_Cache_Media_Queue_Trait
 			$table = $this->get_media_queue_table_name();
 			if (null !== $format) {
 				$format = $this->normalize_media_queue_format($format);
-				return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE status = 'pending' AND format = %s", $format));
+				return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM %i WHERE status = 'pending' AND format = %s", $table, $format));
 			}
 
-			return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status = 'pending'");
-		}
-
-		private function retire_on_demand_partial_media_queue_rows() {
-			if (!$this->media_queue_table_exists()) {
-				return 0;
-			}
-
-			global $wpdb;
-			$table = $this->get_media_queue_table_name();
-			$count = $wpdb->query($wpdb->prepare(
-				"UPDATE {$table} SET status = 'skipped', last_error = %s, updated_at = %s, started_at = NULL, completed_at = %s WHERE status = 'pending' AND format IN ('avif','webp','both') AND last_error LIKE %s",
-				'Frontend on-demand partial queue was retired; use manual bulk or WP-CLI media conversion to complete missing variants.',
-				current_time('mysql'),
-				current_time('mysql'),
-				'%Partially optimized by on-demand generation%'
-			));
-
-			if (is_numeric($count) && (int) $count > 0) {
-				$this->invalidate_media_work_summary_cache();
-			}
-
-			return is_numeric($count) ? (int) $count : 0;
+			return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM %i WHERE status = 'pending'", $table));
 		}
 
 		public function reset_stale_media_queue_items() {
@@ -788,7 +777,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$cutoff = gmdate('Y-m-d H:i:s', time() - self::MEDIA_QUEUE_PROCESSING_TTL);
-			$result = $wpdb->query($wpdb->prepare("UPDATE {$table} SET status = 'pending', updated_at = %s WHERE status = 'processing' AND updated_at < %s", current_time('mysql'), get_date_from_gmt($cutoff)));
+			$result = $wpdb->query($wpdb->prepare("UPDATE %i SET status = 'pending', updated_at = %s WHERE status = 'processing' AND updated_at < %s", $table, current_time('mysql'), get_date_from_gmt($cutoff)));
 			return is_numeric($result) ? (int) $result : 0;
 		}
 
@@ -825,7 +814,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			);
 		}
 
-		private function append_media_queue_build_batch($format = 'best', $limit = 500) {
+		private function append_media_queue_build_batch($format = 'best', $limit = 500, array $budget = array()) {
 			$format = $this->normalize_media_queue_format($format);
 			$limit = max(25, min(500, (int) $limit));
 			$state = $this->get_media_queue_build_state($format);
@@ -836,13 +825,23 @@ trait Ultra_Cache_Media_Queue_Trait
 			$batch = $this->get_media_ids_batch((int) $state['offset'], $limit, false);
 			$items = array_map('intval', (array) ($batch['items'] ?? array()));
 			$queued = 0;
+			$processed = 0;
+			$pause_reason = '';
 			foreach ($items as $attachment_id) {
+				$pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+				if ('' !== $pause_reason) {
+					break;
+				}
+				$processed++;
 				if ($this->upsert_media_queue_item($attachment_id, $format, 'pending', '', 0)) {
 					$queued++;
 				}
 			}
-			$next_offset = (int) ($batch['nextOffset'] ?? ((int) $state['offset'] + count($items)));
+			$next_offset = '' !== $pause_reason ? ((int) $state['offset'] + $processed) : (int) ($batch['nextOffset'] ?? ((int) $state['offset'] + count($items)));
 			$complete = empty($batch['hasMore']) || empty($items);
+			if ('' !== $pause_reason && !empty($items)) {
+				$complete = false;
+			}
 			update_option(self::MEDIA_QUEUE_BUILD_STATE_OPTION, array(
 				'format' => $format,
 				'offset' => $next_offset,
@@ -851,75 +850,87 @@ trait Ultra_Cache_Media_Queue_Trait
 				'updatedAt' => time(),
 			), false);
 
-			return array('scanned' => count($items), 'queued' => $queued, 'complete' => $complete, 'offset' => $next_offset);
+			return array('scanned' => $processed, 'queued' => $queued, 'complete' => $complete, 'offset' => $next_offset, 'pauseReason' => $pause_reason);
 		}
 
-		public function rebuild_media_conversion_queue($format = 'best', $only_missing = true, $limit = 0) {
+		public function rebuild_media_conversion_queue($format = 'best', $only_missing = true, $limit = 0, array $args = array()) {
 			if (!$this->ensure_media_queue_table()) {
 				return array('success' => false, 'message' => 'Media queue table could not be created.');
 			}
 
-			global $wpdb;
-			$table = $this->get_media_queue_table_name();
 			$format = $this->normalize_media_queue_format($format);
 			$limit = max(0, (int) $limit);
 			$is_limited_sample = ($limit > 0);
+			$reset = array_key_exists('reset', $args) ? (bool) $args['reset'] : !$is_limited_sample;
+			$time_budget = isset($args['time_budget']) ? max(0, (int) $args['time_budget']) : null;
+			$budget = function_exists('ucwp_get_safe_operation_budget') ? ucwp_get_safe_operation_budget('media_rebuild', $time_budget, 45) : array('started_at' => microtime(true), 'seconds' => 20);
 
-			if (!$is_limited_sample) {
-				$wpdb->delete($table, array('format' => $format), array('%s'));
-				update_option(self::MEDIA_QUEUE_BUILD_STATE_OPTION, array(
-					'format' => $format,
-					'offset' => 0,
-					'complete' => false,
-					'mode' => 'full',
-					'updatedAt' => time(),
-				), false);
+			if (!$is_limited_sample && $reset) {
+				$this->start_media_queue_rebuild($format);
 			}
 
-			$offset = 0;
-			$batch_size = 250;
 			$queued = 0;
 			$scanned = 0;
-			$batch = array('hasMore' => false);
-			do {
-				$batch = $this->get_media_ids_batch($offset, $batch_size, false);
-				$items = array_map('intval', (array) ($batch['items'] ?? array()));
-				foreach ($items as $attachment_id) {
-					if ($limit > 0 && $scanned >= $limit) {
-						break 2;
-					}
-					$scanned++;
-					if ($this->upsert_media_queue_item($attachment_id, $format, 'pending', '', 0)) {
-						$queued++;
-					}
-				}
-				$offset = (int) ($batch['nextOffset'] ?? ($offset + count($items)));
-			} while (!empty($batch['hasMore']) && !empty($items));
+			$pause_reason = '';
 
 			if (!$is_limited_sample) {
-				update_option(self::MEDIA_QUEUE_BUILD_STATE_OPTION, array(
-					'format' => $format,
-					'offset' => $offset,
-					'complete' => empty($batch['hasMore']),
-					'mode' => 'full',
-					'updatedAt' => time(),
-				), false);
+				do {
+					$chunk = $this->append_media_queue_build_batch($format, 250, $budget);
+					$queued += (int) ($chunk['queued'] ?? 0);
+					$scanned += (int) ($chunk['scanned'] ?? 0);
+					$pause_reason = (string) ($chunk['pauseReason'] ?? '');
+					if (!empty($chunk['complete']) || '' !== $pause_reason || (int) ($chunk['scanned'] ?? 0) < 1) {
+						break;
+					}
+				} while (true);
+			} else {
+				$offset = 0;
+				$batch_size = min(250, max(25, $limit));
+				$batch = array('hasMore' => false);
+				do {
+					$pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+					if ('' !== $pause_reason) {
+						break;
+					}
+					$batch = $this->get_media_ids_batch($offset, $batch_size, false);
+					$items = array_map('intval', (array) ($batch['items'] ?? array()));
+					foreach ($items as $attachment_id) {
+						$pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+						if ('' !== $pause_reason || $scanned >= $limit) {
+							break 2;
+						}
+						$scanned++;
+						if ($this->upsert_media_queue_item($attachment_id, $format, 'pending', '', 0)) {
+							$queued++;
+						}
+					}
+					$offset = (int) ($batch['nextOffset'] ?? ($offset + count($items)));
+				} while (!empty($batch['hasMore']) && !empty($items) && $scanned < $limit);
 			}
 
 			$this->invalidate_media_work_summary_cache();
+			$status = $this->get_media_queue_status($format);
+			$complete = !empty($status['buildComplete']);
 			$message = $is_limited_sample
 				? 'Limited media queue sample scanned. Existing completed queue state was preserved.'
-				: 'Media conversion queue rebuilt.';
+				: ($complete ? 'Media conversion queue rebuilt.' : 'Media queue rebuild chunk complete. Continue rebuild to scan the remaining library.');
 
 			return array_merge(
 				array(
 					'success' => true,
 					'message' => $message,
-					'buildMode' => $is_limited_sample ? 'limited_sample' : 'full',
+					'buildMode' => $is_limited_sample ? 'limited_sample' : 'chunked',
 					'buildLimit' => $limit,
+					'queued' => $queued,
+					'scanned' => $scanned,
+					'onlyMissing' => (bool) $only_missing,
+					'hasMore' => !$complete,
+					'complete' => $complete,
+					'pauseReason' => $pause_reason,
+					'timeBudgetReached' => 'time_budget' === $pause_reason,
+					'memoryBudgetReached' => 'memory_budget' === $pause_reason,
 				),
-				$this->get_media_queue_status($format),
-				array('queued' => $queued, 'scanned' => $scanned, 'onlyMissing' => (bool) $only_missing)
+				$status
 			);
 		}
 
@@ -932,7 +943,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$format = $this->normalize_media_queue_format($format);
-			$rows = $wpdb->get_results($wpdb->prepare("SELECT status, COUNT(*) AS count FROM {$table} WHERE format = %s GROUP BY status", $format), ARRAY_A);
+			$rows = $wpdb->get_results($wpdb->prepare("SELECT status, COUNT(*) AS count FROM %i WHERE format = %s GROUP BY status", $table, $format), ARRAY_A);
 			$counts = array('pending' => 0, 'processing' => 0, 'done' => 0, 'failed' => 0, 'skipped' => 0);
 			foreach ((array) $rows as $row) {
 				$status = isset($row['status']) ? (string) $row['status'] : '';
@@ -994,9 +1005,9 @@ trait Ultra_Cache_Media_Queue_Trait
 
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
-			$rows = $wpdb->get_results($wpdb->prepare("SELECT id, attachment_id FROM {$table} WHERE format = %s AND status = 'pending' AND id > %d ORDER BY id ASC LIMIT %d", $format, $cursor, $limit), ARRAY_A);
+			$rows = $wpdb->get_results($wpdb->prepare("SELECT id, attachment_id FROM %i WHERE format = %s AND status = 'pending' AND id > %d ORDER BY id ASC LIMIT %d", $table, $format, $cursor, $limit), ARRAY_A);
 			if (empty($rows) && $cursor > 0 && !empty($status['pending'])) {
-				$rows = $wpdb->get_results($wpdb->prepare("SELECT id, attachment_id FROM {$table} WHERE format = %s AND status = 'pending' ORDER BY id ASC LIMIT %d", $format, $limit), ARRAY_A);
+				$rows = $wpdb->get_results($wpdb->prepare("SELECT id, attachment_id FROM %i WHERE format = %s AND status = 'pending' ORDER BY id ASC LIMIT %d", $table, $format, $limit), ARRAY_A);
 			}
 
 			$items = array();
@@ -1008,7 +1019,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 			$has_more = false;
 			if ('' !== $next_cursor) {
-				$has_more = (bool) $wpdb->get_var($wpdb->prepare("SELECT 1 FROM {$table} WHERE format = %s AND status = 'pending' AND id > %d LIMIT 1", $format, (int) $next_cursor));
+				$has_more = (bool) $wpdb->get_var($wpdb->prepare("SELECT 1 FROM %i WHERE format = %s AND status = 'pending' AND id > %d LIMIT 1", $table, $format, (int) $next_cursor));
 			} elseif (!empty($status['pending'])) {
 				$has_more = true;
 			}
@@ -1045,7 +1056,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$now = current_time('mysql');
-			$row = $wpdb->get_row($wpdb->prepare("SELECT id, attempts, status FROM {$table} WHERE attachment_id = %d AND format = %s", $attachment_id, $format), ARRAY_A);
+			$row = $wpdb->get_row($wpdb->prepare("SELECT id, attempts, status FROM %i WHERE attachment_id = %d AND format = %s", $table, $attachment_id, $format), ARRAY_A);
 			if (!is_array($row) || empty($row['id'])) {
 				return array('success' => false, 'attachment_id' => $attachment_id, 'message' => 'Queue row unavailable.');
 			}
@@ -1098,8 +1109,9 @@ trait Ultra_Cache_Media_Queue_Trait
 			$limit = isset($args['limit']) ? max(1, min(100, (int) $args['limit'])) : 10;
 			$format = $this->normalize_media_queue_format($args['format'] ?? 'best');
 			$only_missing = array_key_exists('only_missing', $args) ? (bool) $args['only_missing'] : true;
-			$time_budget = isset($args['time_budget']) ? max(0, (int) $args['time_budget']) : 20;
-			$started = microtime(true);
+			$time_budget = isset($args['time_budget']) ? max(0, (int) $args['time_budget']) : null;
+			$budget = function_exists('ucwp_get_safe_operation_budget') ? ucwp_get_safe_operation_budget('media_process', $time_budget, 45) : array('started_at' => microtime(true), 'seconds' => 20);
+			$started = (float) ($budget['started_at'] ?? microtime(true));
 
 			if (get_transient(self::MEDIA_QUEUE_PROCESS_LOCK)) {
 				$status = $this->get_media_queue_status($format);
@@ -1117,7 +1129,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			try {
 				$batch = $this->get_media_queue_batch(0, $limit, $format, true);
 				foreach ((array) ($batch['items'] ?? array()) as $attachment_id) {
-					if ($time_budget > 0 && (microtime(true) - $started) >= $time_budget) {
+					$loop_pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+					if ('' !== $loop_pause_reason) {
 						break;
 					}
 					$result = $this->process_queued_attachment((int) $attachment_id, $format, $only_missing);
@@ -1139,11 +1152,15 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 
 			$status = $this->get_media_queue_status($format);
-			$time_budget_reached = ($time_budget > 0 && (microtime(true) - $started) >= $time_budget && !empty($status['pending']));
+			$pause_detected_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+			$time_budget_reached = ('time_budget' === $pause_detected_reason && !empty($status['pending']));
+			$memory_budget_reached = ('memory_budget' === $pause_detected_reason && !empty($status['pending']));
 			$batch_limit_reached = (!empty($status['pending']) && $processed >= $limit);
 			$pause_reason = '';
 			if ($time_budget_reached) {
 				$pause_reason = 'time_budget';
+			} elseif ($memory_budget_reached) {
+				$pause_reason = 'memory_budget';
 			} elseif ($batch_limit_reached) {
 				$pause_reason = 'batch_limit';
 			}
@@ -1157,6 +1174,7 @@ trait Ultra_Cache_Media_Queue_Trait
 				'alreadyOptimizedThisRun' => $skipped,
 				'batchLimitReached' => $batch_limit_reached,
 				'timeBudgetReached' => $time_budget_reached,
+				'memoryBudgetReached' => $memory_budget_reached,
 				'onDemandAffectedPagesReady' => count($affected_page_purge_ready_urls),
 				'onDemandAffectedPagesPurged' => $affected_page_purged,
 				'complete' => empty($status['remaining']) && empty($status['failed']),
@@ -1170,7 +1188,8 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 
 			$repair = $this->repair_media_queue_if_optimized_storage_missing($format);
-			return array_merge(array('success' => true, 'repair' => $repair), $this->get_media_queue_status($format));
+			$status = $this->get_media_queue_status($format);
+			return array_merge(array('success' => true, 'repair' => $repair, 'hasMore' => !empty($status['needsRepair'])), $status);
 		}
 
 		public function retry_failed_media_queue_items($format = 'best') {
@@ -1180,8 +1199,10 @@ trait Ultra_Cache_Media_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$format = $this->normalize_media_queue_format($format);
-			$count = $wpdb->query($wpdb->prepare("UPDATE %i SET status = 'pending', last_error = '', updated_at = %s WHERE format = %s AND status = 'failed'", $table, current_time('mysql'), $format));
-			return array_merge(array('success' => true, 'retried' => is_numeric($count) ? (int) $count : 0), $this->get_media_queue_status($format));
+			$limit = 1000;
+			$count = $wpdb->query($wpdb->prepare("UPDATE %i SET status = 'pending', last_error = '', updated_at = %s WHERE format = %s AND status = 'failed' LIMIT %d", $table, current_time('mysql'), $format, $limit));
+			$status = $this->get_media_queue_status($format);
+			return array_merge(array('success' => true, 'retried' => is_numeric($count) ? (int) $count : 0, 'hasMore' => !empty($status['failed'])), $status);
 		}
 
 		public function clear_completed_media_queue_items($format = 'best') {
@@ -1191,8 +1212,10 @@ trait Ultra_Cache_Media_Queue_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$format = $this->normalize_media_queue_format($format);
-			$count = $wpdb->query($wpdb->prepare("DELETE FROM %i WHERE format = %s AND status IN ('done','skipped')", $table, $format));
-			return array_merge(array('success' => true, 'cleared' => is_numeric($count) ? (int) $count : 0), $this->get_media_queue_status($format));
+			$limit = 1000;
+			$count = $wpdb->query($wpdb->prepare("DELETE FROM %i WHERE format = %s AND status IN ('done','skipped') LIMIT %d", $table, $format, $limit));
+			$status = $this->get_media_queue_status($format);
+			return array_merge(array('success' => true, 'cleared' => is_numeric($count) ? (int) $count : 0, 'hasMore' => ((int) ($status['done'] ?? 0) + (int) ($status['skipped'] ?? 0)) > 0), $status);
 		}
 
 		private function find_attachment_id_for_source_file($source_file) {
@@ -1263,207 +1286,6 @@ trait Ultra_Cache_Media_Queue_Trait
 			return 0;
 		}
 
-		private function get_on_demand_queue_completion_for_format($attachment_id, $format) {
-			$attachment_id = absint($attachment_id);
-			$format = $this->normalize_media_queue_format($format);
-			$source_files = $this->get_attachment_source_files($attachment_id);
 
-			if ($attachment_id <= 0 || empty($source_files)) {
-				return array(
-					'status' => 'skipped',
-					'message' => 'No supported source files were available for this media item.',
-					'targets' => 0,
-					'completed' => 0,
-				);
-			}
-
-			$targets = 0;
-			$completed = 0;
-
-			foreach ($source_files as $source_file) {
-				$avif_target = (bool) $this->get_avif_path_from_source($source_file);
-				$webp_target = (bool) $this->get_webp_path_from_source($source_file);
-				$avif_done = $avif_target && $this->generated_variant_exists($source_file, 'avif');
-				$webp_done = $webp_target && $this->generated_variant_exists($source_file, 'webp');
-
-				if ('best' === $format) {
-					if (!$avif_target && !$webp_target) {
-						continue;
-					}
-					$targets++;
-					if ($avif_done || $webp_done) {
-						$completed++;
-					}
-					continue;
-				}
-
-				$formats = ('both' === $format) ? array('avif', 'webp') : array($format);
-				foreach ($formats as $single_format) {
-					if ('avif' === $single_format) {
-						if (!$avif_target) {
-							continue;
-						}
-						$targets++;
-						if ($avif_done) {
-							$completed++;
-						}
-					} elseif ('webp' === $single_format) {
-						if (!$webp_target) {
-							continue;
-						}
-						$targets++;
-						if ($webp_done) {
-							$completed++;
-						}
-					}
-				}
-			}
-
-			if ($targets <= 0) {
-				return array(
-					'status' => 'skipped',
-					'message' => 'No supported source files were available for this media format.',
-					'targets' => 0,
-					'completed' => 0,
-				);
-			}
-
-			if ($completed >= $targets) {
-				return array(
-					'status' => 'skipped',
-					'message' => 'Already optimized by on-demand generation.',
-					'targets' => (int) $targets,
-					'completed' => (int) $completed,
-				);
-			}
-
-			return array(
-				'status' => 'pending',
-				'message' => 'Partially optimized by on-demand generation; remaining variants queued.',
-				'targets' => (int) $targets,
-				'completed' => (int) $completed,
-			);
-		}
-
-		private function write_on_demand_queue_status($attachment_id, $format, array $completion) {
-			$attachment_id = absint($attachment_id);
-			$format = $this->normalize_media_queue_format($format);
-			$status = isset($completion['status']) ? (string) $completion['status'] : 'pending';
-			$status = in_array($status, array('pending', 'skipped'), true) ? $status : 'pending';
-			$original_status = $status;
-			$message = isset($completion['message']) ? (string) $completion['message'] : '';
-
-			if ('pending' === $status) {
-				$status = 'skipped';
-				$message = 'Frontend on-demand generated an optimized variant; remaining variants were not queued automatically. Use manual bulk or WP-CLI media conversion to complete missing variants.';
-			}
-
-			if ($attachment_id <= 0 || !$this->ensure_media_queue_table()) {
-				return false;
-			}
-
-			global $wpdb;
-			$table = $this->get_media_queue_table_name();
-			$signature = $this->get_attachment_source_signature($attachment_id);
-			$now = current_time('mysql');
-			$completed = ('skipped' === $status);
-			$existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, attempts, last_error FROM {$table} WHERE attachment_id = %d AND format = %s", $attachment_id, $format), ARRAY_A);
-
-			if (is_array($existing) && !empty($existing['id'])) {
-				$existing_status = isset($existing['status']) ? (string) $existing['status'] : '';
-				$existing_error = isset($existing['last_error']) ? (string) $existing['last_error'] : '';
-				$existing_from_on_demand = (false !== stripos($existing_error, 'on-demand'));
-
-				if (!$existing_from_on_demand) {
-					return false;
-				}
-
-				if ('done' === $existing_status) {
-					return false;
-				}
-
-				$updated = $wpdb->update(
-					$table,
-					array(
-						'source_mtime' => (int) $signature['mtime'],
-						'source_size' => (int) $signature['size'],
-						'status' => $status,
-						'attempts' => max(0, (int) ($existing['attempts'] ?? 0)),
-						'last_error' => $message,
-						'updated_at' => $now,
-						'started_at' => null,
-						'completed_at' => $completed ? $now : null,
-					),
-					array('id' => (int) $existing['id']),
-					array('%d', '%d', '%s', '%d', '%s', '%s', '%s', '%s'),
-					array('%d')
-				);
-
-				return false !== $updated;
-			}
-
-			if ('pending' === $original_status || 'skipped' === $status) {
-				return false;
-			}
-
-			$inserted = $wpdb->insert(
-				$table,
-				array(
-					'attachment_id' => $attachment_id,
-					'format' => $format,
-					'source_mtime' => (int) $signature['mtime'],
-					'source_size' => (int) $signature['size'],
-					'status' => $status,
-					'attempts' => 0,
-					'last_error' => $message,
-					'created_at' => $now,
-					'updated_at' => $now,
-					'started_at' => null,
-					'completed_at' => $completed ? $now : null,
-				),
-				array('%d', '%s', '%d', '%d', '%s', '%d', '%s', '%s', '%s', '%s', '%s')
-			);
-
-			return false !== $inserted;
-		}
-
-		public function sync_media_queue_after_on_demand_generation($source_file, $generated_format) {
-			$generated_format = strtolower((string) $generated_format);
-			if (!in_array($generated_format, array('avif', 'webp'), true)) {
-				return array('synced' => false, 'reason' => 'invalid_format');
-			}
-
-			$attachment_id = $this->find_attachment_id_for_source_file($source_file);
-			if ($attachment_id <= 0) {
-				return array('synced' => false, 'reason' => 'attachment_not_found');
-			}
-
-			$formats = array_values(array_unique(array('best', 'avif', 'webp', 'both')));
-			$statuses = array();
-			$synced = 0;
-
-			foreach ($formats as $format) {
-				$completion = $this->get_on_demand_queue_completion_for_format($attachment_id, $format);
-				if ($this->write_on_demand_queue_status($attachment_id, $format, $completion)) {
-					$synced++;
-				}
-				$statuses[$format] = array(
-					'status' => (string) ($completion['status'] ?? 'pending'),
-					'targets' => (int) ($completion['targets'] ?? 0),
-					'completed' => (int) ($completion['completed'] ?? 0),
-				);
-			}
-
-			$this->invalidate_media_work_summary_cache();
-
-			return array(
-				'synced' => $synced > 0,
-				'attachment_id' => $attachment_id,
-				'generatedFormat' => $generated_format,
-				'rowsSynced' => (int) $synced,
-				'statuses' => $statuses,
-			);
-		}
-
-	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter
+	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 }

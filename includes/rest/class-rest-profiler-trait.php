@@ -343,6 +343,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'replace-shared-css-bundle' => 'Replace shared CSS bundle links',
                 'replace-page-css-bundle' => 'Replace page CSS bundle links',
                 'build_page_css_bundle_on_entry' => 'Build CSS bundle on entry',
+                'queue_page_css_bundle_async_on_entry' => 'Queue CSS bundle async on entry',
                 'consolidate-leftover-css-bundle' => 'Consolidate remaining CSS',
                 'cls-dimensions' => 'CLS image dimensions',
                 'google-fonts-local-links' => 'Google Fonts local rewrite',
@@ -1781,15 +1782,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
 
             $content = '';
-            global $wp_filesystem;
-            if (!function_exists('WP_Filesystem')) {
-                require_once ABSPATH . 'wp-admin/includes/file.php';
-            }
-            if (function_exists('WP_Filesystem') && WP_Filesystem(false, false, true) && is_object($wp_filesystem) && method_exists($wp_filesystem, 'get_contents')) {
-                $content = (string) $wp_filesystem->get_contents($path);
-            }
-            if ('' === $content && function_exists('file_get_contents')) {
-                $raw = @file_get_contents($path);
+            if (function_exists('ucwp_guarded_asset_file_get_contents')) {
+                $raw = ucwp_guarded_asset_file_get_contents($path, 'js', 'runtime_js_scan_read_local_script_content', true);
                 if (is_string($raw)) {
                     $content = $raw;
                 }

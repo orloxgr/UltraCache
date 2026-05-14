@@ -272,19 +272,15 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
 
         private function get_frontend_rewrite_profile($html, array $settings = array())
         {
-            $frontend_safe_mode = !empty($settings['frontend_safe_mode']);
             $slider_safe_mode = !empty($settings['slider_safe_mode']) && $this->should_use_safe_frontend_optimization_mode($html);
-            $safe_mode = $frontend_safe_mode || $slider_safe_mode;
+            $safe_mode = $slider_safe_mode;
 
             $reason = '';
             if ($slider_safe_mode) {
                 $reason = 'slider-hero-detected';
-            } elseif ($frontend_safe_mode) {
-                $reason = 'frontend-safe-mode';
             }
 
             return array(
-                'frontend_safe_mode' => (bool) $frontend_safe_mode,
                 'slider_safe_mode' => (bool) $slider_safe_mode,
                 'safe_mode' => (bool) $safe_mode,
                 'reason' => $reason,
@@ -315,7 +311,6 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 return $this->normalize_protected_script_loading_attributes_in_html($html, $settings);
             });
             $rewrite_profile = $this->get_frontend_rewrite_profile($html, $settings);
-            $frontend_safe_mode = !empty($rewrite_profile['frontend_safe_mode']);
             $slider_safe_mode = !empty($rewrite_profile['slider_safe_mode']);
             $safe_mode = !empty($rewrite_profile['safe_mode']);
 
@@ -342,8 +337,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            // Frontend Safe Mode is user-controlled. Slider/Hero Safe Mode is separate and only
-            // becomes active when protected hero markup is detected in the rendered HTML.
+            // Slider/Hero Safe Mode becomes active only when protected hero markup is detected in the rendered HTML.
             if (!$safe_mode) {
                 $html = $this->apply_html_rewrite_safely($html, 'strip-authoring-assets', function ($html) {
                     return $this->strip_probable_frontend_authoring_assets($html);
@@ -362,13 +356,20 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 // that never appears in the cached HTML on SR7/hero pages.
 
 
-                if ('' !== $bundle_mode && !empty($settings['page_css_bundle_on_entry']) && !$this->is_ultracache_internal_loopback_request()) {
+                if ('' !== $bundle_mode && !$this->is_ultracache_internal_loopback_request()) {
                     $is_frontpage_context = '' !== $target_url ? $this->is_frontpage_request_url($target_url) : $this->is_frontpage_request_url();
                     if ('per-page' === $bundle_scope || ('homepage' === $bundle_scope && $is_frontpage_context) || ('shared' === $bundle_scope && $is_frontpage_context)) {
-                        $this->profile_store_event('build_page_css_bundle_on_entry', $html, function ($html) use ($settings) {
-                            $this->maybe_build_page_css_bundle_on_entry($html, $settings);
-                            return true;
-                        });
+                        if (!empty($settings['page_css_bundle_on_entry'])) {
+                            $this->profile_store_event('build_page_css_bundle_on_entry', $html, function ($html) use ($settings) {
+                                $this->maybe_build_page_css_bundle_on_entry($html, $settings);
+                                return true;
+                            });
+                        } elseif (!empty($settings['page_css_bundle_async_on_entry'])) {
+                            $this->profile_store_event('queue_page_css_bundle_async_on_entry', $html, function ($html) use ($settings) {
+                                $this->maybe_enqueue_page_css_bundle_async_on_entry($settings);
+                                return true;
+                            });
+                        }
                     }
                 }
 
@@ -427,19 +428,25 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             }
 
 
-            $html = $this->apply_html_rewrite_safely($html, 'central-inline-font-display-normalize', function ($html) {
-                return $this->normalize_inline_style_font_display_in_html($html);
-            });
+            $font_policy = $this->get_font_optimization_policy($settings);
 
-            if (!empty($settings['self_hosted_font_css_optimization']) || !empty($settings['delay_icon_fonts']) || !empty($settings['google_fonts_swap'])) {
+            if (!empty($font_policy['local_font_css_rewrite'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'central-inline-font-display-normalize', function ($html) {
+                    return $this->normalize_inline_style_font_display_in_html($html);
+                });
+            }
+
+            if (!empty($font_policy['font_css_links'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'self-hosted-font-css-links', function ($html) {
                     return $this->optimize_self_hosted_font_css_links($html);
                 });
             }
 
-            $html = $this->apply_html_rewrite_safely($html, 'central-linked-font-display-normalize', function ($html) {
-                return $this->normalize_linked_local_stylesheet_font_display_in_html($html);
-            });
+            if (!empty($font_policy['local_font_css_rewrite'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'central-linked-font-display-normalize', function ($html) {
+                    return $this->normalize_linked_local_stylesheet_font_display_in_html($html);
+                });
+            }
 
             if (!empty($settings['google_fonts_swap'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'local-font-display-patches', function ($html) {
@@ -453,7 +460,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (empty($settings['frontend_safe_mode']) && (!empty($settings['self_hosted_font_runtime_rewrite']) || !empty($settings['google_fonts_swap']))) {
+            if (!empty($font_policy['runtime_rewrite'])) {
                 // Runtime font CSS rewrites are intentionally allowed during slider/hero safe mode.
                 // The helper only rewrites late stylesheet href attributes via MutationObserver and
                 // does not alter slider markup, script ordering, or LCP preload selection.
@@ -474,7 +481,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             if (!empty($settings['async_css']) || !empty($settings['aggressive_async_css'])) {
                 $html = $this->apply_async_css_links_to_html($html);
             }
-            if (empty($settings['frontend_safe_mode']) && !empty($settings['lazy_mailerlite_nonce'])) {
+            if (!empty($settings['lazy_mailerlite_nonce'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'lazy-mailerlite-nonce-refresh', function ($html) {
                     return $this->inject_mailerlite_lazy_nonce_refresh($html);
                 });
@@ -492,15 +499,15 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            $html = $this->apply_lcp_priority_pipeline($html, $settings, $frontend_safe_mode, $slider_safe_mode);
+            $html = $this->apply_lcp_priority_pipeline($html, $settings, $slider_safe_mode);
 
-            if (empty($frontend_safe_mode) && !empty($settings['lazy_load_images'])) {
+            if (!empty($settings['lazy_load_images'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'lazy-load-async-images', function ($html) use ($settings) {
                     return $this->apply_lazy_load_images_to_html($html, $settings);
                 });
             }
 
-            if ($this->should_apply_lcp_boundary_defer($settings, $frontend_safe_mode, $slider_safe_mode)) {
+            if ($this->should_apply_lcp_boundary_defer($settings, $slider_safe_mode)) {
                 $html = $this->apply_html_rewrite_safely($html, 'lcp-boundary-defer', function ($html) use ($settings) {
                     return $this->apply_lcp_boundary_defer_to_html($html, $settings);
                 });

@@ -46,45 +46,12 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				return;
 			}
 
-			$queue = $this->get_background_generation_queue();
-			if (isset($queue[(string) $attachment_id])) {
-				unset($queue[(string) $attachment_id]);
-				$this->persist_background_generation_queue($queue);
-			}
-
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			if ($this->media_queue_table_exists()) {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache removes rows from its own custom media queue table; queue state must be database-truth and not object-cached.
 				$wpdb->delete($table, array('attachment_id' => $attachment_id), array('%d'));
 			}
-		}
-
-		private function get_background_generation_queue() {
-			$queue = get_option(self::BACKGROUND_QUEUE_OPTION, array());
-			if (!is_array($queue)) {
-				return array();
-			}
-
-			$normalized = array();
-			foreach ($queue as $attachment_id => $queued_at) {
-				$attachment_id = absint($attachment_id);
-				if ($attachment_id <= 0) {
-					continue;
-				}
-				$normalized[(string) $attachment_id] = max(0, (int) $queued_at);
-			}
-
-			return $normalized;
-		}
-
-		private function persist_background_generation_queue(array $queue) {
-			if (empty($queue)) {
-				delete_option(self::BACKGROUND_QUEUE_OPTION);
-				return;
-			}
-
-			update_option(self::BACKGROUND_QUEUE_OPTION, $queue, false);
 		}
 
 		private function schedule_background_generation_queue() {
@@ -106,29 +73,18 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				|| (function_exists('wp_doing_ajax') && wp_doing_ajax())
 				|| (function_exists('is_admin') && is_admin());
 
-			$legacy_queue = $this->get_background_generation_queue();
 			if (!$is_maintenance_context) {
-				if (!empty($legacy_queue)) {
-					$this->schedule_background_generation_queue();
-				}
 				return;
 			}
 
 			$maintenance_key = 'ultracache_media_queue_init_maintenance_v1';
 			if (get_transient($maintenance_key)) {
-				if (!empty($legacy_queue)) {
-					$this->schedule_background_generation_queue();
-				}
 				return;
 			}
 
 			set_transient($maintenance_key, 1, 10 * MINUTE_IN_SECONDS);
 
-			if (method_exists($this, 'retire_on_demand_partial_media_queue_rows')) {
-				$this->retire_on_demand_partial_media_queue_rows();
-			}
-
-			if ($this->get_media_queue_pending_count('best') <= 0 && empty($legacy_queue)) {
+			if ($this->get_media_queue_pending_count('best') <= 0) {
 				return;
 			}
 
@@ -147,19 +103,6 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 			set_transient(self::BACKGROUND_QUEUE_LOCK, 1, 5 * MINUTE_IN_SECONDS);
 
 			try {
-				if (method_exists($this, 'retire_on_demand_partial_media_queue_rows')) {
-					$this->retire_on_demand_partial_media_queue_rows();
-				}
-
-				$legacy_queue = $this->get_background_generation_queue();
-				foreach (array_keys($legacy_queue) as $attachment_id) {
-					$attachment_id = absint($attachment_id);
-					if ($attachment_id > 0) {
-						$this->upsert_media_queue_item($attachment_id, 'best', 'pending', '', 0);
-					}
-				}
-				$this->persist_background_generation_queue(array());
-
 				if ($this->get_media_queue_pending_count('best') <= 0) {
 					return;
 				}

@@ -127,7 +127,7 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
             )));
         }
 
-        private function should_apply_lcp_boundary_defer(array $settings, $frontend_safe_mode, $slider_safe_mode)
+        private function should_apply_lcp_boundary_defer(array $settings, $slider_safe_mode)
         {
             unset($slider_safe_mode);
 
@@ -135,14 +135,10 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                 return false;
             }
 
-            if (!empty($frontend_safe_mode)) {
-                return false;
-            }
-
             return true;
         }
 
-        private function apply_lcp_priority_pipeline($html, array $settings, $frontend_safe_mode, $slider_safe_mode)
+        private function apply_lcp_priority_pipeline($html, array $settings, $slider_safe_mode)
         {
             if (empty($settings['lcp_image_priority'])) {
                 return $html;
@@ -152,15 +148,6 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                 $html = $this->apply_html_rewrite_safely($html, 'sr7-first-slide-lcp-priority', function ($html) {
                     return $this->apply_sr7_first_slide_lcp_priority_markup($html);
                 });
-                $html = $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
-                    return $this->inject_safe_lcp_priority_preloads($html);
-                });
-                return $this->apply_html_rewrite_safely($html, 'lcp-preload-guard-cleanup', function ($html) {
-                    return $this->cleanup_ambiguous_sr7_generated_lcp_preloads($html);
-                });
-            }
-
-            if (!empty($frontend_safe_mode)) {
                 $html = $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
                     return $this->inject_safe_lcp_priority_preloads($html);
                 });

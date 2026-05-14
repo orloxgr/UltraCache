@@ -425,67 +425,14 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
 
         private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
         {
-            $cache_dir = trailingslashit(UCWP_CACHE_DIR);
-            $protected = array();
-            $max_files = max(100, min(2000, (int) $max_files));
-            $deadline = microtime(true) + 1.5;
-
-            if (!is_dir($cache_dir) || !is_readable($cache_dir)) {
-                return $protected;
+            // 2.57.167: generated CSS refs are tracked in an UltraCache DB table during cache STORE.
+            // Do not scan cached HTML here; this runs in cleanup/warm flows and must stay bounded.
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_protected_generated_css_basenames')) {
+                $protected = Ultra_Cache_WP::get_protected_generated_css_basenames('css-bundles');
+                return is_array($protected) ? $protected : array();
             }
 
-            $scanned = 0;
-            try {
-                $iterator = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($cache_dir, FilesystemIterator::SKIP_DOTS)
-                );
-
-                foreach ($iterator as $file_info) {
-                    if (microtime(true) >= $deadline) {
-                        break;
-                    }
-                    if (!$file_info->isFile()) {
-                        continue;
-                    }
-
-                    $path = wp_normalize_path((string) $file_info->getPathname());
-                    $name = strtolower((string) $file_info->getFilename());
-
-                    if (false !== strpos($path, '/css-bundles/') || false !== strpos($path, '/google-fonts/') || false !== strpos($path, '/font-css/') || false !== strpos($path, '/optimized-css/') || false !== strpos($path, '/diagnostics/') || false !== strpos($path, '/locks/')) {
-                        continue;
-                    }
-
-                    if (!preg_match('/\.html$/i', $name)) {
-                        continue;
-                    }
-
-                    $scanned++;
-                    $size = (int) $file_info->getSize();
-                    if ($size <= 0 || $size > 2097152) {
-                        if ($scanned >= $max_files) {
-                            break;
-                        }
-                        continue;
-                    }
-
-                    $html = ucwp_safe_file_get_contents($path, 'css bundle cached html ref cleanup scan');
-                    if (is_string($html) && false !== stripos($html, '/cache/ultracache/css-bundles/')) {
-                        foreach ($this->get_css_bundle_ref_basenames_from_html($html) as $basename => $enabled) {
-                            if (!empty($enabled)) {
-                                $protected[$basename] = true;
-                            }
-                        }
-                    }
-
-                    if ($scanned >= $max_files) {
-                        break;
-                    }
-                }
-            } catch (Exception $e) {
-                return $protected;
-            }
-
-            return $protected;
+            return array();
         }
 
         private function normalize_css_bundle_entry_for_manifest(array $entry)
@@ -514,7 +461,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $active = $this->get_frontpage_css_manifest_bundle_files($manifest);
             $cached_html_refs = $this->get_css_bundle_cached_html_ref_basenames();
             $deleted = 0;
-            $protected_by_cached_html = 0;
+            $protected_by_ref_index = 0;
             $max_deletes = $this->get_css_bundle_cleanup_max_deletes_per_run();
             $files = (array) glob(trailingslashit($dir) . '*.css');
 
@@ -532,7 +479,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
 
                 $companion_basename = $this->get_css_bundle_companion_basename($basename);
                 if (isset($cached_html_refs[$basename]) || ('' !== $pair_basename && isset($cached_html_refs[$pair_basename])) || ('' !== $companion_basename && isset($cached_html_refs[$companion_basename]))) {
-                    $protected_by_cached_html++;
+                    $protected_by_ref_index++;
                     continue;
                 }
 
@@ -552,12 +499,12 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 }
             }
 
-            if ($deleted > 0 || $protected_by_cached_html > 0) {
+            if ($deleted > 0 || $protected_by_ref_index > 0) {
                 $this->record_cache_event('page-css-bundle-cleanup', array(
                     'deleted' => $deleted,
                     'max' => $max_deletes,
                     'grace_seconds' => $this->get_css_bundle_cleanup_grace_seconds(),
-                    'protected_by_cached_html' => $protected_by_cached_html,
+                    'protected_by_ref_index' => $protected_by_ref_index,
                 ));
             }
 
@@ -1326,6 +1273,11 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
 
         private function build_delayed_icon_fonts_stylesheet_markup(array $entry, $id = 'ucwp-delayed-icon-fonts')
         {
+            $policy = $this->get_font_optimization_policy();
+            if (empty($policy['delay_icon_fonts'])) {
+                return '';
+            }
+
             $url = isset($entry['delayedFontUrl']) ? (string) $entry['delayedFontUrl'] : '';
             if ('' === $url) {
                 return '';
@@ -1374,6 +1326,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $delayed_font_families = array();
             $delayed_font_patterns = array();
             $settings = $this->get_settings();
+            $font_policy = $this->get_font_optimization_policy($settings);
             $stats = array(
                 'bundled' => 0,
                 'skipped' => 0,
@@ -1402,7 +1355,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     );
                 }
 
-                $css = ucwp_safe_file_get_contents($path);
+                $css = ucwp_guarded_asset_file_get_contents($path, 'css', 'frontpage_css_bundle_asset', false);
                 if (!is_string($css) || '' === $css) {
                     $stats['skipped']++;
                     continue;
@@ -1418,10 +1371,12 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     $stats[$css_image_stat_key] = max(0, (int) ($stats[$css_image_stat_key] ?? 0)) + max(0, (int) ($css_image_stats[$css_image_stat_key] ?? 0));
                 }
                 $font_display_stats = array();
-                $prepared_body = $this->normalize_font_face_display_in_css($prepared_body, $font_display_stats);
-                $stats['fontDisplayAdded'] += max(0, (int) ($font_display_stats['fontDisplayAdded'] ?? 0));
-                $stats['fontFaceBlocksScanned'] += max(0, (int) ($font_display_stats['fontFaceBlocksScanned'] ?? 0));
-                $font_split = $this->split_delayed_icon_font_faces_from_css($prepared_body, $url, $settings);
+                if (!empty($font_policy['bundle_font_display'])) {
+                    $prepared_body = $this->normalize_font_face_display_in_css($prepared_body, $font_display_stats);
+                    $stats['fontDisplayAdded'] += max(0, (int) ($font_display_stats['fontDisplayAdded'] ?? 0));
+                    $stats['fontFaceBlocksScanned'] += max(0, (int) ($font_display_stats['fontFaceBlocksScanned'] ?? 0));
+                }
+                $font_split = !empty($font_policy['delay_icon_fonts']) ? $this->split_delayed_icon_font_faces_from_css($prepared_body, $url, $settings) : array('body' => $prepared_body, 'delayedCss' => '', 'delayedCount' => 0, 'families' => array(), 'patterns' => array());
                 if (!empty($font_split['delayedCount'])) {
                     $prepared_body = (string) ($font_split['body'] ?? $prepared_body);
                     $delayed_font_css .= "\n" . (string) ($font_split['delayedCss'] ?? '');
@@ -1496,9 +1451,11 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $bundle_content = trim($bundle_prelude . trim($bundle_body)) . "
 ";
             $bundle_font_display_stats = array();
-            $bundle_content = $this->normalize_font_face_display_in_css($bundle_content, $bundle_font_display_stats);
-            $stats['fontDisplayAdded'] += max(0, (int) ($bundle_font_display_stats['fontDisplayAdded'] ?? 0));
-            $stats['fontFaceBlocksScanned'] += max(0, (int) ($bundle_font_display_stats['fontFaceBlocksScanned'] ?? 0));
+            if (!empty($font_policy['bundle_font_display'])) {
+                $bundle_content = $this->normalize_font_face_display_in_css($bundle_content, $bundle_font_display_stats);
+                $stats['fontDisplayAdded'] += max(0, (int) ($bundle_font_display_stats['fontDisplayAdded'] ?? 0));
+                $stats['fontFaceBlocksScanned'] += max(0, (int) ($bundle_font_display_stats['fontFaceBlocksScanned'] ?? 0));
+            }
             if (function_exists('ucwp_strip_source_mapping_url_comments')) {
                 $bundle_content = trim(ucwp_strip_source_mapping_url_comments($bundle_content)) . "
 ";
@@ -1543,9 +1500,11 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     $delayed_font_content = trim((string) $delayed_font_content) . "\n";
                 }
                 $delayed_font_display_stats = array();
-                $delayed_font_content = $this->normalize_font_face_display_in_css($delayed_font_content, $delayed_font_display_stats);
-                $stats['fontDisplayAdded'] += max(0, (int) ($delayed_font_display_stats['fontDisplayAdded'] ?? 0));
-                $stats['fontFaceBlocksScanned'] += max(0, (int) ($delayed_font_display_stats['fontFaceBlocksScanned'] ?? 0));
+                if (!empty($font_policy['bundle_font_display'])) {
+                    $delayed_font_content = $this->normalize_font_face_display_in_css($delayed_font_content, $delayed_font_display_stats);
+                    $stats['fontDisplayAdded'] += max(0, (int) ($delayed_font_display_stats['fontDisplayAdded'] ?? 0));
+                    $stats['fontFaceBlocksScanned'] += max(0, (int) ($delayed_font_display_stats['fontFaceBlocksScanned'] ?? 0));
+                }
                 $delayed_font_hash = md5($delayed_font_content);
                 $delayed_font_filename = 'bundle-' . $mode . '-' . $signature . '-delayed-fonts.css';
                 $delayed_font_file = $dir . $delayed_font_filename;
@@ -1767,8 +1726,38 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             }, $css);
 
             $css = $this->normalize_google_fonts_cache_urls_in_css($css);
+            $policy = $this->get_font_optimization_policy();
 
-            return $this->normalize_font_face_display_in_css($css);
+            return !empty($policy['bundle_font_display']) ? $this->normalize_font_face_display_in_css($css) : $css;
+        }
+
+
+        private function maybe_enqueue_page_css_bundle_async_on_entry(array $settings = array())
+        {
+            $url = $this->get_current_request_url();
+            if ('' === $url || !$this->is_cacheable_local_url($url)) {
+                return false;
+            }
+
+            $request_method = function_exists('ucwp_server_value') ? ucwp_server_value('REQUEST_METHOD') : '';
+            $request_method = strtoupper(sanitize_text_field($request_method));
+            if ('' !== $request_method && 'GET' !== $request_method) {
+                return false;
+            }
+
+            if (function_exists('is_user_logged_in') && is_user_logged_in()) {
+                return false;
+            }
+
+            if (!empty($this->get_frontpage_css_manifest_entry($url))) {
+                return false;
+            }
+
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'enqueue_async_css_bundle_url')) {
+                return false;
+            }
+
+            return (bool) Ultra_Cache_WP::enqueue_async_css_bundle_url($url);
         }
 
         private function maybe_build_page_css_bundle_on_entry($html, array $settings = array())
@@ -1903,7 +1892,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $frontpage_bundle_role = $this->get_generated_css_bundle_role_from_mode(isset($entry['mode']) ? (string) $entry['mode'] : 'safe');
             $replacement = '<link rel="stylesheet" id="ucwp-frontpage-css" href="' . esc_url($bundle_url) . '" data-ucwp-frontpage-css="1" data-ucwp-css-role="' . esc_attr($frontpage_bundle_role) . '" data-ucwp-css-blocking-reason="main-layout-risk" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
             if (!empty($settings['homepage_css_bundle_inline'])) {
-                $bundle_css = ('' !== $bundle_file && is_readable($bundle_file)) ? ucwp_safe_file_get_contents($bundle_file) : '';
+                $bundle_css = ('' !== $bundle_file && is_readable($bundle_file)) ? ucwp_guarded_asset_file_get_contents($bundle_file, 'generated-css', 'frontpage_css_bundle_inline_generated_asset', false) : '';
                 $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($bundle_css);
                 if ('' !== $bundle_css) {
                     $replacement = '<style id="ucwp-frontpage-css" data-ucwp-frontpage-css="1" data-ucwp-css-role="' . esc_attr($frontpage_bundle_role) . '" data-ucwp-css-blocking-reason="main-layout-risk">' . $bundle_css . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
@@ -2039,7 +2028,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $page_bundle_role = $this->get_generated_css_bundle_role_from_mode($mode);
             $replacement = '<link rel="stylesheet" id="ucwp-page-css-bundle" href="' . esc_url($bundle_url) . '" data-ucwp-page-css-bundle="1" data-ucwp-css-role="' . esc_attr($page_bundle_role) . '" data-ucwp-css-blocking-reason="main-layout-risk" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
             if (!empty($settings['homepage_css_bundle_inline'])) {
-                $maybe_css = ucwp_safe_file_get_contents($bundle_file);
+                $maybe_css = ucwp_guarded_asset_file_get_contents($bundle_file, 'generated-css', 'page_css_bundle_inline_generated_asset', false);
                 $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($maybe_css);
                 if ('' !== $bundle_css) {
                     $replacement = '<style id="ucwp-page-css-bundle" data-ucwp-page-css-bundle="1" data-ucwp-css-role="' . esc_attr($page_bundle_role) . '" data-ucwp-css-blocking-reason="main-layout-risk">' . $bundle_css . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped

@@ -287,7 +287,7 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'homepageCssBundleInlineEnabled',
                 'leftoverCssBundleEnabled',
                 'pageCssBundleOnEntryEnabled',
-                'frontendSafeModeEnabled',
+                'pageAsyncBundleOnEntryEnabled',
                 'sliderSafeModeEnabled',
                 'clsDimensionsEnabled',
                 'asyncCssEnabled',

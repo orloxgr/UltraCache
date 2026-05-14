@@ -6,6 +6,35 @@ if (!defined('ABSPATH')) {
 if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
     trait Ultra_Cache_Engine_Font_Optimization_Trait
     {
+        private function get_font_optimization_policy(array $settings = array())
+        {
+            if (empty($settings)) {
+                $settings = $this->get_settings();
+            }
+            if (!is_array($settings)) {
+                $settings = array();
+            }
+
+            $font_display = !empty($settings['google_fonts_swap']);
+            $google_fonts_local = !empty($settings['google_fonts_local_optimization']);
+            $self_hosted_css = !empty($settings['self_hosted_font_css_optimization']);
+            $delay_icon_fonts = !empty($settings['delay_icon_fonts']);
+            $runtime_rewrite = !empty($settings['self_hosted_font_runtime_rewrite']);
+            $local_font_css_rewrite = $font_display || $self_hosted_css || $delay_icon_fonts;
+
+            return array(
+                'font_display' => $font_display,
+                'google_fonts_local' => $google_fonts_local,
+                'self_hosted_css' => $self_hosted_css,
+                'delay_icon_fonts' => $delay_icon_fonts,
+                'runtime_rewrite' => $runtime_rewrite,
+                'local_font_css_rewrite' => $local_font_css_rewrite,
+                'font_css_links' => $local_font_css_rewrite || $google_fonts_local,
+                'bundle_font_display' => $local_font_css_rewrite,
+                'delayed_icon_fonts_output' => $delay_icon_fonts,
+            );
+        }
+
         public function add_display_swap_to_google_fonts($src, $handle)
         {
             /*
@@ -558,7 +587,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             );
 
             if ('' !== $dir && is_dir($dir)) {
-                $items = @scandir($dir);
+                $items = ucwp_safe_scandir($dir, 'google_fonts_cache_summary');
                 if (is_array($items)) {
                     foreach ($items as $item) {
                         if ('.' === $item || '..' === $item || 'index.php' === $item) {
@@ -568,9 +597,16 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                         if (!is_file($path)) {
                             continue;
                         }
+                        $size = ucwp_safe_filesize($path, 'google_fonts_cache_summary');
+                        $mtime = ucwp_safe_filemtime($path, 'google_fonts_cache_summary');
+
                         $summary['totalFiles']++;
-                        $summary['bytes'] += (int) @filesize($path);
-                        $summary['lastBuilt'] = max((int) $summary['lastBuilt'], (int) @filemtime($path));
+                        if (is_int($size)) {
+                            $summary['bytes'] += $size;
+                        }
+                        if (is_int($mtime)) {
+                            $summary['lastBuilt'] = max((int) $summary['lastBuilt'], $mtime);
+                        }
                         if (preg_match('/\.css$/i', $item)) {
                             $summary['cssFiles']++;
                         } elseif (preg_match('/\.woff2?$/i', $item)) {
@@ -1287,7 +1323,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return false;
             }
 
-            $css = ucwp_safe_file_get_contents($css_file, 'google-fonts-css-normalize', true);
+            $css = ucwp_guarded_asset_file_get_contents($css_file, 'font-css', 'google-fonts-css-normalize', true);
             if (!is_string($css) || '' === $css || false === stripos($css, 'cache/ultracache/google-fonts')) {
                 return false;
             }
@@ -1328,16 +1364,17 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return $html;
             }
 
+            $policy = $this->get_font_optimization_policy();
             $processed = $this->optimize_self_hosted_font_css_links_with_processor($html);
             if (is_string($processed)) {
-                return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($processed);
+                return !empty($policy['local_font_css_rewrite']) ? $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($processed) : $processed;
             }
 
             $preload_urls = array();
             $delayed_font_assets = array();
             $html = (string) preg_replace_callback(
                 '/<link\b[^>]*\bhref=(\"|\')(.*?)\1[^>]*>/is',
-                function ($matches) use (&$preload_urls, &$delayed_font_assets) {
+                function ($matches) use (&$preload_urls, &$delayed_font_assets, $policy) {
                     $tag = (string) $matches[0];
                     $href = $this->extract_attribute_from_html_tag($tag, 'href');
                     if (!$this->html_tag_rel_contains_stylesheet($tag)) {
@@ -1373,7 +1410,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                         }
                     }
 
-                    if (!empty($asset['delayedFontUrl'])) {
+                    if (!empty($policy['delay_icon_fonts']) && !empty($asset['delayedFontUrl'])) {
                         $delayed_url = esc_url_raw((string) $asset['delayedFontUrl']);
                         if ('' !== $delayed_url) {
                             $delayed_font_assets[$delayed_url] = $asset;
@@ -1400,11 +1437,11 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 $html = $this->inject_font_preload_links($html, $preload_urls);
             }
 
-            if (!empty($delayed_font_assets)) {
+            if (!empty($policy['delay_icon_fonts']) && !empty($delayed_font_assets)) {
                 $html = $this->inject_delayed_font_css_links($html, array_values($delayed_font_assets), 'ucwp-no-bundle-delayed-icon-fonts');
             }
 
-            return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($html);
+            return !empty($policy['local_font_css_rewrite']) ? $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($html) : $html;
         }
 
         private function normalize_linked_local_stylesheet_font_display_in_html($html)
@@ -1482,7 +1519,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return array();
             }
 
-            $css = ucwp_safe_file_get_contents($source_path, 'font_display_normalized_css_asset', true);
+            $css = ucwp_guarded_asset_file_get_contents($source_path, 'font-css', 'font_display_normalized_css_asset', true);
             if (!is_string($css) || '' === $css || false === stripos($css, '@font-face') || !$this->css_has_font_face_requiring_display_normalization($css)) {
                 $request_assets[$source_url] = array();
                 return array();
@@ -1562,6 +1599,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 
             try {
                 $processor = new WP_HTML_Tag_Processor((string) $html);
+                $policy = $this->get_font_optimization_policy();
                 $changed = false;
                 $preload_urls = array();
                 $delayed_font_assets = array();
@@ -1611,7 +1649,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                         }
                     }
 
-                    if (!empty($asset['delayedFontUrl'])) {
+                    if (!empty($policy['delay_icon_fonts']) && !empty($asset['delayedFontUrl'])) {
                         $delayed_url = esc_url_raw((string) $asset['delayedFontUrl']);
                         if ('' !== $delayed_url) {
                             $delayed_font_assets[$delayed_url] = $asset;
@@ -1644,11 +1682,11 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     $updated_html = $this->inject_font_preload_links($updated_html, $preload_urls);
                 }
 
-                if (!empty($delayed_font_assets)) {
+                if (!empty($policy['delay_icon_fonts']) && !empty($delayed_font_assets)) {
                     $updated_html = $this->inject_delayed_font_css_links($updated_html, array_values($delayed_font_assets), 'ucwp-no-bundle-delayed-icon-fonts');
                 }
 
-                return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($updated_html);
+                return !empty($policy['local_font_css_rewrite']) ? $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($updated_html) : $updated_html;
             } catch (\Throwable $e) {
                 return null;
             }
@@ -1674,11 +1712,12 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $settings = $this->get_settings();
+            $policy = $this->get_font_optimization_policy($settings);
             $map = $this->get_runtime_local_font_css_url_map();
             $mapped_css_url = '';
             if (is_array($map) && !empty($map[$source_url])) {
                 $mapped_css_url = esc_url_raw((string) $map[$source_url]);
-                if ('' !== $mapped_css_url && $mapped_css_url !== $source_url && empty($settings['delay_icon_fonts'])) {
+                if ('' !== $mapped_css_url && $mapped_css_url !== $source_url && empty($policy['delay_icon_fonts']) && !empty($policy['local_font_css_rewrite'])) {
                     $request_assets[$source_url] = array(
                         'css_url'      => $mapped_css_url,
                         'preload_urls' => array(),
@@ -1702,7 +1741,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return $request_assets[$source_url];
             }
 
-            if ('' !== $mapped_css_url && $mapped_css_url !== $source_url) {
+            if ('' !== $mapped_css_url && $mapped_css_url !== $source_url && !empty($policy['local_font_css_rewrite'])) {
                 $request_assets[$source_url] = array(
                     'css_url'      => $mapped_css_url,
                     'preload_urls' => array(),
@@ -1731,23 +1770,27 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return array();
             }
 
-            $css = ucwp_safe_file_get_contents($source_path, 'build_optimized_font_css_asset', true);
+            $css = ucwp_guarded_asset_file_get_contents($source_path, 'font-css', 'build_optimized_font_css_asset', true);
             if (!is_string($css) || '' === $css) {
                 return array();
             }
 
+            $settings = $this->get_settings();
+            $policy = $this->get_font_optimization_policy($settings);
             $has_font_faces = false !== stripos($css, '@font-face');
             $has_google_imports = false !== stripos($css, 'fonts.googleapis.com');
             if (!$has_font_faces && !$has_google_imports) {
                 return array();
             }
+            if (empty($policy['local_font_css_rewrite']) && (empty($policy['google_fonts_local']) || !$has_google_imports)) {
+                return array();
+            }
 
-            $has_missing_font_display = $this->css_has_font_face_requiring_display_normalization($css);
+            $has_missing_font_display = !empty($policy['local_font_css_rewrite']) && $this->css_has_font_face_requiring_display_normalization($css);
             $google_import_stats = array();
-            $optimized_css = $this->rewrite_self_hosted_font_css_content($css, $source_url, $google_import_stats);
+            $optimized_css = $this->rewrite_self_hosted_font_css_content($css, $source_url, $google_import_stats, !empty($policy['local_font_css_rewrite']));
             $google_imports_localized = !empty($google_import_stats['localized']);
             $google_imports_changed = $optimized_css !== $css && !empty($google_import_stats['found']);
-            $settings = $this->get_settings();
             $delayed_font_css = '';
             $delayed_font_families = array();
             $delayed_font_patterns = array();
@@ -1755,7 +1798,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             $preserve_mixed_css_for_delayed_icon_fonts = false;
             $preserve_mixed_css_for_font_display = false;
 
-            if (!empty($settings['delay_icon_fonts'])) {
+            if (!empty($policy['delay_icon_fonts'])) {
                 $font_split = $this->split_delayed_icon_font_faces_from_css($optimized_css, $source_url, $settings);
                 if (!empty($font_split['delayedCount']) && is_string($font_split['body'])) {
                     $optimized_css = (string) $font_split['body'];
@@ -1768,7 +1811,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $font_css_optimization_stats = array();
-            if (!$preserve_mixed_css_for_delayed_icon_fonts && empty($google_imports_changed) && function_exists('ucwp_optimize_generated_font_css')) {
+            if (!empty($policy['self_hosted_css']) && !$preserve_mixed_css_for_delayed_icon_fonts && empty($google_imports_changed) && function_exists('ucwp_optimize_generated_font_css')) {
                 $font_css_optimization = ucwp_optimize_generated_font_css($optimized_css, $source_url);
                 if (is_array($font_css_optimization) && isset($font_css_optimization['stats']) && is_array($font_css_optimization['stats'])) {
                     $font_css_optimization_stats = $font_css_optimization['stats'];
@@ -2096,7 +2139,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                     continue;
                 }
 
-                $css = ucwp_safe_file_get_contents($path, 'build_linked_woff2_font_face_registry_from_html', true);
+                $css = ucwp_guarded_asset_file_get_contents($path, 'font-css', 'build_linked_woff2_font_face_registry_from_html', true);
                 if (!is_string($css) || '' === $css || false === stripos($css, '@font-face') || false === stripos($css, '.woff2')) {
                     continue;
                 }
@@ -2187,7 +2230,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return 0;
             }
 
-            $css = ucwp_safe_file_get_contents($path, 'add_woff2_font_faces_from_css_url_to_registry', true);
+            $css = ucwp_guarded_asset_file_get_contents($path, 'font-css', 'add_woff2_font_faces_from_css_url_to_registry', true);
             if (!is_string($css) || '' === $css || false === stripos($css, '@font-face') || false === stripos($css, '.woff2')) {
                 return 0;
             }
@@ -3015,7 +3058,7 @@ JS;
                         continue;
                     }
 
-                    $contents = ucwp_safe_file_get_contents($path, 'find_local_font_css_files_in_root', true);
+                    $contents = ucwp_guarded_asset_file_get_contents($path, 'font-css', 'find_local_font_css_files_in_root', true);
                     if (!is_string($contents) || '' === $contents || false === stripos($contents, '@font-face')) {
                         continue;
                     }
@@ -3144,7 +3187,7 @@ JS;
                     continue;
                 }
 
-                $css = ucwp_safe_file_get_contents($source_path, 'build_local_font_display_patch_asset', true);
+                $css = ucwp_guarded_asset_file_get_contents($source_path, 'font-css', 'build_local_font_display_patch_asset', true);
                 if (!is_string($css) || '' === $css || false === stripos($css, '@font-face')) {
                     continue;
                 }
@@ -3305,11 +3348,11 @@ JS;
             return in_array($value, array('auto', 'block'), true);
         }
 
-        private function rewrite_self_hosted_font_css_content($css, $source_url, array &$google_import_stats = null)
+        private function rewrite_self_hosted_font_css_content($css, $source_url, array &$google_import_stats = null, $normalize_font_display = true)
         {
             $css = $this->normalize_protocol_relative_urls_in_css($css, $source_url);
             $css = $this->rewrite_google_fonts_imports_in_css($css, $source_url, $google_import_stats);
-            return $this->normalize_font_face_display_in_css($css);
+            return $normalize_font_display ? $this->normalize_font_face_display_in_css($css) : $css;
         }
 
         private function rewrite_google_fonts_imports_in_css($css, $source_url, array &$stats = null)
@@ -3503,7 +3546,8 @@ JS;
 
         private function inject_delayed_font_css_links($html, array $assets, $id_prefix = 'ucwp-delayed-font-css')
         {
-            if (!is_string($html) || '' === $html || false === stripos($html, '</head>') || empty($assets)) {
+            $policy = $this->get_font_optimization_policy();
+            if (empty($policy['delay_icon_fonts']) || !is_string($html) || '' === $html || false === stripos($html, '</head>') || empty($assets)) {
                 return $html;
             }
 

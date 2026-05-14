@@ -153,7 +153,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 'endpointCount' => count($servers),
                 'key'          => $key,
                 'secretConfigured' => ('' !== $key),
-                'timeout'      => max(1, min(30, absint($settings['varnishCliTimeoutSeconds']))),
+                'timeout'      => max(1, min(15, absint($settings['varnishCliTimeoutSeconds']))),
                 'method'       => $method,
                 'effectiveMethod' => $effective_method,
                 'adminModeUsed' => ('admin' === $mode),

@@ -50,21 +50,22 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
 
         private function get_warm_buckets_from_assoc_args($assoc_args)
         {
-            $buckets = array('orig', 'webp', 'avif');
-            if (!empty($assoc_args['buckets'])) {
-                $buckets = array_values(array_unique(array_intersect(
-                    array('orig', 'webp', 'avif'),
-                    array_map('trim', explode(',', (string) $assoc_args['buckets']))
-                )));
-                if (empty($buckets)) {
-                    WP_CLI::error('Invalid bucket list. Use orig,webp,avif.');
-                }
+            if (empty($assoc_args['buckets'])) {
+                return null;
+            }
+
+            $buckets = array_values(array_unique(array_intersect(
+                array('orig', 'webp', 'avif'),
+                array_map('trim', explode(',', (string) $assoc_args['buckets']))
+            )));
+            if (empty($buckets)) {
+                WP_CLI::error('Invalid bucket list. Use orig,webp,avif.');
             }
 
             return $buckets;
         }
 
-        private function warm_url_list($engine, array $urls, array $buckets, $purge_first = false, $build_css_bundle = false)
+        private function warm_url_list($engine, array $urls, $buckets = null, $purge_first = false, $build_css_bundle = false)
         {
             $urls = array_values(array_filter($urls));
             if (empty($urls)) {
@@ -81,7 +82,11 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
                     $engine->purge_url($url);
                 }
 
-                $result = $engine->warm_url($url, array('buckets' => $buckets, 'build_css_bundle' => (bool) $build_css_bundle));
+                $warm_args = array('build_css_bundle' => (bool) $build_css_bundle);
+                if (is_array($buckets)) {
+                    $warm_args['buckets'] = $buckets;
+                }
+                $result = $engine->warm_url($url, $warm_args);
                 if (!empty($result['success'])) {
                     $warmed++;
                 } else {
@@ -201,7 +206,13 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
                 $engine->purge_url($frontpage_url);
             }
 
-            $result = $engine->warm_frontpage_html(array('buckets' => $this->get_warm_buckets_from_assoc_args($assoc_args)));
+            $warm_args = array();
+            $buckets = $this->get_warm_buckets_from_assoc_args($assoc_args);
+            if (is_array($buckets)) {
+                $warm_args['buckets'] = $buckets;
+            }
+
+            $result = $engine->warm_frontpage_html($warm_args);
             if (!empty($result['success'])) {
                 WP_CLI::success(!empty($result['message']) ? $result['message'] : 'Front page HTML cache warmed.');
                 return;

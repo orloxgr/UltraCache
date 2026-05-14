@@ -1632,8 +1632,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                                 'prefix'           => self::sanitize_redis_prefix($settings['redisPrefix']),
                                 'useTls'           => !empty($settings['redisUseTls']),
                                 'persistent'       => !empty($settings['redisPersistent']),
-                                'connectTimeoutMs' => self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], 200, 50, 5000),
-                                'readTimeoutMs'    => self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], 200, 50, 5000),
+                                'connectTimeoutMs' => self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], 200, 50, 15000),
+                                'readTimeoutMs'    => self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], 200, 50, 15000),
                             ),
                             isset($object_backend_status['redis']) && is_array($object_backend_status['redis'])
                                 ? array(
@@ -1694,7 +1694,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                         'adminModeUsed' => ('admin' === self::sanitize_varnish_mode($settings['varnishCliMode'])),
                         'httpEndpointModeUsed' => ('http' === self::sanitize_varnish_mode($settings['varnishCliMode'])),
                         'secretConfigured' => !empty($settings['varnishCliKey']),
-                        'timeout' => max(1, min(30, absint($settings['varnishCliTimeoutSeconds']))),
+                        'timeout' => max(1, min(15, absint($settings['varnishCliTimeoutSeconds']))),
                         'last'    => self::get_varnish_last_result(),
                         'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
                         'hasUnsafeEndpoints' => !empty(self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['unsafe']),

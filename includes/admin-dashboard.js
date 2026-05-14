@@ -82,7 +82,7 @@
 		'homepageCssBundleMode',
 		'cssBundleScope',
 		'pageCssBundleOnEntryEnabled',
-		'frontendSafeModeEnabled',
+		'pageAsyncBundleOnEntryEnabled',
 		'sliderSafeModeEnabled',
 		'clsDimensionsEnabled',
 		'asyncCssEnabled',
@@ -156,6 +156,7 @@
 		'leftoverCssBundleEnabled',
 		'cssBundleScope',
 		'pageCssBundleOnEntryEnabled',
+		'pageAsyncBundleOnEntryEnabled',
 		'deferJsEnabled',
 		'delaySafeThirdPartyJsEnabled',
 		'delayAllThirdPartyJsEnabled',
@@ -165,7 +166,6 @@
 		'criticalRequestChainReliefEnabled',
 		'lcpBoundaryDeferEnabled',
 		'manualLcpHeroSelector',
-		'frontendSafeModeEnabled',
 		'sliderSafeModeEnabled',
 		'woocommerceSafeModeEnabled',
 		'cacheQueryStringsEnabled',
@@ -243,7 +243,7 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: 'All Off', description: 'Disable optimization modules managed by profiles. Diagnostic counters, Automation & Scheduling, and Varnish settings are preserved.', patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, deferAllJsEnabled: false, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false,
+			deferJsEnabled: false, deferAllJsEnabled: false, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false, cacheSafeTrackingCookiesEnabled: false, varnishCliEnabled: false,
@@ -285,7 +285,7 @@
 			homepageCssBundleExcludeList: "",
 			homepageCssBundleMode: "safe",
 			cssBundleScope: "homepage",
-			pageCssBundleOnEntryEnabled: false,
+			pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false,
 			sliderSafeModeEnabled: false,
 			clsDimensionsEnabled: true,
@@ -378,7 +378,7 @@
 			homepageCssBundleExcludeList: "",
 			homepageCssBundleMode: "safe",
 			cssBundleScope: "shared",
-			pageCssBundleOnEntryEnabled: false,
+			pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: true,
 			frontendSafeModeEnabled: false,
 			sliderSafeModeEnabled: false,
 			clsDimensionsEnabled: true,
@@ -471,7 +471,7 @@
 			homepageCssBundleExcludeList: "",
 			homepageCssBundleMode: "safe",
 			cssBundleScope: "per-page",
-			pageCssBundleOnEntryEnabled: true,
+			pageCssBundleOnEntryEnabled: true, pageAsyncBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false,
 			sliderSafeModeEnabled: true,
 			clsDimensionsEnabled: true,
@@ -823,15 +823,15 @@
 	}
 
 	function getDefaultScheduledWarmLimit() {
-		const value = Number(crawlScopeSummary.defaultScheduledWarmLimit || 8);
-		return Number.isFinite(value) ? Math.max(0, value) : 8;
+		const value = Number(crawlScopeSummary.defaultScheduledWarmLimit || 9);
+		return Number.isFinite(value) ? Math.max(1, value) : 9;
 	}
 
 	function getScheduledWarmLimitSummary(formValues, currentSettings) {
 		formValues = formValues || {};
 		currentSettings = currentSettings || {};
 		const breakdown = Array.isArray(crawlScopeSummary.sourceBreakdown) ? crawlScopeSummary.sourceBreakdown : [];
-		const selectedCap = Number(typeof formValues.scheduledWarmLimit !== 'undefined' ? formValues.scheduledWarmLimit : currentSettings.scheduledWarmLimit || 0);
+		const selectedCap = Number(typeof formValues.scheduledWarmLimit !== 'undefined' ? formValues.scheduledWarmLimit : currentSettings.scheduledWarmLimit || 1);
 		const maxUrls = Number(crawlScopeSummary.maxUrls || 0);
 		const selectedSourceKeys = splitWarmSourceList(
 			typeof currentSettings.warmFullSiteSources !== 'undefined'
@@ -1669,6 +1669,28 @@
 	function normalizeCssBundleScopeValue(scope) {
 		scope = String(scope || 'homepage').toLowerCase();
 		return ['homepage', 'shared', 'per-page'].indexOf(scope) !== -1 ? scope : 'homepage';
+	}
+
+	function getFirstVisitCssBundleHandling(settings) {
+		settings = settings || {};
+		if (!!settings.pageAsyncBundleOnEntryEnabled) {
+			return 'async';
+		}
+		if (!!settings.pageCssBundleOnEntryEnabled) {
+			return 'on_entry';
+		}
+		return 'none';
+	}
+
+	function getFirstVisitCssBundlePatch(value) {
+		value = String(value || 'none').toLowerCase();
+		if ('async' === value) {
+			return { pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: true };
+		}
+		if ('on_entry' === value) {
+			return { pageCssBundleOnEntryEnabled: true, pageAsyncBundleOnEntryEnabled: false };
+		}
+		return { pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false };
 	}
 
 	function getCssWarmJobType(baseScope, cssBundleScope) {
@@ -3946,6 +3968,16 @@
 		]);
 	}
 
+
+	function getDefaultVarnishServersForMode(mode) {
+		return String(mode || 'http') === 'admin' ? '127.0.0.1:6082' : '127.0.0.1:82';
+	}
+
+	function isDefaultVarnishServersValue(value) {
+		const normalized = String(value || '').trim();
+		return !normalized || normalized === '127.0.0.1:82' || normalized === '127.0.0.1:6082';
+	}
+
 	function VarnishCard({ form, diagnostics, busy, onFieldChange, onSave, onTest, onFlushAll, onRemoveConflictingDropins, onRecheckConflicts }) {
 		const varnish = diagnostics.varnish || {};
 		const last = varnish.last || {};
@@ -4029,11 +4061,12 @@
 				}),
 				h(NumberRow, {
 					label: 'Timeout (seconds)',
-					description: isAdminMode ? 'Connection and read timeout for each Varnish admin endpoint.' : 'Connection and read timeout for each Varnish HTTP endpoint.',
+					description: isAdminMode ? 'Connection and read timeout for each Varnish admin endpoint. Maximum: 15 seconds.' : 'Connection and read timeout for each Varnish HTTP endpoint. Maximum: 15 seconds.',
 					value: form.varnishCliTimeoutSeconds || 2,
 					onChange: (value) => onFieldChange('varnishCliTimeoutSeconds', value),
 					disabled: busy,
 					min: 1,
+					max: 15,
 					step: 1,
 					key: 'timeout',
 				}),
@@ -4505,21 +4538,23 @@
 				}),
 				h(NumberRow, {
 					label: 'Connect timeout (ms)',
-					description: 'Advanced. Default: 200ms.',
+					description: 'Advanced. Default: 200ms. Maximum: 15000ms.',
 					value: typeof form.redisConnectTimeoutMs === 'undefined' ? 200 : form.redisConnectTimeoutMs,
 					onChange: (value) => onFieldChange('redisConnectTimeoutMs', value),
 					disabled: busy,
 					min: 50,
+					max: 15000,
 					step: 50,
 					key: 'redis-connect-timeout',
 				}),
 				h(NumberRow, {
 					label: 'Read timeout (ms)',
-					description: 'Advanced. Default: 200ms.',
+					description: 'Advanced. Default: 200ms. Maximum: 15000ms.',
 					value: typeof form.redisReadTimeoutMs === 'undefined' ? 200 : form.redisReadTimeoutMs,
 					onChange: (value) => onFieldChange('redisReadTimeoutMs', value),
 					disabled: busy,
 					min: 50,
+					max: 15000,
 					step: 50,
 					key: 'redis-read-timeout',
 				}),
@@ -4830,7 +4865,7 @@
 		const [varnishForm, setVarnishForm] = useState({
 			varnishCliEnabled: !!initialSettings.varnishCliEnabled,
 			varnishCliMode: initialSettings.varnishCliMode || 'http',
-			varnishCliServers: initialSettings.varnishCliServers || '127.0.0.1:80',
+			varnishCliServers: initialSettings.varnishCliServers || getDefaultVarnishServersForMode(initialSettings.varnishCliMode || 'http'),
 			varnishCliKey: initialSettings.varnishCliKey || '',
 			varnishCliTimeoutSeconds: initialSettings.varnishCliTimeoutSeconds || 2,
 			varnishCliMethod: initialSettings.varnishCliMethod || 'BAN',
@@ -5119,7 +5154,7 @@
 			setVarnishForm({
 				varnishCliEnabled: !!settings.varnishCliEnabled,
 				varnishCliMode: settings.varnishCliMode || 'http',
-				varnishCliServers: settings.varnishCliServers || '127.0.0.1:80',
+				varnishCliServers: settings.varnishCliServers || getDefaultVarnishServersForMode(settings.varnishCliMode || 'http'),
 				varnishCliKey: settings.varnishCliKey || '',
 				varnishCliTimeoutSeconds: settings.varnishCliTimeoutSeconds || 2,
 				varnishCliMethod: settings.varnishCliMethod || 'BAN',
@@ -5249,7 +5284,13 @@
 
 
 		function updateVarnishField(key, value) {
-			setVarnishForm((current) => Object.assign({}, current, { [key]: value }));
+			setVarnishForm((current) => {
+				const next = Object.assign({}, current || {}, { [key]: value });
+				if (key === 'varnishCliMode' && isDefaultVarnishServersValue(current && current.varnishCliServers)) {
+					next.varnishCliServers = getDefaultVarnishServersForMode(value);
+				}
+				return next;
+			});
 
 			if (key === 'varnishCliEnabled') {
 				queueSettingsPatch({ [key]: !!value });
@@ -6772,12 +6813,6 @@
 			});
 		}
 
-		function updateFrontendSafeModeSetting(value) {
-			queueSettingsPatch({
-				frontendSafeModeEnabled: value,
-				lcpBoundaryDeferEnabled: value ? false : !!settings.lcpBoundaryDeferEnabled,
-			});
-		}
 
 		function updateSliderSafeModeSetting(value) {
 			queueSettingsPatch({
@@ -6957,18 +6992,30 @@
 
 		async function saveAdvancedSettings() {
 			return enqueueUiOperation('advanced_settings_save', 'Save advanced settings', async () => {
+				const formSnapshot = Object.assign({}, advancedForm || {});
 				const response = await apiRequest('save_settings', {
 					settings_json: JSON.stringify({
-						cacheCleanupIntervalHours: Number(advancedForm.cacheCleanupIntervalHours || 24),
-						cssBundleCleanupGraceHours: Number(advancedForm.cssBundleCleanupGraceHours || 48),
-						cssBundleCleanupDeleteLimit: Number(advancedForm.cssBundleCleanupDeleteLimit || 60),
-						cronWarmPagesPerMinute: Number(advancedForm.cronWarmPagesPerMinute || 0),
-						scheduledWarmLimit: Number(advancedForm.scheduledWarmLimit || advancedForm.cronWarmPagesPerMinute || 0),
-						cacheFreshTtlMinutes: Number(advancedForm.cacheFreshTtlMinutes || 15),
-						cacheMaxStaleMinutes: Number(advancedForm.cacheMaxStaleMinutes || 720),
+						cacheCleanupIntervalHours: Number(formSnapshot.cacheCleanupIntervalHours || 24),
+						cssBundleCleanupGraceHours: Number(formSnapshot.cssBundleCleanupGraceHours || 48),
+						cssBundleCleanupDeleteLimit: Number(formSnapshot.cssBundleCleanupDeleteLimit || 60),
+						cronWarmPagesPerMinute: Number(formSnapshot.cronWarmPagesPerMinute || 0),
+						scheduledWarmLimit: Number(formSnapshot.scheduledWarmLimit || 1),
+						cacheFreshTtlMinutes: Number(formSnapshot.cacheFreshTtlMinutes || 15),
+						cacheMaxStaleMinutes: Number(formSnapshot.cacheMaxStaleMinutes || 720),
 					}),
 				});
 				applyDashboardPayload(response || {});
+				if (response && response.settings) {
+					setAdvancedForm((prev) => Object.assign({}, prev, {
+						cacheCleanupIntervalHours: response.settings.cacheCleanupIntervalHours || prev.cacheCleanupIntervalHours,
+						cssBundleCleanupGraceHours: typeof response.settings.cssBundleCleanupGraceHours === 'undefined' ? prev.cssBundleCleanupGraceHours : response.settings.cssBundleCleanupGraceHours,
+						cssBundleCleanupDeleteLimit: typeof response.settings.cssBundleCleanupDeleteLimit === 'undefined' ? prev.cssBundleCleanupDeleteLimit : response.settings.cssBundleCleanupDeleteLimit,
+						cronWarmPagesPerMinute: typeof response.settings.cronWarmPagesPerMinute === 'undefined' ? prev.cronWarmPagesPerMinute : response.settings.cronWarmPagesPerMinute,
+						scheduledWarmLimit: typeof response.settings.scheduledWarmLimit === 'undefined' ? prev.scheduledWarmLimit : response.settings.scheduledWarmLimit,
+						cacheFreshTtlMinutes: response.settings.cacheFreshTtlMinutes || prev.cacheFreshTtlMinutes,
+						cacheMaxStaleMinutes: response.settings.cacheMaxStaleMinutes || prev.cacheMaxStaleMinutes,
+					}));
+				}
 				return response;
 			}, { processingText: 'Processing advanced settings save…', successText: 'Advanced settings saved.', failedText: 'Failed to save advanced settings.' });
 		}
@@ -7343,8 +7390,21 @@
 			});
 			try {
 				const params = Object.assign({ media_format: getSelectedMediaQueueFormat() }, extraParams || {});
-				const response = await apiRequest(action, params);
-				applyMediaQueueStatus(response);
+				let response = null;
+				let loops = 0;
+				let changedTotal = 0;
+				do {
+					loops += 1;
+					response = await apiRequest(action, params);
+					applyMediaQueueStatus(response);
+					changedTotal += Math.max(0, Number((response && (response.retried || response.cleared || (response.repair && response.repair.requeued))) || 0));
+					if (response && response.hasMore) {
+						setProcess((prev) => Object.assign({}, prev, {
+							logs: (prev.logs || []).concat(['Processed ' + formatNumber(changedTotal) + ' row(s); continuing safely…']).slice(-50),
+						}));
+						await sleep(80);
+					}
+				} while (response && response.hasMore && loops < 5000);
 				const message = response && response.message ? String(response.message) : successText;
 				const statusText = 'Queue: ' + formatNumber(response && response.total ? response.total : 0) + ' attachment(s), ' + formatNumber(response && response.pending ? response.pending : 0) + ' pending, ' + formatNumber(response && response.alreadyOptimized ? response.alreadyOptimized : 0) + ' already optimized, ' + formatNumber(response && response.failed ? response.failed : 0) + ' failed.';
 				setProcess({
@@ -7379,11 +7439,66 @@
 
 		async function rebuildMediaQueue() {
 			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-				if (!window.confirm('Rebuild the full media queue? This scans the media library and may take longer on large sites. Existing optimized image files are not deleted.')) {
+				if (!window.confirm('Rebuild the full media queue? This scans the media library in safe chunks. Existing optimized image files are not deleted.')) {
 					return;
 				}
 			}
-			await runMediaQueueRestAction('media_queue_rebuild', 'Rebuilding Media Queue', 'Media queue rebuilt.', { limit: 0 });
+			if (busy) {
+				return;
+			}
+			setBusy(true);
+			setProcess({
+				type: 'media',
+				active: true,
+				showWhenInactive: true,
+				label: 'Rebuilding Media Queue',
+				current: 0,
+				total: 0,
+				logs: ['Starting chunked media queue rebuild…'],
+				startTime: Date.now(),
+				cancellable: false,
+				cancelRequested: false,
+			});
+			try {
+				let reset = true;
+				let loops = 0;
+				let totalScanned = 0;
+				let totalQueued = 0;
+				let response = null;
+				do {
+					loops += 1;
+					response = await apiRequest('media_queue_rebuild', { media_format: getSelectedMediaQueueFormat(), limit: 0, reset: reset, time_budget: 20 });
+					reset = false;
+					totalScanned += Math.max(0, Number(response && response.scanned ? response.scanned : 0));
+					totalQueued += Math.max(0, Number(response && response.queued ? response.queued : 0));
+					applyMediaQueueStatus(response);
+					setProcess((prev) => Object.assign({}, prev, {
+						current: Math.max(0, Number(response && response.buildOffset ? response.buildOffset : totalScanned)),
+						total: Math.max(0, Number(response && response.total ? response.total : 0)),
+						logs: (prev.logs || []).concat(['Scanned ' + formatNumber(totalScanned) + ', queued ' + formatNumber(totalQueued) + '.']).slice(-50),
+					}));
+					await sleep(80);
+				} while (response && response.hasMore && loops < 5000);
+
+				const statusText = 'Queue: ' + formatNumber(response && response.total ? response.total : 0) + ' attachment(s), ' + formatNumber(response && response.pending ? response.pending : 0) + ' pending.';
+				setProcess((prev) => Object.assign({}, prev, {
+					active: false,
+					showWhenInactive: true,
+					label: 'Media Queue Rebuild complete',
+					logs: (prev.logs || []).concat([response && response.message ? String(response.message) : 'Media queue rebuild finished.', statusText]).slice(-50),
+				}));
+				pushToast({ type: 'success', text: 'Media queue rebuilt.' });
+				await refreshStats();
+			} catch (error) {
+				setProcess((prev) => Object.assign({}, prev, {
+					active: false,
+					showWhenInactive: true,
+					logs: (prev.logs || []).concat([error && error.message ? error.message : 'Media queue rebuild failed.']).slice(-50),
+				}));
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Media queue rebuild failed.' });
+			} finally {
+				setBusy(false);
+			}
 		}
 
 		async function repairMediaQueue() {
@@ -8053,13 +8168,13 @@ h(ToggleRow, {
 				Card,
 				{
 					title: 'Media Optimization',
-					description: 'Master switch for next-gen image generation, frontend rewriting, upload-time conversion, on-demand queue discovery, and batch conversion.',
+					description: 'Controls frontend AVIF/WebP URL rewriting and the related upload, batch, and missing-media queue tools.',
 					key: 'media-optimization',
 				},
 				[
 					h(ToggleRow, {
-						label: 'Enable Media Optimization',
-						description: 'Enable AVIF/WebP generation and frontend image URL rewriting according to the selected output policy.',
+						label: 'Enable Media Rewrite',
+						description: 'Enable AVIF/WebP media URL rewriting according to the selected output policy. The actual media files must already exist or be generated through batch conversion, generate on upload, or queue missing media on demand.',
 						checked: mediaOptimizationEnabled,
 						onChange: (value) => updateMediaOptimizationSetting(value),
 						disabled: busy,
@@ -8110,7 +8225,7 @@ h(ToggleRow, {
 						description: 'Inject missing width and height on local images using attachment metadata first and local file dimensions as fallback.',
 						checked: settings.clsDimensionsEnabled,
 						onChange: (value) => updateSetting('clsDimensionsEnabled', value),
-						disabled: busy || !mediaOptimizationEnabled || !!settings.frontendSafeModeEnabled,
+						disabled: busy,
 						key: 'media-cls-dimensions',
 					}),
 					h(ToggleRow, {
@@ -8118,7 +8233,7 @@ h(ToggleRow, {
 						description: 'Prioritize likely hero/LCP images. In normal mode UltraCache can mark the detected candidate and inject a preload; when Fix sliders / hero sections is active, it uses SR7/Revolution Slider first-slide discovery plus a lifecycle-safe runtime guard.',
 						checked: settings.lcpImagePriorityEnabled,
 						onChange: (value) => updateSetting('lcpImagePriorityEnabled', value),
-						disabled: busy || !mediaOptimizationEnabled || !!settings.frontendSafeModeEnabled,
+						disabled: busy,
 						key: 'media-lcp-priority',
 					}),
 					h(ToggleRow, {
@@ -8126,7 +8241,7 @@ h(ToggleRow, {
 						description: 'Adds native loading="lazy" and decoding="async" to eligible images. If LCP Image Priority is enabled, UltraCache only lazy-loads images printed after the detected LCP image.',
 						checked: !!settings.lazyLoadImagesEnabled,
 						onChange: (value) => updateSetting('lazyLoadImagesEnabled', value),
-						disabled: busy || !mediaOptimizationEnabled || !!settings.frontendSafeModeEnabled,
+						disabled: busy,
 						key: 'media-lazy-load-images',
 					}),
 					!avifSupport.supported
@@ -8178,7 +8293,7 @@ h(ToggleRow, {
 									description: 'Prevents MailerLite forms from calling wp-admin/admin-ajax.php on page load for ml_create_nonce. The nonce is refreshed on first form interaction or before submit, so cached pages avoid the load-time admin-ajax request.',
 									checked: !!settings.lazyMailerliteNonceEnabled,
 									onChange: (value) => updateSetting('lazyMailerliteNonceEnabled', value),
-									disabled: busy || !!settings.frontendSafeModeEnabled,
+									disabled: busy,
 									key: 'lazy-mailerlite-nonce-refresh',
 								}),
 	h(ToggleRow, {
@@ -8226,7 +8341,7 @@ h(ToggleRow, {
 									description: 'Uses the LCP image detected by LCP Image Priority as a visual boundary. Eligible local scripts printed after that image in the HTML are delayed.',
 									checked: !!settings.lcpBoundaryDeferEnabled,
 									onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
-										disabled: busy || !settings.lcpImagePriorityEnabled || !!settings.frontendSafeModeEnabled,
+										disabled: busy || !settings.lcpImagePriorityEnabled,
 									key: 'lcp-boundary-defer',
 								})
 					]
@@ -8288,14 +8403,18 @@ h(ToggleRow, {
 							disabled: busy || !settings.homepageCssBundleEnabled,
 							key: 'leftover-css-bundle',
 						}),
-h(ToggleRow, {
-							label: 'Create CSS Bundle on Entry / Warm',
-							description: 'Build missing CSS bundles on entry or warmup according to the selected scope. Homepage and shared scopes build the homepage bundle; per-page scope can build a separate bundle for each warmed cacheable URL.',
-							checked: settings.pageCssBundleOnEntryEnabled,
-							onChange: (value) => updateSetting('pageCssBundleOnEntryEnabled', value),
+h('div', { className: 'uc-css-bundle-first-visit-field', key: 'css-bundle-first-visit-wrap' }, h(SelectField, {
+							label: 'First Visit CSS Bundle Handling',
+							description: 'Choose what happens when a visitor opens a page before its CSS bundle exists.',
+							value: getFirstVisitCssBundleHandling(settings),
+							onChange: (value) => queueSettingsPatch(getFirstVisitCssBundlePatch(value)),
 							disabled: busy || !settings.homepageCssBundleEnabled,
-							key: 'page-css-bundle-on-entry',
-						}),
+							options: [
+								{ value: 'none', label: 'Do nothing' },
+								{ value: 'on_entry', label: 'Build CSS bundle on entry' },
+								{ value: 'async', label: 'Build CSS bundle async' },
+							],
+						})),
 h(ToggleRow, {
 							label: 'Async Remaining CSS',
 							description: 'Rewrite low-risk local stylesheet links and UltraCache-generated external CSS bundles/optimized CSS to non-blocking print+onload loading with a noscript fallback. This complements CSS Bundling.',
@@ -8395,20 +8514,20 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 									]),
 									h('div', { className: 'uc-accordion__body space-y-4' }, [
 										h(ToggleRow, {
-											label: 'Frontend Safe Mode',
-											description: 'Force the broad safe frontend mode. When enabled, UltraCache skips structural frontend rewrites such as authoring-asset stripping, async CSS rewrites, self-hosted font runtime rewrites, and LCP Boundary Defer.',
-											checked: settings.frontendSafeModeEnabled,
-											onChange: (value) => updateFrontendSafeModeSetting(value),
-											disabled: busy,
-											key: 'frontend-safe-mode',
-										}),
-										h(ToggleRow, {
 											label: 'Fix sliders / hero sections',
 											description: 'When Revolution Slider, SR7, Swiper, Slick, or similar hero/slider markup is detected, UltraCache protects slider/runtime assets, skips risky structural rewrites, and keeps SR7 first-slide LCP priority on the lifecycle-safe path when LCP Image Priority is enabled.',
 											checked: !!settings.sliderSafeModeEnabled,
 											onChange: (value) => updateSliderSafeModeSetting(value),
 											disabled: busy,
 											key: 'slider-safe-mode',
+										}),
+										h(ToggleRow, {
+											label: 'Enable Debug',
+											description: 'Allow request-triggered UltraCache debug/source headers such as X-Ultra-Cache-Source when X-UltraCache-Debug: 1 is sent. Keep OFF on production unless actively debugging.',
+											checked: !!settings.debugHeadersEnabled,
+											onChange: (value) => updateSetting('debugHeadersEnabled', value),
+											disabled: busy,
+											key: 'enable-debug-headers',
 										}),
 										h(ToggleRow, {
 											label: 'Aggressive Async CSS',
@@ -8566,7 +8685,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 											description: 'Optional newline-separated CSS selectors, plain IDs, or image URL/fragments for the main above-the-fold hero/LCP target. CSS entries scope LCP discovery to that block; image entries become manual LCP preload targets.',
 											value: settings.manualLcpHeroSelector || '',
 											onSave: (value) => updateSetting('manualLcpHeroSelector', value),
-											disabled: busy || !!settings.frontendSafeModeEnabled || !settings.lcpImagePriorityEnabled,
+											disabled: busy || !settings.lcpImagePriorityEnabled,
 											placeholder: '#main-hero\n.hero-slider\n/wp-content/uploads/hero.webp\nhero-home.jpg',
 											saveLabel: 'Save Manual LCP Selector',
 											key: 'manual-lcp-hero-selector',
@@ -8726,7 +8845,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 							value: advancedForm.scheduledWarmLimit,
 							onChange: (value) => updateAdvancedField('scheduledWarmLimit', value),
 							disabled: busy,
-							min: 0,
+							min: 1,
 							key: 'scheduled-warm-limit',
 						}),
 						h(ToggleRow, {
@@ -8913,7 +9032,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 						h(Button, { onClick: exportSettingsFile, disabled: busy, variant: 'primary' }, busy ? 'Working…' : 'Export Settings'),
 						h(Button, { onClick: openImportSettingsDialog, disabled: busy, variant: 'light' }, busy ? 'Working…' : 'Import Settings'),
 					h(Button, { onClick: resetSettingsToDefaults, disabled: busy, variant: 'light' }, busy ? 'Working…' : 'Reset Settings'),
-					h(Button, { onClick: deleteAllPluginDataAndDeactivate, disabled: busy, variant: 'danger' }, busy ? 'Working…' : 'Delete all plugin Data and disable plugin'),
+					h(Button, { onClick: deleteAllPluginDataAndDeactivate, disabled: busy, variant: 'danger' }, busy ? 'Working…' : 'Delete all plugin data and deactivate plugin'),
 					]),
 					h('div', { className: 'mt-4 text-xs text-zinc-500', key: 'hint' }, 'Recommended flow: export from the known-good site, then import into the target site and review Diagnostics once.'),
 					h('div', { className: 'mt-2 text-xs text-zinc-500', key: 'delete-hint' }, 'Delete/deactivate follows the selected cleanup policy. Generated media remains under wp-content/uploads/uc-images/ and must be removed manually if you want it deleted.'),

@@ -38,21 +38,6 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		private $final_buffering = false;
 
 		/**
-		 * Number of frontend on-demand conversions started during this request.
-		 *
-		 * @var int
-		 */
-		private $on_demand_conversions_started = 0;
-
-		/**
-		 * Request start timestamp used for frontend on-demand conversion budgeting.
-		 *
-		 * @var float|null
-		 */
-		private $on_demand_request_started_at = null;
-
-
-		/**
 		 * Per-request memoized optimized variant existence checks.
 		 *
 		 * @var array<string,bool>
@@ -125,11 +110,6 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		private $media_rewrite_accept_context = null;
 
 		/**
-		 * Background conversion queue option name.
-		 */
-		const BACKGROUND_QUEUE_OPTION = 'ultracache_media_conversion_queue';
-
-		/**
 		 * Background conversion cron hook.
 		 */
 		const BACKGROUND_QUEUE_HOOK = 'ucwp_process_media_conversion_queue';
@@ -165,7 +145,7 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 		const MEDIA_DIAGNOSTICS_OPTION = 'ultracache_media_diagnostics_v1';
 
 		/** Persistent media conversion queue table version. */
-		const MEDIA_QUEUE_DB_VERSION = '1';
+		const MEDIA_QUEUE_DB_VERSION = '2';
 
 		/** Persistent media conversion queue database version option. */
 		const MEDIA_QUEUE_DB_VERSION_OPTION = 'ultracache_media_queue_db_version';

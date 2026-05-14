@@ -25,6 +25,9 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
         /** @var Ultra_Cache_Rest_API|null */
         private static $instance = null;
 
+        /** @var bool */
+        private static $routes_registered = false;
+
         public static function get_instance()
         {
             if (null === self::$instance) {
@@ -41,6 +44,11 @@ if (!class_exists('Ultra_Cache_Rest_API')) {
 
         public function register_routes()
         {
+            if (self::$routes_registered) {
+                return;
+            }
+            self::$routes_registered = true;
+
             $definitions = $this->get_route_definitions();
             $canonical_namespace = $this->get_canonical_namespace();
             foreach ($definitions as $route => $handlers) {

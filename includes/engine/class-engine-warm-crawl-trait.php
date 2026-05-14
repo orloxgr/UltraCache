@@ -405,11 +405,39 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             return false;
         }
 
+        private function get_allowed_warm_buckets(array $settings = array())
+        {
+            $settings = is_array($settings) ? $settings : array();
+            $media_rewrite_enabled = !empty($settings['media_optimization_enabled']);
+            $mode = isset($settings['media_output_mode']) ? strtolower(trim((string) $settings['media_output_mode'])) : 'auto';
+            if (!in_array($mode, array('auto', 'avif', 'webp'), true)) {
+                $mode = 'auto';
+            }
+
+            // Keep AVIF before WebP so auto/best warm generation does not settle on
+            // a WebP fallback before the AVIF bucket has had a chance to generate.
+            $buckets = array('orig');
+            if (!$media_rewrite_enabled) {
+                return $buckets;
+            }
+
+            if ('auto' === $mode || 'avif' === $mode) {
+                $buckets[] = 'avif';
+            }
+            if ('auto' === $mode || 'webp' === $mode) {
+                $buckets[] = 'webp';
+            }
+
+            return $buckets;
+        }
+
         public function warm_url($url, array $args = array())
         {
             $args = is_array($args) ? $args : array();
             $ignore_runtime_bypass = !empty($args['ignore_runtime_bypass']);
             $force_refresh = !empty($args['force_refresh']);
+            $settings_for_warm = $this->get_settings();
+            $operation_budget = function_exists('ucwp_get_safe_operation_budget') ? ucwp_get_safe_operation_budget('warm_url', $args['time_budget'] ?? null, 45) : array();
             $url = esc_url_raw((string) $url);
             if (!$this->is_cacheable_local_url($url)) {
                 $result = array(
@@ -440,13 +468,11 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 return $result;
             }
 
-            // 2.56.185: warm AVIF before WebP so auto/best warm generation does not
-            // settle on a WebP fallback before the AVIF bucket has had a chance to generate.
-            $bucket_priority = array('orig', 'avif', 'webp');
+            $bucket_priority = $this->get_allowed_warm_buckets($settings_for_warm);
             $requested_buckets = isset($args['buckets']) && is_array($args['buckets']) ? $args['buckets'] : $bucket_priority;
             $buckets = array_values(array_unique(array_intersect($bucket_priority, array_map('strval', $requested_buckets))));
             if (empty($buckets)) {
-                $buckets = $bucket_priority;
+                $buckets = array('orig');
             }
 
             if ($force_refresh) {
@@ -458,11 +484,9 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 }
             }
 
-            $settings_for_warm = $this->get_settings();
             $css_bundle_requested = !empty($args['build_css_bundle']);
             $css_bundle_auto_warm = !$css_bundle_requested
-                && !empty($settings_for_warm['homepage_css_bundle'])
-                && !empty($settings_for_warm['page_css_bundle_on_entry']);
+                && !empty($settings_for_warm['homepage_css_bundle']);
             $css_bundle_result = array();
             if ($css_bundle_requested || $css_bundle_auto_warm) {
                 $bundle_scope = $this->get_css_bundle_scope($settings_for_warm);
@@ -471,8 +495,8 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 if ($should_build_bundle_for_url && empty($this->get_frontpage_css_manifest_entry($url))) {
                     // Build the CSS bundle/manifest before writing the HTML cache. The HTML warm below
                     // then sees the fresh manifest and only needs one loopback pass instead of a
-                    // warm -> bundle -> warm sequence. The page_css_bundle_on_entry setting is documented
-                    // as entry/warm, so explicit warms and cron warms may also populate missing bundles.
+                    // warm -> bundle -> warm sequence. First-visit handling is visitor-only;
+                    // explicit/manual/cron warms may populate missing bundles whenever CSS Bundling is enabled.
                     $css_bundle_result = $this->build_frontpage_css_bundle($url, array('skip_final_warm' => true));
                 } elseif ($should_build_bundle_for_url) {
                     $css_bundle_result = array('success' => true, 'skipped' => true, 'message' => 'Existing CSS bundle manifest entry found for this URL.');
@@ -483,6 +507,11 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             $last_error = '';
 
             foreach ($buckets as $bucket) {
+                $pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($operation_budget) : '';
+                if ('' !== $pause_reason) {
+                    $last_error = 'Warm paused by ' . $pause_reason . '.';
+                    break;
+                }
                 $accept_header = $this->get_accept_header_for_bucket($bucket);
                 $response = ucwp_safe_loopback_remote_request(
                     $url,
@@ -562,6 +591,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 'url'     => $url,
                 'message' => $success ? sprintf('Generated %d cache file(s).', count($cached_files)) : $last_error,
                 'files'   => $cached_files,
+                'buckets' => $buckets,
             );
 
             if ($css_bundle_requested) {
@@ -627,6 +657,9 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
             try {
                 $this->purge_cache_directory_preserving_google_fonts();
+                if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'mark_all_cache_asset_refs_inactive')) {
+                    Ultra_Cache_WP::mark_all_cache_asset_refs_inactive();
+                }
                 self::ensure_cache_directories();
                 if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'sync_runtime_config')) {
                     Ultra_Cache_WP::sync_runtime_config();
@@ -1512,7 +1545,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 'discoveredTotal' => max(0, (int) ($source_summary['discoveredTotal'] ?? 0)),
                 'estimatedTotal' => max(0, (int) ($source_summary['estimatedTotal'] ?? 0)),
                 'maxUrls' => $max_urls,
-                'defaultScheduledWarmLimit' => 8,
+                'defaultScheduledWarmLimit' => 9,
                 'suggestedScheduledWarmLimit' => max(0, (int) ($source_summary['defaultScheduledWarmLimit'] ?? 0)),
                 'scheduledWarmLimitDerived' => false,
                 'scheduledWarmLimitSource' => 'user_cap',

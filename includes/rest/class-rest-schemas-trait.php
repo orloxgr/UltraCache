@@ -164,6 +164,19 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
         private function get_media_queue_rebuild_args()
         {
             return array_merge($this->get_media_queue_common_args(), array(
+                'reset' => array(
+                    'type'              => 'boolean',
+                    'required'          => false,
+                    'default'           => false,
+                    'sanitize_callback' => 'rest_sanitize_boolean',
+                ),
+                'time_budget' => array(
+                    'type'              => 'integer',
+                    'required'          => false,
+                    'default'           => 20,
+                    'sanitize_callback' => array($this, 'sanitize_media_queue_time_budget_param'),
+                    'validate_callback' => array($this, 'validate_media_queue_time_budget_param'),
+                ),
                 'limit' => array(
                     'type'              => 'integer',
                     'required'          => false,
@@ -240,7 +253,7 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'delayIconFontsExcludeList'            => array('type' => 'string', 'required' => false),
                 'cssBundleScope'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_css_bundle_scope_param'), 'validate_callback' => array($this, 'validate_css_bundle_scope_param')),
                 'pageCssBundleOnEntryEnabled'          => array('type' => 'boolean', 'required' => false),
-                'frontendSafeModeEnabled'            => array('type' => 'boolean', 'required' => false),
+                'pageAsyncBundleOnEntryEnabled'     => array('type' => 'boolean', 'required' => false),
                 'sliderSafeModeEnabled'              => array('type' => 'boolean', 'required' => false),
                 'clsDimensionsEnabled'                 => array('type' => 'boolean', 'required' => false),
                 'asyncCssEnabled'                      => array('type' => 'boolean', 'required' => false),
@@ -297,6 +310,7 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'staleWhileRevalidateEnabled'          => array('type' => 'boolean', 'required' => false),
                 'cacheFreshTtlMinutes'                 => array('type' => 'integer', 'required' => false),
                 'cacheMaxStaleMinutes'                 => array('type' => 'integer', 'required' => false),
+                'debugHeadersEnabled'                  => array('type' => 'boolean', 'required' => false),
                 'cacheExceptionPaths'                  => array('type' => 'string', 'required' => false),
                 'cacheExceptionQueryArgs'              => array('type' => 'string', 'required' => false),
                 'cacheQueryStringsEnabled'             => array('type' => 'boolean', 'required' => false),

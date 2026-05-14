@@ -262,6 +262,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'homepage_css_bundle_mode' => isset($settings['homepage_css_bundle_mode']) ? (string) $settings['homepage_css_bundle_mode'] : '',
             'css_bundle_scope' => isset($settings['css_bundle_scope']) ? (string) $settings['css_bundle_scope'] : '',
             'page_css_bundle_on_entry' => !empty($settings['page_css_bundle_on_entry']),
+            'page_css_bundle_async_on_entry' => !empty($settings['page_css_bundle_async_on_entry']),
             'async_css' => !empty($settings['async_css']),
             'aggressive_async_css' => !empty($settings['aggressive_async_css']),
             'defer_js' => !empty($settings['defer_js']),
@@ -270,7 +271,6 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'delay_non_critical_js' => !empty($settings['delay_non_critical_js']),
             'lcp_image_priority' => !empty($settings['lcp_image_priority']),
             'lcp_boundary_defer' => !empty($settings['lcp_boundary_defer']),
-            'frontend_safe_mode' => !empty($settings['frontend_safe_mode']),
             'slider_safe_mode' => !empty($settings['slider_safe_mode']),
         );
     }
@@ -519,6 +519,49 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         return $this->get_store_profile_dir() . 'store-profile-' . substr($run_id, 0, 64) . '.json';
     }
 
+    private function cleanup_old_store_profile_run_files($context = 'store_profile_cleanup')
+    {
+        $dir = $this->get_store_profile_dir();
+        if (!is_dir($dir)) {
+            return;
+        }
+
+        $entries = function_exists('ucwp_safe_scandir') ? ucwp_safe_scandir($dir, (string) $context) : scandir($dir);
+        if (!is_array($entries)) {
+            return;
+        }
+
+        $retention_seconds = 7 * DAY_IN_SECONDS;
+        $cutoff = time() - $retention_seconds;
+
+        foreach ($entries as $entry) {
+            $entry = (string) $entry;
+            if ('.' === $entry || '..' === $entry || 'store-profile-last.json' === $entry) {
+                continue;
+            }
+
+            if (1 !== preg_match('/^store-profile-[A-Za-z0-9_-]+\.json$/', $entry)) {
+                continue;
+            }
+
+            $path = trailingslashit($dir) . $entry;
+            if (!is_file($path)) {
+                continue;
+            }
+
+            $mtime = function_exists('ucwp_safe_filemtime') ? ucwp_safe_filemtime($path, (string) $context) : filemtime($path);
+            if (!is_int($mtime) || $mtime >= $cutoff) {
+                continue;
+            }
+
+            if (function_exists('ucwp_safe_unlink')) {
+                ucwp_safe_unlink($path, (string) $context);
+            } elseif (function_exists('wp_delete_file')) {
+                wp_delete_file($path);
+            }
+        }
+    }
+
     private function write_store_profile_json($context = 'store_profile_write')
     {
         if (empty($this->store_profile) || !is_array($this->store_profile)) {
@@ -549,6 +592,10 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             if ('' !== $run_file) {
                 $run_ok = false !== ucwp_safe_file_put_contents($run_file, $json, LOCK_EX, (string) $context . '_run');
             }
+        }
+
+        if ($last_ok && $run_ok) {
+            $this->cleanup_old_store_profile_run_files((string) $context . '_retention');
         }
 
         if (!$last_ok || !$run_ok) {

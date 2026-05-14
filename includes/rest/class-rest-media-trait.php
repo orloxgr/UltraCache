@@ -65,7 +65,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
             }
 
             if (method_exists($media, 'process_media_queue_batch')) {
-                return new WP_REST_Response($media->process_media_queue_batch(array('limit' => 5, 'format' => 'best', 'only_missing' => true, 'time_budget' => 20)), 200);
+                return new WP_REST_Response($media->process_media_queue_batch(array('limit' => 5, 'format' => 'best', 'only_missing' => true)), 200);
             }
 
             if (!method_exists($media, 'bulk_optimize')) {
@@ -106,7 +106,9 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
             }
 
             $limit = max(0, absint($request->get_param('limit')));
-            return new WP_REST_Response($media->rebuild_media_conversion_queue($this->get_media_queue_format_from_request($request), true, $limit), 200);
+            $time_budget = max(0, min(120, absint($request->get_param('time_budget')) ?: 20));
+            $reset = rest_sanitize_boolean($request->get_param('reset'));
+            return new WP_REST_Response($media->rebuild_media_conversion_queue($this->get_media_queue_format_from_request($request), true, $limit, array('reset' => $reset, 'time_budget' => $time_budget)), 200);
         }
 
         public function media_queue_process(WP_REST_Request $request)

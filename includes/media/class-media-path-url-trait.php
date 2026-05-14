@@ -125,13 +125,6 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 		}
 
-		private function can_generate_optimized_media_from_lookup($force_generation_budget = false) {
-			// 2.57.135 CPU guard: frontend/cache STORE, warm and stale HTML rewrites
-			// must be lookup-only. Heavy AVIF/WebP encoding is reserved for explicit
-			// manual/queue paths that call the conversion routines directly.
-			return (bool) $force_generation_budget && method_exists($this, 'get_media_generation_context') && 'manual' === $this->get_media_generation_context();
-		}
-
 		private function normalize_uploads_relative_image_path($relative_path) {
 			$relative_path = ltrim(str_replace('\\', '/', (string) $relative_path), '/');
 			if ('' === $relative_path || false !== strpos($relative_path, "\0")) {
@@ -187,7 +180,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			return $this->get_root_relative_optimized_media_url($format, $optimized_relative_path);
 		}
 
-		private function get_public_url_lookup_cache_key($format, $public_url, $force_generation_budget = false) {
+		private function get_public_url_lookup_cache_key($format, $public_url) {
 			$format = strtolower((string) $format);
 			$normalized = $this->normalize_public_url($public_url);
 			if ('' === $normalized) {
@@ -195,7 +188,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			$context = method_exists($this, 'get_media_generation_context') ? $this->get_media_generation_context() : 'frontend';
-			return $format . '|' . $context . '|' . ((bool) $force_generation_budget ? '1' : '0') . '|' . md5($normalized);
+			return $format . '|' . $context . '|lookup|' . md5($normalized);
 		}
 
 		private function memoize_public_url_lookup($key, $value) {
@@ -206,7 +199,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			return $value ? (string) $value : false;
 		}
 
-		private function get_avif_url_from_source($source_file, $force_generation_budget = false) {
+		private function get_avif_url_from_source($source_file) {
 			$avif_path = $this->get_avif_path_from_source($source_file);
 
 			if (!$avif_path) {
@@ -214,14 +207,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			if (!$this->optimized_storage_path_exists($avif_path)) {
-				if (!$this->can_generate_optimized_media_from_lookup($force_generation_budget)) {
-					return false;
-				}
-
-				$generated = $this->ensure_generated_variant($source_file, 'avif', true);
-				if (!$generated || !$this->optimized_storage_path_exists($avif_path, true)) {
-					return false;
-				}
+				return false;
 			}
 
 			$relative_path = ltrim(str_replace(trailingslashit(UCWP_AVIF_DIR), '', $avif_path), '/\\');
@@ -233,7 +219,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			return $this->get_root_relative_optimized_media_url('avif', $relative_path);
 		}
 
-		private function get_webp_url_from_source($source_file, $force_generation_budget = false) {
+		private function get_webp_url_from_source($source_file) {
 			$webp_path = $this->get_webp_path_from_source($source_file);
 
 			if (!$webp_path) {
@@ -241,14 +227,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			if (!$this->optimized_storage_path_exists($webp_path)) {
-				if (!$this->can_generate_optimized_media_from_lookup($force_generation_budget)) {
-					return false;
-				}
-
-				$generated = $this->ensure_generated_variant($source_file, 'webp', true);
-				if (!$generated || !$this->optimized_storage_path_exists($webp_path, true)) {
-					return false;
-				}
+				return false;
 			}
 
 			$relative_path = ltrim(str_replace(trailingslashit(UCWP_WEBP_DIR), '', $webp_path), '/\\');
@@ -311,8 +290,8 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			return $this->get_webp_url_from_public_url($image[0]);
 		}
 
-		private function get_avif_url_from_public_url($public_url, $force_generation_budget = false) {
-			$key = $this->get_public_url_lookup_cache_key('avif', $public_url, $force_generation_budget);
+		private function get_avif_url_from_public_url($public_url) {
+			$key = $this->get_public_url_lookup_cache_key('avif', $public_url);
 			if (isset($this->optimized_public_url_lookup_memo[$key])) {
 				return $this->optimized_public_url_lookup_memo[$key];
 			}
@@ -327,24 +306,12 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return $this->memoize_public_url_lookup($key, $existing_url);
 			}
 
-			if (!$this->can_generate_optimized_media_from_lookup($force_generation_budget)) {
-				$this->maybe_queue_missing_optimized_media_from_public_url($public_url, 'avif');
-				return $this->memoize_public_url_lookup($key, false);
-			}
-
-			$uploads = wp_get_upload_dir();
-			$uploads_root = realpath($uploads['basedir']);
-			if (!is_string($uploads_root) || '' === $uploads_root) {
-				return $this->memoize_public_url_lookup($key, false);
-			}
-
-			$source_path = trailingslashit($uploads_root) . $relative_path;
-			$result = $this->get_avif_url_from_source($source_path, true);
-			return $this->memoize_public_url_lookup($key, $result);
+			$this->maybe_queue_missing_optimized_media_from_public_url($public_url, 'avif');
+			return $this->memoize_public_url_lookup($key, false);
 		}
 
-		private function get_webp_url_from_public_url($public_url, $force_generation_budget = false) {
-			$key = $this->get_public_url_lookup_cache_key('webp', $public_url, $force_generation_budget);
+		private function get_webp_url_from_public_url($public_url) {
+			$key = $this->get_public_url_lookup_cache_key('webp', $public_url);
 			if (isset($this->optimized_public_url_lookup_memo[$key])) {
 				return $this->optimized_public_url_lookup_memo[$key];
 			}
@@ -359,20 +326,8 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return $this->memoize_public_url_lookup($key, $existing_url);
 			}
 
-			if (!$this->can_generate_optimized_media_from_lookup($force_generation_budget)) {
-				$this->maybe_queue_missing_optimized_media_from_public_url($public_url, 'webp');
-				return $this->memoize_public_url_lookup($key, false);
-			}
-
-			$uploads = wp_get_upload_dir();
-			$uploads_root = realpath($uploads['basedir']);
-			if (!is_string($uploads_root) || '' === $uploads_root) {
-				return $this->memoize_public_url_lookup($key, false);
-			}
-
-			$source_path = trailingslashit($uploads_root) . $relative_path;
-			$result = $this->get_webp_url_from_source($source_path, true);
-			return $this->memoize_public_url_lookup($key, $result);
+			$this->maybe_queue_missing_optimized_media_from_public_url($public_url, 'webp');
+			return $this->memoize_public_url_lookup($key, false);
 		}
 
 		private function normalize_local_path_for_compare($path) {
@@ -558,9 +513,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return $this->optimized_public_url_lookup_memo[$lookup_key];
 			}
 
-			$attempted_avif = false;
 			if ($this->can_serve_avif()) {
-				$attempted_avif = true;
 				$avif_url = $this->get_avif_url_from_public_url($public_url);
 				if ($avif_url) {
 					$this->remember_optimized_image_url_rewrite($public_url, $avif_url);
@@ -569,7 +522,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			if ($this->can_serve_webp()) {
-				$webp_url = $this->get_webp_url_from_public_url($public_url, $attempted_avif);
+				$webp_url = $this->get_webp_url_from_public_url($public_url);
 				if ($webp_url) {
 					$this->remember_optimized_image_url_rewrite($public_url, $webp_url);
 					return $this->memoize_public_url_lookup($lookup_key, $webp_url);

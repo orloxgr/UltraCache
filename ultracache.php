@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.57.164
+ * Version: 2.58.01
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 7.4
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.57.164');
+    define('UCWP_VERSION', '2.58.01');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -129,17 +129,46 @@ if (!class_exists('Ultra_Cache_WP')) {
                 UCWP_PATH . 'includes/class-ultra-cache-engine.php',
                 UCWP_PATH . 'includes/class-media-converter.php',
                 UCWP_PATH . 'includes/class-object-cache-manager.php',
-                UCWP_PATH . 'includes/class-rest-api.php',
-                UCWP_PATH . 'includes/class-wp-cli.php',
             );
 
             foreach ($files as $file) {
-                if (file_exists($file)) {
-                    ucwp_request_profile_checkpoint('dependency_load_start', array('file' => basename((string) $file)));
-                    require_once $file;
-                    ucwp_request_profile_checkpoint('dependency_load_end', array('file' => basename((string) $file)));
-                }
+                $this->load_dependency_file($file);
             }
+        }
+
+        private function load_dependency_file($file)
+        {
+            if (!is_string($file) || '' === $file || !file_exists($file)) {
+                return false;
+            }
+
+            ucwp_request_profile_checkpoint('dependency_load_start', array('file' => basename((string) $file)));
+            require_once $file;
+            ucwp_request_profile_checkpoint('dependency_load_end', array('file' => basename((string) $file)));
+
+            return true;
+        }
+
+        private function load_rest_api_dependency()
+        {
+            if (class_exists('Ultra_Cache_Rest_API')) {
+                return true;
+            }
+
+            return $this->load_dependency_file(UCWP_PATH . 'includes/class-rest-api.php');
+        }
+
+        private function load_wp_cli_dependency()
+        {
+            if (!defined('WP_CLI') || !WP_CLI) {
+                return false;
+            }
+
+            if (class_exists('Ultra_Cache_WP_CLI')) {
+                return true;
+            }
+
+            return $this->load_dependency_file(UCWP_PATH . 'includes/class-wp-cli.php');
         }
 
         private function register_request_profile_hooks()
@@ -209,13 +238,37 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
         }
 
+        private static function should_run_bootstrap_reconcile_hooks()
+        {
+            if (defined('WP_CLI') && WP_CLI) {
+                return true;
+            }
+
+            if (defined('REST_REQUEST') && REST_REQUEST) {
+                return true;
+            }
+
+            if (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
+                return true;
+            }
+
+            if (function_exists('is_admin') && is_admin()) {
+                return true;
+            }
+
+            return false;
+        }
+
         private function register_hooks()
         {
             $this->register_request_profile_hooks();
             add_action('plugins_loaded', array($this, 'bootstrap_components'), 5);
-            add_action('plugins_loaded', array($this, 'reconcile_page_cache_dropin'), 19);
-            add_action('plugins_loaded', array($this, 'reconcile_object_cache_dropin'), 20);
-            add_action('plugins_loaded', array($this, 'reconcile_runtime_config'), 21);
+            add_action('rest_api_init', array($this, 'bootstrap_rest_api'), 0);
+            if (self::should_run_bootstrap_reconcile_hooks()) {
+                add_action('plugins_loaded', array($this, 'reconcile_page_cache_dropin'), 19);
+                add_action('plugins_loaded', array($this, 'reconcile_object_cache_dropin'), 20);
+                add_action('plugins_loaded', array($this, 'reconcile_runtime_config'), 21);
+            }
             add_action('admin_menu', array($this, 'register_admin_menu'));
             add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
             add_action('admin_enqueue_scripts', array($this, 'suppress_conflicting_admin_assets'), 999);
@@ -392,6 +445,11 @@ if (!class_exists('Ultra_Cache_WP')) {
         public function reconcile_object_cache_dropin()
         {
             ucwp_request_profile_checkpoint('object_cache_reconcile_entry');
+
+            if (!self::should_run_bootstrap_reconcile_hooks()) {
+                ucwp_request_profile_checkpoint('object_cache_reconcile_skipped', array('reason' => 'frontend_bootstrap_reconcile_disabled'));
+                return;
+            }
 
             $is_full_reconcile = $this->should_run_full_object_cache_reconcile();
             ucwp_request_profile_checkpoint('object_cache_reconcile_context_checked', array(
@@ -651,6 +709,11 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             ucwp_request_profile_checkpoint('page_cache_reconcile_entry');
 
+            if (!self::should_run_bootstrap_reconcile_hooks()) {
+                ucwp_request_profile_checkpoint('page_cache_reconcile_skipped', array('reason' => 'frontend_bootstrap_reconcile_disabled'));
+                return;
+            }
+
             $is_full_reconcile = $this->should_run_full_page_cache_reconcile();
             ucwp_request_profile_checkpoint('page_cache_reconcile_context_checked', array(
                 'full_reconcile' => $is_full_reconcile ? 'true' : 'false',
@@ -727,6 +790,11 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             ucwp_request_profile_checkpoint('runtime_config_reconcile_entry');
 
+            if (!self::should_run_bootstrap_reconcile_hooks()) {
+                ucwp_request_profile_checkpoint('runtime_config_reconcile_skipped', array('reason' => 'frontend_bootstrap_reconcile_disabled'));
+                return;
+            }
+
             $is_full_reconcile = $this->should_run_full_runtime_config_reconcile();
             ucwp_request_profile_checkpoint('runtime_config_reconcile_context_checked', array(
                 'full_reconcile' => $is_full_reconcile ? 'true' : 'false',
@@ -793,8 +861,6 @@ if (!class_exists('Ultra_Cache_WP')) {
             $component_classes = array(
                 array('Ultra_Cache_Engine', 'get_instance'),
                 array('Ultra_Cache_Media_Converter', 'get_instance'),
-                array('Ultra_Cache_Rest_API', 'get_instance'),
-                array('Ultra_Cache_WP_CLI', 'register'),
             );
 
             foreach ($component_classes as $component) {
@@ -802,6 +868,35 @@ if (!class_exists('Ultra_Cache_WP')) {
                 if (class_exists($class) && method_exists($class, $method)) {
                     call_user_func(array($class, $method));
                 }
+            }
+
+            $this->bootstrap_wp_cli();
+        }
+
+        public function bootstrap_rest_api()
+        {
+            if (!$this->load_rest_api_dependency()) {
+                return;
+            }
+
+            if (!class_exists('Ultra_Cache_Rest_API') || !method_exists('Ultra_Cache_Rest_API', 'get_instance')) {
+                return;
+            }
+
+            $rest_api = Ultra_Cache_Rest_API::get_instance();
+            if ($rest_api && method_exists($rest_api, 'register_routes')) {
+                $rest_api->register_routes();
+            }
+        }
+
+        public function bootstrap_wp_cli()
+        {
+            if (!$this->load_wp_cli_dependency()) {
+                return;
+            }
+
+            if (class_exists('Ultra_Cache_WP_CLI') && method_exists('Ultra_Cache_WP_CLI', 'register')) {
+                Ultra_Cache_WP_CLI::register();
             }
         }
 
@@ -824,6 +919,10 @@ if (!class_exists('Ultra_Cache_WP')) {
             if ($media && method_exists($media, 'ensure_media_page_refs_table')) {
                 $media->ensure_media_page_refs_table();
             }
+            $instance = self::instance();
+            if ($instance && method_exists($instance, 'load_rest_api_dependency')) {
+                $instance->load_rest_api_dependency();
+            }
             if (class_exists('Ultra_Cache_Rest_API') && method_exists('Ultra_Cache_Rest_API', 'get_instance')) {
                 $rest_api = Ultra_Cache_Rest_API::get_instance();
                 if ($rest_api && method_exists($rest_api, 'ensure_action_jobs_table')) {
@@ -831,6 +930,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 }
             }
             self::ensure_cron_warm_queue_table();
+            self::ensure_cache_asset_refs_table();
             if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_analytics_table')) {
                 Ultra_Cache_Engine::ensure_analytics_table();
             }
@@ -1063,10 +1163,11 @@ if (!class_exists('Ultra_Cache_WP')) {
                     continue;
                 }
 
-                clearstatcache(true, $candidate);
-                if (function_exists('opcache_invalidate')) {
-                    @opcache_invalidate($candidate, true);
+                if (function_exists('ucwp_is_allowed_readable_path') && !ucwp_is_allowed_readable_path($candidate, 'runtime_secret_require')) {
+                    continue;
                 }
+
+                clearstatcache(true, $candidate);
 
                 $loaded = require $candidate;
                 if (!is_array($loaded)) {
@@ -1121,29 +1222,19 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return new WP_Error('ucwp_runtime_config_missing', 'runtime-config.php is missing or not readable.');
             }
 
-            $extension = strtolower((string) pathinfo((string) $path, PATHINFO_EXTENSION));
-            if ('php' === $extension) {
-                clearstatcache(true, $path);
-                if (function_exists('opcache_invalidate')) {
-                    @opcache_invalidate($path, true);
-                }
-
-                $loaded = require $path;
-                if (!is_array($loaded)) {
-                    return new WP_Error('ucwp_runtime_config_invalid', 'runtime-config.php did not return a valid array.');
-                }
-
-                return $loaded;
+            if (function_exists('ucwp_is_allowed_readable_path') && !ucwp_is_allowed_readable_path($path, 'load_runtime_config_file')) {
+                return new WP_Error('ucwp_runtime_config_blocked', 'runtime-config.php path is outside allowed read roots.');
             }
 
-            $raw = ucwp_safe_file_get_contents($path, 'load_runtime_config_file');
-            if (false === $raw || '' === $raw) {
-                return new WP_Error('ucwp_runtime_config_load_failed', 'runtime-config file could not be read.');
+            if ('php' !== strtolower((string) pathinfo((string) $path, PATHINFO_EXTENSION))) {
+                return new WP_Error('ucwp_runtime_config_invalid_extension', 'runtime-config must be a PHP array file.');
             }
 
-            $loaded = json_decode($raw, true);
+            clearstatcache(true, $path);
+
+            $loaded = require $path;
             if (!is_array($loaded)) {
-                return new WP_Error('ucwp_runtime_config_invalid', 'runtime-config file did not contain a valid JSON object.');
+                return new WP_Error('ucwp_runtime_config_invalid', 'runtime-config.php did not return a valid array.');
             }
 
             return $loaded;
@@ -1152,13 +1243,6 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function load_runtime_config_file($path)
         {
             $loaded = self::load_runtime_config_public_file($path);
-            if (is_wp_error($loaded)) {
-                $legacy_json = self::get_legacy_runtime_config_json_path();
-                if ($path !== $legacy_json && file_exists($legacy_json) && is_readable($legacy_json)) {
-                    $loaded = self::load_runtime_config_public_file($legacy_json);
-                }
-            }
-
             if (is_wp_error($loaded)) {
                 return $loaded;
             }
@@ -1263,8 +1347,8 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function normalize_runtime_config(array $runtime)
         {
             $defaults = self::get_dashboard_defaults();
-            $fresh_minutes = self::sanitize_bounded_integer_setting($runtime['cache_fresh_ttl_minutes'] ?? $defaults['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1, 1440);
-            $max_stale_minutes = self::sanitize_bounded_integer_setting($runtime['cache_max_stale_minutes'] ?? $defaults['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], $fresh_minutes, 10080);
+            $fresh_minutes = max(1, absint($runtime['cache_fresh_ttl_minutes'] ?? $defaults['cacheFreshTtlMinutes']));
+            $max_stale_minutes = max($fresh_minutes, absint($runtime['cache_max_stale_minutes'] ?? $defaults['cacheMaxStaleMinutes']));
 
             $normalized = array(
                 'excluded_paths'                 => self::parse_textarea_setting(self::sanitize_excluded_paths_setting((array) ($runtime['excluded_paths'] ?? array()))),
@@ -1275,6 +1359,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'unsafe_cache_cookie_patterns'  => self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) ($runtime['unsafe_cache_cookie_patterns'] ?? array()))),
                 'woo_safe_mode'                  => !empty($runtime['woo_safe_mode']),
                 'cache_stats_enabled'            => !empty($runtime['cache_stats_enabled']),
+                'debug_headers_enabled'          => !empty($runtime['debug_headers_enabled']),
                 'object_cache_enabled'           => !empty($runtime['object_cache_enabled']),
                 'object_cache_backend'           => self::sanitize_object_cache_backend($runtime['object_cache_backend'] ?? 'redis'),
                 'object_cache_fallback_backend'  => self::sanitize_object_cache_fallback_backend($runtime['object_cache_fallback_backend'] ?? 'apcu'),
@@ -1286,8 +1371,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'redis_prefix'                   => preg_replace('/[^A-Za-z0-9:_\\-]/', '', (string) ($runtime['redis_prefix'] ?? '')),
                 'redis_use_tls'                  => !empty($runtime['redis_use_tls']),
                 'redis_persistent'               => !empty($runtime['redis_persistent']),
-                'redis_connect_timeout_ms'       => max(50, min(10000, absint($runtime['redis_connect_timeout_ms'] ?? 200))),
-                'redis_read_timeout_ms'          => max(50, min(10000, absint($runtime['redis_read_timeout_ms'] ?? 200))),
+                'redis_connect_timeout_ms'       => max(50, min(15000, absint($runtime['redis_connect_timeout_ms'] ?? 200))),
+                'redis_read_timeout_ms'          => max(50, min(15000, absint($runtime['redis_read_timeout_ms'] ?? 200))),
                 'stale_while_revalidate_enabled' => !empty($runtime['stale_while_revalidate_enabled']),
                 'cache_fresh_ttl_minutes'        => $fresh_minutes,
                 'cache_max_stale_minutes'        => $max_stale_minutes,
@@ -1503,9 +1588,337 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return false;
             }
 
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema existence check for UltraCache-owned custom tables.
+            if (function_exists('ucwp_validate_custom_table_name')) {
+                $table = ucwp_validate_custom_table_name($table, 'custom_table_exists');
+                if ('' === $table) {
+                    return false;
+                }
+            }
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema existence check for a validated UltraCache-owned custom table.
             $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
             return (string) $found === (string) $table;
+        }
+
+        public static function get_cache_asset_refs_table_name()
+        {
+            global $wpdb;
+            $table = $wpdb->prefix . 'ultracache_cache_asset_refs';
+            return function_exists('ucwp_validate_custom_table_name') ? ucwp_validate_custom_table_name($table, 'cache_asset_refs') : $table;
+        }
+
+        private static function get_cache_asset_refs_db_version()
+        {
+            return '1.0.0';
+        }
+
+        private static function get_cache_asset_refs_db_version_option_key()
+        {
+            return 'ultracache_cache_asset_refs_db_version';
+        }
+
+        public static function ensure_cache_asset_refs_table()
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb)) {
+                return false;
+            }
+
+            $table = self::get_cache_asset_refs_table_name();
+            $version = (string) get_option(self::get_cache_asset_refs_db_version_option_key(), '');
+            if (self::get_cache_asset_refs_db_version() === $version && self::plugin_custom_table_exists($table)) {
+                return true;
+            }
+
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            $charset_collate = $wpdb->get_charset_collate();
+            $sql = "CREATE TABLE {$table} (
+                id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                cache_hash char(40) NOT NULL DEFAULT '',
+                cache_rel_path varchar(512) NOT NULL DEFAULT '',
+                asset_bucket varchar(32) NOT NULL DEFAULT '',
+                asset_basename varchar(191) NOT NULL DEFAULT '',
+                asset_hash char(40) NOT NULL DEFAULT '',
+                active tinyint(1) NOT NULL DEFAULT 1,
+                first_seen datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+                last_seen datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+                protect_until datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+                PRIMARY KEY  (id),
+                UNIQUE KEY cache_asset (cache_hash, asset_hash),
+                KEY asset_protection (asset_bucket, active, protect_until),
+                KEY asset_hash (asset_hash),
+                KEY cache_hash (cache_hash),
+                KEY protect_until (protect_until)
+            ) {$charset_collate};";
+
+            dbDelta($sql);
+            if (self::plugin_custom_table_exists($table)) {
+                update_option(self::get_cache_asset_refs_db_version_option_key(), self::get_cache_asset_refs_db_version(), false);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static function get_cache_asset_refs_protection_seconds()
+        {
+            $settings = self::get_settings();
+            $css_grace_hours = isset($settings['css_bundle_cleanup_grace_hours']) ? (int) $settings['css_bundle_cleanup_grace_hours'] : 48;
+            $stale_minutes = isset($settings['cache_max_stale_minutes']) ? (int) $settings['cache_max_stale_minutes'] : 720;
+            $default = max(48 * HOUR_IN_SECONDS, $css_grace_hours * HOUR_IN_SECONDS, $stale_minutes * MINUTE_IN_SECONDS);
+            $seconds = (int) apply_filters('ucwp_cache_asset_ref_protection_seconds', $default);
+            return max(HOUR_IN_SECONDS, min(30 * DAY_IN_SECONDS, $seconds));
+        }
+
+        private static function get_cache_asset_refs_per_cache_file_cap()
+        {
+            $cap = (int) apply_filters('ucwp_cache_asset_refs_per_cache_file_cap', 64);
+            return max(8, min(256, $cap));
+        }
+
+        private static function normalize_cache_asset_cache_rel_path($cache_file)
+        {
+            $cache_file = wp_normalize_path((string) $cache_file);
+            $root = defined('UCWP_CACHE_DIR') ? wp_normalize_path(trailingslashit(UCWP_CACHE_DIR)) : '';
+            if ('' === $cache_file || '' === $root || 0 !== strpos($cache_file, $root)) {
+                return '';
+            }
+
+            $relative = ltrim(substr($cache_file, strlen($root)), '/');
+            $relative = preg_replace('#/+#', '/', (string) $relative);
+            if ('' === $relative || strlen($relative) > 512 || false !== strpos($relative, '..')) {
+                return '';
+            }
+
+            return $relative;
+        }
+
+        public static function extract_generated_css_asset_refs($html)
+        {
+            $html = (string) $html;
+            $refs = array();
+            if ('' === $html || false === stripos($html, '/cache/ultracache/')) {
+                return $refs;
+            }
+
+            $patterns = array(
+                '~(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s"\'<>?#)]+\.css~i',
+                '~/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s"\'<>?#)]+\.css~i',
+            );
+
+            foreach ($patterns as $pattern) {
+                $matches = array();
+                $matched = preg_match_all($pattern, $html, $matches);
+                if (false === $matched || empty($matches[0]) || !is_array($matches[0])) {
+                    continue;
+                }
+
+                foreach ($matches[0] as $ref) {
+                    $path = (string) wp_parse_url((string) $ref, PHP_URL_PATH);
+                    if ('' === $path) {
+                        $path = (string) $ref;
+                    }
+
+                    $path = rawurldecode((string) $path);
+                    if (!preg_match('#/wp-content/cache/ultracache/(css-bundles|font-css|optimized-css)/([^/]+\.css)$#i', $path, $match)) {
+                        continue;
+                    }
+
+                    $bucket = strtolower((string) $match[1]);
+                    $basename = basename((string) $match[2]);
+                    if (!in_array($bucket, array('css-bundles', 'font-css', 'optimized-css'), true) || '' === $basename || !preg_match('/^[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                        continue;
+                    }
+
+                    $refs[$bucket . '/' . $basename] = array(
+                        'asset_bucket' => $bucket,
+                        'asset_basename' => $basename,
+                    );
+
+                    if ('css-bundles' === $bucket && preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                        $companion = preg_match('/-delayed-fonts\.css$/i', $basename)
+                            ? (string) preg_replace('/-delayed-fonts\.css$/i', '.css', $basename)
+                            : (string) preg_replace('/\.css$/i', '-delayed-fonts.css', $basename);
+                        if ('' !== $companion && $companion !== $basename && preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $companion)) {
+                            $refs['css-bundles/' . $companion] = array(
+                                'asset_bucket' => 'css-bundles',
+                                'asset_basename' => $companion,
+                            );
+                        }
+                    }
+                }
+            }
+
+            return array_slice(array_values($refs), 0, self::get_cache_asset_refs_per_cache_file_cap());
+        }
+
+        public static function track_cache_asset_refs_for_file($cache_file, $html)
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb) || !self::ensure_cache_asset_refs_table()) {
+                return 0;
+            }
+
+            $cache_rel_path = self::normalize_cache_asset_cache_rel_path($cache_file);
+            if ('' === $cache_rel_path) {
+                return 0;
+            }
+
+            $refs = self::extract_generated_css_asset_refs($html);
+            $table = self::get_cache_asset_refs_table_name();
+            $cache_hash = sha1($cache_rel_path);
+            $now = current_time('mysql');
+            $protect_until = get_date_from_gmt(gmdate('Y-m-d H:i:s', time() + self::get_cache_asset_refs_protection_seconds()));
+
+            if (empty($refs)) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cache build cleanup updates only UltraCache-owned asset refs for one cache file.
+                $wpdb->query($wpdb->prepare('UPDATE %i SET active = 0, last_seen = %s, protect_until = %s WHERE cache_hash = %s AND active = 1', $table, $now, $protect_until, $cache_hash));
+                return 0;
+            }
+
+            $seen = array();
+            foreach ($refs as $ref) {
+                $bucket = isset($ref['asset_bucket']) ? (string) $ref['asset_bucket'] : '';
+                $basename = isset($ref['asset_basename']) ? (string) $ref['asset_basename'] : '';
+                if (!in_array($bucket, array('css-bundles', 'font-css', 'optimized-css'), true) || '' === $basename || !preg_match('/^[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                    continue;
+                }
+
+                $seen[] = sha1($bucket . '/' . $basename);
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cache build metadata upsert writes one bounded UltraCache-owned ref row per generated CSS asset.
+                $wpdb->query(
+                    $wpdb->prepare(
+                        'INSERT INTO %i (cache_hash, cache_rel_path, asset_bucket, asset_basename, asset_hash, active, first_seen, last_seen, protect_until) VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s) ON DUPLICATE KEY UPDATE cache_rel_path = VALUES(cache_rel_path), asset_bucket = VALUES(asset_bucket), asset_basename = VALUES(asset_basename), active = 1, last_seen = VALUES(last_seen), protect_until = VALUES(protect_until)',
+                        $table,
+                        $cache_hash,
+                        $cache_rel_path,
+                        $bucket,
+                        $basename,
+                        sha1($bucket . '/' . $basename),
+                        $now,
+                        $now,
+                        $protect_until
+                    )
+                );
+            }
+
+            if (!empty($seen)) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cache build cleanup reads active UltraCache-owned refs for one generated cache file.
+                $active_hashes = $wpdb->get_col(
+                    $wpdb->prepare(
+                        'SELECT asset_hash FROM %i WHERE cache_hash = %s AND active = 1',
+                        $table,
+                        $cache_hash
+                    )
+                );
+
+                $seen_lookup = array_fill_keys($seen, true);
+                foreach ((array) $active_hashes as $asset_hash) {
+                    $asset_hash = is_scalar($asset_hash) ? (string) $asset_hash : '';
+                    if ('' === $asset_hash || isset($seen_lookup[$asset_hash])) {
+                        continue;
+                    }
+
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cache build cleanup deactivates stale refs only for the rewritten cache file.
+                    $wpdb->update(
+                        $table,
+                        array(
+                            'active'        => 0,
+                            'last_seen'     => $now,
+                            'protect_until' => $protect_until,
+                        ),
+                        array(
+                            'cache_hash' => $cache_hash,
+                            'asset_hash' => $asset_hash,
+                        ),
+                        array('%d', '%s', '%s'),
+                        array('%s', '%s')
+                    );
+                }
+            }
+
+            return count($seen);
+        }
+
+        public static function mark_cache_asset_refs_inactive_for_cache_file($cache_file)
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb) || !self::ensure_cache_asset_refs_table()) {
+                return 0;
+            }
+
+            $cache_rel_path = self::normalize_cache_asset_cache_rel_path($cache_file);
+            if ('' === $cache_rel_path) {
+                return 0;
+            }
+
+            $table = self::get_cache_asset_refs_table_name();
+            $now = current_time('mysql');
+            $protect_until = get_date_from_gmt(gmdate('Y-m-d H:i:s', time() + self::get_cache_asset_refs_protection_seconds()));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cache purge updates only UltraCache-owned asset refs for one cache file.
+            $updated = $wpdb->query($wpdb->prepare('UPDATE %i SET active = 0, last_seen = %s, protect_until = %s WHERE cache_hash = %s', $table, $now, $protect_until, sha1($cache_rel_path)));
+            return is_numeric($updated) ? max(0, (int) $updated) : 0;
+        }
+
+        public static function mark_all_cache_asset_refs_inactive()
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb) || !self::ensure_cache_asset_refs_table()) {
+                return 0;
+            }
+
+            $table = self::get_cache_asset_refs_table_name();
+            $now = current_time('mysql');
+            $protect_until = get_date_from_gmt(gmdate('Y-m-d H:i:s', time() + self::get_cache_asset_refs_protection_seconds()));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Purge-all deactivates only UltraCache-owned generated CSS ref rows while preserving stale-proxy protection.
+            $updated = $wpdb->query($wpdb->prepare('UPDATE %i SET active = 0, last_seen = %s, protect_until = %s WHERE active = 1', $table, $now, $protect_until));
+            return is_numeric($updated) ? max(0, (int) $updated) : 0;
+        }
+
+        public static function get_protected_generated_css_basenames($bucket = 'css-bundles')
+        {
+            global $wpdb;
+
+            $bucket = strtolower(trim((string) $bucket));
+            if (!in_array($bucket, array('css-bundles', 'font-css', 'optimized-css'), true) || !($wpdb instanceof wpdb) || !self::ensure_cache_asset_refs_table()) {
+                return array();
+            }
+
+            $table = self::get_cache_asset_refs_table_name();
+            $now = current_time('mysql');
+            $limit = (int) apply_filters('ucwp_cache_asset_ref_lookup_limit', 5000);
+            $limit = max(100, min(20000, $limit));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cleanup reads bounded UltraCache-owned generated CSS refs outside the frontend HIT path.
+            $rows = $wpdb->get_col($wpdb->prepare('SELECT asset_basename FROM %i WHERE asset_bucket = %s AND (active = 1 OR protect_until >= %s) GROUP BY asset_basename LIMIT %d', $table, $bucket, $now, $limit));
+            $protected = array();
+            foreach ((array) $rows as $basename) {
+                $basename = basename((string) $basename);
+                if ('' !== $basename && preg_match('/^[A-Za-z0-9_.-]+\.css$/', $basename)) {
+                    $protected[$basename] = true;
+                }
+            }
+
+            return $protected;
+        }
+
+        public static function prune_cache_asset_refs_table($limit = 1000)
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb) || !self::ensure_cache_asset_refs_table()) {
+                return 0;
+            }
+
+            $limit = max(25, min(5000, (int) $limit));
+            $table = self::get_cache_asset_refs_table_name();
+            $now = current_time('mysql');
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only expired inactive UltraCache-owned generated CSS ref rows.
+            $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE active = 0 AND protect_until < %s LIMIT %d', $table, $now, $limit));
+            return is_numeric($deleted) ? max(0, (int) $deleted) : 0;
         }
 
         private static function cleanup_plugin_database_table_rows($table, $operation, array $args = array())
@@ -1581,6 +1994,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'mediaPageRefs' => $wpdb->prefix . 'ultracache_media_page_refs',
                 'mediaQueue' => $wpdb->prefix . 'ultracache_media_queue',
                 'analytics' => $wpdb->prefix . 'ultracache_analytics',
+                'cacheAssetRefs' => self::get_cache_asset_refs_table_name(),
             );
 
             if (self::plugin_custom_table_exists($tables['actionJobs'])) {
@@ -1702,6 +2116,15 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $summary['deleted'] += $deleted;
             }
 
+            if (self::plugin_custom_table_exists($tables['cacheAssetRefs'])) {
+                $deleted = 0;
+                if (!$dry_run) {
+                    $deleted = self::prune_cache_asset_refs_table($limit);
+                }
+                $summary['tables']['cacheAssetRefs'] = array('deleted' => $deleted, 'expiredInactiveOnly' => true);
+                $summary['deleted'] += $deleted;
+            }
+
             return $summary;
         }
 
@@ -1813,7 +2236,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 return $result;
             }
 
-            $items = scandir($locks_dir);
+            $items = ucwp_safe_scandir($locks_dir, 'runtime_lock_cleanup');
             if (!is_array($items)) {
                 $result['success'] = false;
                 $result['message'] = 'Unable to read runtime locks directory.';
@@ -1948,7 +2371,7 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private static function get_cron_warm_queue_db_version()
         {
-            return '1';
+            return '3';
         }
 
         private static function get_cron_warm_queue_db_version_option_key()
@@ -1959,7 +2382,8 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function get_cron_warm_queue_table_name()
         {
             global $wpdb;
-            return $wpdb->prefix . 'ultracache_cron_warm_queue';
+            $table = $wpdb->prefix . 'ultracache_cron_warm_queue';
+            return function_exists('ucwp_validate_custom_table_name') ? ucwp_validate_custom_table_name($table, 'cron_warm_queue') : $table;
         }
 
         private static function cron_warm_queue_table_exists()
@@ -1971,8 +2395,9 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             $table = self::get_cron_warm_queue_table_name();
             $cache_key = 'cron_warm_queue_table_exists_' . md5((string) $table);
-            $cached = wp_cache_get($cache_key, 'ultracache');
-            if (is_bool($cached)) {
+            $found = false;
+            $cached = wp_cache_get($cache_key, 'ultracache', false, $found);
+            if ($found && is_bool($cached)) {
                 return $cached;
             }
 
@@ -2003,6 +2428,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
                 url_hash varchar(40) NOT NULL DEFAULT '',
                 url text NOT NULL,
+                job_type varchar(32) NOT NULL DEFAULT 'warm',
                 position bigint(20) unsigned NOT NULL DEFAULT 0,
                 status varchar(20) NOT NULL DEFAULT 'pending',
                 result_message text NULL,
@@ -2010,16 +2436,18 @@ if (!class_exists('Ultra_Cache_WP')) {
                 updated_at bigint(20) unsigned NOT NULL DEFAULT 0,
                 processed_at bigint(20) unsigned NOT NULL DEFAULT 0,
                 PRIMARY KEY  (id),
-                UNIQUE KEY url_hash (url_hash),
+                UNIQUE KEY job_type_url_hash (job_type, url_hash),
+                KEY url_hash (url_hash),
+                KEY job_status_position (job_type, status, position),
                 KEY status_position (status, position),
                 KEY updated_at (updated_at),
                 KEY processed_at (processed_at)
             ) {$charset_collate};";
 
             dbDelta($sql);
+            wp_cache_delete('cron_warm_queue_table_exists_' . md5((string) $table), 'ultracache');
             if (self::cron_warm_queue_table_exists()) {
                 update_option(self::get_cron_warm_queue_db_version_option_key(), self::get_cron_warm_queue_db_version(), false);
-                wp_cache_delete('cron_warm_queue_table_exists_' . md5((string) $table), 'ultracache');
                 return true;
             }
 
@@ -2040,7 +2468,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             return true;
         }
 
-        private static function insert_cron_warm_queue_urls(array $urls, $base_position = 0)
+        private static function insert_cron_warm_queue_urls(array $urls, $base_position = 0, $job_type = 'warm')
         {
             global $wpdb;
 
@@ -2051,6 +2479,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             $table = self::get_cron_warm_queue_table_name();
             $now = time();
             $base_position = max(0, (int) $base_position);
+            $job_type = in_array((string) $job_type, array('warm', 'css_bundle'), true) ? (string) $job_type : 'warm';
             $inserted = 0;
 
             foreach ($urls as $url) {
@@ -2069,10 +2498,11 @@ if (!class_exists('Ultra_Cache_WP')) {
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cron warm queue writes only UltraCache-owned rows.
                 $result = $wpdb->query(
                     $wpdb->prepare(
-                        'INSERT IGNORE INTO %i (url_hash, url, position, status, result_message, created_at, updated_at, processed_at) VALUES (%s, %s, %d, %s, %s, %d, %d, %d)',
+                        'INSERT INTO %i (url_hash, url, job_type, position, status, result_message, created_at, updated_at, processed_at) VALUES (%s, %s, %s, %d, %s, %s, %d, %d, %d) ON DUPLICATE KEY UPDATE url = VALUES(url), job_type = VALUES(job_type), position = VALUES(position), status = VALUES(status), result_message = VALUES(result_message), updated_at = VALUES(updated_at), processed_at = VALUES(processed_at)',
                         $table,
                         $hash,
                         $url,
+                        $job_type,
                         $position,
                         'pending',
                         '',
@@ -2089,6 +2519,71 @@ if (!class_exists('Ultra_Cache_WP')) {
             return $inserted;
         }
 
+
+        public static function enqueue_async_css_bundle_url($url)
+        {
+            global $wpdb;
+
+            $url = is_string($url) ? trim($url) : '';
+            if ('' === $url || !self::ensure_cron_warm_queue_table()) {
+                return false;
+            }
+
+            $engine = self::get_engine_instance();
+            if (!$engine || !method_exists($engine, 'is_cacheable_local_url') || !$engine->is_cacheable_local_url($url)) {
+                return false;
+            }
+
+            $state = self::get_cron_warm_state();
+            $pending_before = self::count_cron_warm_pending_queue_rows();
+            $inserted = self::insert_cron_warm_queue_urls(array($url), $pending_before, 'css_bundle');
+            if ($inserted < 1) {
+                return false;
+            }
+
+            $now = time();
+            if (empty($state['active'])) {
+                $state = self::save_cron_warm_state(array(
+                    'active'       => true,
+                    'reason'       => 'css_bundle_async',
+                    'cursor'       => '',
+                    'processed'    => 0,
+                    'total'        => max(1, $pending_before + $inserted),
+                    'successCount' => 0,
+                    'errorCount'   => 0,
+                    'startedAt'    => $now,
+                    'updatedAt'    => $now,
+                    'lastRunAt'    => 0,
+                    'finishedAt'   => 0,
+                    'pagesPerMinute' => max(1, (int) (self::get_settings()['cron_warm_pages_per_minute'] ?? 2)),
+                    'totalLimit'   => 0,
+                    'currentBatch' => array(),
+                    'batchIndex'   => 0,
+                    'batchHasMore' => false,
+                    'nextCursorPending' => '',
+                    'lastError'    => '',
+                    'lastMessage'  => self::maybe_translate('Async CSS bundle build queued.'),
+                    'lastUrl'      => $url,
+                    'completed'    => false,
+                    'stopped'      => false,
+                    'stopReason'   => '',
+                    'invokedBy'    => 'frontend-css-bundle',
+                ));
+            } else {
+                $state['active'] = true;
+                $state['completed'] = false;
+                $state['stopped'] = false;
+                $state['updatedAt'] = $now;
+                $state['total'] = max((int) ($state['total'] ?? 0), (int) ($state['processed'] ?? 0) + $pending_before + $inserted);
+                $state['lastMessage'] = self::maybe_translate('Async CSS bundle build queued.');
+                $state['lastUrl'] = $url;
+                self::save_cron_warm_state($state);
+            }
+
+            self::ensure_cron_warm_events_scheduled(5);
+            return true;
+        }
+
         private static function load_cron_warm_pending_queue_rows($limit)
         {
             global $wpdb;
@@ -2102,7 +2597,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Cron warm queue reads only UltraCache-owned rows.
             $rows = $wpdb->get_results(
                 $wpdb->prepare(
-                    'SELECT id, url FROM %i WHERE status = %s ORDER BY position ASC, id ASC LIMIT %d',
+                    'SELECT id, url, job_type FROM %i WHERE status = %s ORDER BY position ASC, id ASC LIMIT %d',
                     $table,
                     'pending',
                     $limit
@@ -2548,6 +3043,21 @@ if (!class_exists('Ultra_Cache_WP')) {
                 }
 
                 $pending_rows = self::load_cron_warm_pending_queue_rows($pages_per_minute);
+                $state_reason = sanitize_key((string) ($state['reason'] ?? ''));
+                if (empty($pending_rows) && 'css_bundle_async' === $state_reason) {
+                    $state['active'] = false;
+                    $state['completed'] = true;
+                    $state['stopped'] = false;
+                    $state['stopReason'] = '';
+                    $state['finishedAt'] = time();
+                    $state['updatedAt'] = time();
+                    $state['lastMessage'] = self::maybe_translate('Async CSS bundle queue complete.');
+                    self::clear_cron_warm_queue_table();
+                    self::save_cron_warm_state($state);
+                    self::unschedule_cron_warm_events();
+                    return array('success' => true, 'message' => $state['lastMessage'], 'warmedThisRun' => 0, 'state' => self::get_cron_warm_status());
+                }
+
                 if (empty($pending_rows)) {
                     $remaining_budget = $total_limit > 0 ? max(0, $total_limit - max(0, (int) $state['processed'])) : 0;
                     if ($total_limit > 0 && $remaining_budget < 1) {
@@ -2600,6 +3110,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     self::save_cron_warm_state($state);
                 }
 
+                $operation_budget = function_exists('ucwp_get_safe_operation_budget') ? ucwp_get_safe_operation_budget('cron_warm', null, 45) : array();
                 $warmed = 0;
                 $errors = 0;
                 $last_error = (string) $state['lastError'];
@@ -2613,14 +3124,25 @@ if (!class_exists('Ultra_Cache_WP')) {
                 $pending_total_this_run = count($pending_rows);
 
                 foreach ($pending_rows as $row) {
+                    $budget_pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($operation_budget) : '';
+                    if ('' !== $budget_pause_reason) {
+                        $state['lastMessage'] = 'Cron warm paused by ' . $budget_pause_reason . '; it will resume on the next tick.';
+                        break;
+                    }
                     $row_id = isset($row['id']) ? absint($row['id']) : 0;
                     $url = isset($row['url']) ? (string) $row['url'] : '';
+                    $job_type = isset($row['job_type']) && in_array((string) $row['job_type'], array('warm', 'css_bundle'), true) ? (string) $row['job_type'] : 'warm';
                     if ($row_id < 1 || '' === $url) {
                         continue;
                     }
 
                     $last_url = $url;
-                    $result = $engine->warm_url($url, array('ignore_runtime_bypass' => true));
+                    $warm_args = array('ignore_runtime_bypass' => true);
+                    if ('css_bundle' === $job_type) {
+                        $warm_args['build_css_bundle'] = true;
+                    }
+                    $warm_args['time_budget'] = 20;
+                    $result = $engine->warm_url($url, $warm_args);
                     if (!empty($result['success'])) {
                         $warmed++;
                         $state['successCount'] = (int) $state['successCount'] + 1;
@@ -2735,6 +3257,7 @@ private static function drop_plugin_custom_tables()
         $wpdb->prefix . 'ultracache_action_jobs',
         $wpdb->prefix . 'ultracache_cron_warm_queue',
         $wpdb->prefix . 'ultracache_analytics',
+        $wpdb->prefix . 'ultracache_cache_asset_refs',
     );
 
     foreach ($tables as $table) {
@@ -2774,6 +3297,7 @@ private static function delete_plugin_options_and_transients($keep_settings = fa
         $option_names[] = 'ultracache_action_jobs_db_version';
         $option_names[] = 'ultracache_cron_warm_queue_db_version';
         $option_names[] = 'ultracache_analytics_db_version';
+        $option_names[] = self::get_cache_asset_refs_db_version_option_key();
         $option_names[] = 'ultracache_media_queue_build_state_v1';
     }
 

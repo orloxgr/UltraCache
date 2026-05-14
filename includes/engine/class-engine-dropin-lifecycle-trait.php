@@ -132,7 +132,7 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
             // Frontend health checks are read-only and intentionally avoid
             // WP_Filesystem initialization. All writes/repairs are handled in
             // admin, activation, settings-save, or WP-CLI contexts.
-            $contents = @file_get_contents($target);
+            $contents = ucwp_safe_file_get_contents($target, 'advanced_cache_status_read', true);
             if (!is_string($contents) || '' === $contents) {
                 $status['reason'] = 'read_failed';
                 return $status;

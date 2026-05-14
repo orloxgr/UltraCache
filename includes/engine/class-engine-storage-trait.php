@@ -87,13 +87,6 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                 return false;
             }
 
-            $this->profile_request_checkpoint('early_hit_before_css_ref_validation');
-            if (!$this->validate_cached_html_css_bundle_refs($html, $file_path)) {
-                $this->profile_request_checkpoint('early_hit_css_ref_validation_failed');
-                return false;
-            }
-            $this->profile_request_checkpoint('early_hit_after_css_ref_validation');
-
             $mtime = filemtime($file_path);
             $age = $mtime ? max(0, time() - (int) $mtime) : 0;
             if (!headers_sent()) {
@@ -256,6 +249,10 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                     }
                 } else {
                     ucwp_safe_unlink($file_path . '.br');
+                }
+
+                if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'track_cache_asset_refs_for_file')) {
+                    Ultra_Cache_WP::track_cache_asset_refs_for_file($file_path, $html);
                 }
 
                 return true;
@@ -421,6 +418,10 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
 
         private function delete_cache_variants($file)
         {
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'mark_cache_asset_refs_inactive_for_cache_file')) {
+                Ultra_Cache_WP::mark_cache_asset_refs_inactive_for_cache_file($file);
+            }
+
             foreach (array($file, $file . '.gz', $file . '.br') as $variant) {
                 if (file_exists($variant)) {
                     ucwp_safe_unlink($variant);

@@ -209,6 +209,97 @@ if (!function_exists('ucwp_query_value')) {
     }
 }
 
+
+if (!function_exists('ucwp_parse_size_to_bytes')) {
+    function ucwp_parse_size_to_bytes($size)
+    {
+        $size = trim((string) $size);
+        if ('' === $size || '-1' === $size) {
+            return 0;
+        }
+
+        if (!preg_match('/^([0-9]+)\s*([kmg])?b?$/i', $size, $matches)) {
+            return max(0, (int) $size);
+        }
+
+        $bytes = (int) $matches[1];
+        $unit = isset($matches[2]) ? strtolower((string) $matches[2]) : '';
+        if ('g' === $unit) {
+            $bytes *= 1024 * 1024 * 1024;
+        } elseif ('m' === $unit) {
+            $bytes *= 1024 * 1024;
+        } elseif ('k' === $unit) {
+            $bytes *= 1024;
+        }
+
+        return max(0, $bytes);
+    }
+}
+
+if (!function_exists('ucwp_is_cli_context')) {
+    function ucwp_is_cli_context()
+    {
+        return (defined('WP_CLI') && WP_CLI) || 'cli' === PHP_SAPI;
+    }
+}
+
+if (!function_exists('ucwp_get_safe_operation_budget')) {
+    function ucwp_get_safe_operation_budget($context = 'rest', $requested = null, $hard_cap = null)
+    {
+        $context = sanitize_key((string) $context);
+        $is_cli = ucwp_is_cli_context();
+        $max_execution = (int) ini_get('max_execution_time');
+        $memory_limit = ucwp_parse_size_to_bytes((string) ini_get('memory_limit'));
+
+        $default_requested = $is_cli ? 120 : 20;
+        if ('cron' === $context || false !== strpos($context, 'warm')) {
+            $default_requested = $is_cli ? 120 : 20;
+        } elseif (false !== strpos($context, 'background')) {
+            $default_requested = 3;
+        }
+
+        $requested = null === $requested ? $default_requested : (int) $requested;
+        $requested = max(0, $requested);
+
+        $detected = $is_cli ? 300 : 20;
+        if ($max_execution > 0) {
+            $margin = max(3, min(10, (int) ceil($max_execution * 0.20)));
+            $detected = max(3, $max_execution - $margin);
+        }
+
+        $cap = null === $hard_cap ? ($is_cli ? 300 : 45) : max(1, (int) $hard_cap);
+        $seconds = $requested > 0 ? min($requested, $detected, $cap) : min($detected, $cap);
+        $seconds = max(1, (int) $seconds);
+
+        return array(
+            'context' => $context,
+            'started_at' => microtime(true),
+            'seconds' => $seconds,
+            'max_execution_time' => $max_execution,
+            'memory_limit_bytes' => $memory_limit,
+            'memory_stop_bytes' => $memory_limit > 0 ? (int) floor($memory_limit * 0.80) : 0,
+        );
+    }
+}
+
+if (!function_exists('ucwp_operation_pause_reason')) {
+    function ucwp_operation_pause_reason(array $budget)
+    {
+        $seconds = isset($budget['seconds']) ? max(0, (int) $budget['seconds']) : 0;
+        $started_at = isset($budget['started_at']) ? (float) $budget['started_at'] : 0.0;
+        if ($seconds > 0 && $started_at > 0 && (microtime(true) - $started_at) >= $seconds) {
+            return 'time_budget';
+        }
+
+        $memory_stop = isset($budget['memory_stop_bytes']) ? max(0, (int) $budget['memory_stop_bytes']) : 0;
+        if ($memory_stop > 0 && function_exists('memory_get_usage') && memory_get_usage(true) >= $memory_stop) {
+            return 'memory_budget';
+        }
+
+        return '';
+    }
+}
+
 if (!function_exists('ucwp_runtime_control_secret')) {
     function ucwp_runtime_control_secret()
     {
@@ -1094,9 +1185,12 @@ if (!function_exists('ucwp_is_allowed_redis_socket_target')) {
     }
 }
 
-if (!function_exists('ucwp_safe_file_get_contents')) {
-
-    function ucwp_safe_file_get_contents($path, $context = '', $suppress_warnings = false)
+if (!function_exists('ucwp_internal_file_get_contents')) {
+    /**
+     * Internal file read primitive. Do not call this with user/configurable paths.
+     * Use ucwp_guarded_file_get_contents() or ucwp_safe_file_get_contents() instead.
+     */
+    function ucwp_internal_file_get_contents($path, $context = '', $suppress_warnings = false)
     {
         $path = (string) $path;
         $context = (string) $context;
@@ -1112,7 +1206,7 @@ if (!function_exists('ucwp_safe_file_get_contents')) {
             $readable = $is_file && is_readable($path);
 
             if (!$suppress_warnings || $readable) {
-                $data = file_get_contents($path);
+                $data = @file_get_contents($path);
             }
         }
 
@@ -1122,6 +1216,176 @@ if (!function_exists('ucwp_safe_file_get_contents')) {
         }
 
         return $data;
+    }
+}
+
+if (!function_exists('ucwp_guarded_file_get_contents')) {
+    function ucwp_guarded_file_get_contents($path, $context = '', $suppress_warnings = false, $allowed_roots = array())
+    {
+        $path = (string) $path;
+        $context = (string) $context;
+
+        if (!function_exists('ucwp_is_allowed_readable_path') || !ucwp_is_allowed_readable_path($path, $context, is_array($allowed_roots) ? $allowed_roots : array())) {
+            ucwp_debug_log('file_get_contents blocked: path outside allowed read roots', array('path' => $path, 'context' => $context));
+            return false;
+        }
+
+        return ucwp_internal_file_get_contents($path, $context, $suppress_warnings);
+    }
+}
+
+if (!function_exists('ucwp_safe_file_get_contents')) {
+    /**
+     * Back-compatible guarded read helper. The name is retained for existing code,
+     * but reads now pass through UltraCache's readable-path allowlist.
+     */
+    function ucwp_safe_file_get_contents($path, $context = '', $suppress_warnings = false, $allowed_roots = array())
+    {
+        return ucwp_guarded_file_get_contents($path, $context, $suppress_warnings, $allowed_roots);
+    }
+}
+
+if (!function_exists('ucwp_get_asset_readable_roots')) {
+    /**
+     * Return narrowly scoped filesystem roots for local CSS/JS/font asset reads.
+     * These guards are for optimization reads only; blocked reads must leave the
+     * original frontend asset untouched rather than breaking the page.
+     */
+    function ucwp_get_asset_readable_roots($type = '')
+    {
+        $type = strtolower(trim((string) $type));
+        $roots = array();
+
+        if (defined('WP_CONTENT_DIR')) {
+            $roots[] = WP_CONTENT_DIR;
+        }
+
+        if (defined('ABSPATH') && defined('WPINC')) {
+            $roots[] = rtrim((string) ABSPATH, '/\\') . '/' . WPINC;
+        }
+
+        if (in_array($type, array('generated-css', 'cached-html', 'font-css', 'css', 'js'), true) && defined('UCWP_CACHE_DIR')) {
+            $roots[] = UCWP_CACHE_DIR;
+        }
+
+        if ('generated-css' === $type && defined('UCWP_CACHE_DIR')) {
+            $roots = array(UCWP_CACHE_DIR);
+        }
+
+        if ('cached-html' === $type && defined('UCWP_CACHE_DIR')) {
+            $roots = array(UCWP_CACHE_DIR);
+        }
+
+        $normalized = array();
+        foreach ($roots as $root) {
+            $root = ucwp_normalize_filesystem_path_for_guard($root);
+            if ('' !== $root && !in_array($root, $normalized, true)) {
+                $normalized[] = $root;
+            }
+        }
+
+        return (array) apply_filters('ucwp_asset_readable_roots', $normalized, $type);
+    }
+}
+
+if (!function_exists('ucwp_asset_read_allowed_extensions')) {
+    function ucwp_asset_read_allowed_extensions($type = '')
+    {
+        $type = strtolower(trim((string) $type));
+        switch ($type) {
+            case 'css':
+            case 'font-css':
+            case 'generated-css':
+                return array('css');
+            case 'js':
+                return array('js', 'mjs');
+            case 'cached-html':
+                return array('html', 'htm');
+            default:
+                return array();
+        }
+    }
+}
+
+if (!function_exists('ucwp_guarded_asset_file_get_contents')) {
+    /**
+     * Guarded local asset read for optimization pipelines.
+     * This never controls frontend delivery; if a read is blocked or fails, callers
+     * should skip optimization and keep the original asset reference.
+     */
+    function ucwp_guarded_asset_file_get_contents($path, $type = '', $context = '', $suppress_warnings = false)
+    {
+        $path = (string) $path;
+        $type = strtolower(trim((string) $type));
+        $context = '' !== (string) $context ? (string) $context : ('asset_read_' . $type);
+
+        $allowed_extensions = ucwp_asset_read_allowed_extensions($type);
+        if (!empty($allowed_extensions)) {
+            $extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+            if ('' === $extension || !in_array($extension, $allowed_extensions, true)) {
+                ucwp_debug_log('asset file_get_contents blocked: extension not allowed', array(
+                    'path' => $path,
+                    'type' => $type,
+                    'context' => $context,
+                    'extension' => $extension,
+                ));
+                return false;
+            }
+        }
+
+        return ucwp_guarded_file_get_contents($path, $context, (bool) $suppress_warnings, ucwp_get_asset_readable_roots($type));
+    }
+}
+
+
+
+if (!function_exists('ucwp_get_allowed_custom_table_basenames')) {
+    function ucwp_get_allowed_custom_table_basenames()
+    {
+        return array(
+            'ultracache_media_queue',
+            'ultracache_media_page_refs',
+            'ultracache_action_jobs',
+            'ultracache_cron_warm_queue',
+            'ultracache_analytics',
+            'ultracache_cache_asset_refs',
+        );
+    }
+}
+
+if (!function_exists('ucwp_is_allowed_custom_table_name')) {
+    function ucwp_is_allowed_custom_table_name($table)
+    {
+        global $wpdb;
+
+        $table = (string) $table;
+        if ('' === $table || !($wpdb instanceof wpdb)) {
+            return false;
+        }
+
+        if (!preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            return false;
+        }
+
+        $allowed = array();
+        foreach (ucwp_get_allowed_custom_table_basenames() as $basename) {
+            $allowed[(string) $wpdb->prefix . $basename] = true;
+        }
+
+        return isset($allowed[$table]);
+    }
+}
+
+if (!function_exists('ucwp_validate_custom_table_name')) {
+    function ucwp_validate_custom_table_name($table, $context = '')
+    {
+        $table = (string) $table;
+        if (ucwp_is_allowed_custom_table_name($table)) {
+            return $table;
+        }
+
+        ucwp_debug_log('blocked invalid UltraCache custom table identifier', array('table' => $table, 'context' => (string) $context));
+        return '';
     }
 }
 
@@ -1283,6 +1547,124 @@ if (!function_exists('ucwp_path_has_dir_prefix')) {
 
         $dir = rtrim($dir, '/') . '/';
         return 0 === strpos($path, $dir) || rtrim($path, '/') === rtrim($dir, '/');
+    }
+}
+
+
+if (!function_exists('ucwp_get_default_readable_roots')) {
+    function ucwp_get_default_readable_roots($context = '')
+    {
+        $roots = array();
+
+        foreach (array('UCWP_CACHE_DIR', 'UCWP_OPTIMIZED_IMAGES_DIR', 'UCWP_AVIF_DIR', 'UCWP_WEBP_DIR', 'UCWP_OBJECT_CACHE_DIR') as $constant) {
+            if (defined($constant)) {
+                $roots[] = constant($constant);
+            }
+        }
+
+        if (defined('WP_CONTENT_DIR')) {
+            $roots[] = WP_CONTENT_DIR;
+        }
+
+        if (defined('ABSPATH') && defined('WPINC')) {
+            $roots[] = rtrim((string) ABSPATH, '/\\') . '/' . WPINC;
+        }
+
+        $plugin_root = dirname(dirname(__DIR__));
+        if (is_string($plugin_root) && '' !== $plugin_root) {
+            $roots[] = $plugin_root;
+        }
+
+        $normalized = array();
+        foreach ($roots as $root) {
+            $root = ucwp_normalize_filesystem_path_for_guard($root);
+            if ('' !== $root && !in_array($root, $normalized, true)) {
+                $normalized[] = $root;
+            }
+        }
+
+        return (array) apply_filters('ucwp_default_readable_roots', $normalized, (string) $context);
+    }
+}
+
+if (!function_exists('ucwp_read_context_allows_wp_config')) {
+    function ucwp_read_context_allows_wp_config($context)
+    {
+        $context = strtolower((string) $context);
+        foreach (array('wp_config', 'wp-cache', 'set_wp_cache_flag', 'get_wp_cache_define_status') as $token) {
+            if (false !== strpos($context, $token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('ucwp_read_context_allows_root_server_config')) {
+    function ucwp_read_context_allows_root_server_config($context)
+    {
+        $context = strtolower((string) $context);
+        foreach (array('sync_browser_cache_rules', 'browser_cache', 'dashboard diagnostics', 'dashboard path diagnostic', 'path_diagnostic') as $token) {
+            if (false !== strpos($context, $token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('ucwp_is_allowed_readable_path')) {
+    function ucwp_is_allowed_readable_path($path, $context = '', $allowed_roots = array())
+    {
+        $path = is_string($path) ? trim($path) : '';
+        $context = (string) $context;
+        if ('' === $path) {
+            return false;
+        }
+
+        if (preg_match('#^[a-z][a-z0-9+.-]*://#i', $path)) {
+            return false;
+        }
+
+        $normalized = ucwp_normalize_filesystem_path_for_guard($path);
+        if ('' === $normalized) {
+            return false;
+        }
+
+        $roots = is_array($allowed_roots) && !empty($allowed_roots) ? $allowed_roots : ucwp_get_default_readable_roots($context);
+        foreach ($roots as $root) {
+            $root = ucwp_normalize_filesystem_path_for_guard($root);
+            if ('' !== $root && ucwp_path_has_dir_prefix($normalized, $root)) {
+                return true;
+            }
+        }
+
+        $base = basename($normalized);
+
+        if ('wp-config.php' === $base && ucwp_read_context_allows_wp_config($context) && defined('ABSPATH')) {
+            $allowed_files = array(
+                rtrim((string) ABSPATH, '/\\') . '/wp-config.php',
+                dirname(rtrim((string) ABSPATH, '/\\')) . '/wp-config.php',
+            );
+            foreach ($allowed_files as $file) {
+                if ($normalized === ucwp_normalize_filesystem_path_for_guard($file)) {
+                    return true;
+                }
+            }
+        }
+
+        if (false !== strpos(strtolower($context), 'runtime') && function_exists('ucwp_is_canonical_runtime_secret_path_for_guard') && ucwp_is_canonical_runtime_secret_path_for_guard($normalized)) {
+            return true;
+        }
+
+        if (defined('ABSPATH') && ucwp_read_context_allows_root_server_config($context) && in_array($base, array('.htaccess', 'web.config'), true)) {
+            $root = ucwp_normalize_filesystem_path_for_guard(ABSPATH);
+            if ('' !== $root && ucwp_path_has_dir_prefix($normalized, $root)) {
+                return true;
+            }
+        }
+
+        return (bool) apply_filters('ucwp_is_allowed_readable_path', false, $normalized, $context, $allowed_roots);
     }
 }
 

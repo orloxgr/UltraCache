@@ -330,7 +330,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     continue;
                 }
 
-                $content = ucwp_safe_file_get_contents($local_path);
+                $content = ucwp_guarded_asset_file_get_contents($local_path, 'js', 'js_delay_safety_local_asset', true);
                 if (!is_string($content) || '' === $content) {
                     continue;
                 }
@@ -398,7 +398,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     continue;
                 }
 
-                $content = ucwp_safe_file_get_contents($local_path);
+                $content = ucwp_guarded_asset_file_get_contents($local_path, 'js', 'js_delay_safety_local_asset', true);
                 if (!is_string($content) || '' === $content) {
                     continue;
                 }
