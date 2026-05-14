@@ -4,6 +4,9 @@
 	const ReactApi = elementApi || window.React;
 	const ReactDOMApi = elementApi || window.ReactDOM;
 	const { createElement: h, useCallback, useEffect, useMemo, useRef, useState } = ReactApi;
+	const ucwpI18n = (window.wp && window.wp.i18n) ? window.wp.i18n : {};
+	const __ = typeof ucwpI18n.__ === 'function' ? ucwpI18n.__ : function (text) { return text; };
+	const sprintf = typeof ucwpI18n.sprintf === 'function' ? ucwpI18n.sprintf : function (text) { return text; };
 
 	const rootEl =
 		document.getElementById('uc-dashboard') ||

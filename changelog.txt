@@ -1,2 +1,7 @@
+2.58.02 - Repository localization cleanup
+- Replaced direct unsafe loopback SSL bypass requests with the UltraCache safe loopback helper.
+- Added admin JavaScript i18n setup and generated the UltraCache POT template.
+- Added a first PHP i18n pass for REST/admin-facing messages.
+
 2.58.01 - Initial public release
 - Initial public release build.

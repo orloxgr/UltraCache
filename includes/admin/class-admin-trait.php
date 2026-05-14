@@ -105,7 +105,8 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
             }
 
             wp_enqueue_style('ucwp-admin-css', UCWP_URL . 'includes/admin-dashboard.css', array(), UCWP_VERSION);
-            wp_enqueue_script('ucwp-admin-js', UCWP_URL . 'includes/admin-dashboard.js', array('wp-element'), UCWP_VERSION, true);
+            wp_enqueue_script('ucwp-admin-js', UCWP_URL . 'includes/admin-dashboard.js', array('wp-element', 'wp-i18n'), UCWP_VERSION, true);
+            wp_set_script_translations('ucwp-admin-js', 'ultracache', UCWP_PATH . 'languages');
             wp_script_add_data('ucwp-admin-js', 'type', 'module');
 
             $settings_for_client = self::get_dashboard_settings_for_client();

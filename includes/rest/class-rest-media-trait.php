@@ -36,12 +36,12 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
         {
             $attachment_id = absint($request->get_param('id'));
             if ($attachment_id <= 0) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'No valid media ID.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => __('No valid media ID.', 'ultracache')), 400);
             }
 
             $media = $this->get_media();
             if (!$media) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media converter not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media converter not available.', 'ultracache')), 500);
             }
 
             if (method_exists($media, 'process_queued_attachment')) {
@@ -50,7 +50,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
             }
 
             if (!method_exists($media, 'to_avif_by_id')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media converter not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media converter not available.', 'ultracache')), 500);
             }
 
             $converted = (bool) $media->to_avif_by_id($attachment_id);
@@ -61,7 +61,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
         {
             $media = $this->get_media();
             if (!$media) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media converter not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media converter not available.', 'ultracache')), 500);
             }
 
             if (method_exists($media, 'process_media_queue_batch')) {
@@ -69,7 +69,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
             }
 
             if (!method_exists($media, 'bulk_optimize')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media converter not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media converter not available.', 'ultracache')), 500);
             }
 
             $media->bulk_optimize();
@@ -86,7 +86,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
         {
             $media = $this->get_media();
             if (!$media || !method_exists($media, 'get_media_queue_status')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media queue is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media queue is not available.', 'ultracache')), 500);
             }
 
             $refresh_storage = rest_sanitize_boolean($request->get_param('refresh_storage'));
@@ -102,7 +102,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
         {
             $media = $this->get_media();
             if (!$media || !method_exists($media, 'rebuild_media_conversion_queue')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media queue rebuild is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media queue rebuild is not available.', 'ultracache')), 500);
             }
 
             $limit = max(0, absint($request->get_param('limit')));
@@ -115,7 +115,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
         {
             $media = $this->get_media();
             if (!$media || !method_exists($media, 'process_media_queue_batch')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media queue processing is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media queue processing is not available.', 'ultracache')), 500);
             }
 
             $limit = max(1, min(100, absint($request->get_param('limit')) ?: 5));
@@ -132,7 +132,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
         {
             $media = $this->get_media();
             if (!$media || !method_exists($media, 'repair_media_conversion_queue')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media queue repair is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media queue repair is not available.', 'ultracache')), 500);
             }
 
             return new WP_REST_Response($media->repair_media_conversion_queue($this->get_media_queue_format_from_request($request)), 200);
@@ -142,7 +142,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
         {
             $media = $this->get_media();
             if (!$media || !method_exists($media, 'retry_failed_media_queue_items')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media queue retry is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media queue retry is not available.', 'ultracache')), 500);
             }
 
             return new WP_REST_Response($media->retry_failed_media_queue_items($this->get_media_queue_format_from_request($request)), 200);
@@ -152,7 +152,7 @@ if (!trait_exists('Ultra_Cache_Rest_Media_Trait')) {
         {
             $media = $this->get_media();
             if (!$media || !method_exists($media, 'clear_completed_media_queue_items')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Media queue cleanup is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Media queue cleanup is not available.', 'ultracache')), 500);
             }
 
             return new WP_REST_Response($media->clear_completed_media_queue_items($this->get_media_queue_format_from_request($request)), 200);

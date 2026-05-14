@@ -1,0 +1,550 @@
+# Copyright (C) 2026 Byron Iniotakis
+# This file is distributed under the GPLv2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: UltraCache 2.58.02\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/ultracache\n"
+"POT-Creation-Date: 2026-05-14 10:57+0000\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: UltraCache local POT generator\n"
+"X-Domain: ultracache\n"
+
+#: ultracache.php:420
+msgid "%s detected. UltraCache hit counters reflect only requests that reach PHP/advanced-cache and may under-report public hits served before WordPress."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:787
+msgid "%s performance profile completed."
+msgstr ""
+
+#: ultracache.php:4398
+msgid "APCu clear cache is unavailable on this server."
+msgstr ""
+
+#: ultracache.php:4334
+msgid "APCu functions are unavailable on this server."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:315
+msgid "APCu helper not available."
+msgstr ""
+
+#: ultracache.php:4342 ultracache.php:4405
+msgid "APCu is loaded but disabled for the current PHP SAPI."
+msgstr ""
+
+#: ultracache.php:4352
+msgid "APCu status could not be read for the current PHP SAPI."
+msgstr ""
+
+#: ultracache.php:4412
+msgid "APCu user cache flush failed."
+msgstr ""
+
+#: ultracache.php:4412
+msgid "APCu user cache flushed successfully."
+msgstr ""
+
+#: ultracache.php:312
+msgid "Brotli and gzip are available. UltraCache will prefer Brotli and fall back to gzip when needed."
+msgstr ""
+
+#: ultracache.php:315
+msgid "Brotli is available on this server. UltraCache will prefer Brotli compression."
+msgstr ""
+
+#: ultracache.php:318
+msgid "Brotli is not available on this server. UltraCache will use gzip compression instead."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:55 includes/rest/class-rest-cache-trait.php:564
+#: includes/rest/class-rest-cache-trait.php:584 includes/rest/class-rest-cache-trait.php:603
+#: includes/rest/class-rest-cache-trait.php:619 includes/rest/class-rest-cache-trait.php:640
+msgid "Cache engine not available."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:469
+msgid "Cache helper cleanup is not available."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:18 ultracache.php:597
+msgid "Cache stats are disabled."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:215
+msgid "Cleanup helper not available."
+msgstr ""
+
+#: includes/admin/class-admin-trait.php:261
+msgid "Clear All Cache"
+msgstr ""
+
+#: includes/admin/class-admin-trait.php:271
+msgid "Clear This Page"
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:208
+msgid "Confirmation failed. Type DELETE to remove UltraCache data and deactivate the plugin."
+msgstr ""
+
+#: ultracache.php:393
+msgid "Could not determine site host for Varnish test."
+msgstr ""
+
+#: ultracache.php:387
+msgid "Could not determine site host for Varnish."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:230 includes/rest/class-rest-cache-trait.php:244
+#: includes/rest/class-rest-cache-trait.php:256
+msgid "Cron warm helper not available."
+msgstr ""
+
+#: ultracache.php:354
+msgid "Cron warm start suppressed for this purge."
+msgstr ""
+
+#: ultracache.php:360
+msgid "Cron warm up after scheduled cleanup is disabled."
+msgstr ""
+
+#: ultracache.php:357
+msgid "Cron warm up is disabled."
+msgstr ""
+
+#: ultracache.php:366
+msgid "Cron warm up is not available."
+msgstr ""
+
+#: ultracache.php:363
+msgid "Cron warm up is paused because pages per minute is 0."
+msgstr ""
+
+#: ultracache.php:375
+msgid "Cron warm up queue is idle."
+msgstr ""
+
+#: ultracache.php:369
+msgid "Cron warm up queued."
+msgstr ""
+
+#: ultracache.php:372
+msgid "Cron warm up stopped."
+msgstr ""
+
+#: ultracache.php:378
+msgid "Cron warm up tick skipped because another run is active."
+msgstr ""
+
+#: includes/diagnostics/class-diagnostics-trait.php:1279
+msgid "CSS Bundle Summary is independent from Cache Stats. It reads the last bundle warm snapshot and current manifest/file integrity."
+msgstr ""
+
+#: includes/rest/class-rest-action-queue-trait.php:736 includes/rest/class-rest-action-queue-trait.php:768
+msgid "Dashboard processing action not found."
+msgstr ""
+
+#: ultracache.php:657
+msgid "Dashboard stats are passive; no refresh was requested."
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1173
+msgid "Detected %1$d likely icon font pattern(s) and %2$d non-icon font pattern(s) on the front page."
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1109
+msgid "Detected %d likely theme/page-builder init exclusion pattern(s) on the front page."
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1190
+msgid "Detected %d taxonomy/attribute query-string keys."
+msgstr ""
+
+#: ultracache.php:415
+msgid "Every %d hour(s) for UltraCache"
+msgstr ""
+
+#: ultracache.php:306
+msgid "Every minute for UltraCache"
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:325
+msgid "External cache detection helper not available."
+msgstr ""
+
+#: includes/diagnostics/class-diagnostics-trait.php:354
+msgid "Font diagnostics are read-only. They report generated local font CSS, delayed icon-font CSS, and CSS bundle delayed-font metadata."
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1132
+msgid "Front page font scan failed: %s"
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1142
+msgid "Front page font scan returned empty HTML."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:483
+msgid "Full object-cache count completed."
+msgstr ""
+
+#: includes/rest/class-rest-action-queue-trait.php:891
+msgid "Google Fonts rebuild helper is not available."
+msgstr ""
+
+#: ultracache.php:3555
+msgid "Google Fonts settings saved. Use the Rebuild Google Fonts Cache button or wp ultracache google_fonts_rebuild --clear to rebuild the local font cache."
+msgstr ""
+
+#: ultracache.php:4705
+msgid "Handled by the Flush All Cache purge hook."
+msgstr ""
+
+#: ultracache.php:4570
+msgid "Invalid LiteSpeed purge header value."
+msgstr ""
+
+#: ultracache.php:390
+msgid "Invalid URL for Varnish purge."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:627
+msgid "Last speed timing breakdown cleared."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:610
+msgid "Last speed timing breakdown loaded."
+msgstr ""
+
+#: includes/diagnostics/class-diagnostics-trait.php:427
+msgid "Legacy values are merged into the visible JS Delay / Defer Exclusions field and then cleared."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:338
+msgid "LiteSpeed Cache helper not available."
+msgstr ""
+
+#: ultracache.php:4606
+msgid "LiteSpeed Cache purge is not available."
+msgstr ""
+
+#: ultracache.php:4586
+msgid "LiteSpeed purge header could not be sent because headers were already sent at %1$s:%2$s."
+msgstr ""
+
+#: ultracache.php:4596
+msgid "LiteSpeed server-level purge header queued on this HTTP response."
+msgstr ""
+
+#: ultracache.php:4578
+msgid "LiteSpeed server-level purge needs an HTTP response; it cannot be sent from WP-CLI."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:44 includes/rest/class-rest-media-trait.php:53
+#: includes/rest/class-rest-media-trait.php:64 includes/rest/class-rest-media-trait.php:72
+msgid "Media converter not available."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:155
+msgid "Media queue cleanup is not available."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:89
+msgid "Media queue is not available."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:118
+msgid "Media queue processing is not available."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:105
+msgid "Media queue rebuild is not available."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:135
+msgid "Media queue repair is not available."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:145
+msgid "Media queue retry is not available."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:2778
+msgid "Missing console error text."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:2812 includes/rest/class-rest-profiler-trait.php:2925
+msgid "Missing runtime JS scan id."
+msgstr ""
+
+#: ultracache.php:4667
+msgid "Nginx Cache flush failed."
+msgstr ""
+
+#: ultracache.php:4667
+msgid "Nginx Cache flush triggered."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:348
+msgid "Nginx Cache helper not available."
+msgstr ""
+
+#: ultracache.php:4653
+msgid "Nginx Cache purge is not available. Configure Nginx Helper or a safe purge integration first."
+msgstr ""
+
+#: ultracache.php:4542
+msgid "Nginx Cache was not detected."
+msgstr ""
+
+#: ultracache.php:4542
+msgid "Nginx Helper purge hook detected."
+msgstr ""
+
+#: ultracache.php:4542
+msgid "Nginx was detected, but no safe purge hook/endpoint is configured."
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1110
+msgid "No likely theme/page-builder init scripts were detected on the front page."
+msgstr ""
+
+#: ultracache.php:309
+msgid "No PHP compression support detected on this server."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:605
+msgid "No speed timing breakdown found yet."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:627
+msgid "No speed timing breakdown was present."
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1190
+msgid "No taxonomy/attribute query-string keys were detected."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:547 includes/rest/class-rest-cache-trait.php:579
+msgid "No URL provided."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:39
+msgid "No valid media ID."
+msgstr ""
+
+#: ultracache.php:384
+msgid "No Varnish endpoints are configured."
+msgstr ""
+
+#: ultracache.php:4683 ultracache.php:4689 ultracache.php:4695 ultracache.php:4701 ultracache.php:4707
+msgid "Not detected/flushable."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:390
+msgid "Object cache backend test helper not available."
+msgstr ""
+
+#: ultracache.php:4983 ultracache.php:4997 ultracache.php:5012
+msgid "Object cache flush failed."
+msgstr ""
+
+#: ultracache.php:4997
+msgid "Object cache flushed."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:453 ultracache.php:399
+msgid "Object cache helper not available."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:568
+msgid "Only local site URLs can be crawled."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:588
+msgid "Only local site URLs can be inspected."
+msgstr ""
+
+#: ultracache.php:4317
+msgid "OPcache flush failed."
+msgstr ""
+
+#: ultracache.php:4317
+msgid "OPcache flushed successfully."
+msgstr ""
+
+#: ultracache.php:4244
+msgid "OPcache functions are unavailable on this server."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:305
+msgid "OPcache helper not available."
+msgstr ""
+
+#: ultracache.php:4253
+msgid "OPcache is not enabled for the current PHP SAPI."
+msgstr ""
+
+#: ultracache.php:4307
+msgid "OPcache reset is unavailable on this server."
+msgstr ""
+
+#: ultracache.php:303
+msgid "PHP Redis extension is not loaded on this server."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:512
+msgid "Please enable CSS Bundling before using CSS bundle actions."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:500
+msgid "Please enable Page Caching first or select a profile before warming cache."
+msgstr ""
+
+#: includes/rest/class-rest-action-queue-trait.php:688
+msgid "Processing dashboard action."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:741
+msgid "Profiler request failed: %s"
+msgstr ""
+
+#: ultracache.php:345
+msgid "Read failed"
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:358 ultracache.php:396
+msgid "Redis helper not available."
+msgstr ""
+
+#: ultracache.php:342
+msgid "Reverse Proxy Cache"
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1032
+msgid "Safe Defer JS init-script scan failed: %s"
+msgstr ""
+
+#: includes/rest/class-rest-routes-trait.php:1042
+msgid "Safe Defer JS init-script scan returned empty HTML."
+msgstr ""
+
+#: includes/diagnostics/class-diagnostics-trait.php:1423
+msgid "Security diagnostics are read-only. Sensitive query args are enforced as an engine safety floor even if not present in the visible exclusion list."
+msgstr ""
+
+#: includes/diagnostics/class-diagnostics-trait.php:443
+msgid "Settings transparency diagnostics are read-only. User-editable safeguards are listed separately from engine-only safety floors."
+msgstr ""
+
+#: ultracache.php:4683 ultracache.php:4689 ultracache.php:4695 ultracache.php:4701 ultracache.php:4707
+msgid "Skipped by setting."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:600 includes/rest/class-rest-profiler-trait.php:620
+#: includes/rest/class-rest-profiler-trait.php:678
+msgid "Speed diagnostics helper is not available."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:37
+msgid "Storage diagnostics helper is not available."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:43
+msgid "Storage diagnostics refreshed."
+msgstr ""
+
+#: ultracache.php:351
+msgid "Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:757
+msgid "The page was generated and cached, but the timing breakdown was not saved. This is a Speed Diagnostics issue, not necessarily a site speed issue. Cache status: %s."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:157
+msgid "This UltraCache action changes plugin drop-ins, wp-config.php, .htaccess, runtime secrets, or plugin activation state. It requires a full administrator with plugin activation permissions."
+msgstr ""
+
+#: includes/admin/class-admin-trait.php:12 includes/admin/class-admin-trait.php:13
+#: includes/admin/class-admin-trait.php:251 includes/admin/class-admin-trait.php:253 ultracache.php:348
+msgid "UltraCache"
+msgstr ""
+
+#: ultracache.php:425
+msgid "UltraCache %1$s · Bundle %2$s"
+msgstr ""
+
+#: ultracache.php:4550
+msgid "UltraCache Varnish endpoint is configured."
+msgstr ""
+
+#: includes/admin/class-admin-trait.php:296
+msgid "UltraCache: all cache cleared."
+msgstr ""
+
+#: includes/admin/class-admin-trait.php:306
+msgid "UltraCache: current page cache cleared."
+msgstr ""
+
+#: includes/rest/class-rest-action-queue-trait.php:676 includes/rest/class-rest-action-queue-trait.php:907
+msgid "Unsupported dashboard processing action."
+msgstr ""
+
+#: ultracache.php:430
+msgid "Varnish %1$s succeeded on %2$d endpoint(s)."
+msgstr ""
+
+#: ultracache.php:435
+msgid "Varnish %s failed on one or more endpoints."
+msgstr ""
+
+#: ultracache.php:4550
+msgid "Varnish Cache was not detected."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:272 includes/rest/class-rest-cache-trait.php:295
+msgid "Varnish helper not available."
+msgstr ""
+
+#: ultracache.php:381
+msgid "Varnish integration is disabled."
+msgstr ""
+
+#: ultracache.php:4550
+msgid "Varnish settings exist, but flushing is not enabled/configured."
+msgstr ""
+
+#: ultracache.php:617
+msgid "When disabled, UltraCache does not collect, refresh, scan, or poll cache statistics. OPcache/APCu runtime status and manual flush controls remain available."
+msgstr ""
+
+#: ultracache.php:321
+msgid "wp-config.php could not be located."
+msgstr ""
+
+#: ultracache.php:324
+msgid "wp-config.php could not be read."
+msgstr ""
+
+#: ultracache.php:330
+msgid "WP_CACHE is already defined as true in wp-config.php."
+msgstr ""
+
+#: ultracache.php:333
+msgid "WP_CACHE is currently defined as false in wp-config.php and UltraCache will disable that line safely before enabling page cache."
+msgstr ""
+
+#: ultracache.php:339
+msgid "WP_CACHE is defined in a non-standard way in wp-config.php and UltraCache can replace it safely when enabling page cache."
+msgstr ""
+
+#: ultracache.php:327
+msgid "WP_CACHE is managed by UltraCache."
+msgstr ""
+
+#: ultracache.php:336
+msgid "WP_CACHE is not currently defined in wp-config.php. UltraCache can add it automatically."
+msgstr ""

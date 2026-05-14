@@ -673,7 +673,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
         {
             $action = sanitize_key((string) $request->get_param('action'));
             if (!in_array($action, $this->get_allowed_action_queue_actions(), true)) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Unsupported dashboard processing action.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Unsupported dashboard processing action.', 'ultracache')), 400);
             }
 
             $params = $this->normalize_action_params($request->get_param('params'));
@@ -685,7 +685,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 'action'    => $action,
                 'params'    => is_array($stored_params) ? $stored_params : array(),
                 'status'    => 'running',
-                'message'   => 'Processing dashboard action.',
+                'message'   => __('Processing dashboard action.', 'ultracache'),
                 'createdAt' => $now,
                 'startedAt' => $now,
                 'updatedAt' => $now,
@@ -733,7 +733,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             $id = sanitize_text_field((string) $request->get_param('id'));
             $jobs = $this->load_action_jobs();
             if (empty($jobs[$id]) || !is_array($jobs[$id])) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Dashboard processing action not found.'), 404);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Dashboard processing action not found.', 'ultracache')), 404);
             }
 
             $job = $jobs[$id];
@@ -765,7 +765,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             $id = sanitize_text_field((string) $request->get_param('id'));
             $jobs = $this->load_action_jobs();
             if (empty($jobs[$id]) || !is_array($jobs[$id])) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Dashboard processing action not found.'), 404);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Dashboard processing action not found.', 'ultracache')), 404);
             }
 
             $job = $jobs[$id];
@@ -888,7 +888,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                     case 'google_fonts_rebuild_cache':
                         $engine = $this->get_engine();
                         if (!$engine || !method_exists($engine, 'rebuild_google_fonts_cache_from_scan_urls')) {
-                            return array('success' => false, 'message' => 'Google Fonts rebuild helper is not available.');
+                            return array('success' => false, 'message' => __('Google Fonts rebuild helper is not available.', 'ultracache'));
                         }
                         $result = $engine->rebuild_google_fonts_cache_from_scan_urls(array(), !empty($params['clear']), 'dashboard');
                         if (is_array($result) && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
@@ -904,7 +904,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 return array('success' => false, 'message' => $error->getMessage());
             }
 
-            return array('success' => false, 'message' => 'Unsupported dashboard processing action.');
+            return array('success' => false, 'message' => __('Unsupported dashboard processing action.', 'ultracache'));
         }
 
     }

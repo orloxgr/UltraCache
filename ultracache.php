@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.58.01
+ * Version: 2.58.02
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 7.4
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.58.01');
+    define('UCWP_VERSION', '2.58.02');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -594,7 +594,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'enabled' => false,
                 'disabled' => true,
                 'cacheStatsEnabled' => false,
-                'message' => 'Cache stats are disabled.',
+                'message' => __('Cache stats are disabled.', 'ultracache'),
                 'impact' => 'off',
                 'timestamp' => time(),
                 'source' => (string) $source,
@@ -614,7 +614,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     'cacheStats' => array(
                         'enabled' => false,
                         'disabled' => true,
-                        'message' => 'When disabled, UltraCache does not collect, refresh, scan, or poll cache statistics. OPcache/APCu runtime status and manual flush controls remain available.',
+                        'message' => __('When disabled, UltraCache does not collect, refresh, scan, or poll cache statistics. OPcache/APCu runtime status and manual flush controls remain available.', 'ultracache'),
                     ),
                     'objectCache' => method_exists(__CLASS__, 'get_object_cache_status_diagnostic_lite')
                         ? self::get_object_cache_status_diagnostic_lite()
@@ -654,7 +654,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                     'success' => true,
                     'dashboardStatsSnapshotCached' => false,
                     'dashboardStatsRefreshInterval' => $max_age,
-                    'message' => 'Dashboard stats are passive; no refresh was requested.',
+                    'message' => __('Dashboard stats are passive; no refresh was requested.', 'ultracache'),
                 );
 
                 // Initial dashboard bootstrap must not run heavy engine/storage stats,
@@ -3552,7 +3552,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 $google_fonts_job = array(
                     'success' => true,
                     'queued'  => false,
-                    'message' => 'Google Fonts settings saved. Use the Rebuild Google Fonts Cache button or wp ultracache google_fonts_rebuild --clear to rebuild the local font cache.',
+                    'message' => __('Google Fonts settings saved. Use the Rebuild Google Fonts Cache button or wp ultracache google_fonts_rebuild --clear to rebuild the local font cache.', 'ultracache'),
                 );
             }
 
@@ -4241,7 +4241,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 return array(
                     'available' => false,
                     'enabled'   => false,
-                    'message'   => 'OPcache functions are unavailable on this server.',
+                    'message'   => __('OPcache functions are unavailable on this server.', 'ultracache'),
                 );
             }
 
@@ -4250,7 +4250,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 return array(
                     'available' => true,
                     'enabled'   => false,
-                    'message'   => 'OPcache is not enabled for the current PHP SAPI.',
+                    'message'   => __('OPcache is not enabled for the current PHP SAPI.', 'ultracache'),
                 );
             }
 
@@ -4304,7 +4304,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             if (!function_exists('opcache_reset')) {
                 return array(
                     'success' => false,
-                    'message' => 'OPcache reset is unavailable on this server.',
+                    'message' => __('OPcache reset is unavailable on this server.', 'ultracache'),
                 );
             }
 
@@ -4314,7 +4314,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             }
             $response = array(
                 'success' => $success,
-                'message' => $success ? 'OPcache flushed successfully.' : 'OPcache flush failed.',
+                'message' => $success ? __('OPcache flushed successfully.', 'ultracache') : __('OPcache flush failed.', 'ultracache'),
                 'opcache' => self::get_opcache_status_summary(),
             );
 
@@ -4331,7 +4331,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 return array(
                     'available' => false,
                     'enabled'   => false,
-                    'message'   => 'APCu functions are unavailable on this server.',
+                    'message'   => __('APCu functions are unavailable on this server.', 'ultracache'),
                 );
             }
 
@@ -4339,7 +4339,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 return array(
                     'available' => true,
                     'enabled'   => false,
-                    'message'   => 'APCu is loaded but disabled for the current PHP SAPI.',
+                    'message'   => __('APCu is loaded but disabled for the current PHP SAPI.', 'ultracache'),
                 );
             }
 
@@ -4349,7 +4349,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 return array(
                     'available' => true,
                     'enabled'   => false,
-                    'message'   => 'APCu status could not be read for the current PHP SAPI.',
+                    'message'   => __('APCu status could not be read for the current PHP SAPI.', 'ultracache'),
                 );
             }
 
@@ -4395,21 +4395,21 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             if (!function_exists('apcu_clear_cache')) {
                 return array(
                     'success' => false,
-                    'message' => 'APCu clear cache is unavailable on this server.',
+                    'message' => __('APCu clear cache is unavailable on this server.', 'ultracache'),
                 );
             }
 
             if (function_exists('apcu_enabled') && !apcu_enabled()) {
                 return array(
                     'success' => false,
-                    'message' => 'APCu is loaded but disabled for the current PHP SAPI.',
+                    'message' => __('APCu is loaded but disabled for the current PHP SAPI.', 'ultracache'),
                 );
             }
 
             $success = (bool) @apcu_clear_cache();
             $response = array(
                 'success' => $success,
-                'message' => $success ? 'APCu user cache flushed successfully.' : 'APCu user cache flush failed.',
+                'message' => $success ? __('APCu user cache flushed successfully.', 'ultracache') : __('APCu user cache flush failed.', 'ultracache'),
             );
 
             if ($include_stats && method_exists(__CLASS__, 'get_engine_stats')) {
@@ -4539,7 +4539,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                         'flushable' => (bool) $nginx_flushable,
                         'enabled' => (bool) $nginx_detected,
                         'method' => $nginx_method,
-                        'message' => $nginx_flushable ? 'Nginx Helper purge hook detected.' : ($nginx_detected ? 'Nginx was detected, but no safe purge hook/endpoint is configured.' : 'Nginx Cache was not detected.'),
+                        'message' => $nginx_flushable ? __('Nginx Helper purge hook detected.', 'ultracache') : ($nginx_detected ? __('Nginx was detected, but no safe purge hook/endpoint is configured.', 'ultracache') : __('Nginx Cache was not detected.', 'ultracache')),
                     ),
                     'varnish' => array(
                         'label' => 'Varnish Cache',
@@ -4547,7 +4547,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                         'flushable' => (bool) $varnish_flushable,
                         'enabled' => !empty($varnish_settings['enabled']),
                         'method' => $varnish_method,
-                        'message' => $varnish_flushable ? 'UltraCache Varnish endpoint is configured.' : ($varnish_detected ? 'Varnish settings exist, but flushing is not enabled/configured.' : 'Varnish Cache was not detected.'),
+                        'message' => $varnish_flushable ? __('UltraCache Varnish endpoint is configured.', 'ultracache') : ($varnish_detected ? __('Varnish settings exist, but flushing is not enabled/configured.', 'ultracache') : __('Varnish Cache was not detected.', 'ultracache')),
                     ),
                 ),
             );
@@ -4567,7 +4567,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             if ('*' !== $value && !preg_match('/^(?:url|tag|private|public)=[A-Za-z0-9_:\/.,?&=%+~#@!$;*()\[\]\-]+$/', $value)) {
                 return array(
                     'success' => false,
-                    'message' => 'Invalid LiteSpeed purge header value.',
+                    'message' => __('Invalid LiteSpeed purge header value.', 'ultracache'),
                     'method' => 'X-LiteSpeed-Purge response header',
                 );
             }
@@ -4575,7 +4575,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             if (PHP_SAPI === 'cli') {
                 return array(
                     'success' => false,
-                    'message' => 'LiteSpeed server-level purge needs an HTTP response; it cannot be sent from WP-CLI.',
+                    'message' => __('LiteSpeed server-level purge needs an HTTP response; it cannot be sent from WP-CLI.', 'ultracache'),
                     'method' => 'X-LiteSpeed-Purge response header',
                 );
             }
@@ -4583,7 +4583,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             if (headers_sent($file, $line)) {
                 return array(
                     'success' => false,
-                    'message' => sprintf('LiteSpeed purge header could not be sent because headers were already sent at %s:%s.', (string) $file, (string) $line),
+                    'message' => sprintf(__('LiteSpeed purge header could not be sent because headers were already sent at %1$s:%2$s.', 'ultracache'), (string) $file, (string) $line),
                     'method' => 'X-LiteSpeed-Purge response header',
                 );
             }
@@ -4593,7 +4593,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
 
             return array(
                 'success' => true,
-                'message' => 'LiteSpeed server-level purge header queued on this HTTP response.',
+                'message' => __('LiteSpeed server-level purge header queued on this HTTP response.', 'ultracache'),
                 'method' => 'X-LiteSpeed-Purge response header',
             );
         }
@@ -4603,7 +4603,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             $detection = self::get_external_cache_detection(false);
             $layer = isset($detection['layers']['litespeed']) && is_array($detection['layers']['litespeed']) ? $detection['layers']['litespeed'] : array();
             if (empty($layer['flushable'])) {
-                return array('success' => false, 'message' => 'LiteSpeed Cache purge is not available.', 'externalCaches' => $detection);
+                return array('success' => false, 'message' => __('LiteSpeed Cache purge is not available.', 'ultracache'), 'externalCaches' => $detection);
             }
 
             $success = false;
@@ -4650,7 +4650,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             $detection = self::get_external_cache_detection(false);
             $layer = isset($detection['layers']['nginx']) && is_array($detection['layers']['nginx']) ? $detection['layers']['nginx'] : array();
             if (empty($layer['flushable'])) {
-                return array('success' => false, 'message' => 'Nginx Cache purge is not available. Configure Nginx Helper or a safe purge integration first.', 'externalCaches' => $detection);
+                return array('success' => false, 'message' => __('Nginx Cache purge is not available. Configure Nginx Helper or a safe purge integration first.', 'ultracache'), 'externalCaches' => $detection);
             }
 
             $success = false;
@@ -4664,7 +4664,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
 
             return array(
                 'success' => (bool) $success,
-                'message' => $success ? 'Nginx Cache flush triggered.' : 'Nginx Cache flush failed.',
+                'message' => $success ? __('Nginx Cache flush triggered.', 'ultracache') : __('Nginx Cache flush failed.', 'ultracache'),
                 'method' => $method,
                 'externalCaches' => self::get_external_cache_detection(true),
             );
@@ -4680,31 +4680,31 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             if (!empty($settings['flushAllIncludeOpcache']) && !empty($layers['opcache']['flushable'])) {
                 $results['opcache'] = self::flush_opcache();
             } else {
-                $results['opcache'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeOpcache']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+                $results['opcache'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeOpcache']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'));
             }
 
             if (!empty($settings['flushAllIncludeApcu']) && !empty($layers['apcu']['flushable'])) {
                 $results['apcu'] = self::flush_apcu();
             } else {
-                $results['apcu'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeApcu']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+                $results['apcu'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeApcu']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'));
             }
 
             if (!empty($settings['flushAllIncludeLiteSpeed']) && !empty($layers['litespeed']['flushable'])) {
                 $results['litespeed'] = self::flush_litespeed_cache();
             } else {
-                $results['litespeed'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeLiteSpeed']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+                $results['litespeed'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeLiteSpeed']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'));
             }
 
             if (!empty($settings['flushAllIncludeNginx']) && !empty($layers['nginx']['flushable'])) {
                 $results['nginx'] = self::flush_nginx_cache();
             } else {
-                $results['nginx'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeNginx']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+                $results['nginx'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeNginx']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'));
             }
 
             if (!empty($settings['flushAllIncludeVarnish']) && !empty($layers['varnish']['flushable'])) {
-                $results['varnish'] = array('success' => true, 'handled' => true, 'message' => 'Handled by the Flush All Cache purge hook.');
+                $results['varnish'] = array('success' => true, 'handled' => true, 'message' => __('Handled by the Flush All Cache purge hook.', 'ultracache'));
             } else {
-                $results['varnish'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeVarnish']) ? 'Skipped by setting.' : 'Not detected/flushable.');
+                $results['varnish'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeVarnish']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'));
             }
 
             return array(
@@ -4980,7 +4980,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
 
             $report = array(
                 'success' => false,
-                'message' => 'Object cache flush failed.',
+                'message' => __('Object cache flush failed.', 'ultracache'),
             );
 
             try {
@@ -4994,7 +4994,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                     $flushed = (bool) Ultra_Cache_Object_Cache_Manager::flush_cache(true, false);
                     $report = array(
                         'success' => $flushed,
-                        'message' => $flushed ? 'Object cache flushed.' : 'Object cache flush failed.',
+                        'message' => $flushed ? __('Object cache flushed.', 'ultracache') : __('Object cache flush failed.', 'ultracache'),
                     );
                 }
 
@@ -5009,7 +5009,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
 
             return is_array($report) ? $report : array(
                 'success' => false,
-                'message' => 'Object cache flush failed.',
+                'message' => __('Object cache flush failed.', 'ultracache'),
             );
         }
 

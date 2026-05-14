@@ -597,17 +597,17 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
         {
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'get_last_store_profile')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Speed diagnostics helper is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Speed diagnostics helper is not available.', 'ultracache')), 500);
             }
 
             $profile = $engine->get_last_store_profile();
             if (!is_array($profile) || empty($profile)) {
-                return new WP_REST_Response(array('success' => true, 'message' => 'No speed timing breakdown found yet.', 'performanceProfile' => array(), 'profile' => null), 200);
+                return new WP_REST_Response(array('success' => true, 'message' => __('No speed timing breakdown found yet.', 'ultracache'), 'performanceProfile' => array(), 'profile' => null), 200);
             }
 
             return new WP_REST_Response(array(
                 'success'            => true,
-                'message'            => 'Last speed timing breakdown loaded.',
+                'message'            => __('Last speed timing breakdown loaded.', 'ultracache'),
                 'performanceProfile' => $this->summarize_performance_profile($profile),
                 'profile'            => $profile,
             ), 200);
@@ -617,14 +617,14 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
         {
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'clear_last_store_profile')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Speed diagnostics helper is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Speed diagnostics helper is not available.', 'ultracache')), 500);
             }
 
             $ok = (bool) $engine->clear_last_store_profile();
             return new WP_REST_Response(array(
                 'success' => true,
                 'cleared' => $ok,
-                'message' => $ok ? 'Last speed timing breakdown cleared.' : 'No speed timing breakdown was present.',
+                'message' => $ok ? __('Last speed timing breakdown cleared.', 'ultracache') : __('No speed timing breakdown was present.', 'ultracache'),
             ), 200);
         }
 
@@ -675,7 +675,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $mode = $this->normalize_performance_profile_mode($params['mode'] ?? 'compact');
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'get_last_store_profile')) {
-                return array('success' => false, 'message' => 'Speed diagnostics helper is not available.');
+                return array('success' => false, 'message' => __('Speed diagnostics helper is not available.', 'ultracache'));
             }
 
             if (method_exists($engine, 'clear_last_store_profile')) {
@@ -738,7 +738,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if (is_wp_error($response)) {
                 return array(
                     'success' => false,
-                    'message' => 'Profiler request failed: ' . $response->get_error_message(),
+                    'message' => sprintf(__('Profiler request failed: %s', 'ultracache'), $response->get_error_message()),
                     'performanceProfile' => array('available' => false, 'mode' => $mode),
                 );
             }
@@ -754,7 +754,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if (!is_array($profile) || empty($profile)) {
                 return array(
                     'success' => false,
-                    'message' => 'The page was generated and cached, but the timing breakdown was not saved. This is a Speed Diagnostics issue, not necessarily a site speed issue. Cache status: ' . ($cache_status ?: 'unknown') . '.',
+                    'message' => sprintf(__('The page was generated and cached, but the timing breakdown was not saved. This is a Speed Diagnostics issue, not necessarily a site speed issue. Cache status: %s.', 'ultracache'), ($cache_status ?: 'unknown')),
                     'performanceProfile' => array(
                         'available' => false,
                         'mode' => $mode,
@@ -784,7 +784,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             return array(
                 'success' => true,
-                'message' => strtoupper($mode) . ' performance profile completed.',
+                'message' => sprintf(__('%s performance profile completed.', 'ultracache'), strtoupper($mode)),
                 'performanceProfile' => $summary,
             );
         }
@@ -2775,7 +2775,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if ('' === trim($text)) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => 'Missing console error text.',
+                    'message' => __('Missing console error text.', 'ultracache'),
                 ), 400);
             }
 
@@ -2809,7 +2809,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $payload = $this->normalize_runtime_js_scan_report_payload($request->get_json_params());
             $scan_id = (string) $payload['scanId'];
             if ('' === $scan_id) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Missing runtime JS scan id.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Missing runtime JS scan id.', 'ultracache')), 400);
             }
 
             $existing = get_transient($this->get_runtime_js_scan_transient_key($scan_id));
@@ -2922,7 +2922,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
         {
             $scan_id = sanitize_key((string) $request->get_param('scanId'));
             if ('' === $scan_id) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Missing runtime JS scan id.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Missing runtime JS scan id.', 'ultracache')), 400);
             }
 
             $report = get_transient($this->get_runtime_js_scan_transient_key($scan_id));

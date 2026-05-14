@@ -5,7 +5,7 @@ Donate link: https://iniotakis.com/
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.58.01
+Stable tag: 2.58.02
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -119,5 +119,10 @@ UltraCache does not track visitors through an external UltraCache service.
 3. Media, CSS, fonts, warm-up, and diagnostics panels.
 
 == Changelog ==
+2.58.02 - Repository localization cleanup
+- Replaced direct unsafe loopback SSL bypass requests with the UltraCache safe loopback helper.
+- Added admin JavaScript i18n setup and generated the UltraCache POT template.
+- Added a first PHP i18n pass for REST/admin-facing messages.
+
 2.58.01 - Initial public release
 - Initial public release build.

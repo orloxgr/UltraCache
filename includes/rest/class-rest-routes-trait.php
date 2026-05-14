@@ -1016,21 +1016,20 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             unset($request);
 
             $url = home_url('/');
-            $response = wp_remote_get($url, array(
+            $response = ucwp_safe_loopback_remote_request($url, array(
                 'timeout'     => 10,
                 'redirection' => 3,
-                'sslverify'   => false,
                 'headers'     => array(
                     'Cache-Control' => 'no-cache',
                     'Pragma'        => 'no-cache',
                     'User-Agent'    => 'UltraCache-SafeDeferInitScanner/' . (defined('UCWP_VERSION') ? UCWP_VERSION : '1.0') . '; ' . home_url('/'),
                 ),
-            ));
+            ), 'safe-defer-init-scan');
 
             if (is_wp_error($response)) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => 'Safe Defer JS init-script scan failed: ' . $response->get_error_message(),
+                    'message' => sprintf(__('Safe Defer JS init-script scan failed: %s', 'ultracache'), $response->get_error_message()),
                     'items'   => array(),
                     'details' => array(),
                 ), 500);
@@ -1040,7 +1039,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             if ('' === trim($html)) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => 'Safe Defer JS init-script scan returned empty HTML.',
+                    'message' => __('Safe Defer JS init-script scan returned empty HTML.', 'ultracache'),
                     'items'   => array(),
                     'details' => array(),
                 ), 500);
@@ -1107,8 +1106,8 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'items'   => $values,
                 'details' => array_slice($details, 0, 120),
                 'message' => count($values)
-                    ? sprintf('Detected %d likely theme/page-builder init exclusion pattern(s) on the front page.', count($values))
-                    : 'No likely theme/page-builder init scripts were detected on the front page.',
+                    ? sprintf(__('Detected %d likely theme/page-builder init exclusion pattern(s) on the front page.', 'ultracache'), count($values))
+                    : __('No likely theme/page-builder init scripts were detected on the front page.', 'ultracache'),
             ), 200);
         }
 
@@ -1117,21 +1116,20 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             unset($request);
 
             $url = home_url('/');
-            $response = wp_remote_get($url, array(
+            $response = ucwp_safe_loopback_remote_request($url, array(
                 'timeout'     => 10,
                 'redirection' => 3,
-                'sslverify'   => false,
                 'headers'     => array(
                     'Cache-Control' => 'no-cache',
                     'Pragma'        => 'no-cache',
                     'User-Agent'    => 'UltraCache-FontPatternScanner/' . (defined('UCWP_VERSION') ? UCWP_VERSION : '1.0') . '; ' . home_url('/'),
                 ),
-            ));
+            ), 'frontpage-font-pattern-scan');
 
             if (is_wp_error($response)) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => 'Front page font scan failed: ' . $response->get_error_message(),
+                    'message' => sprintf(__('Front page font scan failed: %s', 'ultracache'), $response->get_error_message()),
                     'delayIconFontsList' => array(),
                     'delayIconFontsExcludeList' => array(),
                 ), 500);
@@ -1141,7 +1139,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             if ('' === trim($html)) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => 'Front page font scan returned empty HTML.',
+                    'message' => __('Front page font scan returned empty HTML.', 'ultracache'),
                     'delayIconFontsList' => array(),
                     'delayIconFontsExcludeList' => array(),
                 ), 500);
@@ -1172,7 +1170,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'delayIconFontsExcludeList' => $never_values,
                 'iconCount' => count($delay_values),
                 'nonIconCount' => count($never_values),
-                'message' => sprintf('Detected %d likely icon font pattern(s) and %d non-icon font pattern(s) on the front page.', count($delay_values), count($never_values)),
+                'message' => sprintf(__('Detected %1$d likely icon font pattern(s) and %2$d non-icon font pattern(s) on the front page.', 'ultracache'), count($delay_values), count($never_values)),
             ), 200);
         }
 
@@ -1189,7 +1187,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'sources'             => $sources,
                 'count'               => count($items),
                 'woocommerceDetected' => class_exists('WooCommerce') || function_exists('wc_get_attribute_taxonomies'),
-                'message'             => count($items) ? sprintf('Detected %d taxonomy/attribute query-string keys.', count($items)) : 'No taxonomy/attribute query-string keys were detected.',
+                'message'             => count($items) ? sprintf(__('Detected %d taxonomy/attribute query-string keys.', 'ultracache'), count($items)) : __('No taxonomy/attribute query-string keys were detected.', 'ultracache'),
             ), 200);
         }
 

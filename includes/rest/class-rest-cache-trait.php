@@ -15,7 +15,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                         'success' => true,
                         'enabled' => false,
                         'disabled' => true,
-                        'message' => 'Cache stats are disabled.',
+                        'message' => __('Cache stats are disabled.', 'ultracache'),
                         'impact' => 'off',
                         'timestamp' => time(),
                     );
@@ -34,13 +34,13 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function refresh_storage_diagnostics()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Storage diagnostics helper is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Storage diagnostics helper is not available.', 'ultracache')), 500);
             }
 
             $diagnostics = Ultra_Cache_WP::get_dashboard_diagnostics(true);
             return new WP_REST_Response(array(
                 'success' => true,
-                'message' => 'Storage diagnostics refreshed.',
+                'message' => __('Storage diagnostics refreshed.', 'ultracache'),
                 'diagnostics' => $diagnostics,
             ), 200);
         }
@@ -52,7 +52,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 return new WP_REST_Response(
                     array(
                         'success' => false,
-                        'message' => 'Cache engine not available.',
+                        'message' => __('Cache engine not available.', 'ultracache'),
                     ),
                     500
                 );
@@ -154,7 +154,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 array(
                     'success' => false,
                     'code'    => 'ucwp_file_mutation_forbidden',
-                    'message' => 'This UltraCache action changes plugin drop-ins, wp-config.php, .htaccess, runtime secrets, or plugin activation state. It requires a full administrator with plugin activation permissions.',
+                    'message' => __('This UltraCache action changes plugin drop-ins, wp-config.php, .htaccess, runtime secrets, or plugin activation state. It requires a full administrator with plugin activation permissions.', 'ultracache'),
                 ),
                 403
             );
@@ -205,14 +205,14 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 return new WP_REST_Response(
                     array(
                         'success' => false,
-                        'message' => 'Confirmation failed. Type DELETE to remove UltraCache data and deactivate the plugin.',
+                        'message' => __('Confirmation failed. Type DELETE to remove UltraCache data and deactivate the plugin.', 'ultracache'),
                     ),
                     400
                 );
             }
 
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'delete_all_plugin_data_and_deactivate')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cleanup helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cleanup helper not available.', 'ultracache')), 500);
             }
 
             $cleanup_policy = $request->get_param('cleanupPolicy');
@@ -227,7 +227,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function cron_warm_start()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'start_cron_warmup_queue')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cron warm helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cron warm helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::start_cron_warmup_queue('manual', false);
@@ -241,7 +241,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function cron_warm_stop()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'stop_cron_warmup_queue')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cron warm helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cron warm helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::stop_cron_warmup_queue('manual');
@@ -253,7 +253,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function cron_warm_tick(WP_REST_Request $request)
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'run_cron_warm_tick')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cron warm helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cron warm helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::run_cron_warm_tick(array(
@@ -269,7 +269,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function varnish_test()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'varnish_test_connection')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Varnish helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Varnish helper not available.', 'ultracache')), 500);
             }
 
             if (method_exists('Ultra_Cache_WP', 'reset_settings_cache')) {
@@ -292,7 +292,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function varnish_flush_all()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'varnish_flush_all_current_host')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Varnish helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Varnish helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::varnish_flush_all_current_host();
@@ -302,7 +302,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function opcache_flush()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_opcache')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'OPcache helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('OPcache helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::flush_opcache();
@@ -312,7 +312,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function apcu_flush()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_apcu')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'APCu helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('APCu helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::flush_apcu();
@@ -322,7 +322,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function external_caches_redetect()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'redetect_external_caches')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'External cache detection helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('External cache detection helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::redetect_external_caches();
@@ -335,7 +335,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function litespeed_flush()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_litespeed_cache')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'LiteSpeed Cache helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('LiteSpeed Cache helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::flush_litespeed_cache();
@@ -345,7 +345,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function nginx_flush()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_nginx_cache')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Nginx Cache helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Nginx Cache helper not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::flush_nginx_cache();
@@ -355,7 +355,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function redis_test(WP_REST_Request $request)
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'test_redis_connection')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Redis helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Redis helper not available.', 'ultracache')), 500);
             }
 
             $settings = array();
@@ -387,7 +387,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function object_cache_backend_test(WP_REST_Request $request)
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'test_object_cache_backend')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Object cache backend test helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Object cache backend test helper not available.', 'ultracache')), 500);
             }
 
             $backend = sanitize_key((string) $request->get_param('backend'));
@@ -450,7 +450,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function object_cache_flush(WP_REST_Request $request = null)
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'flush_object_cache')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Object cache helper not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Object cache helper not available.', 'ultracache')), 500);
             }
 
             $backend = $request instanceof WP_REST_Request ? sanitize_key((string) $request->get_param('backend')) : 'active';
@@ -466,7 +466,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         public function remove_conflicting_cache_dropins()
         {
             if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'remove_conflicting_cache_dropins')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cache helper cleanup is not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cache helper cleanup is not available.', 'ultracache')), 500);
             }
 
             $result = Ultra_Cache_WP::remove_conflicting_cache_dropins();
@@ -480,7 +480,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             return new WP_REST_Response(array(
                 'success' => true,
-                'message' => 'Full object-cache count completed.',
+                'message' => __('Full object-cache count completed.', 'ultracache'),
                 'stats' => $stats,
             ), 200);
         }
@@ -497,7 +497,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             if (!$this->is_dashboard_setting_enabled('pageCacheEnabled')) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => 'Please enable Page Caching first or select a profile before warming cache.',
+                    'message' => __('Please enable Page Caching first or select a profile before warming cache.', 'ultracache'),
                 ), 400);
             }
 
@@ -509,7 +509,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             if (!$this->is_dashboard_setting_enabled('homepageCssBundleEnabled')) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => 'Please enable CSS Bundling before using CSS bundle actions.',
+                    'message' => __('Please enable CSS Bundling before using CSS bundle actions.', 'ultracache'),
                 ), 400);
             }
 
@@ -544,7 +544,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         {
             $url = esc_url_raw((string) $request->get_param('url'));
             if ('' === $url) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'No URL provided.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => __('No URL provided.', 'ultracache')), 400);
             }
 
             $guard = $this->guard_page_cache_enabled();
@@ -561,11 +561,11 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'warm_url') || !method_exists($engine, 'is_cacheable_local_url')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
             }
 
             if (!$engine->is_cacheable_local_url($url)) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Only local site URLs can be crawled.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Only local site URLs can be crawled.', 'ultracache')), 400);
             }
 
             $result = $engine->warm_url($url, array('build_css_bundle' => (bool) $request->get_param('buildCssBundle')));
@@ -576,16 +576,16 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
         {
             $url = (string) $request->get_param('url');
             if ('' === trim($url)) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'No URL provided.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => __('No URL provided.', 'ultracache')), 400);
             }
 
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'inspect_url')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
             }
 
             if (!method_exists($engine, 'is_cacheable_local_url') || !$engine->is_cacheable_local_url($url)) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Only local site URLs can be inspected.'), 400);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Only local site URLs can be inspected.', 'ultracache')), 400);
             }
 
             return new WP_REST_Response($engine->inspect_url($url), 200);
@@ -600,7 +600,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'build_frontpage_css_bundle')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
             }
 
             $result = $engine->build_frontpage_css_bundle();
@@ -616,7 +616,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'warm_frontpage_html')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
             }
 
             $result = $engine->warm_frontpage_html();
@@ -637,7 +637,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             $engine = $this->get_engine();
             if (!$engine || !method_exists($engine, 'warm_frontpage_html_with_css')) {
-                return new WP_REST_Response(array('success' => false, 'message' => 'Cache engine not available.'), 500);
+                return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
             }
 
             $result = $engine->warm_frontpage_html_with_css();

@@ -351,7 +351,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'fontFilesOrAssets' => (int) $google_font_files['count'],
                     'fontBytesOrAssetBytes' => (int) $google_font_files['bytes'],
                 ),
-                'message' => 'Font diagnostics are read-only. They report generated local font CSS, delayed icon-font CSS, and CSS bundle delayed-font metadata.',
+                'message' => __('Font diagnostics are read-only. They report generated local font CSS, delayed icon-font CSS, and CSS bundle delayed-font metadata.', 'ultracache'),
             );
         }
 
@@ -424,7 +424,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             );
 
             $legacy_lists = array(
-                array('key' => 'delayNonCriticalJsExcludeList', 'label' => 'Legacy Delay Non-Critical JS Exclusions', 'mappedTo' => 'deferJsExcludeList', 'active' => false, 'message' => 'Legacy values are merged into the visible JS Delay / Defer Exclusions field and then cleared.'),
+                array('key' => 'delayNonCriticalJsExcludeList', 'label' => 'Legacy Delay Non-Critical JS Exclusions', 'mappedTo' => 'deferJsExcludeList', 'active' => false, 'message' => __('Legacy values are merged into the visible JS Delay / Defer Exclusions field and then cleared.', 'ultracache')),
             );
 
             return array(
@@ -440,7 +440,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'legacyLists' => count($legacy_lists),
                     'resetUsesDashboardDefaults' => true,
                 ),
-                'message' => 'Settings transparency diagnostics are read-only. User-editable safeguards are listed separately from engine-only safety floors.',
+                'message' => __('Settings transparency diagnostics are read-only. User-editable safeguards are listed separately from engine-only safety floors.', 'ultracache'),
             );
         }
 
@@ -1276,7 +1276,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'missingDelayedFontFiles' => (int) $missing_delayed_files,
                 ),
                 'integrityOk' => (0 === (int) $missing_bundle_files && 0 === (int) $missing_delayed_files),
-                'message' => 'CSS Bundle Summary is independent from Cache Stats. It reads the last bundle warm snapshot and current manifest/file integrity.',
+                'message' => __('CSS Bundle Summary is independent from Cache Stats. It reads the last bundle warm snapshot and current manifest/file integrity.', 'ultracache'),
             );
         }
 
@@ -1420,7 +1420,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'routesUsePermissionCallback' => true,
                     'dangerousActionsRequireAdmin' => true,
                 ),
-                'message' => 'Security diagnostics are read-only. Sensitive query args are enforced as an engine safety floor even if not present in the visible exclusion list.',
+                'message' => __('Security diagnostics are read-only. Sensitive query args are enforced as an engine safety floor even if not present in the visible exclusion list.', 'ultracache'),
             );
         }
         private static function redact_diagnostics_for_output($value, $key = '', $depth = 0)
