@@ -367,22 +367,22 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $defaults = self::get_dashboard_defaults();
 
             $visible_lists = array(
-                array('key' => 'cacheExceptionPaths', 'label' => 'Exclude Paths From Caching', 'area' => 'Cache bypass', 'kind' => 'Textarea', 'shared' => false),
-                array('key' => 'cacheExceptionQueryArgs', 'label' => 'Excluded query-string args from Caching', 'area' => 'Cache bypass', 'kind' => 'Textarea', 'shared' => false),
-                array('key' => 'cacheQueryStringAllowlist', 'label' => 'Query-string args whitelist', 'area' => 'Cache query strings', 'kind' => 'Textarea', 'shared' => false),
-                array('key' => 'deferJsForceList', 'label' => 'Defer those scripts', 'area' => 'JavaScript', 'kind' => 'Textarea', 'shared' => false),
-                array('key' => 'deferJsExcludeList', 'label' => 'JS Delay / Defer Exclusions', 'area' => 'JavaScript', 'kind' => 'Shared final override', 'shared' => true),
-                array('key' => 'delaySafeThirdPartyJsPatterns', 'label' => 'Safe third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
-                array('key' => 'delayFunctionalThirdPartyJsPatterns', 'label' => 'Known functional third-party delay patterns', 'area' => 'JavaScript', 'kind' => 'Pattern list', 'shared' => false),
-                array('key' => 'criticalRequestChainDelayList', 'label' => 'Delay Non-Critical Request Chains', 'area' => 'JavaScript/CSS', 'kind' => 'Textarea', 'shared' => false),
-                array('key' => 'criticalResourcePreloadList', 'label' => 'Priority Preloads', 'area' => 'Critical chain', 'kind' => 'Textarea', 'shared' => true),
-                array('key' => 'homepageCssBundleExcludeList', 'label' => 'CSS Bundle Exclusions', 'area' => 'CSS bundles', 'kind' => 'Textarea', 'shared' => false),
-                array('key' => 'asyncCssExcludeList', 'label' => 'Async CSS Exclude List', 'area' => 'CSS async', 'kind' => 'Shared final override', 'shared' => true),
-                array('key' => 'assetCleanupExcludeList', 'label' => 'Asset Cleanup Exclusions', 'area' => 'Asset cleanup', 'kind' => 'Textarea', 'shared' => false),
-                array('key' => 'delayIconFontsList', 'label' => 'Delay These Fonts / Patterns', 'area' => 'Fonts', 'kind' => 'Pattern list', 'shared' => false),
-                array('key' => 'delayIconFontsExcludeList', 'label' => 'Never Delay These Fonts / Patterns', 'area' => 'Fonts', 'kind' => 'Pattern list', 'shared' => false),
-                array('key' => 'manualLcpHeroSelector', 'label' => 'Manual LCP selector', 'area' => 'LCP', 'kind' => 'Image URL / CSS selector list', 'shared' => true),
-                array('key' => 'googleFontsAdditionalScanUrls', 'label' => 'Additional Google Fonts Scan URLs', 'area' => 'Fonts', 'kind' => 'Textarea', 'shared' => false),
+                array('key' => 'cacheExceptionPaths', 'label' => __('Exclude Paths From Caching', 'ultracache'), 'area' => __('Cache bypass', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
+                array('key' => 'cacheExceptionQueryArgs', 'label' => __('Excluded query-string args from Caching', 'ultracache'), 'area' => __('Cache bypass', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
+                array('key' => 'cacheQueryStringAllowlist', 'label' => __('Query-string args whitelist', 'ultracache'), 'area' => __('Cache query strings', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
+                array('key' => 'deferJsForceList', 'label' => __('Defer those scripts', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
+                array('key' => 'deferJsExcludeList', 'label' => __('JS Delay / Defer Exclusions', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Shared final override', 'ultracache'), 'shared' => true),
+                array('key' => 'delaySafeThirdPartyJsPatterns', 'label' => __('Safe third-party delay patterns', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
+                array('key' => 'delayFunctionalThirdPartyJsPatterns', 'label' => __('Known functional third-party delay patterns', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
+                array('key' => 'criticalRequestChainDelayList', 'label' => __('Delay Non-Critical Request Chains', 'ultracache'), 'area' => __('JavaScript/CSS', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
+                array('key' => 'criticalResourcePreloadList', 'label' => __('Priority Preloads', 'ultracache'), 'area' => __('Critical chain', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => true),
+                array('key' => 'homepageCssBundleExcludeList', 'label' => __('CSS Bundle Exclusions', 'ultracache'), 'area' => __('CSS bundles', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
+                array('key' => 'asyncCssExcludeList', 'label' => __('Async CSS Exclude List', 'ultracache'), 'area' => __('CSS async', 'ultracache'), 'kind' => __('Shared final override', 'ultracache'), 'shared' => true),
+                array('key' => 'assetCleanupExcludeList', 'label' => __('Asset Cleanup Exclusions', 'ultracache'), 'area' => __('Asset cleanup', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
+                array('key' => 'delayIconFontsList', 'label' => __('Delay These Fonts / Patterns', 'ultracache'), 'area' => __('Fonts', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
+                array('key' => 'delayIconFontsExcludeList', 'label' => __('Never Delay These Fonts / Patterns', 'ultracache'), 'area' => __('Fonts', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
+                array('key' => 'manualLcpHeroSelector', 'label' => __('Manual LCP selector', 'ultracache'), 'area' => __('LCP', 'ultracache'), 'kind' => __('Image URL / CSS selector list', 'ultracache'), 'shared' => true),
+                array('key' => 'googleFontsAdditionalScanUrls', 'label' => __('Additional Google Fonts Scan URLs', 'ultracache'), 'area' => __('Fonts', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
             );
 
             $list_rows = array();
@@ -416,15 +416,15 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             }
 
             $engine_only_safeguards = array(
-                array('label' => 'Absolute JS dependency floor', 'area' => 'JavaScript', 'editable' => false, 'reason' => 'Core WordPress/jQuery globals stay protected to avoid site-wide runtime failures.', 'examples' => array('jquery', 'jquery-migrate', 'wp-i18n', 'wp-hooks', 'wp-util', 'api-fetch', 'underscore')),
-                array('label' => 'Admin/internal paths never cached', 'area' => 'Cache bypass', 'editable' => false, 'reason' => 'WordPress admin/login/API flows must remain uncached even if the visible path list is edited.', 'examples' => array('/wp-admin/', '/wp-login.php', '/wp-json/')),
-                array('label' => 'Logged-in and personalized requests bypass', 'area' => 'Cache poisoning protection', 'editable' => false, 'reason' => 'User cookies, cart/checkout/account flows, and unsafe methods must not be page-cached.', 'examples' => array('logged-in cookies', 'POST', 'cart', 'checkout', 'account')),
-                array('label' => 'CSS bundle stale-ref protection', 'area' => 'CSS bundles', 'editable' => false, 'reason' => 'Main bundle files and delayed-font companion files are retained/validated to protect stale proxy HTML.', 'examples' => array('48h bundle grace period', 'delayed-font pair lifecycle', 'missing bundle invalidation')),
-                array('label' => 'Varnish endpoint safety validation', 'area' => 'Reverse proxy', 'editable' => false, 'reason' => 'Obvious public frontend endpoints are blocked while explicitly configured Varnish infrastructure endpoints remain supported.', 'examples' => array('external Varnish infrastructure allowed', 'public frontend :80/:443 blocked')),
+                array('label' => __('Absolute JS dependency floor', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'editable' => false, 'reason' => __('Core WordPress/jQuery globals stay protected to avoid site-wide runtime failures.', 'ultracache'), 'examples' => array('jquery', 'jquery-migrate', 'wp-i18n', 'wp-hooks', 'wp-util', 'api-fetch', 'underscore')),
+                array('label' => __('Admin/internal paths never cached', 'ultracache'), 'area' => __('Cache bypass', 'ultracache'), 'editable' => false, 'reason' => __('WordPress admin/login/API flows must remain uncached even if the visible path list is edited.', 'ultracache'), 'examples' => array('/wp-admin/', '/wp-login.php', '/wp-json/')),
+                array('label' => __('Logged-in and personalized requests bypass', 'ultracache'), 'area' => __('Cache poisoning protection', 'ultracache'), 'editable' => false, 'reason' => __('User cookies, cart/checkout/account flows, and unsafe methods must not be page-cached.', 'ultracache'), 'examples' => array('logged-in cookies', 'POST', 'cart', 'checkout', 'account')),
+                array('label' => __('CSS bundle stale-ref protection', 'ultracache'), 'area' => __('CSS bundles', 'ultracache'), 'editable' => false, 'reason' => __('Main bundle files and delayed-font companion files are retained/validated to protect stale proxy HTML.', 'ultracache'), 'examples' => array('48h bundle grace period', 'delayed-font pair lifecycle', 'missing bundle invalidation')),
+                array('label' => __('Varnish endpoint safety validation', 'ultracache'), 'area' => __('Reverse proxy', 'ultracache'), 'editable' => false, 'reason' => __('Obvious public frontend endpoints are blocked while explicitly configured Varnish infrastructure endpoints remain supported.', 'ultracache'), 'examples' => array('external Varnish infrastructure allowed', 'public frontend :80/:443 blocked')),
             );
 
             $legacy_lists = array(
-                array('key' => 'delayNonCriticalJsExcludeList', 'label' => 'Legacy Delay Non-Critical JS Exclusions', 'mappedTo' => 'deferJsExcludeList', 'active' => false, 'message' => __('Legacy values are merged into the visible JS Delay / Defer Exclusions field and then cleared.', 'ultracache')),
+                array('key' => 'delayNonCriticalJsExcludeList', 'label' => __('Legacy Delay Non-Critical JS Exclusions', 'ultracache'), 'mappedTo' => 'deferJsExcludeList', 'active' => false, 'message' => __('Legacy values are merged into the visible JS Delay / Defer Exclusions field and then cleared.', 'ultracache')),
             );
 
             return array(
@@ -1391,11 +1391,11 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'hardSensitiveQueryArgsMissingFromVisibleList' => array_values($missing_visible),
                 'cookieBypassPrefixes' => array('wordpress_logged_in_', 'wordpress_sec_', 'comment_author_', 'wp-postpass_', 'woocommerce_items_in_cart', 'woocommerce_cart_hash', 'wp_woocommerce_session_'),
                 'engineOnlySafeguards' => array(
-                    array('label' => 'Logged-in users bypass page cache', 'status' => 'enforced'),
-                    array('label' => 'Sensitive query args always bypass cache', 'status' => 'enforced'),
-                    array('label' => 'WooCommerce cart/checkout/account bypass rules', 'status' => !empty($settings['woocommerceSafeModeEnabled']) ? 'enabled' : 'available'),
-                    array('label' => 'Runtime and Redis secrets redacted from REST/dashboard settings', 'status' => 'enforced'),
-                    array('label' => 'Debug context secret redaction', 'status' => function_exists('ucwp_redact_sensitive_debug_context') ? 'enabled' : 'missing'),
+                    array('label' => __('Logged-in users bypass page cache', 'ultracache'), 'status' => 'enforced'),
+                    array('label' => __('Sensitive query args always bypass cache', 'ultracache'), 'status' => 'enforced'),
+                    array('label' => __('WooCommerce cart/checkout/account bypass rules', 'ultracache'), 'status' => !empty($settings['woocommerceSafeModeEnabled']) ? 'enabled' : 'available'),
+                    array('label' => __('Runtime and Redis secrets redacted from REST/dashboard settings', 'ultracache'), 'status' => 'enforced'),
+                    array('label' => __('Debug context secret redaction', 'ultracache'), 'status' => function_exists('ucwp_redact_sensitive_debug_context') ? 'enabled' : 'missing'),
                 ),
                 'runtimeConfigProtection' => $runtime_config_protection,
                 'secretFiles' => $secret_files,

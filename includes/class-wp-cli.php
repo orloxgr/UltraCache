@@ -226,197 +226,197 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
         {
             return array(
                 array(
-                    'title' => 'Discovery / Help',
+                    'title' => __('Discovery / Help', 'ultracache'),
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache',
-                            'description' => 'Show this complete command reference.',
+                            'description' => __('Show this complete command reference.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache help [--format=text|json]',
-                            'description' => 'Show the same complete reference explicitly.',
+                            'description' => __('Show the same complete reference explicitly.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache commands [--format=text|json]',
-                            'description' => 'Alias for help; useful for scripts when --format=json is needed.',
+                            'description' => __('Alias for help; useful for scripts when --format=json is needed.', 'ultracache'),
                         ),
                     ),
                 ),
                 array(
-                    'title' => 'Status / Diagnostics',
+                    'title' => __('Status / Diagnostics', 'ultracache'),
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache status [--section=summary|settings|diagnostics|storage|stats|analytics|all] [--format=table|json|yaml]',
-                            'description' => 'Show UltraCache status, settings, diagnostics, storage, or analytics.',
+                            'description' => __('Show UltraCache status, settings, diagnostics, storage, or analytics.', 'ultracache'),
                             'examples' => array('wp ultracache status --section=all --format=json'),
                         ),
                         array(
                             'command' => 'wp ultracache inspect <url> [--format=table|json|yaml]',
-                            'description' => 'Inspect cacheability for a local URL.',
+                            'description' => __('Inspect cacheability for a local URL.', 'ultracache'),
                             'examples' => array('wp ultracache inspect https://example.com/ --format=json'),
                         ),
                         array(
                             'command' => 'wp ultracache self_test [--format=table|json]',
-                            'description' => 'Run UltraCache self-test checks.',
+                            'description' => __('Run UltraCache self-test checks.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache css_diagnostics [<url>] [--url=<url>] [--last] [--format=table|json|yaml]',
-                            'description' => 'Run or read CSS/STORE critical-path diagnostics.',
+                            'description' => __('Run or read CSS/STORE critical-path diagnostics.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache store_profile [show|clear] [--format=table|json|yaml]',
-                            'description' => 'Show or clear the last STORE profiler report.',
+                            'description' => __('Show or clear the last STORE profiler report.', 'ultracache'),
                         ),
                     ),
                 ),
                 array(
-                    'title' => 'Page Cache',
+                    'title' => __('Page Cache', 'ultracache'),
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache purge',
-                            'description' => 'Purge the full UltraCache page cache.',
+                            'description' => __('Purge the full UltraCache page cache.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache purge --cache-url=<url>',
-                            'description' => 'Purge one local URL only.',
+                            'description' => __('Purge one local URL only.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache warm [--cache-url=<url>] [--limit=<number>] [--buckets=orig,webp,avif] [--purge-first]',
-                            'description' => 'Warm one URL or discovered crawl URLs.',
+                            'description' => __('Warm one URL or discovered crawl URLs.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache warm_frontpage_html [--buckets=orig,webp,avif] [--purge-first]',
-                            'description' => 'Warm front page HTML cache only.',
+                            'description' => __('Warm front page HTML cache only.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache warm_frontpage_html_css [--purge-first]',
-                            'description' => 'Warm front page HTML and rebuild the homepage/frontpage CSS bundle.',
+                            'description' => __('Warm front page HTML and rebuild the homepage/frontpage CSS bundle.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache warm_html_all [--limit=<number>] [--buckets=orig,webp,avif] [--purge-first]',
-                            'description' => 'Warm HTML cache for all crawlable public URLs.',
+                            'description' => __('Warm HTML cache for all crawlable public URLs.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache warm_html_all_css [--limit=<number>] [--buckets=orig,webp,avif] [--purge-first]',
-                            'description' => 'Warm all crawlable URLs and rebuild CSS bundle output.',
+                            'description' => __('Warm all crawlable URLs and rebuild CSS bundle output.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache cleanup',
-                            'description' => 'Run scheduled cleanup once.',
+                            'description' => __('Run scheduled cleanup once.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache cleanup_artifacts [--dry-run] [--max-age-minutes=<number>] [--format=table|json|yaml]',
-                            'description' => 'Clean safe old runtime lock/test artifacts from UltraCache locks storage.',
+                            'description' => __('Clean safe old runtime lock/test artifacts from UltraCache locks storage.', 'ultracache'),
                         ),
                     ),
                 ),
                 array(
-                    'title' => 'Media Optimization',
+                    'title' => __('Media Optimization', 'ultracache'),
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache media rebuild',
-                            'description' => 'Rebuild and regenerate all optimized AVIF/WebP images until complete. Default output target: both.',
+                            'description' => __('Rebuild and regenerate all optimized AVIF/WebP images until complete. Default output target: both.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache media rebuild --only-missing',
-                            'description' => 'Repair only missing optimized AVIF/WebP images without replacing existing variants. Default output target: both.',
+                            'description' => __('Repair only missing optimized AVIF/WebP images without replacing existing variants. Default output target: both.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache media process',
-                            'description' => 'Process the current media queue until complete. If the queue is empty, it is rebuilt first.',
+                            'description' => __('Process the current media queue until complete. If the queue is empty, it is rebuilt first.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache media status [--media-format=both|best|avif|webp] [--format=table|json|yaml]',
-                            'description' => 'Show AVIF/WebP media queue and persistent uploads/uc-images storage status.',
+                            'description' => __('Show AVIF/WebP media queue and persistent uploads/uc-images storage status.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache media retry-failed',
-                            'description' => 'Reset failed media queue rows back to pending.',
+                            'description' => __('Reset failed media queue rows back to pending.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache media clear-completed',
-                            'description' => 'Clear completed rows from the media queue.',
+                            'description' => __('Clear completed rows from the media queue.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache media process --ids=12,34,56',
-                            'description' => 'Generate optimized variants for specific attachment IDs.',
+                            'description' => __('Generate optimized variants for specific attachment IDs.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache media process-batch [--batch-size=25] [--time-budget=20]',
-                            'description' => 'Advanced diagnostic action: process one internal chunk only.',
+                            'description' => __('Advanced diagnostic action: process one internal chunk only.', 'ultracache'),
                         ),
                     ),
                 ),
                 array(
-                    'title' => 'Settings / Analytics',
+                    'title' => __('Settings / Analytics', 'ultracache'),
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache settings list [--format=table|json|yaml]',
-                            'description' => 'List current dashboard settings with sensitive values redacted.',
+                            'description' => __('List current dashboard settings with sensitive values redacted.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache settings get <key> [--format=table|json|yaml]',
-                            'description' => 'Read one setting key.',
+                            'description' => __('Read one setting key.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache settings set <key> <value> [--format=table|json|yaml]',
-                            'description' => 'Update one setting key through UltraCache settings persistence.',
+                            'description' => __('Update one setting key through UltraCache settings persistence.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache stats [show|reset] [--format=table|json]',
-                            'description' => 'Show or reset cache/object-cache analytics counters.',
+                            'description' => __('Show or reset cache/object-cache analytics counters.', 'ultracache'),
                         ),
                     ),
                 ),
                 array(
-                    'title' => 'Object Cache',
+                    'title' => __('Object Cache', 'ultracache'),
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache flush_object_cache',
-                            'description' => 'Flush UltraCache object cache through the public WP-CLI command name.',
+                            'description' => __('Flush UltraCache object cache through the public WP-CLI command name.', 'ultracache'),
                         ),
                     ),
                 ),
                 array(
-                    'title' => 'Cron Warm Queue',
+                    'title' => __('Cron Warm Queue', 'ultracache'),
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache cron_warm status',
-                            'description' => 'Show cron warm queue state.',
+                            'description' => __('Show cron warm queue state.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache cron_warm start',
-                            'description' => 'Start or reset the cron warm queue.',
+                            'description' => __('Start or reset the cron warm queue.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache cron_warm tick [--pages-per-minute=<number>]',
-                            'description' => 'Process one cron warm tick. Useful for real server cron.',
+                            'description' => __('Process one cron warm tick. Useful for real server cron.', 'ultracache'),
                             'examples' => array('wp ultracache cron_warm tick --pages-per-minute=60'),
                         ),
                         array(
                             'command' => 'wp ultracache cron_warm stop',
-                            'description' => 'Stop the cron warm queue.',
+                            'description' => __('Stop the cron warm queue.', 'ultracache'),
                         ),
                     ),
                 ),
                 array(
-                    'title' => 'Integrations',
+                    'title' => __('Integrations', 'ultracache'),
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache varnish test',
-                            'description' => 'Test Varnish integration.',
+                            'description' => __('Test Varnish integration.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache varnish flush-all',
-                            'description' => 'Flush/BAN the current host through Varnish integration.',
+                            'description' => __('Flush/BAN the current host through Varnish integration.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache varnish flush-url --cache-url=<url>',
-                            'description' => 'Flush/BAN one URL through Varnish integration.',
+                            'description' => __('Flush/BAN one URL through Varnish integration.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache google_fonts_rebuild [--clear]',
-                            'description' => 'Rebuild the local Google Fonts cache from scan URLs.',
+                            'description' => __('Rebuild the local Google Fonts cache from scan URLs.', 'ultracache'),
                         ),
                     ),
                 ),

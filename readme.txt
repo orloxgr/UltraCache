@@ -5,7 +5,7 @@ Donate link: https://iniotakis.com/
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.58.02
+Stable tag: 2.58.05
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -97,15 +97,75 @@ Examples:
 
 == External services ==
 
-UltraCache does not require an external SaaS account.
+UltraCache does not require an external SaaS account and does not send visitor data to an UltraCache-owned service.
 
-When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request CSS and font files from `fonts.googleapis.com` and `fonts.gstatic.com` to build local copies under `wp-content/cache/ultracache/google-fonts/`.
+Google Fonts
 
-Service provider: Google LLC. Privacy information: https://developers.google.com/fonts/faq/privacy
+When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request CSS and font files from Google Fonts in order to build local copies under `wp-content/cache/ultracache/google-fonts/`.
 
-If Varnish integration is configured, UltraCache may send purge/test requests to the administrator-configured Varnish endpoint. Varnish admin secrets should not be exposed to frontend HTML, JavaScript, REST responses, or logs.
+UltraCache may also add or preserve Google Fonts parameters such as `display=swap` on Google Fonts URLs that already exist on the site. UltraCache does not add Google Fonts to a site by itself unless the administrator has enabled the local Google Fonts optimization feature or the site already uses Google Fonts through the active theme/plugins.
 
-The dashboard may include optional support/donation links. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit. Service provider: PayPal. Privacy information: https://www.paypal.com/privacy
+This may contact:
+
+* `fonts.googleapis.com`
+* `fonts.gstatic.com`
+
+Data sent: the server makes HTTP requests for the configured Google Fonts CSS/font files. UltraCache does not intentionally send visitor personal data to Google Fonts.
+
+Service provider: Google LLC  
+Terms: https://policies.google.com/terms  
+Privacy: https://policies.google.com/privacy  
+Google Fonts privacy FAQ: https://developers.google.com/fonts/faq/privacy
+
+Third-party script optimization patterns
+
+UltraCache includes optional frontend optimization rules that can detect, delay, defer, or exclude known third-party scripts already present on the site.
+
+These patterns may reference domains such as:
+
+* `googletagmanager.com`
+* `connect.facebook.net`
+* `maps.googleapis.com`
+* `maps.gstatic.com`
+* `gstatic.com/recaptcha`
+
+UltraCache does not add Google Tag Manager, Facebook/Meta scripts, Google Maps, or reCAPTCHA to a site by itself. These domains are used only as matching patterns so the plugin can optimize, delay, defer, or exclude scripts/styles that the site owner, theme, or another plugin has already added to the page.
+
+Data sent: UltraCache itself does not send data to these services. If these third-party scripts are already installed on the site, the visitor's browser may contact the relevant provider according to that service's own behavior and the site owner's configuration.
+
+Possible service providers:
+
+Google Tag Manager / Google LLC  
+Terms: https://policies.google.com/terms  
+Privacy: https://policies.google.com/privacy
+
+Google Maps Platform / Google LLC  
+Terms: https://cloud.google.com/maps-platform/terms  
+Privacy: https://policies.google.com/privacy
+
+Google reCAPTCHA / Google LLC  
+Terms: https://policies.google.com/terms  
+Privacy: https://policies.google.com/privacy
+
+Meta / Facebook  
+Terms: https://www.facebook.com/legal/terms  
+Privacy: https://www.facebook.com/privacy/policy/
+
+Varnish / reverse proxy integration
+
+If Varnish integration is configured by an administrator, UltraCache may send purge/test requests to the administrator-configured Varnish or reverse proxy endpoint.
+
+Data sent: cache purge/test requests may include the configured site URL, host, path, and purge-related headers needed by the reverse proxy. Varnish admin secrets should not be exposed to frontend HTML, JavaScript, REST responses, or logs.
+
+This endpoint is configured by the site administrator and is not an UltraCache-owned external service.
+
+Optional support/donation links
+
+The dashboard may include optional support/donation links. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit.
+
+Service provider: PayPal  
+Terms: https://www.paypal.com/legalhub/useragreement-full  
+Privacy: https://www.paypal.com/legalhub/paypal/privacy-full
 
 == Privacy ==
 
@@ -119,6 +179,20 @@ UltraCache does not track visitors through an external UltraCache service.
 3. Media, CSS, fonts, warm-up, and diagnostics panels.
 
 == Changelog ==
+
+2.58.05 - WordPress.org escaping and external services documentation cleanup
+- Routed WordPress content/block media rewrites through a context-aware callback with escaped rewritten attributes.
+- Updated External services documentation for Google Fonts, third-party optimization patterns, Varnish/reverse proxy endpoints, and PayPal links.
+
+2.58.04 - Translator comment cleanup for Plugin Check i18n placeholders
+- Added missing translator comments for placeholder-based i18n strings reported by Plugin Check.
+- Refreshed the POT template header for 2.58.04.
+
+2.58.03 - Full i18n pass and localization template refresh
+- Expanded PHP and admin dashboard JavaScript i18n coverage for user-facing text.
+- Kept commands, paths, keys, statuses, handles, and executable snippets untranslated.
+- Refreshed the POT template.
+
 2.58.02 - Repository localization cleanup
 - Replaced direct unsafe loopback SSL bypass requests with the UltraCache safe loopback helper.
 - Added admin JavaScript i18n setup and generated the UltraCache POT template.

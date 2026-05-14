@@ -1029,7 +1029,11 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             if (is_wp_error($response)) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => sprintf(__('Safe Defer JS init-script scan failed: %s', 'ultracache'), $response->get_error_message()),
+                    'message' => sprintf(
+                        /* translators: %s: WordPress HTTP API error message. */
+                        __('Safe Defer JS init-script scan failed: %s', 'ultracache'),
+                        $response->get_error_message()
+                    ),
                     'items'   => array(),
                     'details' => array(),
                 ), 500);
@@ -1106,7 +1110,11 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'items'   => $values,
                 'details' => array_slice($details, 0, 120),
                 'message' => count($values)
-                    ? sprintf(__('Detected %d likely theme/page-builder init exclusion pattern(s) on the front page.', 'ultracache'), count($values))
+                    ? sprintf(
+                        /* translators: %d: number of detected JavaScript init exclusion patterns. */
+                        __('Detected %d likely theme/page-builder init exclusion pattern(s) on the front page.', 'ultracache'),
+                        count($values)
+                    )
                     : __('No likely theme/page-builder init scripts were detected on the front page.', 'ultracache'),
             ), 200);
         }
@@ -1129,7 +1137,11 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             if (is_wp_error($response)) {
                 return new WP_REST_Response(array(
                     'success' => false,
-                    'message' => sprintf(__('Front page font scan failed: %s', 'ultracache'), $response->get_error_message()),
+                    'message' => sprintf(
+                        /* translators: %s: WordPress HTTP API error message. */
+                        __('Front page font scan failed: %s', 'ultracache'),
+                        $response->get_error_message()
+                    ),
                     'delayIconFontsList' => array(),
                     'delayIconFontsExcludeList' => array(),
                 ), 500);
@@ -1170,7 +1182,12 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'delayIconFontsExcludeList' => $never_values,
                 'iconCount' => count($delay_values),
                 'nonIconCount' => count($never_values),
-                'message' => sprintf(__('Detected %1$d likely icon font pattern(s) and %2$d non-icon font pattern(s) on the front page.', 'ultracache'), count($delay_values), count($never_values)),
+                'message' => sprintf(
+                    /* translators: 1: number of detected icon font patterns, 2: number of detected non-icon font patterns. */
+                    __('Detected %1$d likely icon font pattern(s) and %2$d non-icon font pattern(s) on the front page.', 'ultracache'),
+                    count($delay_values),
+                    count($never_values)
+                ),
             ), 200);
         }
 
@@ -1187,7 +1204,11 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'sources'             => $sources,
                 'count'               => count($items),
                 'woocommerceDetected' => class_exists('WooCommerce') || function_exists('wc_get_attribute_taxonomies'),
-                'message'             => count($items) ? sprintf(__('Detected %d taxonomy/attribute query-string keys.', 'ultracache'), count($items)) : __('No taxonomy/attribute query-string keys were detected.', 'ultracache'),
+                'message'             => count($items) ? sprintf(
+                    /* translators: %d: number of detected taxonomy or product attribute query-string keys. */
+                    __('Detected %d taxonomy/attribute query-string keys.', 'ultracache'),
+                    count($items)
+                ) : __('No taxonomy/attribute query-string keys were detected.', 'ultracache'),
             ), 200);
         }
 

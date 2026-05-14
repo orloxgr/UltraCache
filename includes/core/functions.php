@@ -2253,7 +2253,7 @@ if (!function_exists('ucwp_safe_remote_request')) {
     {
         $url = is_string($url) ? trim($url) : '';
         if ('' === $url) {
-            return new WP_Error('ucwp_empty_remote_url', 'Remote request URL is empty.');
+            return new WP_Error('ucwp_empty_remote_url', __('Remote request URL is empty.', 'ultracache'));
         }
 
         $defaults = array(
@@ -2285,23 +2285,23 @@ if (!function_exists('ucwp_safe_configured_infrastructure_remote_request')) {
     {
         $url = is_string($url) ? trim($url) : '';
         if ('' === $url) {
-            return new WP_Error('ucwp_empty_remote_url', 'Remote request URL is empty.');
+            return new WP_Error('ucwp_empty_remote_url', __('Remote request URL is empty.', 'ultracache'));
         }
 
         $parts = wp_parse_url($url);
         if (!is_array($parts)) {
-            return new WP_Error('ucwp_invalid_infrastructure_url', 'Configured infrastructure URL is invalid.');
+            return new WP_Error('ucwp_invalid_infrastructure_url', __('Configured infrastructure URL is invalid.', 'ultracache'));
         }
 
         $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) : '';
         $host = isset($parts['host']) ? strtolower(trim((string) $parts['host'])) : '';
         $port = isset($parts['port']) ? (int) $parts['port'] : ('https' === $scheme ? 443 : 80);
         if (!in_array($scheme, array('http', 'https'), true) || '' === $host || $port <= 0 || $port > 65535) {
-            return new WP_Error('ucwp_invalid_infrastructure_url', 'Configured infrastructure URL must use http(s) with a valid host and port.');
+            return new WP_Error('ucwp_invalid_infrastructure_url', __('Configured infrastructure URL must use http(s) with a valid host and port.', 'ultracache'));
         }
 
         if (!ucwp_is_allowed_socket_target($host, $port, 'trusted_infrastructure_' . (string) $context)) {
-            return new WP_Error('ucwp_blocked_infrastructure_url', 'Configured infrastructure target is blocked by UltraCache socket policy.');
+            return new WP_Error('ucwp_blocked_infrastructure_url', __('Configured infrastructure target is blocked by UltraCache socket policy.', 'ultracache'));
         }
 
         $defaults = array(
@@ -2527,7 +2527,7 @@ if (!function_exists('ucwp_safe_loopback_remote_request')) {
     {
         if (!ucwp_is_trusted_loopback_url($url)) {
             ucwp_debug_log('loopback remote request blocked: untrusted URL', array('url' => (string) $url, 'context' => (string) $context));
-            return new WP_Error('ucwp_untrusted_loopback_url', 'Loopback request URL is not local/trusted for this site.');
+            return new WP_Error('ucwp_untrusted_loopback_url', __('Loopback request URL is not local/trusted for this site.', 'ultracache'));
         }
 
         $is_local_https = ucwp_is_local_https_url($url);
@@ -2556,7 +2556,7 @@ if (!function_exists('ucwp_safe_loopback_remote_request')) {
                 'lastUrl'         => (string) $url,
                 'lastError'       => (string) $response->get_error_message(),
                 'context'         => (string) $context,
-                'message'         => UltraCache_WP::maybe_translate('Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification.'),
+                'message'         => function_exists('__') ? __('Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification.', 'ultracache') : 'Strict local SSL verification failed and UltraCache temporarily retried the same-host HTTPS loopback request without certificate verification.',
                 'updatedAt'       => time(),
             ));
             return $fallback;

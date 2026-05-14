@@ -9039,7 +9039,7 @@ h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-
 						value: inspectUrl,
 						onChange: setInspectUrl,
 						disabled: inspectBusy,
-						placeholder: __("/sample-page/?utm_source=test", 'ultracache'),
+						placeholder: "/sample-page/?utm_source=test",
 						onKeyDown: (event) => {
 							if ('Enter' === event.key) {
 								event.preventDefault();

@@ -1,3 +1,16 @@
+2.58.05 - WordPress.org escaping and external services documentation cleanup
+- Routed WordPress content/block media rewrites through a context-aware callback with escaped rewritten attributes.
+- Updated External services documentation for Google Fonts, third-party optimization patterns, Varnish/reverse proxy endpoints, and PayPal links.
+
+2.58.04 - Translator comment cleanup for Plugin Check i18n placeholders
+- Added missing translator comments for placeholder-based i18n strings reported by Plugin Check.
+- Refreshed the POT template header for 2.58.04.
+
+2.58.03 - Full i18n pass and localization template refresh
+- Expanded PHP and admin dashboard JavaScript i18n coverage for user-facing text.
+- Kept commands, paths, keys, statuses, handles, and executable snippets untranslated.
+- Refreshed the POT template.
+
 2.58.02 - Repository localization cleanup
 - Replaced direct unsafe loopback SSL bypass requests with the UltraCache safe loopback helper.
 - Added admin JavaScript i18n setup and generated the UltraCache POT template.

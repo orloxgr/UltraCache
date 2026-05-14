@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.58.02
+ * Version: 2.58.05
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 7.4
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.58.02');
+    define('UCWP_VERSION', '2.58.05');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1222,22 +1222,22 @@ if (!class_exists('Ultra_Cache_WP')) {
         private static function load_runtime_config_public_file($path)
         {
             if (!file_exists($path) || !is_readable($path)) {
-                return new WP_Error('ucwp_runtime_config_missing', 'runtime-config.php is missing or not readable.');
+                return new WP_Error('ucwp_runtime_config_missing', __('runtime-config.php is missing or not readable.', 'ultracache'));
             }
 
             if (function_exists('ucwp_is_allowed_readable_path') && !ucwp_is_allowed_readable_path($path, 'load_runtime_config_file')) {
-                return new WP_Error('ucwp_runtime_config_blocked', 'runtime-config.php path is outside allowed read roots.');
+                return new WP_Error('ucwp_runtime_config_blocked', __('runtime-config.php path is outside allowed read roots.', 'ultracache'));
             }
 
             if ('php' !== strtolower((string) pathinfo((string) $path, PATHINFO_EXTENSION))) {
-                return new WP_Error('ucwp_runtime_config_invalid_extension', 'runtime-config must be a PHP array file.');
+                return new WP_Error('ucwp_runtime_config_invalid_extension', __('runtime-config must be a PHP array file.', 'ultracache'));
             }
 
             clearstatcache(true, $path);
 
             $loaded = require $path;
             if (!is_array($loaded)) {
-                return new WP_Error('ucwp_runtime_config_invalid', 'runtime-config.php did not return a valid array.');
+                return new WP_Error('ucwp_runtime_config_invalid', __('runtime-config.php did not return a valid array.', 'ultracache'));
             }
 
             return $loaded;
@@ -2548,7 +2548,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             if (empty($state['active'])) {
                 $state = self::save_cron_warm_state(array(
                     'active'       => true,
-                    'reason'       => 'css_bundle_async',
+                    'reason' => 'css_bundle_async',
                     'cursor'       => '',
                     'processed'    => 0,
                     'total'        => max(1, $pending_before + $inserted),
@@ -3361,7 +3361,7 @@ private static function remove_runtime_secret_files($include_secrets = true)
 public static function delete_all_plugin_data_and_deactivate($cleanup_policy = null)
 {
     if (!current_user_can('manage_options') || !current_user_can('activate_plugins')) {
-        return new WP_Error('ucwp_forbidden', 'Deleting UltraCache data and deactivating the plugin requires manage_options and activate_plugins permissions.');
+        return new WP_Error('ucwp_forbidden', __('Deleting UltraCache data and deactivating the plugin requires manage_options and activate_plugins permissions.', 'ultracache'));
     }
 
     $cleanup_policy = self::get_uninstall_cleanup_policy($cleanup_policy);
@@ -3552,7 +3552,11 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 $google_fonts_job = array(
                     'success' => true,
                     'queued'  => false,
-                    'message' => __('Google Fonts settings saved. Use the Rebuild Google Fonts Cache button or wp ultracache google_fonts_rebuild --clear to rebuild the local font cache.', 'ultracache'),
+                    'message' => sprintf(
+                        /* translators: %s: WP-CLI command used to rebuild the local Google Fonts cache. */
+                        __('Google Fonts settings saved. Use the Rebuild Google Fonts Cache button or %s to rebuild the local font cache.', 'ultracache'),
+                        'wp ultracache google_fonts_rebuild --clear'
+                    ),
                 );
             }
 
@@ -4044,7 +4048,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
         {
             $offset = self::get_wp_cache_insertion_offset($contents);
             if (false === $offset) {
-                return new WP_Error('ucwp_wp_config_anchor_not_found', 'Could not locate a safe insertion point for WP_CACHE in wp-config.php.');
+                return new WP_Error('ucwp_wp_config_anchor_not_found', __('Could not locate a safe insertion point for WP_CACHE in wp-config.php.', 'ultracache'));
             }
 
             $before = substr((string) $contents, 0, $offset);
@@ -4144,7 +4148,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
         {
             $backup = self::get_wp_config_backup_path($config);
             if (!ucwp_safe_copy($config, $backup, 'set_wp_cache_flag backup')) {
-                return new WP_Error('ucwp_wp_config_backup_failed', 'Failed to create a wp-config backup before updating wp-config.php.');
+                return new WP_Error('ucwp_wp_config_backup_failed', __('Failed to create a wp-config backup before updating wp-config.php.', 'ultracache'));
             }
 
             self::register_wp_config_backup($config, $backup);
@@ -4153,12 +4157,12 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             $tmp = $config . '.tmp-' . uniqid('', true);
             if (false === ucwp_safe_file_put_contents($tmp, $contents, LOCK_EX, 'set_wp_cache_flag tmp')) {
                 ucwp_safe_unlink($tmp, 'set_wp_cache_flag tmp cleanup');
-                return new WP_Error('ucwp_wp_config_write_failed', 'Failed to write temporary wp-config.php file.');
+                return new WP_Error('ucwp_wp_config_write_failed', __('Failed to write temporary wp-config.php file.', 'ultracache'));
             }
 
             if (!ucwp_safe_rename($tmp, $config, 'set_wp_cache_flag rename')) {
                 ucwp_safe_unlink($tmp, 'set_wp_cache_flag rename cleanup');
-                return new WP_Error('ucwp_wp_config_write_failed', 'Failed to replace wp-config.php atomically.');
+                return new WP_Error('ucwp_wp_config_write_failed', __('Failed to replace wp-config.php atomically.', 'ultracache'));
             }
 
             return true;
@@ -4168,12 +4172,12 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
         {
             $config = self::get_wp_config_path();
             if (!$config || !ucwp_path_is_writable($config)) {
-                return new WP_Error('ucwp_wp_config_not_writable', 'wp-config.php was not found or is not writable.');
+                return new WP_Error('ucwp_wp_config_not_writable', __('wp-config.php was not found or is not writable.', 'ultracache'));
             }
 
             $raw_contents = ucwp_safe_file_get_contents($config, 'set_wp_cache_flag');
             if (false === $raw_contents) {
-                return new WP_Error('ucwp_wp_config_read_failed', 'Failed to read wp-config.php.');
+                return new WP_Error('ucwp_wp_config_read_failed', __('Failed to read wp-config.php.', 'ultracache'));
             }
 
             $enabled           = (bool) $enabled;
@@ -4503,7 +4507,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                 'serverSoftware' => $server_software,
                 'layers' => array(
                     'opcache' => array(
-                        'label' => 'OPcache',
+                        'label' => __('OPcache', 'ultracache'),
                         'detected' => !empty($opcache['available']) && !empty($opcache['enabled']),
                         'flushable' => function_exists('opcache_reset') && !empty($opcache['available']) && !empty($opcache['enabled']),
                         'enabled' => !empty($opcache['enabled']),
@@ -4511,7 +4515,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                         'message' => isset($opcache['message']) ? (string) $opcache['message'] : '',
                     ),
                     'apcu' => array(
-                        'label' => 'APCu',
+                        'label' => __('APCu', 'ultracache'),
                         'detected' => !empty($apcu['available']) && !empty($apcu['enabled']),
                         'flushable' => function_exists('apcu_clear_cache') && !empty($apcu['available']) && !empty($apcu['enabled']),
                         'enabled' => !empty($apcu['enabled']),
@@ -4519,7 +4523,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                         'message' => isset($apcu['message']) ? (string) $apcu['message'] : '',
                     ),
                     'litespeed' => array(
-                        'label' => 'LiteSpeed Cache',
+                        'label' => __('LiteSpeed Cache', 'ultracache'),
                         'detected' => (bool) $litespeed_detected,
                         'flushable' => (bool) $litespeed_flushable,
                         'enabled' => (bool) $litespeed_detected,
@@ -4534,7 +4538,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                             : ($litespeed_detected ? 'LiteSpeed was detected, but no safe purge method is available.' : 'LiteSpeed Cache was not detected.'),
                     ),
                     'nginx' => array(
-                        'label' => 'Nginx Cache',
+                        'label' => __('Nginx Cache', 'ultracache'),
                         'detected' => (bool) $nginx_detected,
                         'flushable' => (bool) $nginx_flushable,
                         'enabled' => (bool) $nginx_detected,
@@ -4542,7 +4546,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
                         'message' => $nginx_flushable ? __('Nginx Helper purge hook detected.', 'ultracache') : ($nginx_detected ? __('Nginx was detected, but no safe purge hook/endpoint is configured.', 'ultracache') : __('Nginx Cache was not detected.', 'ultracache')),
                     ),
                     'varnish' => array(
-                        'label' => 'Varnish Cache',
+                        'label' => __('Varnish Cache', 'ultracache'),
                         'detected' => (bool) $varnish_detected,
                         'flushable' => (bool) $varnish_flushable,
                         'enabled' => !empty($varnish_settings['enabled']),
@@ -4583,7 +4587,12 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
             if (headers_sent($file, $line)) {
                 return array(
                     'success' => false,
-                    'message' => sprintf(__('LiteSpeed purge header could not be sent because headers were already sent at %1$s:%2$s.', 'ultracache'), (string) $file, (string) $line),
+                    'message' => sprintf(
+                        /* translators: 1: PHP file path where headers were sent, 2: line number. */
+                        __('LiteSpeed purge header could not be sent because headers were already sent at %1$s:%2$s.', 'ultracache'),
+                        (string) $file,
+                        (string) $line
+                    ),
                     'method' => 'X-LiteSpeed-Purge response header',
                 );
             }

@@ -30,11 +30,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
 
             if ('' === $home_host || '' === $host || $host !== $home_host) {
-                return new WP_Error('ucwp_profile_url_not_allowed', 'Only same-site URLs can be scanned.');
+                return new WP_Error('ucwp_profile_url_not_allowed', __('Only same-site URLs can be scanned.', 'ultracache'));
             }
 
             if (function_exists('ucwp_is_strict_frontend_loopback_url') && !ucwp_is_strict_frontend_loopback_url($url)) {
-                return new WP_Error('ucwp_profile_url_not_allowed', 'Only same-site frontend URLs on the site port can be scanned.');
+                return new WP_Error('ucwp_profile_url_not_allowed', __('Only same-site frontend URLs on the site port can be scanned.', 'ultracache'));
             }
 
             $scheme = isset($parts['scheme']) && in_array(strtolower((string) $parts['scheme']), array('http', 'https'), true) ? strtolower((string) $parts['scheme']) : '';
@@ -738,7 +738,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if (is_wp_error($response)) {
                 return array(
                     'success' => false,
-                    'message' => sprintf(__('Profiler request failed: %s', 'ultracache'), $response->get_error_message()),
+                    'message' => sprintf(
+                        /* translators: %s: WordPress HTTP API error message. */
+                        __('Profiler request failed: %s', 'ultracache'),
+                        $response->get_error_message()
+                    ),
                     'performanceProfile' => array('available' => false, 'mode' => $mode),
                 );
             }
@@ -754,7 +758,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if (!is_array($profile) || empty($profile)) {
                 return array(
                     'success' => false,
-                    'message' => sprintf(__('The page was generated and cached, but the timing breakdown was not saved. This is a Speed Diagnostics issue, not necessarily a site speed issue. Cache status: %s.', 'ultracache'), ($cache_status ?: 'unknown')),
+                    'message' => sprintf(
+                        /* translators: %s: cache status returned during the speed diagnostic request. */
+                        __('The page was generated and cached, but the timing breakdown was not saved. This is a Speed Diagnostics issue, not necessarily a site speed issue. Cache status: %s.', 'ultracache'),
+                        ($cache_status ?: 'unknown')
+                    ),
                     'performanceProfile' => array(
                         'available' => false,
                         'mode' => $mode,
@@ -784,7 +792,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             return array(
                 'success' => true,
-                'message' => sprintf(__('%s performance profile completed.', 'ultracache'), strtoupper($mode)),
+                'message' => sprintf(
+                    /* translators: %s: speed diagnostic profile mode, for example COMPACT or VERBOSE. */
+                    __('%s performance profile completed.', 'ultracache'),
+                    strtoupper($mode)
+                ),
                 'performanceProfile' => $summary,
             );
         }
@@ -2752,7 +2764,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
                 foreach ($sources as $source) {
                     $errors[] = array(
-                        'kind'    => 'console-paste',
+                        'kind' => 'console-paste',
                         'message' => sanitize_text_field(substr($message, 0, 500)),
                         'source'  => $this->runtime_js_scan_sanitize_source((string) $source),
                         'line'    => 0,

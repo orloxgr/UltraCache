@@ -50,7 +50,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		public static function get_unavailable_reason() {
 			$settings = self::get_plugin_settings();
 			if (!empty($settings['object_cache_enabled']) && 'redis' === self::get_selected_backend() && !self::redis_supported()) {
-				return 'Redis backend selected, but the PHP Redis extension is not loaded. UltraCache will use APCu when available, otherwise runtime-only object caching.';
+				return __('Redis backend selected, but the PHP Redis extension is not loaded. UltraCache will use APCu when available, otherwise runtime-only object caching.', 'ultracache');
 			}
 
 			return '';
@@ -519,13 +519,25 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			$backend = isset($report['targetBackend']) ? strtolower((string) $report['targetBackend']) : 'object';
 			$label = 'redis' === $backend ? 'Redis' : ('apcu' === $backend ? 'APCu' : ('disk' === $backend ? 'Disk' : 'Runtime'));
 			if (empty($report['success'])) {
-				return $label . ' object cache flush failed.';
+				return sprintf(
+					/* translators: %s: object cache backend label, for example Redis. */
+					__('%s object cache flush failed.', 'ultracache'),
+					$label
+				);
 			}
 			if ('disk' === $backend) {
 				$base = self::build_flush_report_message($report);
-				return 'Disk object cache: ' . $base;
+				return sprintf(
+					/* translators: %s: disk object cache flush report message. */
+					__('Disk object cache: %s', 'ultracache'),
+					$base
+				);
 			}
-			return $label . ' object cache flushed.';
+			return sprintf(
+				/* translators: %s: object cache backend label, for example Redis. */
+				__('%s object cache flushed.', 'ultracache'),
+				$label
+			);
 		}
 
 		public static function test_object_cache_backend($backend = 'selected', array $override = array()) {
@@ -545,7 +557,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 				'success' => true,
 				'backend' => 'runtime',
 				'available' => true,
-				'message' => 'Runtime-only object cache is available for the current PHP request.',
+				'message' => __('Runtime-only object cache is available for the current PHP request.', 'ultracache'),
 			);
 		}
 
@@ -939,14 +951,31 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			$recreated_count = max(0, (int) ($report['recreatedEntries'] ?? 0));
 			if ($stale_count > 0) {
 				if ($recreated_count > 0) {
-					return sprintf('Object cache flush completed, but %1$d stale entr%2$s remained. %3$d entr%4$s were recreated after flush by live runtime activity.', $stale_count, 1 === $stale_count ? 'y' : 'ies', $recreated_count, 1 === $recreated_count ? 'y' : 'ies');
+					return sprintf(
+						/* translators: 1: stale cache entry count, 2: singular/plural suffix, 3: recreated cache entry count, 4: singular/plural suffix. */
+						__('Object cache flush completed, but %1$d stale entr%2$s remained. %3$d entr%4$s were recreated after flush by live runtime activity.', 'ultracache'),
+						$stale_count,
+						1 === $stale_count ? 'y' : 'ies',
+						$recreated_count,
+						1 === $recreated_count ? 'y' : 'ies'
+					);
 				}
-				return sprintf('Object cache flush completed, but %d stale entr%s remained.', $stale_count, 1 === $stale_count ? 'y' : 'ies');
+				return sprintf(
+					/* translators: 1: stale cache entry count, 2: singular/plural suffix. */
+					__('Object cache flush completed, but %1$d stale entr%2$s remained.', 'ultracache'),
+					$stale_count,
+					1 === $stale_count ? 'y' : 'ies'
+				);
 			}
 			if ($recreated_count > 0) {
-				return sprintf('Object cache flushed. No stale entries remained. %d entr%s were recreated after flush by live runtime activity.', $recreated_count, 1 === $recreated_count ? 'y' : 'ies');
+				return sprintf(
+					/* translators: 1: recreated cache entry count, 2: singular/plural suffix. */
+					__('Object cache flushed. No stale entries remained. %1$d entr%2$s were recreated after flush by live runtime activity.', 'ultracache'),
+					$recreated_count,
+					1 === $recreated_count ? 'y' : 'ies'
+				);
 			}
-			return 'Object cache flushed. No cache entries remained after flush.';
+			return __('Object cache flushed. No cache entries remained after flush.', 'ultracache');
 		}
 
 		private static function limit_cache_file_samples($files, $limit = 10) {
@@ -1597,7 +1626,12 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 			if (function_exists('ucwp_is_allowed_redis_socket_target') && !ucwp_is_allowed_redis_socket_target($policy_host, $port, $context)) {
 				return new WP_Error(
 					'ucwp_unsafe_redis_endpoint',
-					'Blocked invalid Redis endpoint ' . $policy_host . ':' . $port . '. Use a valid explicitly configured Redis host and port. External Redis infrastructure is supported when intentionally configured.'
+					sprintf(
+						/* translators: 1: Redis host, 2: Redis port. */
+						__('Blocked invalid Redis endpoint %1$s:%2$d. Use a valid explicitly configured Redis host and port. External Redis infrastructure is supported when intentionally configured.', 'ultracache'),
+						$policy_host,
+						$port
+					)
 				);
 			}
 

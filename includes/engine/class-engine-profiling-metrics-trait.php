@@ -648,7 +648,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $this->store_profile_started_at = microtime(true);
         $request_id = gmdate('Ymd-His') . '-' . substr(md5(uniqid('', true)), 0, 10);
         $this->store_profile = array(
-            'label' => 'UCWP STORE PROFILE',
+            'label' => __('UCWP STORE PROFILE', 'ultracache'),
             'version' => defined('UCWP_VERSION') ? UCWP_VERSION : '',
             'request_id' => $request_id,
             'profile_run_id' => $this->get_store_profile_run_id(),

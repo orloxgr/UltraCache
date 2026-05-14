@@ -433,14 +433,14 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 			if (!function_exists('imageavif') || !function_exists('imagecreatetruecolor')) {
 				$gd_avif_supported = false;
-				set_transient($cache_key, array('supported' => false, 'error' => 'GD imageavif() is unavailable'), DAY_IN_SECONDS);
+				set_transient($cache_key, array('supported' => false, 'error' => __('GD imageavif() is unavailable', 'ultracache')), DAY_IN_SECONDS);
 				return false;
 			}
 
 			$tmp = $this->create_temp_file('ucwp-avif-test');
 			if (!$tmp) {
 				$gd_avif_supported = false;
-				set_transient($cache_key, array('supported' => false, 'error' => 'Unable to create GD AVIF probe file'), HOUR_IN_SECONDS);
+				set_transient($cache_key, array('supported' => false, 'error' => __('Unable to create GD AVIF probe file', 'ultracache')), HOUR_IN_SECONDS);
 				return false;
 			}
 
@@ -450,7 +450,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 			$image = imagecreatetruecolor(2, 2);
 			if (!$image) {
 				$gd_avif_supported = false;
-				set_transient($cache_key, array('supported' => false, 'error' => 'Unable to create GD AVIF probe canvas'), HOUR_IN_SECONDS);
+				set_transient($cache_key, array('supported' => false, 'error' => __('Unable to create GD AVIF probe canvas', 'ultracache')), HOUR_IN_SECONDS);
 				return false;
 			}
 
@@ -520,14 +520,14 @@ trait Ultra_Cache_Media_Conversion_Trait
 
 			if (!function_exists('imagewebp') || !function_exists('imagecreatetruecolor')) {
 				$gd_webp_supported = false;
-				set_transient($cache_key, array('supported' => false, 'error' => 'GD imagewebp() is unavailable'), DAY_IN_SECONDS);
+				set_transient($cache_key, array('supported' => false, 'error' => __('GD imagewebp() is unavailable', 'ultracache')), DAY_IN_SECONDS);
 				return false;
 			}
 
 			$tmp = $this->create_temp_file('ucwp-webp-test');
 			if (!$tmp) {
 				$gd_webp_supported = false;
-				set_transient($cache_key, array('supported' => false, 'error' => 'Unable to create GD WebP probe file'), HOUR_IN_SECONDS);
+				set_transient($cache_key, array('supported' => false, 'error' => __('Unable to create GD WebP probe file', 'ultracache')), HOUR_IN_SECONDS);
 				return false;
 			}
 
@@ -537,7 +537,7 @@ trait Ultra_Cache_Media_Conversion_Trait
 			$image = imagecreatetruecolor(2, 2);
 			if (!$image) {
 				$gd_webp_supported = false;
-				set_transient($cache_key, array('supported' => false, 'error' => 'Unable to create GD WebP probe canvas'), HOUR_IN_SECONDS);
+				set_transient($cache_key, array('supported' => false, 'error' => __('Unable to create GD WebP probe canvas', 'ultracache')), HOUR_IN_SECONDS);
 				return false;
 			}
 

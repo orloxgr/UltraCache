@@ -173,7 +173,7 @@ trait Ultra_Cache_Media_Queue_Trait
 					'cached' => false,
 					'scanSkipped' => true,
 					'scannedAt' => 0,
-					'message' => 'Optimized storage health is passive. Use Refresh Storage Stats or Verify / Repair Queue to run the capped filesystem scan.',
+					'message' => __('Optimized storage health is passive. Use Refresh Storage Stats or Verify / Repair Queue to run the capped filesystem scan.', 'ultracache'),
 				);
 				return $health;
 			}
@@ -855,7 +855,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 		public function rebuild_media_conversion_queue($format = 'best', $only_missing = true, $limit = 0, array $args = array()) {
 			if (!$this->ensure_media_queue_table()) {
-				return array('success' => false, 'message' => 'Media queue table could not be created.');
+				return array('success' => false, 'message' => __('Media queue table could not be created.', 'ultracache'));
 			}
 
 			$format = $this->normalize_media_queue_format($format);
@@ -936,7 +936,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 		public function get_media_queue_status($format = 'best', $force_storage_refresh = false) {
 			if (!$this->ensure_media_queue_table()) {
-				return array('enabled' => false, 'message' => 'Media queue table unavailable.');
+				return array('enabled' => false, 'message' => __('Media queue table unavailable.', 'ultracache'));
 			}
 
 			$this->reset_stale_media_queue_items();
@@ -984,7 +984,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$limit = max(1, min(500, (int) $limit));
 			$format = $this->normalize_media_queue_format($format);
 			if (!$this->ensure_media_queue_table()) {
-				return array('items' => array(), 'total' => 0, 'cursor' => (string) $cursor, 'nextCursor' => '', 'hasMore' => false, 'message' => 'Media queue table unavailable.');
+				return array('items' => array(), 'total' => 0, 'cursor' => (string) $cursor, 'nextCursor' => '', 'hasMore' => false, 'message' => __('Media queue table unavailable.', 'ultracache'));
 			}
 
 			$status = $this->get_media_queue_status($format);
@@ -1049,7 +1049,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$attachment_id = absint($attachment_id);
 			$format = $this->normalize_media_queue_format($format);
 			if ($attachment_id <= 0) {
-				return array('success' => false, 'attachment_id' => 0, 'message' => 'Invalid attachment ID.');
+				return array('success' => false, 'attachment_id' => 0, 'message' => __('Invalid attachment ID.', 'ultracache'));
 			}
 			$this->upsert_media_queue_item($attachment_id, $format, 'pending', '', 0);
 
@@ -1058,7 +1058,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$now = current_time('mysql');
 			$row = $wpdb->get_row($wpdb->prepare("SELECT id, attempts, status FROM %i WHERE attachment_id = %d AND format = %s", $table, $attachment_id, $format), ARRAY_A);
 			if (!is_array($row) || empty($row['id'])) {
-				return array('success' => false, 'attachment_id' => $attachment_id, 'message' => 'Queue row unavailable.');
+				return array('success' => false, 'attachment_id' => $attachment_id, 'message' => __('Queue row unavailable.', 'ultracache'));
 			}
 			if (in_array((string) $row['status'], array('done', 'skipped'), true)) {
 				$result = $this->generate_attachment_formats($attachment_id, $format, true);
@@ -1184,7 +1184,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 		public function repair_media_conversion_queue($format = 'best') {
 			if (!$this->ensure_media_queue_table()) {
-				return array('success' => false, 'message' => 'Media queue table unavailable.');
+				return array('success' => false, 'message' => __('Media queue table unavailable.', 'ultracache'));
 			}
 
 			$repair = $this->repair_media_queue_if_optimized_storage_missing($format);
@@ -1194,7 +1194,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 		public function retry_failed_media_queue_items($format = 'best') {
 			if (!$this->ensure_media_queue_table()) {
-				return array('success' => false, 'message' => 'Media queue table unavailable.');
+				return array('success' => false, 'message' => __('Media queue table unavailable.', 'ultracache'));
 			}
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
@@ -1207,7 +1207,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 		public function clear_completed_media_queue_items($format = 'best') {
 			if (!$this->ensure_media_queue_table()) {
-				return array('success' => false, 'message' => 'Media queue table unavailable.');
+				return array('success' => false, 'message' => __('Media queue table unavailable.', 'ultracache'));
 			}
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();

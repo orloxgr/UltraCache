@@ -426,7 +426,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             if (empty($settings['google_fonts_local_optimization'])) {
                 return array(
                     'success' => false,
-                    'message' => 'Local Google Fonts Optimization is disabled.',
+                    'message' => __('Local Google Fonts Optimization is disabled.', 'ultracache'),
                     'scannedUrls' => 0,
                     'fontUrls' => 0,
                     'built' => 0,
@@ -438,7 +438,7 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             if ('' === $lock_token) {
                 return array(
                     'success' => false,
-                    'message' => 'Google Fonts rebuild is already running.',
+                    'message' => __('Google Fonts rebuild is already running.', 'ultracache'),
                     'scannedUrls' => 0,
                     'fontUrls' => 0,
                     'built' => 0,

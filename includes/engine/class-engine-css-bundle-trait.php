@@ -697,7 +697,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 $this->write_frontpage_css_manifest($manifest);
                 $this->cleanup_orphan_frontpage_css_bundles($manifest);
 
-                $warm_result = $skip_final_warm ? array('success' => true, 'skipped' => true, 'message' => 'Final HTML warm skipped because the caller will warm the page after the CSS bundle is available.') : $this->warm_url($frontpage_url, array('force_refresh' => true));
+                $warm_result = $skip_final_warm ? array('success' => true, 'skipped' => true, 'message' => __('Final HTML warm skipped because the caller will warm the page after the CSS bundle is available.', 'ultracache')) : $this->warm_url($frontpage_url, array('force_refresh' => true));
                 $verification = $skip_final_warm ? array(
                     'checked' => false,
                     'cachedHtmlAvailable' => false,
@@ -705,7 +705,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     'cssBundleRefs' => 0,
                     'stylesheetLinks' => 0,
                     'inspectedFile' => '',
-                    'message' => 'Final HTML warm skipped; caller must verify after writing cached HTML.',
+                    'message' => __('Final HTML warm skipped; caller must verify after writing cached HTML.', 'ultracache'),
                 ) : $this->inspect_css_bundle_html_after_warm($frontpage_url, is_array($warm_result) ? $warm_result : array());
                 $bundle_bytes = (!empty($prepared['bundleFile']) && is_readable((string) $prepared['bundleFile'])) ? (int) filesize((string) $prepared['bundleFile']) : 0;
                 $warm_success = $skip_final_warm || !empty($warm_result['success']);
@@ -870,7 +870,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 return array('success' => false, 'message' => 200 !== $code ? 'Remote page did not return HTTP 200.' : 'Remote page returned an empty body.', 'html' => '');
             }
             if (!$this->is_html_loopback_response($response, $html)) {
-                return array('success' => false, 'message' => 'Remote page did not return an HTML Content-Type.', 'html' => '');
+                return array('success' => false, 'message' => __('Remote page did not return an HTML Content-Type.', 'ultracache'), 'html' => '');
             }
 
             return array('success' => true, 'message' => '', 'html' => $html);
@@ -884,16 +884,16 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             $stats = $this->get_default_frontpage_css_stats();
             $html = $this->normalize_protocol_relative_urls_in_html((string) $html);
             if ('' === $html || false === stripos($html, '<head') || false === stripos($html, '<link')) {
-                return array('success' => false, 'skipped' => true, 'message' => 'No stylesheet links were found on the page.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => true, 'message' => __('No stylesheet links were found on the page.', 'ultracache'), 'stats' => $stats);
             }
 
             if (!preg_match('/<head\b[^>]*>([\s\S]*?)<\/head>/i', $html, $matches)) {
-                return array('success' => false, 'skipped' => true, 'message' => 'No <head> element was found on the page.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => true, 'message' => __('No <head> element was found on the page.', 'ultracache'), 'stats' => $stats);
             }
 
             $head_inner = isset($matches[1]) ? (string) $matches[1] : '';
             if (!preg_match_all('/<link\b[^>]*>/i', $head_inner, $tag_matches)) {
-                return array('success' => false, 'skipped' => true, 'message' => 'No <link> tags were found on the page.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => true, 'message' => __('No <link> tags were found on the page.', 'ultracache'), 'stats' => $stats);
             }
 
             $assets = array();
@@ -918,7 +918,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             }
 
             if (count($assets) < 2) {
-                return array('success' => false, 'skipped' => true, 'message' => 'Not enough eligible local stylesheets were found for CSS bundling.', 'stats' => $stats);
+                return array('success' => false, 'skipped' => true, 'message' => __('Not enough eligible local stylesheets were found for CSS bundling.', 'ultracache'), 'stats' => $stats);
             }
 
             $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, $mode);
@@ -1350,7 +1350,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     return array(
                         'success' => false,
                         'skipped' => false,
-                        'message' => 'A stylesheet could not be read.',
+                        'message' => __('A stylesheet could not be read.', 'ultracache'),
                         'stats' => $stats,
                     );
                 }
@@ -1429,7 +1429,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 return array(
                     'success' => false,
                     'skipped' => true,
-                    'message' => 'Not enough non-empty stylesheets were eligible for bundling.',
+                    'message' => __('Not enough non-empty stylesheets were eligible for bundling.', 'ultracache'),
                     'stats' => $stats,
                     'sourceUrls' => array_values(array_unique(array_map('strval', $used_urls))),
                 );
@@ -1471,7 +1471,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     return array(
                         'success' => false,
                         'skipped' => true,
-                        'message' => 'Could not write the generated CSS bundle file.',
+                        'message' => __('Could not write the generated CSS bundle file.', 'ultracache'),
                         'stats' => $stats,
                     );
                 }
@@ -1482,7 +1482,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 return array(
                     'success' => false,
                     'skipped' => true,
-                    'message' => 'Generated CSS bundle file failed verification.',
+                    'message' => __('Generated CSS bundle file failed verification.', 'ultracache'),
                     'stats' => $stats,
                 );
             }
@@ -1515,7 +1515,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                         return array(
                             'success' => false,
                             'skipped' => true,
-                            'message' => 'Could not write the delayed icon-font CSS companion file.',
+                            'message' => __('Could not write the delayed icon-font CSS companion file.', 'ultracache'),
                             'stats' => $stats,
                         );
                     }
@@ -1526,7 +1526,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     return array(
                         'success' => false,
                         'skipped' => true,
-                        'message' => 'Delayed icon-font CSS companion file failed verification.',
+                        'message' => __('Delayed icon-font CSS companion file failed verification.', 'ultracache'),
                         'stats' => $stats,
                     );
                 }
@@ -2131,12 +2131,16 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             }
 
             if ($this->should_exclude_stylesheet_url_by_fragments($absolute_url, $this->get_homepage_css_bundle_exclude_fragments())) {
-                return array('asset' => array(), 'skip' => 'protected', 'url' => $absolute_url, 'reason' => 'CSS Bundle Exclusions matched');
+                return array('asset' => array(), 'skip' => 'protected', 'url' => $absolute_url, 'reason' => __('CSS Bundle Exclusions matched', 'ultracache'));
             }
 
             $slider_fragment = !empty($settings['slider_safe_mode']) ? $this->get_matching_fragment('', $absolute_url, $tag_html, $this->get_slider_hero_protected_fragments()) : '';
             if ('' !== $slider_fragment) {
-                return array('asset' => array(), 'skip' => 'protected', 'url' => $absolute_url, 'reason' => 'slider/hero stylesheet fragment: ' . $slider_fragment);
+                return array('asset' => array(), 'skip' => 'protected', 'url' => $absolute_url, 'reason' => sprintf(
+					/* translators: %s: matched slider/hero stylesheet fragment. */
+					__('slider/hero stylesheet fragment: %s', 'ultracache'),
+					$slider_fragment
+				));
             }
 
             $host = (string) wp_parse_url($absolute_url, PHP_URL_HOST);

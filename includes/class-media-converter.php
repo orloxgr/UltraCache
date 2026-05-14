@@ -190,10 +190,10 @@ if (!class_exists('Ultra_Cache_Media_Converter')) {
 			add_action('init', array($this, 'maybe_schedule_pending_background_generation'), 20);
 			add_filter('wp_get_attachment_image_attributes', array($this, 'filter_attachment_image_attributes'), 20, 3);
 			add_filter('wp_calculate_image_srcset', array($this, 'filter_attachment_image_srcset'), 20, 5);
-			add_filter('the_content', array($this, 'rewrite_html_image_urls'), 999);
-			add_filter('post_thumbnail_html', array($this, 'rewrite_html_image_urls'), 999);
-			add_filter('widget_text_content', array($this, 'rewrite_html_image_urls'), 999);
-			add_filter('render_block', array($this, 'rewrite_html_image_urls'), 999);
+			add_filter('the_content', array($this, 'rewrite_filtered_content_image_urls'), 999);
+			add_filter('post_thumbnail_html', array($this, 'rewrite_filtered_content_image_urls'), 999);
+			add_filter('widget_text_content', array($this, 'rewrite_filtered_content_image_urls'), 999);
+			add_filter('render_block', array($this, 'rewrite_filtered_content_image_urls'), 999);
 			add_action('template_redirect', array($this, 'maybe_start_final_html_buffer'), 999);
 		}
 

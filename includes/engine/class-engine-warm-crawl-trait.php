@@ -444,7 +444,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                     'success' => false,
                     'cached'  => false,
                     'url'     => $url,
-                    'message' => 'Only local site URLs can be warmed.',
+                    'message' => __('Only local site URLs can be warmed.', 'ultracache'),
                     'files'   => array(),
                 );
                 $this->record_analytics_warm($url, $result);
@@ -490,7 +490,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             $css_bundle_result = array();
             if ($css_bundle_requested || $css_bundle_auto_warm) {
                 $bundle_scope = $this->get_css_bundle_scope($settings_for_warm);
-                $css_bundle_result = array('success' => false, 'skipped' => true, 'message' => 'CSS bundle skipped for this URL by the selected CSS Bundling Scope.');
+                $css_bundle_result = array('success' => false, 'skipped' => true, 'message' => __('CSS bundle skipped for this URL by the selected CSS Bundling Scope.', 'ultracache'));
                 $should_build_bundle_for_url = ('per-page' === $bundle_scope || $this->is_frontpage_request_url($url));
                 if ($should_build_bundle_for_url && empty($this->get_frontpage_css_manifest_entry($url))) {
                     // Build the CSS bundle/manifest before writing the HTML cache. The HTML warm below
@@ -499,7 +499,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                     // explicit/manual/cron warms may populate missing bundles whenever CSS Bundling is enabled.
                     $css_bundle_result = $this->build_frontpage_css_bundle($url, array('skip_final_warm' => true));
                 } elseif ($should_build_bundle_for_url) {
-                    $css_bundle_result = array('success' => true, 'skipped' => true, 'message' => 'Existing CSS bundle manifest entry found for this URL.');
+                    $css_bundle_result = array('success' => true, 'skipped' => true, 'message' => __('Existing CSS bundle manifest entry found for this URL.', 'ultracache'));
                 }
             }
 
@@ -1551,11 +1551,11 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 'scheduledWarmLimitSource' => 'user_cap',
                 'menuOptions' => $menu_options,
                 'menuDepthOptions' => array(
-                    array('value' => '', 'label' => 'Select depth'),
-                    array('value' => '1', 'label' => 'Depth 1'),
-                    array('value' => '2', 'label' => 'Depth 2'),
-                    array('value' => '3', 'label' => 'Depth 3'),
-                    array('value' => 'all', 'label' => 'All depths'),
+                    array('value' => '', 'label' => __('Select depth', 'ultracache')),
+                    array('value' => '1', 'label' => __('Depth 1', 'ultracache')),
+                    array('value' => '2', 'label' => __('Depth 2', 'ultracache')),
+                    array('value' => '3', 'label' => __('Depth 3', 'ultracache')),
+                    array('value' => 'all', 'label' => __('All depths', 'ultracache')),
                 ),
                 'fullSiteSourceOptions' => $this->get_full_site_warm_source_options(),
                 'selectedMenuLocation' => (string) $scope_settings['menuLocation'],
@@ -1969,12 +1969,12 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
         private function get_full_site_warm_source_options()
         {
             $options = array(
-                array('value' => 'homepage', 'label' => 'Homepage / blog index'),
-                array('value' => 'menus', 'label' => 'Selected menu URLs'),
-                array('value' => 'pages', 'label' => 'Pages'),
-                array('value' => 'posts', 'label' => 'Posts'),
-                array('value' => 'categories', 'label' => 'Categories'),
-                array('value' => 'tags', 'label' => 'Tags'),
+                array('value' => 'homepage', 'label' => __('Homepage / blog index', 'ultracache')),
+                array('value' => 'menus', 'label' => __('Selected menu URLs', 'ultracache')),
+                array('value' => 'pages', 'label' => __('Pages', 'ultracache')),
+                array('value' => 'posts', 'label' => __('Posts', 'ultracache')),
+                array('value' => 'categories', 'label' => __('Categories', 'ultracache')),
+                array('value' => 'tags', 'label' => __('Tags', 'ultracache')),
             );
 
             $post_types = get_post_types(array('public' => true), 'objects');
@@ -1988,7 +1988,11 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 }
             }
             if (!empty($custom_post_types)) {
-                $options[] = array('value' => 'custom_post_types', 'label' => 'Detected custom post types: ' . implode(', ', array_slice($custom_post_types, 0, 5)));
+                $options[] = array('value' => 'custom_post_types', 'label' => sprintf(
+				/* translators: %s: comma-separated custom post type labels. */
+				__('Detected custom post types: %s', 'ultracache'),
+				implode(', ', array_slice($custom_post_types, 0, 5))
+			));
             }
 
             $taxonomies = get_taxonomies(array('public' => true), 'objects');
@@ -2002,14 +2006,18 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 }
             }
             if (!empty($custom_taxonomies)) {
-                $options[] = array('value' => 'custom_taxonomies', 'label' => 'Detected custom taxonomies: ' . implode(', ', array_slice($custom_taxonomies, 0, 5)));
+                $options[] = array('value' => 'custom_taxonomies', 'label' => sprintf(
+				/* translators: %s: comma-separated custom taxonomy labels. */
+				__('Detected custom taxonomies: %s', 'ultracache'),
+				implode(', ', array_slice($custom_taxonomies, 0, 5))
+			));
             }
 
             if (post_type_exists('product')) {
-                $options[] = array('value' => 'woocommerce_products', 'label' => 'WooCommerce products');
+                $options[] = array('value' => 'woocommerce_products', 'label' => __('WooCommerce products', 'ultracache'));
             }
             if (taxonomy_exists('product_cat') || taxonomy_exists('product_tag')) {
-                $options[] = array('value' => 'woocommerce_product_taxonomies', 'label' => 'WooCommerce product categories/tags');
+                $options[] = array('value' => 'woocommerce_product_taxonomies', 'label' => __('WooCommerce product categories/tags', 'ultracache'));
             }
 
             return $options;
@@ -2050,7 +2058,12 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
                 $options[] = array(
                     'value'    => $location_key,
-                    'label'    => 'Assigned / frontend: ' . $location_label . ' — ' . $menu_name,
+                    'label'    => sprintf(
+						/* translators: 1: menu location label, 2: menu name. */
+						__('Assigned / frontend: %1$s — %2$s', 'ultracache'),
+						$location_label,
+						$menu_name
+					),
                     'menuId'   => $menu_id,
                     'location' => $location_key,
                     'source'   => 'assigned',
@@ -2074,7 +2087,11 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                     $menu_name = !empty($menu->name) ? (string) $menu->name : ('Menu #' . $menu_id);
                     $options[] = array(
                         'value'    => 'menu-' . $menu_id,
-                        'label'    => 'Other saved menu: ' . $menu_name,
+                        'label'    => sprintf(
+						/* translators: %s: menu name. */
+						__('Other saved menu: %s', 'ultracache'),
+						$menu_name
+					),
                         'menuId'   => $menu_id,
                         'location' => '',
                         'source'   => 'saved',
