@@ -142,25 +142,26 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                 ? self::get_dashboard_diagnostics()
                 : (isset($dashboard_stats['diagnostics']) && is_array($dashboard_stats['diagnostics']) ? $dashboard_stats['diagnostics'] : array());
 
-            wp_localize_script(
-                'ucwp-admin-js',
-                'ucwpData',
-                array(
-                    'restBase'     => esc_url_raw(rest_url('ultracache/v1/')),
-                    'restNonce'    => wp_create_nonce('wp_rest'),
-                    'runtimeJsScanNonce' => wp_create_nonce('ucwp_runtime_js_scan'),
-                    'frontendProbeUrl' => esc_url_raw(home_url('/')),
-                    'version'      => UCWP_VERSION,
-                    'stats'        => $dashboard_stats,
-                    'settings'     => $settings_for_client,
-                    'defaults'     => self::get_dashboard_defaults_for_client(),
-                    'jsDelayDeferRecommendedExclusions' => implode("\n", self::get_default_js_delay_defer_exclusion_patterns()),
-                    'avifSupport'  => self::get_media_support_status(),
-                    'diagnostics'  => $dashboard_diagnostics,
-                    'crawlScopeSummary' => self::get_crawl_scope_summary(),
-                    'warmupGeneration' => method_exists(__CLASS__, 'get_warmup_generation') ? self::get_warmup_generation() : 0,
-                )
+            $ucwp_runtime_config = array(
+                'restBase'     => esc_url_raw(rest_url('ultracache/v1/')),
+                'restNonce'    => wp_create_nonce('wp_rest'),
+                'runtimeJsScanNonce' => wp_create_nonce('ucwp_runtime_js_scan'),
+                'frontendProbeUrl' => esc_url_raw(home_url('/')),
+                'version'      => UCWP_VERSION,
+                'stats'        => $dashboard_stats,
+                'settings'     => $settings_for_client,
+                'defaults'     => self::get_dashboard_defaults_for_client(),
+                'jsDelayDeferRecommendedExclusions' => implode("\n", self::get_default_js_delay_defer_exclusion_patterns()),
+                'avifSupport'  => self::get_media_support_status(),
+                'diagnostics'  => $dashboard_diagnostics,
+                'crawlScopeSummary' => self::get_crawl_scope_summary(),
+                'warmupGeneration' => method_exists(__CLASS__, 'get_warmup_generation') ? self::get_warmup_generation() : 0,
             );
+            $ucwp_runtime_config_json = wp_json_encode($ucwp_runtime_config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+            if (false === $ucwp_runtime_config_json) {
+                $ucwp_runtime_config_json = '{}';
+            }
+            wp_add_inline_script('ucwp-admin-js', 'window.ucwpData = ' . $ucwp_runtime_config_json . ';', 'before');
         }
 
         public function suppress_conflicting_admin_assets($hook = '')

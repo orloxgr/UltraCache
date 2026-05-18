@@ -1,3 +1,112 @@
+2.58.34 - Final submission metadata cleanup
+- Refreshed plugin/readme/README/POT version metadata for the final review package.
+- Normalized the GPLv2 license URI between the plugin header and readme.
+
+2.58.33 - HTTP wrapper URL normalization revert
+- Reverted esc_url_raw() normalization in the general UltraCache safe HTTP wrapper after it correlated with bypassing frontend optimization output.
+- Kept WordPress safe HTTP transport, reject_unsafe_urls, bounded timeout/redirection, and the infrastructure wrapper PHPCS rationale.
+- No HTML, CSS, JavaScript, media, settings, or REST parser behavior changes.
+
+2.58.30 - Final technical dead-code cleanup
+- Removed unused private helpers left behind by recent HTML API, font, CSS, JS, LCP, and media refactors.
+- Cleaned the recent changelog entries for the 2.58.24-2.58.29 cleanup sequence.
+- No runtime feature behavior changes intended.
+
+2.58.29 - Font/Icon scan suspicious candidate cleanup
+- Filter suspicious encoded/random-looking font-family candidates from Font/Icon scan results.
+- Keep real icon/font family names such as Font Awesome, eicons, feather, swiper-icons, and theme icon fonts.
+
+2.58.28 - Safe Defer / scan HTML API cleanup
+- Switched Safe Defer front-page script scanner to WP_HTML_Tag_Processor.
+- Switched runtime JS inventory scan to WP_HTML_Tag_Processor.
+- Switched front-page font scan style/link discovery to WP_HTML_Tag_Processor.
+- Removed legacy regex attribute extraction helpers from those scanner paths.
+
+2.58.27 - Image/dimension HTML API cleanup
+- Use WP_HTML_Tag_Processor by default for Safe CLS image dimension injection.
+- Remove the regex fallback from Safe CLS image width/height injection.
+- Remove the regex fallback from lazy-load/async image attribute mutation.
+
+2.58.26 - Admin settings FIFO cleanup
+- Removed stale pending settings/debounce refs from the old save model.
+- Kept scoped settings save/apply behavior and the current UI FIFO flow.
+
+2.58.25 - Delayed font noscript fallback cleanup
+- Prevent Safe Async CSS processing from re-wrapping existing noscript fallback links.
+- Keep delayed icon-font noscript fallbacks clean without nested noscript tags.
+
+2.58.24 - Leftover CSS HTML API cleanup
+- Converted leftover CSS stylesheet consolidation from offset/substr HTML rebuilding to WP_HTML_Tag_Processor attribute mutation.
+- Kept source stylesheet consolidation scoped to the existing leftover CSS bundle path with no regex replacement fallback.
+
+2.58.23 - Google Fonts live output cleanup
+- Run Google Fonts HTML API cleanup through the WordPress template enhancement output buffer for bypass/uncached responses.
+- Keep wp_resource_hints source filtering and avoid regex fallbacks.
+
+2.58.22 - Google Fonts resource hints source filter
+- Added wp_resource_hints filtering for Google Fonts dns-prefetch/preconnect hints when Local Google Fonts Optimization is enabled.
+- Kept HTML API cleanup for manually injected Google Fonts hint links.
+
+2.58.21 - Font stylesheet link HTML API cleanup
+- Removed regex fallback mutation for Google Fonts stylesheet link href rewrites.
+- Neutralized remote Google Fonts resource hints with WP_HTML_Tag_Processor attribute mutation instead of regex tag removal.
+- Removed regex fallback mutation for self-hosted font CSS link and font-display normalized stylesheet link rewrites.
+
+2.58.20 - LCP/preload/image HTML API cleanup
+- Removed the regex fallback from the LCP image candidate optimization path.
+- Existing LCP preload link normalization now uses WP_HTML_Tag_Processor only.
+- UltraCache-managed ambiguous/duplicate LCP preloads are neutralized with HTML API attribute mutation instead of regex removal.
+
+2.58.19 - Media filtered-content HTML API cleanup
+- Removed the regex fallback from WordPress content/block image URL rewrite callbacks.
+- Filtered content image URL rewriting now uses WP_HTML_Tag_Processor directly under the WordPress 6.9+ baseline.
+- Left full-page media URL token discovery and CSS url() parsing unchanged for later focused cleanup.
+
+2.58.18 - Script delay HTML API cleanup
+- Switched the full HTML script delay/wrap application path to WP_HTML_Tag_Processor.
+- Removed the offset/substr assembly path for applying already-decided delayed script replacements.
+- Left script selection logic and unrelated optimization paths unchanged.
+
+2.58.17 - JS script loading attribute HTML API cleanup
+- Switched the Defer All JS script loading attribute mutation path to WP_HTML_Tag_Processor.
+- Removed the regex fallback from protected script loading attribute normalization.
+- Left full script tag replacement/delay wrapping paths unchanged for later focused cleanup.
+
+2.58.16 - HTML attribute helper cleanup
+- Removed regex fallback mutation from the shared HTML tag attribute helpers.
+- Shared attribute add/remove operations now use the WordPress HTML API path and leave the tag unchanged if the processor cannot safely update it.
+
+2.58.14 - Move CSS bundle cached-HTML stylesheet replacement to the WordPress HTML API without regex fallback.
+2.58.13 - Hide recovered noisy REST output details from the admin UI while keeping resilient JSON recovery.
+2.58.12 - Add resilient REST response parser for noisy admin REST responses
+
+2.58.11 - Remove REST output buffer guard
+- Removed the UltraCache REST bootstrap output buffer and the matching rest_pre_serve_request discard filter to avoid unclosed ob_start review risk.
+
+2.58.10 - Profile toggle enforcement
+- Fixed profile application so Pre-render on Save and Stale While Revalidate are no longer stripped from profile saves.
+- Added Enable Debug to the profile-managed off state so All Off turns debug headers off.
+- Kept Pre-render on Save and Stale While Revalidate enabled for Safe, Balanced, and Aggressive profiles.
+
+2.58.09 - Safe loopback request for JS inventory scan
+- Routed the runtime JS inventory scan through the shared UltraCache safe loopback request helper.
+- Kept JS inventory scan requests on the same trusted same-site URL policy, SSL fallback reporting, and debug logging used by other internal scans.
+
+2.58.08 - Admin runtime config inline script
+- Replaced the admin dashboard ucwpData runtime config use of wp_localize_script with wp_add_inline_script and wp_json_encode before the module script.
+- Kept wp_set_script_translations dedicated to dashboard translation loading.
+
+2.58.07 - REST output guard for dashboard batch jobs
+- Protected UltraCache REST JSON responses from third-party PHP notices or warnings printed before the JSON payload.
+- Made dashboard REST parsing fail with a clear invalid JSON or empty response error instead of returning null to warm-up and media queue jobs.
+- Kept batch response normalization strict so invalid REST payloads no longer surface as unrelated processed-property crashes.
+- Raised plugin metadata to PHP 8.1+ while keeping WordPress 6.9+ as the target.
+
+2.58.06 - Settings save FIFO and scoped response apply
+- Scoped dashboard settings responses to the keys saved by each switch, dropdown, or form so unrelated UI state is not rolled back by later saves.
+- Routed profile follow-up saves for object-cache autodetect and Safe Defer JS scans through the same patch-scoped settings save path.
+- Removed changelog content from the readme files so changelog entries live only in changelog.txt.
+
 2.58.05 - WordPress.org escaping and external services documentation cleanup
 - Routed WordPress content/block media rewrites through a context-aware callback with escaped rewritten attributes.
 - Updated External services documentation for Google Fonts, third-party optimization patterns, Varnish/reverse proxy endpoints, and PayPal links.

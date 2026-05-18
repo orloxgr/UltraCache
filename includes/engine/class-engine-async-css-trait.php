@@ -128,6 +128,13 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                         continue;
                     }
 
+                    if (null !== $processor->get_attribute('data-ucwp-async-css-fallback')
+                        || null !== $processor->get_attribute('data-ucwp-delayed-icon-fonts-noscript')) {
+                        $stats['skipped']++;
+                        $this->add_safe_async_css_diagnostic_item($stats, $href_for_diag, 'skipped', 'noscript_fallback');
+                        continue;
+                    }
+
                     $is_ucwp_generated_css_link = null !== $processor->get_attribute('data-ucwp-frontpage-css')
                         || null !== $processor->get_attribute('data-ucwp-page-css-bundle')
                         || null !== $processor->get_attribute('data-ucwp-leftover-css-bundle');
@@ -248,6 +255,13 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             if (false !== stripos($tag, 'data-ucwp-async-css=')) {
                 $stats['skipped']++;
                 $this->add_safe_async_css_diagnostic_item($stats, $absolute_for_diag, 'skipped', 'already_async');
+                return $tag;
+            }
+
+            if (false !== stripos($tag, 'data-ucwp-async-css-fallback=')
+                || false !== stripos($tag, 'data-ucwp-delayed-icon-fonts-noscript=')) {
+                $stats['skipped']++;
+                $this->add_safe_async_css_diagnostic_item($stats, $absolute_for_diag, 'skipped', 'noscript_fallback');
                 return $tag;
             }
 
@@ -650,13 +664,8 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
         }
 
 
-        private function should_async_css_stylesheet_url($url, $tag = '')
-        {
-            $decision = $this->get_async_css_stylesheet_decision($url, $tag);
-            return !empty($decision['eligible']);
-        }
 
-        private function get_async_css_stylesheet_decision($url, $tag = '')
+private function get_async_css_stylesheet_decision($url, $tag = '')
         {
             $settings = $this->get_settings();
             $path = strtolower((string) wp_parse_url($url, PHP_URL_PATH));

@@ -388,42 +388,8 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             return (string) preg_replace('/\.css$/i', '-delayed-fonts.css', $basename);
         }
 
-        private function get_css_bundle_ref_basenames_from_html($html)
-        {
-            $html = (string) $html;
-            $refs = array();
-            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
-                return $refs;
-            }
 
-            preg_match_all('~(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css~i', $html, $absolute_matches);
-            preg_match_all('~/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css~i', $html, $path_matches);
-
-            $matches = array_merge(
-                isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
-                isset($path_matches[0]) && is_array($path_matches[0]) ? $path_matches[0] : array()
-            );
-
-            foreach (array_unique(array_map('strval', $matches)) as $ref) {
-                $path = (string) wp_parse_url($ref, PHP_URL_PATH);
-                if ('' === $path) {
-                    $path = $ref;
-                }
-                $basename = basename(rawurldecode($path));
-                if ('' === $basename || !preg_match('/^bundle-[A-Za-z0-9_.-]+\.css$/', $basename)) {
-                    continue;
-                }
-                $refs[$basename] = true;
-                $companion = $this->get_css_bundle_companion_basename($basename);
-                if ('' !== $companion) {
-                    $refs[$companion] = true;
-                }
-            }
-
-            return $refs;
-        }
-
-        private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
+private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
         {
             // 2.57.167: generated CSS refs are tracked in an UltraCache DB table during cache STORE.
             // Do not scan cached HTML here; this runs in cleanup/warm flows and must stay bounded.
@@ -1848,105 +1814,123 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
             return trim($css);
         }
 
-        private function maybe_replace_legacy_frontpage_stylesheet_links_with_bundle($html)
+        /**
+         * Replace cached CSS-bundle source stylesheet links using the WordPress HTML API.
+         *
+         * This intentionally does not fall back to regex-based structural HTML mutation.
+         * If the HTML API cannot process the document, the original HTML is returned.
+         * Matched source links are made inert so they no longer request their original
+         * stylesheet, and the generated bundle markup is inserted at the first matched
+         * source position.
+         *
+         * @param string $html HTML document.
+         * @param array  $source_urls Absolute source stylesheet URLs keyed by normalized URL.
+         * @param string $replacement_markup Bundle stylesheet or inline style markup.
+         * @param string $base_url URL used to resolve relative href attributes.
+         * @param string $source_marker Attribute used to mark inert source links.
+         * @return string
+         */
+        private function replace_cached_css_bundle_links_with_html_api($html, array $source_urls, $replacement_markup, $base_url = '', $source_marker = 'data-ucwp-css-bundle-source')
         {
-            if (!is_string($html) || '' === $html || !$this->is_frontpage_request_url()) {
+            $html = is_string($html) ? $html : '';
+            $replacement_markup = is_string($replacement_markup) ? trim($replacement_markup) : '';
+            if ('' === $html || '' === $replacement_markup || empty($source_urls) || false === stripos($html, '<link')) {
                 return $html;
             }
 
-            // Stage 1 is the legacy homepage-only bundle path. Do not apply it to page-entry bundles.
-            $entry = $this->get_frontpage_css_manifest_entry(home_url('/'));
-            if (empty($entry)) {
+            if (!$this->html_tag_processor_available()) {
                 return $html;
             }
 
-            $source_urls = array();
-            foreach ((array) ($entry['sourceUrls'] ?? array()) as $url) {
-                $normalized = $this->absolutize_public_resource_url((string) $url, home_url('/'));
-                if ('' !== $normalized) {
-                    $source_urls[$normalized] = true;
-                }
-            }
-            if (empty($source_urls)) {
+            $head_close = stripos($html, '</head>');
+            if (false === $head_close) {
                 return $html;
             }
 
-            if (!preg_match('/<head\b[^>]*>([\s\S]*?)<\/head>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
+            $head_html = substr($html, 0, $head_close);
+            $tail_html = substr($html, $head_close);
+            if ('' === $head_html) {
                 return $html;
             }
 
-            $head_html = (string) $matches[0][0];
-            $head_offset = (int) $matches[0][1];
-            $head_inner = isset($matches[1][0]) ? (string) $matches[1][0] : '';
-            if (!preg_match_all('/<link\b[^>]*>/i', $head_inner, $tag_matches, PREG_OFFSET_CAPTURE)) {
-                return $html;
+            $source_marker = preg_replace('/[^A-Za-z0-9_:-]/', '', (string) $source_marker);
+            if (!is_string($source_marker) || '' === $source_marker) {
+                $source_marker = 'data-ucwp-css-bundle-source';
             }
 
-            $settings = $this->get_settings();
-            $bundle_url = isset($entry['bundleUrl']) ? (string) $entry['bundleUrl'] : '';
-            $bundle_file = isset($entry['bundleFile']) ? (string) $entry['bundleFile'] : (isset($entry['file']) ? (string) $entry['file'] : '');
-            if ('' === $bundle_url) {
-                return $html;
-            }
+            $insertion_marker = 'data-ucwp-css-bundle-insertion-point';
+            $insertion_token = 'ucwp-css-bundle-' . md5($replacement_markup . '|' . implode('|', array_keys($source_urls)));
+            $base_url = '' !== (string) $base_url ? (string) $base_url : home_url('/');
 
-            $frontpage_bundle_role = $this->get_generated_css_bundle_role_from_mode(isset($entry['mode']) ? (string) $entry['mode'] : 'safe');
-            $replacement = '<link rel="stylesheet" id="ucwp-frontpage-css" href="' . esc_url($bundle_url) . '" data-ucwp-frontpage-css="1" data-ucwp-css-role="' . esc_attr($frontpage_bundle_role) . '" data-ucwp-css-blocking-reason="main-layout-risk" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
-            if (!empty($settings['homepage_css_bundle_inline'])) {
-                $bundle_css = ('' !== $bundle_file && is_readable($bundle_file)) ? ucwp_guarded_asset_file_get_contents($bundle_file, 'generated-css', 'frontpage_css_bundle_inline_generated_asset', false) : '';
-                $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($bundle_css);
-                if ('' !== $bundle_css) {
-                    $replacement = '<style id="ucwp-frontpage-css" data-ucwp-frontpage-css="1" data-ucwp-css-role="' . esc_attr($frontpage_bundle_role) . '" data-ucwp-css-blocking-reason="main-layout-risk">' . $bundle_css . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-                }
-            }
-            $delayed_font_markup = $this->build_delayed_icon_fonts_stylesheet_markup($entry, 'ucwp-frontpage-delayed-icon-fonts');
-            if ('' !== $delayed_font_markup) {
-                $replacement .= "\n" . $delayed_font_markup;
-            }
+            try {
+                $processor = new WP_HTML_Tag_Processor($head_html);
+                $matched = 0;
 
-            $rebuilt_head = '';
-            $cursor = 0;
-            $matched = 0;
-            foreach ($tag_matches[0] as $match) {
-                $tag_html = (string) $match[0];
-                $start = (int) $match[1];
-                $end = $start + strlen($tag_html);
+                while ($processor->next_tag('LINK')) {
+                    $rel = $processor->get_attribute('rel');
+                    if (!$this->html_rel_attribute_contains_stylesheet($rel)) {
+                        continue;
+                    }
 
-                if (!$this->html_tag_rel_contains_stylesheet($tag_html)) {
-                    continue;
+                    $href = $processor->get_attribute('href');
+                    if (!is_string($href) || '' === $href) {
+                        continue;
+                    }
+
+                    $absolute_url = $this->absolutize_public_resource_url(html_entity_decode($href, ENT_QUOTES | ENT_HTML5), $base_url);
+                    if ('' === $absolute_url || !isset($source_urls[$absolute_url])) {
+                        continue;
+                    }
+
+                    $matched++;
+                    if (1 === $matched) {
+                        $processor->set_attribute($insertion_marker, $insertion_token);
+                    }
+
+                    foreach (array('rel', 'href', 'as', 'type', 'media', 'onload', 'crossorigin', 'integrity', 'referrerpolicy') as $attribute) {
+                        $processor->remove_attribute($attribute);
+                    }
+
+                    $processor->set_attribute($source_marker, '1');
+                    $processor->set_attribute('data-ucwp-css-bundle-original-href', $absolute_url);
                 }
 
-                $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag_html, 'href'), ENT_QUOTES);
-                if ('' === $href) {
-                    continue;
+                if ($matched <= 0) {
+                    return $html;
                 }
 
-                $absolute_url = $this->absolutize_public_resource_url($href, home_url('/'));
-                if ('' === $absolute_url || !isset($source_urls[$absolute_url])) {
-                    continue;
+                $updated_head = $processor->get_updated_html();
+                if (!is_string($updated_head) || '' === $updated_head) {
+                    return $html;
                 }
 
-                $rebuilt_head .= substr($head_inner, $cursor, $start - $cursor);
-                if (0 === $matched) {
-                    $rebuilt_head .= $replacement;
+                $token_offset = strpos($updated_head, $insertion_token);
+                if (false === $token_offset) {
+                    return $html;
                 }
-                $cursor = $end;
-                $matched++;
-            }
 
-            if ($matched <= 0) {
+                $prefix = substr($updated_head, 0, $token_offset);
+                $tag_offset = strripos($prefix, '<link');
+                if (false === $tag_offset) {
+                    return $html;
+                }
+
+                $updated_head = substr($updated_head, 0, $tag_offset) . $replacement_markup . "\n" . substr($updated_head, $tag_offset);
+
+                return $updated_head . $tail_html;
+            } catch (\Throwable $e) {
+                if (function_exists('ucwp_debug_log')) {
+                    ucwp_debug_log('CSS bundle HTML API replacement failed.', array(
+                        'error' => $e->getMessage(),
+                    ));
+                }
+
                 return $html;
             }
-
-            $rebuilt_head .= substr($head_inner, $cursor);
-            $updated_head = preg_replace('/<head\b([^>]*)>[\s\S]*<\/head>/i', '<head$1>' . $rebuilt_head . '</head>', $head_html, 1);
-            if (!is_string($updated_head) || '' === $updated_head) {
-                return $html;
-            }
-
-            return substr($html, 0, $head_offset) . $updated_head . substr($html, $head_offset + strlen($head_html));
         }
 
-        private function maybe_replace_page_stylesheet_links_with_bundle($html, $entry_url = '')
+
+private function maybe_replace_page_stylesheet_links_with_bundle($html, $entry_url = '')
         {
             if (!is_string($html) || '' === $html) {
                 return $html;
@@ -1981,48 +1965,6 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 return $html;
             }
 
-            if (!preg_match('/<head\\b[^>]*>([\\s\\S]*?)<\\/head>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
-                return $html;
-            }
-
-            $head_inner = isset($matches[1][0]) ? (string) $matches[1][0] : '';
-            $head_inner_offset = isset($matches[1][1]) ? (int) $matches[1][1] : -1;
-            if ('' === $head_inner || $head_inner_offset < 0 || !preg_match_all('/<link\\b[^>]*>/i', $head_inner, $tag_matches, PREG_OFFSET_CAPTURE)) {
-                return $html;
-            }
-
-            $matched_tags = array();
-            foreach ($tag_matches[0] as $match) {
-                $tag_html = (string) $match[0];
-                $start = (int) $match[1];
-                $end = $start + strlen($tag_html);
-
-                if (!$this->html_tag_rel_contains_stylesheet($tag_html)) {
-                    continue;
-                }
-
-                $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag_html, 'href'), ENT_QUOTES);
-                if ('' === $href) {
-                    continue;
-                }
-
-                $absolute_url = $this->absolutize_public_resource_url($href, '' !== $current_url ? $current_url : home_url('/'));
-                if ('' === $absolute_url || !isset($source_urls[$absolute_url])) {
-                    continue;
-                }
-
-                $matched_tags[] = array(
-                    'html' => $tag_html,
-                    'start' => $start,
-                    'end' => $end,
-                    'url' => $absolute_url,
-                );
-            }
-
-            if (empty($matched_tags)) {
-                return $html;
-            }
-
             $settings = $this->get_settings();
             $mode = isset($entry['mode']) && 'aggressive' === strtolower((string) $entry['mode']) ? 'aggressive' : (isset($entry['mode']) && 'full' === strtolower((string) $entry['mode']) ? 'full' : 'safe');
             $page_bundle_role = $this->get_generated_css_bundle_role_from_mode($mode);
@@ -2034,37 +1976,19 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                     $replacement = '<style id="ucwp-page-css-bundle" data-ucwp-page-css-bundle="1" data-ucwp-css-role="' . esc_attr($page_bundle_role) . '" data-ucwp-css-blocking-reason="main-layout-risk">' . $bundle_css . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
                 }
             }
+
             $delayed_font_markup = $this->build_delayed_icon_fonts_stylesheet_markup($entry, 'ucwp-page-delayed-icon-fonts');
             if ('' !== $delayed_font_markup) {
                 $replacement .= "\n" . $delayed_font_markup;
             }
 
-            $rebuilt_head = '';
-            $cursor = 0;
-            $inserted = false;
-            foreach ($matched_tags as $tag) {
-                $start = (int) $tag['start'];
-                $end = (int) $tag['end'];
-                $rebuilt_head .= substr($head_inner, $cursor, $start - $cursor);
-                if (!$inserted) {
-                    // Safe mode is conservative replacement, not duplicate injection: only the
-                    // exact stylesheet links recorded in the bundle manifest are removed, while all
-                    // unmatched/excluded/runtime/protected stylesheets remain as normal links. This
-                    // gives the safe bundle a real request-reduction effect without touching assets
-                    // that were not bundled. Aggressive mode uses the same manifest-based removal,
-                    // with a broader eligibility set at bundle-build time.
-                    $rebuilt_head .= $replacement . "\n";
-                    $inserted = true;
-                }
-                $cursor = $end;
-            }
-            $rebuilt_head .= substr($head_inner, $cursor);
-
-            if (!$inserted || '' === $rebuilt_head) {
-                return $html;
-            }
-
-            return substr($html, 0, $head_inner_offset) . $rebuilt_head . substr($html, $head_inner_offset + strlen($head_inner));
+            return $this->replace_cached_css_bundle_links_with_html_api(
+                $html,
+                $source_urls,
+                $replacement,
+                '' !== $current_url ? $current_url : home_url('/'),
+                'data-ucwp-page-css-bundle-source'
+            );
         }
 
         private function get_leftover_css_bundle_default_stats()
@@ -2193,133 +2117,324 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 return $html;
             }
 
-            if (!preg_match_all('/<link\b[^>]*>/i', $html, $tag_matches, PREG_OFFSET_CAPTURE)) {
-                $stats['skipped_reason'] = 'no-link-tags';
-                $this->record_leftover_css_bundle_profile($stats);
-                return $html;
+            $processed = $this->maybe_consolidate_leftover_stylesheet_links_with_processor($html, $settings, $stats);
+            if (is_string($processed) && '' !== $processed) {
+                return $processed;
             }
 
-            $page_url = $this->get_current_request_url();
-            $assets = array();
-            $matched_tags = array();
-            $seen = array();
-            foreach ($tag_matches[0] as $match) {
-                $tag_html = (string) $match[0];
-                $start = (int) $match[1];
-                $end = $start + strlen($tag_html);
-                $candidate = $this->get_leftover_css_bundle_candidate_from_tag($tag_html, $page_url, $settings);
-                $asset = isset($candidate['asset']) && is_array($candidate['asset']) ? $candidate['asset'] : array();
-                $skip = isset($candidate['skip']) ? (string) $candidate['skip'] : '';
-
-                if (empty($asset)) {
-                    switch ($skip) {
-                        case 'protected':
-                            $stats['skipped_protected_count']++;
-                            if (!empty($candidate['url']) && count($stats['protected_urls']) < 20) {
-                                $stats['protected_urls'][] = array(
-                                    'url' => (string) $candidate['url'],
-                                    'reason' => isset($candidate['reason']) ? (string) $candidate['reason'] : 'protected',
-                                );
-                            }
-                            break;
-                        case 'nonlocal':
-                            $stats['skipped_nonlocal_count']++;
-                            break;
-                        case 'unreadable':
-                            $stats['skipped_unreadable_count']++;
-                            break;
-                        case 'async':
-                            $stats['skipped_async_count']++;
-                            break;
-                        case 'media':
-                            $stats['skipped_media_count']++;
-                            break;
-                        case 'existing-bundle':
-                            $stats['skipped_existing_bundle_count']++;
-                            break;
-                    }
-                    continue;
-                }
-
-                $url = (string) ($asset['url'] ?? '');
-                if ('' === $url || isset($seen[$url])) {
-                    continue;
-                }
-                $seen[$url] = true;
-                $assets[] = $asset;
-                $matched_tags[] = array(
-                    'start' => $start,
-                    'end' => $end,
-                    'url' => $url,
-                );
-            }
-
-            $stats['candidate_count'] = count($assets);
-            $stats['source_urls'] = array_values(array_map('strval', array_keys($seen)));
-
-            if (count($assets) < 2 || count($matched_tags) < 2) {
-                $stats['skipped_reason'] = 'not-enough-eligible-leftover-css';
-                $this->record_leftover_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, 'leftover');
-            if (empty($bundle['success'])) {
-                $stats['skipped_reason'] = !empty($bundle['message']) ? (string) $bundle['message'] : 'bundle-build-failed';
-                $this->record_leftover_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $bundle_url = isset($bundle['url']) ? (string) $bundle['url'] : '';
-            $bundle_file = isset($bundle['file']) ? (string) $bundle['file'] : '';
-            if ('' === $bundle_url || '' === $bundle_file || !is_readable($bundle_file)) {
-                $stats['skipped_reason'] = 'bundle-file-unreadable';
-                $this->record_leftover_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $replacement = '<link rel="stylesheet" id="ucwp-leftover-css-bundle" href="' . esc_url($bundle_url) . '" data-ucwp-leftover-css-bundle="1" data-ucwp-css-role="leftover-bundle" />'; // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
-            $delayed_font_markup = $this->build_delayed_icon_fonts_stylesheet_markup($bundle, 'ucwp-leftover-delayed-icon-fonts');
-            if ('' !== $delayed_font_markup) {
-                $replacement .= "\n" . $delayed_font_markup;
-            }
-            $rebuilt = '';
-            $cursor = 0;
-            $inserted = false;
-            $replaced = 0;
-            foreach ($matched_tags as $tag) {
-                $start = (int) $tag['start'];
-                $end = (int) $tag['end'];
-                if ($start < $cursor) {
-                    continue;
-                }
-                $rebuilt .= substr($html, $cursor, $start - $cursor);
-                if (!$inserted) {
-                    $rebuilt .= $replacement . "\n";
-                    $inserted = true;
-                }
-                $cursor = $end;
-                $replaced++;
-            }
-            $rebuilt .= substr($html, $cursor);
-
-            if (!$inserted || $replaced < 2 || '' === $rebuilt) {
-                $stats['skipped_reason'] = 'replacement-failed';
-                $this->record_leftover_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $stats['success'] = true;
-            $stats['replaced_link_count'] = $replaced;
-            $stats['bundle_url'] = $bundle_url;
-            $stats['bundle_file'] = $bundle_file;
-            $stats['bundle_bytes'] = is_readable($bundle_file) ? (int) filesize($bundle_file) : 0;
-            $stats['source_bytes_total'] = isset($bundle['sourceBytesTotal']) ? (int) $bundle['sourceBytesTotal'] : 0;
-            $stats['source_details'] = isset($bundle['sourceDetails']) && is_array($bundle['sourceDetails']) ? $bundle['sourceDetails'] : array();
+            $stats['skipped_reason'] = 'html-api-leftover-css-consolidation-failed';
             $this->record_leftover_css_bundle_profile($stats);
-
-            return $rebuilt;
+            return $html;
         }
+
+        private function maybe_consolidate_leftover_stylesheet_links_with_processor($html, array $settings, array &$stats)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return null;
+            }
+
+            try {
+                $page_url = $this->get_current_request_url();
+                $assets = array();
+                $matched_urls = array();
+                $seen = array();
+                $collector = new WP_HTML_Tag_Processor($html);
+
+                while ($collector->next_tag('LINK')) {
+                    $candidate = $this->get_leftover_css_bundle_candidate_from_link_processor($collector, $page_url, $settings);
+                    $asset = isset($candidate['asset']) && is_array($candidate['asset']) ? $candidate['asset'] : array();
+                    $skip = isset($candidate['skip']) ? (string) $candidate['skip'] : '';
+
+                    if (empty($asset)) {
+                        switch ($skip) {
+                            case 'protected':
+                                $stats['skipped_protected_count']++;
+                                if (!empty($candidate['url']) && count($stats['protected_urls']) < 20) {
+                                    $stats['protected_urls'][] = array(
+                                        'url' => (string) $candidate['url'],
+                                        'reason' => isset($candidate['reason']) ? (string) $candidate['reason'] : 'protected',
+                                    );
+                                }
+                                break;
+                            case 'nonlocal':
+                                $stats['skipped_nonlocal_count']++;
+                                break;
+                            case 'unreadable':
+                                $stats['skipped_unreadable_count']++;
+                                break;
+                            case 'async':
+                                $stats['skipped_async_count']++;
+                                break;
+                            case 'media':
+                                $stats['skipped_media_count']++;
+                                break;
+                            case 'existing-bundle':
+                                $stats['skipped_existing_bundle_count']++;
+                                break;
+                        }
+                        continue;
+                    }
+
+                    $url = (string) ($asset['url'] ?? '');
+                    if ('' === $url || isset($seen[$url])) {
+                        continue;
+                    }
+
+                    $seen[$url] = true;
+                    $assets[] = $asset;
+                    $matched_urls[] = $url;
+                }
+
+                $stats['candidate_count'] = count($assets);
+                $stats['source_urls'] = array_values(array_map('strval', array_keys($seen)));
+
+                if (count($assets) < 2 || count($matched_urls) < 2) {
+                    $stats['skipped_reason'] = 'not-enough-eligible-leftover-css';
+                    $this->record_leftover_css_bundle_profile($stats);
+                    return $html;
+                }
+
+                $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, 'leftover');
+                if (empty($bundle['success'])) {
+                    $stats['skipped_reason'] = !empty($bundle['message']) ? (string) $bundle['message'] : 'bundle-build-failed';
+                    $this->record_leftover_css_bundle_profile($stats);
+                    return $html;
+                }
+
+                $bundle_url = isset($bundle['url']) ? (string) $bundle['url'] : '';
+                $bundle_file = isset($bundle['file']) ? (string) $bundle['file'] : '';
+                if ('' === $bundle_url || '' === $bundle_file || !is_readable($bundle_file)) {
+                    $stats['skipped_reason'] = 'bundle-file-unreadable';
+                    $this->record_leftover_css_bundle_profile($stats);
+                    return $html;
+                }
+
+                $delayed_font_url = '';
+                $delayed_font_markup = $this->build_delayed_icon_fonts_stylesheet_markup($bundle, 'ucwp-leftover-delayed-icon-fonts');
+                if ('' !== $delayed_font_markup && !empty($bundle['delayedFontUrl'])) {
+                    $delayed_font_url = (string) $bundle['delayedFontUrl'];
+                }
+
+                $updated = $this->apply_leftover_css_bundle_links_with_processor($html, $matched_urls, $bundle_url, $delayed_font_url);
+                if (!is_string($updated) || '' === $updated || $updated === $html) {
+                    $stats['skipped_reason'] = 'html-api-replacement-failed';
+                    $this->record_leftover_css_bundle_profile($stats);
+                    return $html;
+                }
+
+                $stats['success'] = true;
+                $stats['replaced_link_count'] = count($matched_urls);
+                $stats['bundle_url'] = $bundle_url;
+                $stats['bundle_file'] = $bundle_file;
+                $stats['bundle_bytes'] = is_readable($bundle_file) ? (int) filesize($bundle_file) : 0;
+                $stats['source_bytes_total'] = isset($bundle['sourceBytesTotal']) ? (int) $bundle['sourceBytesTotal'] : 0;
+                $stats['source_details'] = isset($bundle['sourceDetails']) && is_array($bundle['sourceDetails']) ? $bundle['sourceDetails'] : array();
+                $this->record_leftover_css_bundle_profile($stats);
+
+                return $updated;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        private function get_leftover_css_bundle_candidate_from_link_processor($processor, $page_url, array $settings = array())
+        {
+            $rel = is_object($processor) && method_exists($processor, 'get_attribute') ? $processor->get_attribute('rel') : null;
+            if (!$this->html_rel_attribute_contains_stylesheet($rel)) {
+                return array('asset' => array(), 'skip' => 'not-stylesheet');
+            }
+
+            foreach (array('data-ucwp-frontpage-css', 'data-ucwp-page-css-bundle', 'data-ucwp-leftover-css-bundle', 'data-ucwp-async-css') as $attribute) {
+                if (null !== $processor->get_attribute($attribute)) {
+                    return array('asset' => array(), 'skip' => 'existing-bundle');
+                }
+            }
+
+            foreach (array('onload', 'disabled', 'data-href', 'data-src') as $attribute) {
+                if (null !== $processor->get_attribute($attribute)) {
+                    return array('asset' => array(), 'skip' => 'async');
+                }
+            }
+
+            $href = $processor->get_attribute('href');
+            $href = is_string($href) ? html_entity_decode($href, ENT_QUOTES | ENT_HTML5) : '';
+            if ('' === $href) {
+                return array('asset' => array(), 'skip' => 'unresolved');
+            }
+
+            $media = $processor->get_attribute('media');
+            $media = strtolower(trim(is_string($media) ? $media : ''));
+            if (!$this->is_homepage_css_bundle_allowed_media($media, 'leftover')) {
+                return array('asset' => array(), 'skip' => 'media');
+            }
+
+            $absolute_url = $this->absolutize_public_resource_url($href, '' !== (string) $page_url ? (string) $page_url : home_url('/'));
+            if ('' === $absolute_url) {
+                return array('asset' => array(), 'skip' => 'unresolved');
+            }
+
+            if ($this->should_exclude_stylesheet_url_by_fragments($absolute_url, $this->get_homepage_css_bundle_exclude_fragments())) {
+                return array('asset' => array(), 'skip' => 'protected', 'url' => $absolute_url, 'reason' => __('CSS Bundle Exclusions matched', 'ultracache'));
+            }
+
+            $tag_context = $this->get_leftover_css_bundle_link_context_from_processor($processor);
+            $slider_fragment = !empty($settings['slider_safe_mode']) ? $this->get_matching_fragment('', $absolute_url, $tag_context, $this->get_slider_hero_protected_fragments()) : '';
+            if ('' !== $slider_fragment) {
+                return array('asset' => array(), 'skip' => 'protected', 'url' => $absolute_url, 'reason' => sprintf(
+                    /* translators: %s: matched slider/hero stylesheet fragment. */
+                    __('slider/hero stylesheet fragment: %s', 'ultracache'),
+                    $slider_fragment
+                ));
+            }
+
+            $host = (string) wp_parse_url($absolute_url, PHP_URL_HOST);
+            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
+                return array('asset' => array(), 'skip' => 'nonlocal');
+            }
+
+            $path = (string) wp_parse_url($absolute_url, PHP_URL_PATH);
+            if ('' === $path || '.css' !== strtolower(substr($path, -4))) {
+                return array('asset' => array(), 'skip' => 'nonlocal');
+            }
+            if (false !== strpos(strtolower($path), '/cache/ultracache/css-bundles/')) {
+                return array('asset' => array(), 'skip' => 'existing-bundle');
+            }
+
+            $local_path = $this->resolve_local_path_from_public_url($absolute_url);
+            if ('' === $local_path || !is_readable($local_path)) {
+                return array('asset' => array(), 'skip' => 'unreadable');
+            }
+
+            return array(
+                'asset' => array(
+                    'url' => $absolute_url,
+                    'path' => $local_path,
+                ),
+                'skip' => '',
+            );
+        }
+
+        private function get_leftover_css_bundle_link_context_from_processor($processor)
+        {
+            if (!is_object($processor) || !method_exists($processor, 'get_attribute')) {
+                return '';
+            }
+
+            $parts = array();
+            foreach (array('id', 'class', 'href', 'media', 'data-ucwp-css-role') as $attribute) {
+                $value = $processor->get_attribute($attribute);
+                if (is_string($value) && '' !== $value) {
+                    $parts[] = $attribute . '=' . $value;
+                }
+            }
+
+            return implode(' ', $parts);
+        }
+
+        private function apply_leftover_css_bundle_links_with_processor($html, array $source_urls, $bundle_url, $delayed_font_url = '')
+        {
+            if (!$this->html_tag_processor_available() || empty($source_urls) || !is_string($html) || '' === $html) {
+                return null;
+            }
+
+            $source_map = array();
+            foreach ($source_urls as $url) {
+                $url = (string) $url;
+                if ('' !== $url) {
+                    $source_map[strtolower($url)] = $url;
+                }
+            }
+
+            if (empty($source_map)) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $applied_bundle = false;
+                $applied_delayed = false;
+
+                while ($processor->next_tag('LINK')) {
+                    $href = $processor->get_attribute('href');
+                    $href = is_string($href) ? html_entity_decode($href, ENT_QUOTES | ENT_HTML5) : '';
+                    if ('' === $href) {
+                        continue;
+                    }
+
+                    $absolute = $this->absolutize_public_resource_url($href, home_url('/'));
+                    $key = strtolower((string) $absolute);
+                    if ('' === $key || !isset($source_map[$key])) {
+                        continue;
+                    }
+
+                    if (!$applied_bundle) {
+                        $this->rewrite_link_processor_to_leftover_css_bundle($processor, $bundle_url);
+                        $applied_bundle = true;
+                        $changed = true;
+                        continue;
+                    }
+
+                    if ('' !== (string) $delayed_font_url && !$applied_delayed) {
+                        $this->rewrite_link_processor_to_leftover_delayed_fonts($processor, (string) $delayed_font_url);
+                        $applied_delayed = true;
+                        $changed = true;
+                        continue;
+                    }
+
+                    $this->neutralize_link_processor_for_leftover_css_source($processor, $source_map[$key]);
+                    $changed = true;
+                }
+
+                if (!$changed || !$applied_bundle) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        private function rewrite_link_processor_to_leftover_css_bundle($processor, $bundle_url)
+        {
+            $this->clear_leftover_css_link_processor_attributes($processor);
+            $processor->set_attribute('rel', 'stylesheet');
+            $processor->set_attribute('id', 'ucwp-leftover-css-bundle');
+            $processor->set_attribute('href', (string) $bundle_url);
+            $processor->set_attribute('data-ucwp-leftover-css-bundle', '1');
+            $processor->set_attribute('data-ucwp-css-role', 'leftover-bundle');
+        }
+
+        private function rewrite_link_processor_to_leftover_delayed_fonts($processor, $delayed_font_url)
+        {
+            $this->clear_leftover_css_link_processor_attributes($processor);
+            $processor->set_attribute('rel', 'stylesheet');
+            $processor->set_attribute('id', 'ucwp-leftover-delayed-icon-fonts');
+            $processor->set_attribute('href', (string) $delayed_font_url);
+            $processor->set_attribute('media', 'print');
+            $processor->set_attribute('onload', "this.media='all'");
+            $processor->set_attribute('data-ucwp-delayed-icon-fonts', '1');
+            $processor->set_attribute('data-ucwp-css-role', 'delayed-fonts-css');
+            $processor->set_attribute('data-ucwp-css-async-reason', 'delayed-fonts');
+        }
+
+        private function neutralize_link_processor_for_leftover_css_source($processor, $source_url)
+        {
+            $this->clear_leftover_css_link_processor_attributes($processor);
+            $processor->set_attribute('data-ucwp-leftover-css-source-removed', '1');
+            $processor->set_attribute('data-ucwp-leftover-css-original-href', (string) $source_url);
+        }
+
+        private function clear_leftover_css_link_processor_attributes($processor)
+        {
+            foreach (array('rel', 'href', 'id', 'media', 'onload', 'disabled', 'as', 'crossorigin', 'integrity', 'type', 'data-href', 'data-src') as $attribute) {
+                $processor->remove_attribute($attribute);
+            }
+        }
+
 
     }
 }

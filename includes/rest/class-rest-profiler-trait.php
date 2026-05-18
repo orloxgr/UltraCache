@@ -1343,17 +1343,21 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             return $summary;
         }
 
-        private function runtime_js_scan_attribute_from_tag($attributes, $name)
+        private function runtime_js_scan_processor_attribute($processor, $name)
         {
-            $attributes = (string) $attributes;
-            $name = preg_quote((string) $name, '/');
-            if (preg_match('/\\b' . $name . '\\s*=\\s*(["\\\'])(.*?)\\1/is', $attributes, $match)) {
-                return html_entity_decode((string) $match[2], ENT_QUOTES, 'UTF-8');
+            if (!$processor instanceof WP_HTML_Tag_Processor) {
+                return '';
             }
-            if (preg_match('/\\b' . $name . '\\s*=\\s*([^\\s>]+)/is', $attributes, $match)) {
-                return html_entity_decode((string) $match[1], ENT_QUOTES, 'UTF-8');
+
+            $value = $processor->get_attribute((string) $name);
+            if (null === $value || false === $value) {
+                return '';
             }
-            return '';
+            if (true === $value) {
+                return (string) $name;
+            }
+
+            return html_entity_decode((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         }
 
         private function runtime_js_scan_url_to_absolute($url, $base_url = '')
@@ -1617,14 +1621,16 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'ucwp_rt'           => time(),
             ), $normalized);
 
-            $response = wp_remote_get($request_url, array(
+            $response = ucwp_safe_loopback_remote_request($request_url, array(
                 'timeout'     => 8,
                 'redirection' => 3,
                 'headers'     => array(
-                    'User-Agent' => 'UltraCache JS inventory/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown'),
-                    'Accept'     => 'text/html,application/xhtml+xml',
+                    'Accept'        => 'text/html,application/xhtml+xml',
+                    'Cache-Control' => 'no-cache',
+                    'Pragma'        => 'no-cache',
                 ),
-            ));
+                'user-agent'  => 'UltraCache JS inventory/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown') . '; ' . home_url('/'),
+            ), 'runtime-js-inventory-scan');
             if (is_wp_error($response)) {
                 return array();
             }
@@ -1635,55 +1641,66 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
 
             $html = (string) wp_remote_retrieve_body($response);
-            if ('' === $html || !preg_match_all('/<script\\b([^>]*)>(.*?)<\\/script>/is', $html, $matches, PREG_SET_ORDER)) {
+            if ('' === $html || !class_exists('WP_HTML_Tag_Processor')) {
                 return array();
             }
 
             $scripts = array();
-            foreach ($matches as $match) {
-                $attributes = isset($match[1]) ? (string) $match[1] : '';
-                $body = isset($match[2]) ? (string) $match[2] : '';
-                $src = $this->runtime_js_scan_attribute_from_tag($attributes, 'src');
-                if ('' === $src) {
-                    $src = $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-src');
-                }
-                if ('' === $src) {
-                    $src = $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-original-src');
-                }
-                $id = $this->runtime_js_scan_attribute_from_tag($attributes, 'id');
-                if ('' === $id) {
-                    $id = $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-id');
-                }
-                if ('' === $id) {
-                    $source_url_id = $this->runtime_js_scan_source_url_id_from_inline_text($body);
-                    if ('' !== $source_url_id) {
-                        $id = $source_url_id;
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                while ($processor->next_tag('SCRIPT')) {
+                    $src = $this->runtime_js_scan_processor_attribute($processor, 'src');
+                    if ('' === $src) {
+                        $src = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-src');
+                    }
+                    if ('' === $src) {
+                        $src = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-original-src');
+                    }
+
+                    $body = method_exists($processor, 'get_modifiable_text') ? (string) $processor->get_modifiable_text() : '';
+                    $id = $this->runtime_js_scan_processor_attribute($processor, 'id');
+                    if ('' === $id) {
+                        $id = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-id');
+                    }
+                    if ('' === $id) {
+                        $source_url_id = $this->runtime_js_scan_source_url_id_from_inline_text($body);
+                        if ('' !== $source_url_id) {
+                            $id = $source_url_id;
+                        }
+                    }
+                    if ('' === $id) {
+                        $handle_id = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-handle');
+                        if ('' !== $handle_id) {
+                            $id = $handle_id;
+                        }
+                    }
+
+                    $type = $this->runtime_js_scan_processor_attribute($processor, 'type');
+                    $handle = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-handle');
+                    $strategy = $this->runtime_js_scan_processor_attribute($processor, 'data-wp-strategy');
+                    $is_delayed = (null !== $processor->get_attribute('data-ucwp-src')
+                        || null !== $processor->get_attribute('data-ucwp-inline')
+                        || null !== $processor->get_attribute('data-ucwp-delayed')
+                        || false !== stripos($type, 'ucwp-delayed'));
+
+                    $scripts[] = array(
+                        'id'       => sanitize_text_field(substr($id, 0, 160)),
+                        'handle'   => sanitize_text_field(substr($handle, 0, 160)),
+                        'src'      => '' !== $src ? $this->runtime_js_scan_url_to_absolute($src, $normalized) : '',
+                        'type'     => sanitize_text_field(substr($type, 0, 120)),
+                        'defer'    => null !== $processor->get_attribute('defer'),
+                        'async'    => null !== $processor->get_attribute('async'),
+                        'strategy' => $strategy,
+                        'delayed'  => $is_delayed,
+                        'text'     => '' === $src || $is_delayed ? sanitize_textarea_field(substr($body, 0, 60000)) : '',
+                    );
+
+                    if (count($scripts) >= 240) {
+                        break;
                     }
                 }
-                if ('' === $id) {
-                    $handle_id = $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-handle');
-                    if ('' !== $handle_id) {
-                        $id = $handle_id;
-                    }
-                }
-                $type = $this->runtime_js_scan_attribute_from_tag($attributes, 'type');
-                $is_delayed = (bool) preg_match('/\bdata-ucwp-(?:src|inline|delayed)\b/i', $attributes) || false !== stripos($type, 'ucwp-delayed');
-
-                $scripts[] = array(
-                    'id'       => sanitize_text_field(substr($id, 0, 160)),
-                    'handle'   => sanitize_text_field(substr((string) $this->runtime_js_scan_attribute_from_tag($attributes, 'data-ucwp-handle'), 0, 160)),
-                    'src'      => '' !== $src ? $this->runtime_js_scan_url_to_absolute($src, $normalized) : '',
-                    'type'     => sanitize_text_field(substr($type, 0, 120)),
-                    'defer'    => (bool) preg_match('/\bdefer(?:\s|=|>|$)/i', $attributes),
-                    'async'    => (bool) preg_match('/\basync(?:\s|=|>|$)/i', $attributes),
-                    'strategy' => $this->runtime_js_scan_attribute_from_tag($attributes, 'data-wp-strategy'),
-                    'delayed'  => $is_delayed,
-                    'text'     => '' === $src || $is_delayed ? sanitize_textarea_field(substr($body, 0, 60000)) : '',
-                );
-
-                if (count($scripts) >= 240) {
-                    break;
-                }
+            } catch (\Throwable $e) {
+                return array();
             }
 
             return $this->runtime_js_scan_normalize_script_inventory($scripts);

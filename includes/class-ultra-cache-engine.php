@@ -125,6 +125,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('update_option_page_for_posts', array($this, 'handle_front_page_option_change'), 20, 2);
             add_action('update_option_posts_per_page', array($this, 'handle_front_page_option_change'), 20, 2);
             add_action('update_option_permalink_structure', array($this, 'handle_global_frontend_change'), 20, 2);
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_live_google_fonts_output_cleanup'), 90);
             add_filter('wp_template_enhancement_output_buffer', array($this, 'inject_runtime_js_scan_collector_into_output'), PHP_INT_MAX);
             add_action('wp_head', array($this, 'print_runtime_js_scan_collector'), 0);
             add_action('wp_head', array($this, 'print_delayed_script_loader'), 1);
@@ -136,6 +137,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('shutdown', array($this, 'update_store_profile_after_shutdown'), PHP_INT_MAX);
             add_filter('script_loader_tag', array($this, 'defer_scripts'), 10, 3);
             add_filter('style_loader_src', array($this, 'add_display_swap_to_google_fonts'), 20, 2);
+            add_filter('wp_resource_hints', array($this, 'filter_google_fonts_resource_hints'), 20, 2);
         }
 
         public function maybe_start_buffering()
@@ -203,6 +205,11 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
             if ($this->template_enhancement_buffer_required) {
                 $this->profile_request_checkpoint('template_enhancement_buffer_forced');
+                return true;
+            }
+
+            if ($this->should_force_template_buffer_for_google_fonts_cleanup()) {
+                $this->profile_request_checkpoint('template_enhancement_buffer_for_google_fonts_cleanup_forced');
                 return true;
             }
 

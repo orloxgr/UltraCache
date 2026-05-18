@@ -34,7 +34,6 @@
 	const SYSTEM_NOTICE_DELAY = 7000;
 	const SYSTEM_NOTICE_COOLDOWN = 24 * 60 * 60 * 1000;
 	const STATS_REFRESH_INTERVAL = 60000;
-	const SETTINGS_SAVE_DEBOUNCE_MS = 700;
 	const ACTION_QUEUE_POLL_DELAY = 750;
 	const ACTION_QUEUE_MAX_POLLS = 480;
 	const JOB_STORAGE_KEY = 'ucwp-dashboard-job-state-v3';
@@ -185,7 +184,7 @@
 	];
 	const PERFORMANCE_PROFILE_ORDER = ['off', 'safe', 'balanced', 'aggressive'];
 	const PERFORMANCE_PROFILE_PRESERVED_SETTING_KEYS = [
-		// Profiles must not change diagnostics, scheduling/automation, Varnish infrastructure,
+		// Profiles must not change stats counters, scheduling/automation, Varnish infrastructure,
 		// Redis connection infrastructure, or user-maintained visible lists/textareas.
 		'cacheStatsEnabled',
 		'varnishCliEnabled',
@@ -195,7 +194,6 @@
 		'varnishCliMethod',
 		'varnishCliKey',
 		'varnishCliKeyConfigured',
-		'preRenderOnSave',
 		'cacheCleanupEnabled',
 		'apcuFlushOnScheduledCleanup',
 		'flushAllIncludeOpcache',
@@ -209,7 +207,6 @@
 		'cronWarmPagesPerMinute',
 		'scheduledWarmLimit',
 		'cacheCleanupIntervalHours',
-		'staleWhileRevalidateEnabled',
 		'cacheFreshTtlMinutes',
 		'cacheMaxStaleMinutes',
 		'cssBundleCleanupGraceHours',
@@ -246,7 +243,7 @@
 	};
 	const PERFORMANCE_PROFILES = {
 		off: { label: __("All Off", 'ultracache'), description: __("Disable optimization modules managed by profiles. Diagnostic counters, Automation & Scheduling, and Varnish settings are preserved.", 'ultracache'), patch: {
-			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
+			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, debugHeadersEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
 			deferJsEnabled: false, deferAllJsEnabled: false, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
@@ -1441,6 +1438,98 @@
 		return 'UltraCache REST failed: ' + method + ' ' + path + (status ? (' returned HTTP ' + status) : '') + (code ? (' (' + code + ')') : '') + '. ' + message;
 	}
 
+	function getRestBodyPreview(body) {
+		const preview = String(body || '').replace(/\s+/g, ' ').trim();
+		return preview.length > 500 ? preview.slice(0, 500) : preview;
+	}
+
+	function findBalancedJsonRange(text, startIndex) {
+		const source = String(text || '');
+		const opener = source.charAt(startIndex);
+		const closer = opener === '{' ? '}' : (opener === '[' ? ']' : '');
+		let depth = 0;
+		let inString = false;
+		let escaped = false;
+
+		if (!closer) {
+			return null;
+		}
+
+		for (let index = startIndex; index < source.length; index += 1) {
+			const character = source.charAt(index);
+
+			if (inString) {
+				if (escaped) {
+					escaped = false;
+				} else if (character === '\\') {
+					escaped = true;
+				} else if (character === '"') {
+					inString = false;
+				}
+				continue;
+			}
+
+			if (character === '"') {
+				inString = true;
+				continue;
+			}
+
+			if (character === opener) {
+				depth += 1;
+			} else if (character === closer) {
+				depth -= 1;
+				if (depth === 0) {
+					return { start: startIndex, end: index + 1 };
+				}
+			}
+		}
+
+		return null;
+	}
+
+	function parseRestJsonText(responseText) {
+		const original = String(responseText || '');
+		const trimmed = original.trim();
+
+		if (!trimmed) {
+			return { data: null, noisy: false, noisePreview: '' };
+		}
+
+		try {
+			return { data: JSON.parse(trimmed), noisy: false, noisePreview: '' };
+		} catch (directError) {
+			// Continue with the noisy-response fallback below.
+		}
+
+		for (let index = 0; index < original.length; index += 1) {
+			const character = original.charAt(index);
+			if (character !== '{' && character !== '[') {
+				continue;
+			}
+
+			const range = findBalancedJsonRange(original, index);
+			if (!range) {
+				continue;
+			}
+
+			const candidate = original.slice(range.start, range.end);
+			try {
+				const data = JSON.parse(candidate);
+				const noise = (original.slice(0, range.start) + ' ' + original.slice(range.end)).trim();
+				return {
+					data,
+					noisy: !!noise,
+					noisePreview: getRestBodyPreview(noise),
+				};
+			} catch (candidateError) {
+				// Keep scanning; notices may include braces before the real REST JSON body.
+			}
+		}
+
+		return { data: null, noisy: false, noisePreview: '' };
+	}
+
+
 	async function apiRequest(subAction, params = {}) {
 		const routes = {
 			stats: { path: 'stats', method: 'GET' },
@@ -1543,6 +1632,7 @@
 
 		let response = null;
 		let data = null;
+		let responseText = '';
 		try {
 			response = await ucwpFetch(requestUrl, {
 				method: route.method,
@@ -1564,8 +1654,69 @@
 		}
 
 		try {
-			data = await response.json();
-		} catch (error) {}
+			responseText = await response.text();
+		} catch (error) {
+			const wrapped = new Error(getRestErrorMessage(subAction, route, requestUrl, response, null, error && error.message ? error.message : 'Could not read response body.'));
+			wrapped.data = null;
+			wrapped.rest = {
+				action: subAction,
+				method: route.method,
+				path: route.path,
+				url: requestUrl,
+				status: response.status,
+				code: 'response_body_unreadable',
+			};
+			throw wrapped;
+		}
+
+		const trimmedResponseText = String(responseText || '').trim();
+		if (trimmedResponseText) {
+			const parsedResponse = parseRestJsonText(responseText);
+			data = parsedResponse.data;
+
+			if (!data) {
+				const preview = getRestBodyPreview(trimmedResponseText);
+				const wrapped = new Error(getRestErrorMessage(
+					subAction,
+					route,
+					requestUrl,
+					response,
+					null,
+					'Invalid JSON response. Response preview: ' + (preview || '[empty]')
+				));
+				wrapped.data = null;
+				wrapped.rest = {
+					action: subAction,
+					method: route.method,
+					path: route.path,
+					url: requestUrl,
+					status: response.status,
+					code: 'invalid_json',
+					bodyPreview: preview,
+				};
+				throw wrapped;
+			}
+
+			if (parsedResponse.noisy) {
+				if (data && typeof data === 'object') {
+					try {
+						Object.defineProperty(data, '__ucwpNoisyRestResponse', {
+							value: {
+								action: subAction,
+								method: route.method,
+								path: route.path,
+								status: response.status,
+								preview: parsedResponse.noisePreview || '',
+							},
+							enumerable: false,
+						});
+					} catch (propertyError) {
+						data.__ucwpNoisyRestResponse = { action: subAction, method: route.method, path: route.path, status: response.status, preview: parsedResponse.noisePreview || '' };
+					}
+				}
+
+			}
+		}
 
 		if (!response.ok) {
 			const message = getRestErrorMessage(subAction, route, requestUrl, response, data, '');
@@ -1579,6 +1730,20 @@
 				status: response.status,
 				code: data && data.code ? String(data.code) : '',
 				message: data && data.message ? String(data.message) : '',
+			};
+			throw error;
+		}
+
+		if (!trimmedResponseText && response.status !== 204) {
+			const error = new Error(getRestErrorMessage(subAction, route, requestUrl, response, null, 'Empty response body.'));
+			error.data = null;
+			error.rest = {
+				action: subAction,
+				method: route.method,
+				path: route.path,
+				url: requestUrl,
+				status: response.status,
+				code: 'empty_response',
 			};
 			throw error;
 		}
@@ -1624,27 +1789,32 @@
 			};
 		}
 
-		const items = Array.isArray(data && data.items) ? data.items : [];
-		const queue = data && data.queue && typeof data.queue === 'object' ? data.queue : null;
-		const total = Math.max(items.length, Number((data && data.total) || 0));
+		if (!data || typeof data !== 'object') {
+			throw new Error('UltraCache REST failed: batch endpoint returned an invalid payload. Expected a JSON object or array.');
+		}
+
+		const source = data;
+		const items = Array.isArray(source.items) ? source.items : [];
+		const queue = source.queue && typeof source.queue === 'object' ? source.queue : null;
+		const total = Math.max(items.length, Number(source.total || 0));
 		const queueCompleted = queue
 			? Math.max(0, Number(queue.done || 0)) + Math.max(0, Number(queue.skipped || 0)) + Math.max(0, Number(queue.failed || 0))
 			: 0;
-		const processed = typeof (data && data.processed) !== 'undefined'
-			? Math.max(0, Number(data.processed || 0))
-			: Math.max(0, Number(data && data.nextOffset ? data.nextOffset : items.length));
-		const nextCursor = typeof (data && data.nextCursor) === 'string' ? data.nextCursor : '';
+		const processed = typeof source.processed !== 'undefined'
+			? Math.max(0, Number(source.processed || 0))
+			: Math.max(0, Number(source.nextOffset ? source.nextOffset : items.length));
+		const nextCursor = typeof source.nextCursor === 'string' ? source.nextCursor : '';
 		const queueBuilding = queue ? !queue.buildComplete : false;
 
 		return {
 			items,
 			total,
-			workTotal: typeof (data && data.workTotal) !== 'undefined' ? Math.max(0, Number(data.workTotal || 0)) : total,
-			attachmentTotal: typeof (data && data.attachmentTotal) !== 'undefined' ? Math.max(0, Number(data.attachmentTotal || total)) : total,
-			cursor: typeof (data && data.cursor) === 'string' ? data.cursor : normalizedCursor,
-			limit: typeof (data && data.limit) !== 'undefined' ? Number(data.limit || normalizedLimit) : normalizedLimit,
+			workTotal: typeof source.workTotal !== 'undefined' ? Math.max(0, Number(source.workTotal || 0)) : total,
+			attachmentTotal: typeof source.attachmentTotal !== 'undefined' ? Math.max(0, Number(source.attachmentTotal || total)) : total,
+			cursor: typeof source.cursor === 'string' ? source.cursor : normalizedCursor,
+			limit: typeof source.limit !== 'undefined' ? Number(source.limit || normalizedLimit) : normalizedLimit,
 			nextCursor: nextCursor,
-			nextOffset: typeof (data && data.nextOffset) !== 'undefined' ? Number(data.nextOffset || processed) : processed,
+			nextOffset: typeof source.nextOffset !== 'undefined' ? Number(source.nextOffset || processed) : processed,
 			processed: processed,
 			queueCompleted: queueCompleted,
 			queueBuilding: queueBuilding,
@@ -1652,11 +1822,11 @@
 			queueFailed: queue ? Math.max(0, Number(queue.failed || 0)) : 0,
 			queueSkipped: queue ? Math.max(0, Number(queue.skipped || 0)) : 0,
 			queueAlreadyOptimized: queue ? Math.max(0, Number(queue.alreadyOptimized || queue.skipped || 0)) : 0,
-			queueIsComplete: queue ? !!queue.isComplete : !!(data && data.complete),
+			queueIsComplete: queue ? !!queue.isComplete : !!source.complete,
 			needsRepair: queue ? !!queue.needsRepair : false,
-			repair: data && data.repair && typeof data.repair === 'object' ? data.repair : null,
-			message: data && data.message ? String(data.message) : '',
-			hasMore: typeof (data && data.hasMore) !== 'undefined' ? !!data.hasMore : !!nextCursor,
+			repair: source.repair && typeof source.repair === 'object' ? source.repair : null,
+			message: source.message ? String(source.message) : '',
+			hasMore: typeof source.hasMore !== 'undefined' ? !!source.hasMore : !!nextCursor,
 		};
 	}
 
@@ -4911,9 +5081,7 @@
 		const statsRefreshInFlightRef = useRef(false);
 		const settingsRef = useRef(initialSettings);
 		const committedSettingsRef = useRef(initialSettings);
-		const pendingSettingsPatchRef = useRef({});
-		const settingsSaveTimerRef = useRef(null);
-		const settingsSaveInFlightRef = useRef(false);
+		const lastSettingsSavePromiseRef = useRef(Promise.resolve());
 		const queuedActionKeysRef = useRef({});
 		const uiActionQueueRef = useRef(Promise.resolve());
 		const uiActionQueueDepthRef = useRef(0);
@@ -4971,14 +5139,6 @@
 			settingsRef.current = settings;
 		}, [settings]);
 
-		useEffect(() => {
-			return () => {
-				if (settingsSaveTimerRef.current) {
-					window.clearTimeout(settingsSaveTimerRef.current);
-					settingsSaveTimerRef.current = null;
-				}
-			};
-		}, []);
 
 		useEffect(() => {
 			const handleBeforeUnload = (event) => {
@@ -4988,9 +5148,8 @@
 
 				const processActive = !!(process && process.active);
 				const actionActive = hasActiveQueuedDashboardAction();
-				const saveActive = !!(settingsSaveTimerRef.current || settingsSaveInFlightRef.current || hasPendingSettingsPatch());
 
-				if (!saveActive && !actionActive && !processActive && !busy) {
+				if (!actionActive && !processActive && !busy) {
 					return undefined;
 				}
 
@@ -5180,15 +5339,10 @@
 		]);
 
 		useEffect(() => {
-			const pendingObjectCachePatch = pendingSettingsPatchRef.current && (
-				Object.prototype.hasOwnProperty.call(pendingSettingsPatchRef.current, 'objectCacheBackend') ||
-				Object.prototype.hasOwnProperty.call(pendingSettingsPatchRef.current, 'objectCacheFallbackBackend')
-			);
-
-			setRedisForm((current) => {
+			setRedisForm(() => {
 				const next = {
-					objectCacheBackend: pendingObjectCachePatch ? (current.objectCacheBackend || settings.objectCacheBackend || 'redis') : (settings.objectCacheBackend || 'redis'),
-					objectCacheFallbackBackend: pendingObjectCachePatch ? (current.objectCacheFallbackBackend || settings.objectCacheFallbackBackend || 'apcu') : (settings.objectCacheFallbackBackend || 'apcu'),
+					objectCacheBackend: settings.objectCacheBackend || 'redis',
+					objectCacheFallbackBackend: settings.objectCacheFallbackBackend || 'apcu',
 					redisHost: settings.redisHost || '127.0.0.1',
 					redisPort: settings.redisPort || 6379,
 					redisUsername: settings.redisUsername || '',
@@ -5250,10 +5404,7 @@
 			(async () => {
 				setBusy(true);
 				try {
-					const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
-					if (response && response.settings) {
-						applyServerSettings(response.settings);
-					}
+					const response = await saveSettingsPatch(patch);
 					if (response && response.stats) {
 						setStats(response.stats);
 					}
@@ -5405,8 +5556,7 @@
 				if (String(form.redisPassword || '').trim()) {
 					patch.redisPassword = String(form.redisPassword || '');
 				}
-				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
-				applyDashboardPayload(response || {});
+				const response = await saveSettingsPatch(patch);
 				return response;
 			}, { processingText: 'Processing object-cache settings save…', successText: 'Object cache backend settings saved.', failedText: 'Failed to save object cache settings.' });
 		}
@@ -5510,11 +5660,10 @@
 				if (submittedSecret) {
 					patch.varnishCliKey = submittedSecret;
 				}
-				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(patch) });
+				const response = await saveSettingsPatch(patch);
 				if (submittedSecret) {
 					setVarnishForm((current) => Object.assign({}, current || {}, { varnishCliKey: '', varnishCliKeyConfigured: true }));
 				}
-				applyDashboardPayload(response || {});
 				return response;
 			}, { processingText: 'Processing Varnish settings save…', successText: 'Varnish settings saved.', failedText: 'Failed to save Varnish settings.' });
 		}
@@ -5665,21 +5814,12 @@
 			}
 		}
 
-		function hasPendingSettingsPatch() {
-			return !!Object.keys(pendingSettingsPatchRef.current || {}).length;
-		}
-
 		function hasActiveQueuedDashboardAction() {
 			return uiActionQueueDepthRef.current > 0 || Object.keys(queuedActionKeysRef.current || {}).some((key) => !!queuedActionKeysRef.current[key]);
 		}
 
 		function hasDashboardWorkInProgress() {
-			return !!(
-				settingsSaveTimerRef.current ||
-				settingsSaveInFlightRef.current ||
-				hasPendingSettingsPatch() ||
-				hasActiveQueuedDashboardAction()
-			);
+			return hasActiveQueuedDashboardAction();
 		}
 
 		function isCriticalSettingsPatch(patch) {
@@ -5689,7 +5829,31 @@
 			return Object.keys(patch).some((key) => CRITICAL_SETTING_KEYS.indexOf(key) !== -1);
 		}
 
-		function applyServerSettings(responseSettings) {
+		function getSettingsResponseKeysForPatch(patch) {
+			const keys = {};
+			Object.keys(patch || {}).forEach((key) => {
+				keys[key] = true;
+			});
+
+			if (keys.redisPassword) {
+				keys.redisPasswordConfigured = true;
+			}
+			if (keys.varnishCliKey) {
+				keys.varnishCliKeyConfigured = true;
+			}
+			if (keys.cacheFreshTtlMinutes || keys.cacheMaxStaleMinutes) {
+				keys.cacheFreshTtlMinutes = true;
+				keys.cacheMaxStaleMinutes = true;
+			}
+			if (keys.pageCssBundleOnEntryEnabled || keys.pageAsyncBundleOnEntryEnabled) {
+				keys.pageCssBundleOnEntryEnabled = true;
+				keys.pageAsyncBundleOnEntryEnabled = true;
+			}
+
+			return Object.keys(keys);
+		}
+
+		function applyServerSettings(responseSettings, options) {
 			if (!responseSettings || typeof responseSettings !== 'object') {
 				return;
 			}
@@ -5697,16 +5861,52 @@
 			const committed = Object.assign({}, responseSettings);
 			committedSettingsRef.current = committed;
 
-			const pendingPatch = Object.assign({}, pendingSettingsPatchRef.current || {});
-			const nextSettings = Object.keys(pendingPatch).length ? Object.assign({}, committed, pendingPatch) : committed;
+			const opts = options || {};
+			let nextSettings = null;
+
+			if (opts.fullReplace) {
+				nextSettings = committed;
+			} else if (opts.patch && typeof opts.patch === 'object') {
+				const responseKeys = getSettingsResponseKeysForPatch(opts.patch);
+				nextSettings = Object.assign({}, settingsRef.current || {});
+				responseKeys.forEach((key) => {
+					if (Object.prototype.hasOwnProperty.call(committed, key)) {
+						nextSettings[key] = committed[key];
+					}
+				});
+			} else if (Array.isArray(opts.keys) && opts.keys.length) {
+				nextSettings = Object.assign({}, settingsRef.current || {});
+				opts.keys.forEach((key) => {
+					if (Object.prototype.hasOwnProperty.call(committed, key)) {
+						nextSettings[key] = committed[key];
+					}
+				});
+			} else {
+				return;
+			}
+
 			settingsRef.current = nextSettings;
 			setSettings(nextSettings);
 		}
 
+		function applySettingsSaveResponse(response, patch, options) {
+			const opts = options || {};
+			if (response && response.settings) {
+				applyServerSettings(response.settings, opts.fullReplace ? { fullReplace: true } : { patch: patch || {} });
+			}
+			applyDashboardPayload(response || {}, { skipSettings: true });
+		}
+
+		async function saveSettingsPatch(patch, options) {
+			const settingsPatch = Object.assign({}, patch || {});
+			const response = await apiRequest('save_settings', { settings_json: JSON.stringify(settingsPatch) });
+			applySettingsSaveResponse(response || {}, settingsPatch, options || {});
+			return response;
+		}
+
 		function applyEffectiveSettingsFromCommitted() {
 			const committed = committedSettingsRef.current || initialSettings || {};
-			const pendingPatch = Object.assign({}, pendingSettingsPatchRef.current || {});
-			const nextSettings = Object.keys(pendingPatch).length ? Object.assign({}, committed, pendingPatch) : committed;
+			const nextSettings = Object.assign({}, committed);
 			settingsRef.current = nextSettings;
 			setSettings(nextSettings);
 		}
@@ -5752,10 +5952,23 @@
 			queuedDashboardPayloadRef.current = mergeDashboardPayloadForDeferredApply(queuedDashboardPayloadRef.current, payload);
 		}
 
-		function applyDashboardPayloadNow(payload) {
+		function stripSettingsFromDashboardPayload(payload) {
+			if (!payload || typeof payload !== 'object') {
+				return payload;
+			}
+			const next = Object.assign({}, payload);
+			delete next.settings;
+			if (next.result && typeof next.result === 'object') {
+				next.result = stripSettingsFromDashboardPayload(next.result);
+			}
+			return next;
+		}
+
+		function applyDashboardPayloadNow(payload, options) {
 			if (!payload || typeof payload !== 'object') {
 				return;
 			}
+			const opts = options || {};
 
 			const responseStats = payload.stats || (payload.result && payload.result.stats);
 			if (responseStats) {
@@ -5785,20 +5998,22 @@
 			}
 
 			const responseSettings = payload.settings || (payload.result && payload.result.settings);
-			if (responseSettings) {
-				applyServerSettings(responseSettings);
+			if (responseSettings && opts.fullReplaceSettings && !opts.skipSettings) {
+				applyServerSettings(responseSettings, { fullReplace: true });
 			}
 		}
 
-		function applyDashboardPayload(payload) {
+		function applyDashboardPayload(payload, options) {
 			if (!payload || typeof payload !== 'object') {
 				return;
 			}
+			const opts = options || {};
+			const nextPayload = opts.skipSettings ? stripSettingsFromDashboardPayload(payload) : payload;
 			if (uiActionQueueDepthRef.current > 0) {
-				stageDashboardPayloadForQueue(payload);
+				stageDashboardPayloadForQueue(nextPayload);
 				return;
 			}
-			applyDashboardPayloadNow(payload);
+			applyDashboardPayloadNow(nextPayload, opts);
 		}
 
 		async function flushDeferredDashboardPayloadAfterQueue() {
@@ -5990,29 +6205,18 @@
 		}
 
 		async function waitForSettingsSaveToSettle(maxWaitMs = 15000) {
-			const startedAt = Date.now();
-			while (settingsSaveInFlightRef.current && (Date.now() - startedAt) < maxWaitMs) {
-				await sleep(50);
-			}
-			return !settingsSaveInFlightRef.current;
+			const savePromise = lastSettingsSavePromiseRef.current || Promise.resolve();
+			let timedOut = false;
+			await Promise.race([
+				savePromise.catch(() => null),
+				sleep(maxWaitMs).then(() => { timedOut = true; }),
+			]);
+			return !timedOut;
 		}
 
 		async function syncQueuedSettingsBeforeAction() {
-			if (settingsSaveTimerRef.current || hasPendingSettingsPatch()) {
-				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: __("Saving queued settings before running action…", 'ultracache'), persistent: true });
-				await flushQueuedSettings();
-			}
-
 			if (!(await waitForSettingsSaveToSettle())) {
 				throw new Error('Settings are still saving. Please wait for the save to finish before running this action.');
-			}
-
-			if (hasPendingSettingsPatch()) {
-				pushToast({ id: 'ucwp-settings-queue', type: 'info', text: __("Saving queued settings before running action…", 'ultracache'), persistent: true });
-				await flushQueuedSettings();
-				if (!(await waitForSettingsSaveToSettle())) {
-					throw new Error('Settings are still saving. Please wait for the save to finish before running this action.');
-				}
 			}
 		}
 
@@ -6170,39 +6374,29 @@
 			}
 		}
 
-		async function flushQueuedSettings() {
-			if (settingsSaveTimerRef.current) {
-				window.clearTimeout(settingsSaveTimerRef.current);
-				settingsSaveTimerRef.current = null;
-			}
-			const patch = Object.assign({}, pendingSettingsPatchRef.current || {});
-			pendingSettingsPatchRef.current = {};
-			if (Object.keys(patch).length) {
-				queueSettingsPatch(patch);
-			}
-		}
 
 		function queueSettingsPatch(patch) {
 			if (!patch || typeof patch !== 'object') {
-				return;
+				return Promise.resolve(null);
 			}
 			const queuedPatch = Object.assign({}, patch || {});
 			const next = Object.assign({}, settingsRef.current || {}, queuedPatch);
 			settingsRef.current = next;
 			setSettings(next);
 			const criticalPatch = isCriticalSettingsPatch(queuedPatch);
-			enqueueUiOperation('settings_save', criticalPatch ? 'Save critical settings' : 'Save settings', async () => {
-				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(queuedPatch) });
+			const queuedSave = enqueueUiOperation('settings_save', criticalPatch ? 'Save critical settings' : 'Save settings', async () => {
+				const response = await saveSettingsPatch(queuedPatch);
 				if (response && response.settings) {
 					committedSettingsRef.current = Object.assign({}, response.settings);
 				}
-				applyDashboardPayload(response || {});
 				return response;
 			}, {
 				processingText: criticalPatch ? 'Processing critical settings save…' : 'Processing settings save…',
 				successText: criticalPatch ? 'Critical cache settings saved.' : 'Settings saved.',
 				failedText: 'Settings save failed.',
 			});
+			lastSettingsSavePromiseRef.current = queuedSave.catch(() => null);
+			return queuedSave;
 		}
 
 		function getCurrentCssBundleScope() {
@@ -6969,8 +7163,7 @@
 				}));
 
 				pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: __("Saving profile settings…", 'ultracache'), persistent: true });
-				const firstResponse = await apiRequest('save_settings', { settings_json: JSON.stringify(mainPatch) });
-				applyDashboardPayload(firstResponse || {});
+				const firstResponse = await saveSettingsPatch(mainPatch);
 				pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: __("Profile settings saved.", 'ultracache'), persistent: true });
 
 				let objectCachePatch = {};
@@ -6993,8 +7186,7 @@
 					settingsRef.current = objectOptimistic;
 					setSettings(objectOptimistic);
 					setRedisForm((prev) => Object.assign({}, prev, objectCachePatch));
-					const objectResponse = await apiRequest('save_settings', { settings_json: JSON.stringify(objectCachePatch) });
-					applyDashboardPayload(objectResponse || {});
+					const objectResponse = await saveSettingsPatch(objectCachePatch);
 					pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: objectCachePatch.objectCacheEnabled === false ? 'Object Cache disabled.' : 'Object Cache set up.', persistent: true });
 				} else if (objectCacheWarning) {
 					pushToast({ type: 'warning', title: __("Object Cache setup skipped", 'ultracache'), text: profile.label + ' profile settings were saved, but Object Cache was not changed. ' + objectCacheWarning });
@@ -7011,8 +7203,7 @@
 						const scanOptimistic = Object.assign({}, settingsRef.current || {}, scanPatch);
 						settingsRef.current = scanOptimistic;
 						setSettings(scanOptimistic);
-						const scanResponse = await apiRequest('save_settings', { settings_json: JSON.stringify(scanPatch) });
-						applyDashboardPayload(scanResponse || {});
+						const scanResponse = await saveSettingsPatch(scanPatch);
 						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: String(scanPatch.deferJsExcludeList || '') === String(currentExclusions || '') ? 'Safe Defer JS scan finalized; no new init exclusions were needed.' : 'Safe Defer JS scan exclusions saved.', persistent: true });
 					}
 				}
@@ -7028,18 +7219,16 @@
 		async function saveAdvancedSettings() {
 			return enqueueUiOperation('advanced_settings_save', 'Save advanced settings', async () => {
 				const formSnapshot = Object.assign({}, advancedForm || {});
-				const response = await apiRequest('save_settings', {
-					settings_json: JSON.stringify({
-						cacheCleanupIntervalHours: Number(formSnapshot.cacheCleanupIntervalHours || 24),
-						cssBundleCleanupGraceHours: Number(formSnapshot.cssBundleCleanupGraceHours || 48),
-						cssBundleCleanupDeleteLimit: Number(formSnapshot.cssBundleCleanupDeleteLimit || 60),
-						cronWarmPagesPerMinute: Number(formSnapshot.cronWarmPagesPerMinute || 0),
-						scheduledWarmLimit: Number(formSnapshot.scheduledWarmLimit || 1),
-						cacheFreshTtlMinutes: Number(formSnapshot.cacheFreshTtlMinutes || 15),
-						cacheMaxStaleMinutes: Number(formSnapshot.cacheMaxStaleMinutes || 720),
-					}),
-				});
-				applyDashboardPayload(response || {});
+				const patch = {
+					cacheCleanupIntervalHours: Number(formSnapshot.cacheCleanupIntervalHours || 24),
+					cssBundleCleanupGraceHours: Number(formSnapshot.cssBundleCleanupGraceHours || 48),
+					cssBundleCleanupDeleteLimit: Number(formSnapshot.cssBundleCleanupDeleteLimit || 60),
+					cronWarmPagesPerMinute: Number(formSnapshot.cronWarmPagesPerMinute || 0),
+					scheduledWarmLimit: Number(formSnapshot.scheduledWarmLimit || 1),
+					cacheFreshTtlMinutes: Number(formSnapshot.cacheFreshTtlMinutes || 15),
+					cacheMaxStaleMinutes: Number(formSnapshot.cacheMaxStaleMinutes || 720),
+				};
+				const response = await saveSettingsPatch(patch);
 				if (response && response.settings) {
 					setAdvancedForm((prev) => Object.assign({}, prev, {
 						cacheCleanupIntervalHours: response.settings.cacheCleanupIntervalHours || prev.cacheCleanupIntervalHours,
@@ -7666,21 +7855,7 @@
 				const rawText = await file.text();
 				const parsed = JSON.parse(rawText);
 				const importedSettings = getTransferableSettingsFromImport(parsed);
-				const response = await apiRequest('save_settings', {
-					settings_json: JSON.stringify(importedSettings),
-				});
-
-				if (response && response.settings) {
-					applyServerSettings(response.settings);
-				}
-
-				if (response && response.stats) {
-					setStats(response.stats);
-				}
-
-				if (response && response.diagnostics) {
-					setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(response.diagnostics));
-				}
+				const response = await saveSettingsPatch(importedSettings, { fullReplace: true });
 
 				pushToast({ type: 'success', text: 'Settings imported from ' + file.name + '.' });
 			} catch (error) {
@@ -7714,16 +7889,7 @@
 
 			setBusy(true);
 			try {
-				const response = await apiRequest('save_settings', { settings_json: JSON.stringify(defaultsPayload) });
-				if (response && response.settings) {
-					applyServerSettings(response.settings);
-				}
-				if (response && response.stats) {
-					setStats(response.stats);
-				}
-				if (response && response.diagnostics) {
-					setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(response.diagnostics));
-				}
+				const response = await saveSettingsPatch(defaultsPayload, { fullReplace: true });
 				setInspectResult(null);
 				pushToast({ type: 'success', text: __("UltraCache settings were reset to defaults, including visible safeguard lists.", 'ultracache') });
 			} catch (error) {

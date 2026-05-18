@@ -596,7 +596,7 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 return;
             }
 
-            if (strlen($value) > 120) {
+            if (strlen($value) > 120 || $this->ucwp_font_scan_is_suspicious_family_candidate($value)) {
                 return;
             }
 
@@ -604,6 +604,34 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 'value'  => $value,
                 'source' => (string) $source,
             );
+        }
+
+
+        private function ucwp_font_scan_is_suspicious_family_candidate($value)
+        {
+            $value = trim((string) $value);
+            if ('' === $value) {
+                return true;
+            }
+
+            if (preg_match('/[{};()<>]/', $value)) {
+                return true;
+            }
+
+            if (false !== stripos($value, 'url(') || false !== stripos($value, 'data:')) {
+                return true;
+            }
+
+            $compact = preg_replace('/[\s_\-]+/', '', $value);
+            if (is_string($compact) && strlen($compact) >= 48 && preg_match('/^[A-Za-z0-9+\/=]+$/', $compact)) {
+                return true;
+            }
+
+            if (strlen($value) >= 32 && preg_match('/^[A-Za-z0-9+\/=]{32,}$/', $value)) {
+                return true;
+            }
+
+            return false;
         }
 
         private function ucwp_font_scan_add_font_family_list(&$items, $value, $source = '')
@@ -730,40 +758,38 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             $css_blocks = array();
             $stylesheet_urls = array();
 
-            if (preg_match_all('/<style\b[^>]*>(.*?)<\/style>/is', $html, $matches)) {
-                foreach ((array) $matches[1] as $css) {
-                    $css = trim((string) $css);
-                    if ('' !== $css) {
-                        $css_blocks[] = array('css' => $css, 'source' => 'inline-style');
-                    }
-                }
-            }
-
-            if (preg_match_all('/<link\b[^>]*>/is', $html, $links)) {
-                foreach ((array) $links[0] as $tag) {
-                    $tag = (string) $tag;
-                    $rel = '';
-                    $as = '';
-                    $href = '';
-                    if (preg_match('/\brel\s*=\s*(["\'])(.*?)\1/is', $tag, $m)) {
-                        $rel = strtolower((string) $m[2]);
-                    }
-                    if (preg_match('/\bas\s*=\s*(["\'])(.*?)\1/is', $tag, $m)) {
-                        $as = strtolower((string) $m[2]);
-                    }
-                    if (preg_match('/\bhref\s*=\s*(["\'])(.*?)\1/is', $tag, $m)) {
-                        $href = html_entity_decode((string) $m[2], ENT_QUOTES | ENT_HTML5);
-                    }
-                    if ('' === $href || (false === strpos($rel, 'stylesheet') && !('preload' === $rel && 'style' === $as))) {
-                        continue;
+            if (class_exists('WP_HTML_Tag_Processor')) {
+                try {
+                    $style_processor = new WP_HTML_Tag_Processor($html);
+                    while ($style_processor->next_tag('STYLE')) {
+                        $type = strtolower($this->ucwp_html_processor_attribute($style_processor, 'type'));
+                        if ('' !== $type && 'text/css' !== $type) {
+                            continue;
+                        }
+                        $css = method_exists($style_processor, 'get_modifiable_text') ? trim((string) $style_processor->get_modifiable_text()) : '';
+                        if ('' !== $css) {
+                            $css_blocks[] = array('css' => $css, 'source' => 'inline-style');
+                        }
                     }
 
-                    $absolute = wp_http_validate_url($href) ? $href : wp_make_link_relative($href);
-                    if (!wp_http_validate_url($absolute)) {
-                        $absolute = rtrim((string) $base_url, '/') . '/' . ltrim($href, '/');
+                    $link_processor = new WP_HTML_Tag_Processor($html);
+                    while ($link_processor->next_tag('LINK')) {
+                        $rel = strtolower($this->ucwp_html_processor_attribute($link_processor, 'rel'));
+                        $as = strtolower($this->ucwp_html_processor_attribute($link_processor, 'as'));
+                        $href = $this->ucwp_html_processor_attribute($link_processor, 'href');
+                        if ('' === $href || (false === strpos($rel, 'stylesheet') && !('preload' === $rel && 'style' === $as))) {
+                            continue;
+                        }
+
+                        $absolute = wp_http_validate_url($href) ? $href : wp_make_link_relative($href);
+                        if (!wp_http_validate_url($absolute)) {
+                            $absolute = rtrim((string) $base_url, '/') . '/' . ltrim($href, '/');
+                        }
+                        $stylesheet_urls[] = $absolute;
+                        $this->ucwp_font_scan_parse_google_fonts_url($absolute, $never_delay);
                     }
-                    $stylesheet_urls[] = $absolute;
-                    $this->ucwp_font_scan_parse_google_fonts_url($absolute, $never_delay);
+                } catch (\Throwable $e) {
+                    // Without a valid HTML API scan, return only stylesheet CSS gathered from later local sources.
                 }
             }
 
@@ -847,17 +873,21 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             }
         }
 
-        private function ucwp_safe_defer_extract_tag_attribute($tag, $attribute)
+        private function ucwp_html_processor_attribute($processor, $attribute)
         {
-            $tag = (string) $tag;
-            $attribute = preg_quote((string) $attribute, '~');
-            if (preg_match('~\s' . $attribute . '\s*=\s*(["\'])(.*?)\1~i', $tag, $match)) {
-                return html_entity_decode((string) $match[2], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if (!$processor instanceof WP_HTML_Tag_Processor) {
+                return '';
             }
-            if (preg_match('~\s' . $attribute . '\s*=\s*([^\s>]+)~i', $tag, $match)) {
-                return html_entity_decode((string) $match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+            $value = $processor->get_attribute((string) $attribute);
+            if (null === $value || false === $value) {
+                return '';
             }
-            return '';
+            if (true === $value) {
+                return (string) $attribute;
+            }
+
+            return html_entity_decode((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         }
 
         private function ucwp_safe_defer_absolute_url($url, $base_url = '')
@@ -1053,45 +1083,49 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
             $details = array();
             $scanned = 0;
 
-            if (preg_match_all('/<script\b[^>]*>/i', $html, $matches)) {
-                foreach ((array) $matches[0] as $tag) {
-                    $tag = (string) $tag;
-                    $src = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'data-ucwp-original-src');
-                    if ('' === $src) {
-                        $src = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'data-ucwp-src');
-                    }
-                    if ('' === $src) {
-                        $src = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'src');
-                    }
+            if (class_exists('WP_HTML_Tag_Processor')) {
+                try {
+                    $processor = new WP_HTML_Tag_Processor($html);
+                    while ($processor->next_tag('SCRIPT')) {
+                        $src = $this->ucwp_html_processor_attribute($processor, 'data-ucwp-original-src');
+                        if ('' === $src) {
+                            $src = $this->ucwp_html_processor_attribute($processor, 'data-ucwp-src');
+                        }
+                        if ('' === $src) {
+                            $src = $this->ucwp_html_processor_attribute($processor, 'src');
+                        }
 
-                    $absolute = $this->ucwp_safe_defer_absolute_url($src, $url);
-                    if ('' === $absolute || !$this->ucwp_safe_defer_is_same_site_url($absolute)) {
-                        continue;
-                    }
+                        $absolute = $this->ucwp_safe_defer_absolute_url($src, $url);
+                        if ('' === $absolute || !$this->ucwp_safe_defer_is_same_site_url($absolute)) {
+                            continue;
+                        }
 
-                    $handle = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'data-ucwp-handle');
-                    $id = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'data-ucwp-id');
-                    if ('' === $id) {
-                        $id = $this->ucwp_safe_defer_extract_tag_attribute($tag, 'id');
-                    }
+                        $handle = $this->ucwp_html_processor_attribute($processor, 'data-ucwp-handle');
+                        $id = $this->ucwp_html_processor_attribute($processor, 'data-ucwp-id');
+                        if ('' === $id) {
+                            $id = $this->ucwp_html_processor_attribute($processor, 'id');
+                        }
 
-                    $scanned++;
-                    if (!$this->ucwp_safe_defer_is_layout_init_script($absolute, $handle, $id)) {
-                        continue;
-                    }
+                        $scanned++;
+                        if (!$this->ucwp_safe_defer_is_layout_init_script($absolute, $handle, $id)) {
+                            continue;
+                        }
 
-                    $fragment = $this->ucwp_safe_defer_script_path_fragment($absolute);
-                    $reason = 'Detected same-site theme/page-builder layout or animation init script in front-page HTML.';
-                    if ('' !== $fragment) {
-                        $this->ucwp_safe_defer_add_detected_init_item($items, $fragment, $absolute, $reason);
+                        $fragment = $this->ucwp_safe_defer_script_path_fragment($absolute);
+                        $reason = 'Detected same-site theme/page-builder layout or animation init script in front-page HTML.';
+                        if ('' !== $fragment) {
+                            $this->ucwp_safe_defer_add_detected_init_item($items, $fragment, $absolute, $reason);
+                        }
+                        if ('' !== $handle) {
+                            $this->ucwp_safe_defer_add_detected_init_item($items, $handle, $absolute, $reason);
+                        }
+                        if ('' !== $id) {
+                            $clean_id = preg_replace('/-js$/i', '', (string) $id);
+                            $this->ucwp_safe_defer_add_detected_init_item($items, $clean_id, $absolute, $reason);
+                        }
                     }
-                    if ('' !== $handle) {
-                        $this->ucwp_safe_defer_add_detected_init_item($items, $handle, $absolute, $reason);
-                    }
-                    if ('' !== $id) {
-                        $clean_id = preg_replace('/-js$/i', '', (string) $id);
-                        $this->ucwp_safe_defer_add_detected_init_item($items, $clean_id, $absolute, $reason);
-                    }
+                } catch (\Throwable $e) {
+                    $scanned = 0;
                 }
             }
 

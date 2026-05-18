@@ -4,8 +4,8 @@ Tags: cache, redis, varnish, webp, avif
 Donate link: https://iniotakis.com/
 Requires at least: 6.9
 Tested up to: 6.9
-Requires PHP: 7.4
-Stable tag: 2.58.05
+Requires PHP: 8.1
+Stable tag: 2.58.34
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -161,7 +161,7 @@ This endpoint is configured by the site administrator and is not an UltraCache-o
 
 Optional support/donation links
 
-The dashboard may include optional support/donation links. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit.
+The dashboard may include optional support/donation links shown only to administrators. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit.
 
 Service provider: PayPal  
 Terms: https://www.paypal.com/legalhub/useragreement-full  
@@ -177,26 +177,3 @@ UltraCache does not track visitors through an external UltraCache service.
 1. UltraCache dashboard overview.
 2. Cache engine and object cache controls.
 3. Media, CSS, fonts, warm-up, and diagnostics panels.
-
-== Changelog ==
-
-2.58.05 - WordPress.org escaping and external services documentation cleanup
-- Routed WordPress content/block media rewrites through a context-aware callback with escaped rewritten attributes.
-- Updated External services documentation for Google Fonts, third-party optimization patterns, Varnish/reverse proxy endpoints, and PayPal links.
-
-2.58.04 - Translator comment cleanup for Plugin Check i18n placeholders
-- Added missing translator comments for placeholder-based i18n strings reported by Plugin Check.
-- Refreshed the POT template header for 2.58.04.
-
-2.58.03 - Full i18n pass and localization template refresh
-- Expanded PHP and admin dashboard JavaScript i18n coverage for user-facing text.
-- Kept commands, paths, keys, statuses, handles, and executable snippets untranslated.
-- Refreshed the POT template.
-
-2.58.02 - Repository localization cleanup
-- Replaced direct unsafe loopback SSL bypass requests with the UltraCache safe loopback helper.
-- Added admin JavaScript i18n setup and generated the UltraCache POT template.
-- Added a first PHP i18n pass for REST/admin-facing messages.
-
-2.58.01 - Initial public release
-- Initial public release build.

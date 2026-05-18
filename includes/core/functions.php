@@ -2256,6 +2256,7 @@ if (!function_exists('ucwp_safe_remote_request')) {
             return new WP_Error('ucwp_empty_remote_url', __('Remote request URL is empty.', 'ultracache'));
         }
 
+
         $defaults = array(
             'timeout' => 10,
             'redirection' => 3,
@@ -2315,6 +2316,7 @@ if (!function_exists('ucwp_safe_configured_infrastructure_remote_request')) {
         $args['timeout'] = max(1, min(60, (int) $args['timeout']));
         $args['reject_unsafe_urls'] = false;
 
+        // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.wp_remote_request_wp_remote_request -- This wrapper is only used for administrator-configured same-server infrastructure endpoints after ucwp_is_allowed_socket_target() validation; wp_safe_remote_request() would block trusted loopback targets needed for Varnish/reverse-proxy integrations.
         $response = wp_remote_request($url, $args);
         if (is_wp_error($response)) {
             ucwp_debug_log('wp_remote_request infrastructure request failed', array(

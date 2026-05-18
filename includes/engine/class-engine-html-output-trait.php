@@ -1360,68 +1360,10 @@ JS;
             return false;
         }
 
-        private function protect_html_regions_from_safe_minify($html, array &$tokens)
-        {
-            $pattern = '#<(script|style|pre|textarea|svg|math|title|code|noscript|template)\b[^>]*>.*?</\1>#is';
-            $counter = 0;
 
-            return (string) preg_replace_callback(
-                $pattern,
-                function ($matches) use (&$tokens, &$counter) {
-                    $placeholder = "%%UCWP_HTML_MINIFY_TOKEN_" . (++$counter) . "%%";
-                    $tokens[$placeholder] = (string) $matches[0];
-                    return $placeholder;
-                },
-                (string) $html
-            );
-        }
 
-        private function remove_noncritical_html_comments_for_safe_minify($html)
-        {
-            return (string) preg_replace_callback(
-                '/<!--([\s\S]*?)-->/u',
-                function ($matches) {
-                    $comment = isset($matches[1]) ? trim((string) $matches[1]) : '';
-                    if ('' === $comment) {
-                        return '';
-                    }
 
-                    $normalized = strtolower($comment);
-                    foreach (array('[if ', '<![endif', 'wp:', '/wp:', 'more', 'nextpage', 'googleoff:', 'googleon:', 'noindex', '/noindex') as $prefix) {
-                        if (0 === strpos($normalized, $prefix)) {
-                            return (string) $matches[0];
-                        }
-                    }
-
-                    return '';
-                },
-                (string) $html
-            );
-        }
-
-        private function minify_head_html_safely($html)
-        {
-            if (!is_string($html) || '' === $html) {
-                return $html;
-            }
-
-            if (!preg_match('/<head\b[^>]*>([\s\S]*?)<\/head>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
-                return $html;
-            }
-
-            $head_html = (string) $matches[0][0];
-            $head_offset = (int) $matches[0][1];
-            $head_inner = isset($matches[1][0]) ? (string) $matches[1][0] : '';
-            $minified_inner = (string) preg_replace('/>\s+</', '><', $head_inner);
-            $minified_head = preg_replace('/<head\b([^>]*)>[\s\S]*<\/head>/i', '<head$1>' . $minified_inner . '</head>', $head_html, 1);
-            if (!is_string($minified_head) || '' === $minified_head) {
-                return $html;
-            }
-
-            return substr($html, 0, $head_offset) . $minified_head . substr($html, $head_offset + strlen($head_html));
-        }
-
-        private function html_tag_processor_available()
+private function html_tag_processor_available()
         {
             return class_exists('WP_HTML_Tag_Processor');
         }
@@ -1532,11 +1474,7 @@ JS;
             }
 
             $processed = $this->remove_html_tag_attribute_with_processor($html, $attribute);
-            if (is_string($processed)) {
-                return $processed;
-            }
-
-            return (string) preg_replace('/\s+' . preg_quote($attribute, '/') . '(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s"\'=<>`]+))?/i', '', (string) $html);
+            return is_string($processed) ? $processed : (string) $html;
         }
 
         private function set_or_add_html_tag_attribute($html, $attribute, $value)
@@ -1547,17 +1485,7 @@ JS;
             }
 
             $processed = $this->set_html_tag_attribute_with_processor($html, $attribute, $value);
-            if (is_string($processed)) {
-                return $processed;
-            }
-
-            $quoted_value = esc_attr((string) $value);
-            $pattern = '/\b' . preg_quote($attribute, '/') . '(?:\s*=\s*("|\')(.*?)(\1)|\s*=\s*[^\s"\'=<>`]+)?/i';
-            if (preg_match($pattern, (string) $html)) {
-                return (string) preg_replace($pattern, $attribute . '="' . $quoted_value . '"', (string) $html, 1);
-            }
-
-            return (string) preg_replace('/\s*\/?>$/', ' ' . $attribute . '="' . $quoted_value . '"$0', (string) $html, 1);
+            return is_string($processed) ? $processed : (string) $html;
         }
 
         private function html_link_href_exists($html, $href)

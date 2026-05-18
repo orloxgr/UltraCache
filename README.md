@@ -1,11 +1,6 @@
 # UltraCache
 
-Current version: **2.58.05**
-
-- 2.58.05 - WordPress.org escaping and external services documentation cleanup
-  - Routed WordPress content/block media rewrites through a context-aware callback with escaped rewritten attributes.
-  - Updated External services documentation for Google Fonts, third-party optimization patterns, Varnish/reverse proxy endpoints, and PayPal links.
-- 2.58.04 - Translator comment cleanup for Plugin Check i18n placeholders
+Current version: **2.58.34**
 
 UltraCache is a WordPress performance plugin with page cache, object-cache integration, AVIF/WebP media rewrite, CSS/font optimization, warm-up tools, Varnish helpers, and diagnostics.
 
@@ -136,7 +131,7 @@ This endpoint is configured by the site administrator and is not an UltraCache-o
 
 ### Optional support/donation links
 
-The dashboard may include optional support/donation links. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit.
+The dashboard may include optional support/donation links shown only to administrators. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit.
 
 Service provider: PayPal  
 Terms: https://www.paypal.com/legalhub/useragreement-full  

@@ -16,16 +16,11 @@ trait Ultra_Cache_Engine_Media_Image_Trait
                 return $result;
             }
 
-            // The tag processor is precise, but it scans every HTML tag and was measured as
-            // expensive on large Elementor/WooCommerce pages. The regex implementation only walks
-            // <img> tags and uses the same dimension resolver, so make it the default for STORE
-            // path performance. A filter keeps the processor available for targeted debugging.
-            $use_tag_processor = (bool) apply_filters('ucwp_cls_dimensions_use_html_tag_processor', false);
-            if ($use_tag_processor && class_exists('WP_HTML_Tag_Processor')) {
-                return $this->inject_safe_cls_dimensions_with_tag_processor($html);
+            if (!class_exists('WP_HTML_Tag_Processor')) {
+                return $result;
             }
 
-            return $this->inject_safe_cls_dimensions_with_regex($html);
+            return $this->inject_safe_cls_dimensions_with_tag_processor($html);
         }
 
         private function get_default_safe_cls_dimension_stats()
@@ -103,78 +98,6 @@ trait Ultra_Cache_Engine_Media_Image_Trait
 
             return array(
                 'html' => $processor->get_updated_html(),
-                'stats' => $stats,
-            );
-        }
-
-        private function inject_safe_cls_dimensions_with_regex($html)
-        {
-            $stats = $this->get_default_safe_cls_dimension_stats();
-
-            $updated = (string) preg_replace_callback(
-                '/<img\b[^>]*>/i',
-                function ($matches) use (&$stats) {
-                    $tag = (string) $matches[0];
-                    $stats['scanned']++;
-
-                    $width = $this->parse_positive_dimension_value($this->extract_attribute_from_html_tag($tag, 'width'));
-                    $height = $this->parse_positive_dimension_value($this->extract_attribute_from_html_tag($tag, 'height'));
-                    if ($width > 0 && $height > 0) {
-                        $stats['skipped']++;
-                        return $tag;
-                    }
-
-                    $source_url = $this->extract_best_img_source_from_attributes(array(
-                        'src' => $this->extract_attribute_from_html_tag($tag, 'src'),
-                        'data-src' => $this->extract_attribute_from_html_tag($tag, 'data-src'),
-                        'data-lazy-src' => $this->extract_attribute_from_html_tag($tag, 'data-lazy-src'),
-                        'srcset' => $this->extract_attribute_from_html_tag($tag, 'srcset'),
-                        'data-srcset' => $this->extract_attribute_from_html_tag($tag, 'data-srcset'),
-                        'data-lazy-srcset' => $this->extract_attribute_from_html_tag($tag, 'data-lazy-srcset'),
-                    ));
-
-                    if ('' === $source_url) {
-                        $stats['unresolved']++;
-                        return $tag;
-                    }
-
-                    $resolution = $this->resolve_safe_cls_dimensions_for_image_url($source_url);
-                    if (!empty($resolution['skipped'])) {
-                        $stats['skipped']++;
-                        return $tag;
-                    }
-
-                    $resolved_width = max(0, (int) ($resolution['width'] ?? 0));
-                    $resolved_height = max(0, (int) ($resolution['height'] ?? 0));
-                    if ($resolved_width < 1 || $resolved_height < 1) {
-                        $stats['unresolved']++;
-                        return $tag;
-                    }
-
-                    $updated_tag = $tag;
-                    $changed = false;
-                    if ($width < 1) {
-                        $updated_tag = $this->set_or_add_html_tag_attribute($updated_tag, 'width', (string) $resolved_width);
-                        $changed = true;
-                    }
-                    if ($height < 1) {
-                        $updated_tag = $this->set_or_add_html_tag_attribute($updated_tag, 'height', (string) $resolved_height);
-                        $changed = true;
-                    }
-
-                    if ($changed) {
-                        $stats['injected']++;
-                        return $updated_tag;
-                    }
-
-                    $stats['skipped']++;
-                    return $tag;
-                },
-                $html
-            );
-
-            return array(
-                'html' => $updated,
                 'stats' => $stats,
             );
         }

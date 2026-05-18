@@ -1398,7 +1398,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             if (!empty($user_protected_groups)) {
                 $protected_groups = array_merge($protected_groups, $user_protected_groups);
             }
-            $replacements = array();
+            $mutations = array();
 
             foreach ($records as $index => $record) {
                 if (empty($record['has_src']) || empty($record['open']) || empty($record['tag'])) {
@@ -1411,40 +1411,18 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $group = isset($record['group']) ? (string) $record['group'] : '';
 
                 if ($this->should_keep_script_blocking_for_defer_all($handle, $src, $open, $settings) || ('' !== $group && !empty($protected_groups[$group]))) {
-                    $new_open = $this->strip_native_loading_attributes_from_script_tag($open);
-                } elseif (!$this->is_defer_all_js_candidate($handle, $src, $open, $settings)) {
-                    continue;
-                } else {
-                    $new_open = $this->add_defer_attribute_to_script_tag($open, false);
-                }
-
-                if ($new_open !== $open) {
-                    $replacements[$index] = $this->replace_script_opening_tag($record['tag'], $new_open);
+                    $mutations[$index] = 'strip-loading';
+                } elseif ($this->is_defer_all_js_candidate($handle, $src, $open, $settings)) {
+                    $mutations[$index] = 'defer';
                 }
             }
 
-            if (empty($replacements)) {
+            if (empty($mutations)) {
                 return $html;
             }
 
-            ksort($replacements);
-            $out = '';
-            $last = 0;
-            foreach ($replacements as $index => $replacement) {
-                if (!isset($records[$index])) {
-                    continue;
-                }
-                $record = $records[$index];
-                $offset = isset($record['offset']) ? (int) $record['offset'] : -1;
-                $tag = isset($record['tag']) ? (string) $record['tag'] : '';
-                if ($offset < 0 || '' === $tag) {
-                    continue;
-                }
-                $out .= substr($html, $last, $offset - $last) . $replacement;
-                $last = $offset + strlen($tag);
-            }
-
-            return $out . substr($html, $last);
+            $updated = $this->apply_script_loading_attribute_mutations_with_processor($html, $mutations);
+            return is_string($updated) ? $updated : $html;
         }
 
         private function restore_user_excluded_delayed_scripts_in_html($html, array $settings = array())
@@ -1900,25 +1878,8 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             return false;
         }
 
-        private function add_jquery_legacy_cluster_protection(array &$protected, array $records, array $ordered_indexes)
-        {
-            foreach ($records as $index => $record) {
-                $haystack = strtolower(
-                    (isset($record['handle']) ? (string) $record['handle'] : '') . ' ' .
-                    (isset($record['src']) ? (string) $record['src'] : '') . ' ' .
-                    (isset($record['id']) ? (string) $record['id'] : '')
-                );
-                if (false === strpos($haystack, 'jquery')) {
-                    continue;
-                }
-                if (false === strpos($haystack, 'jquery.min.js') && false === strpos($haystack, 'jquery-migrate') && false === strpos($haystack, 'jquery-core') && false === strpos($haystack, 'jquery-js') && false === strpos($haystack, 'jquery')) {
-                    continue;
-                }
-                $this->add_script_record_dependency_protection($protected, $records, $ordered_indexes, (int) $index, 1);
-            }
-        }
 
-        private function script_record_matches_user_defer_exclusion(array $record, array $settings = array())
+private function script_record_matches_user_defer_exclusion(array $record, array $settings = array())
         {
             $fragments = $this->get_defer_stage_user_exclude_fragments($settings);
             if (empty($fragments)) {
@@ -2066,16 +2027,53 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             return false;
         }
 
-        private function replace_script_opening_tag($tag, $new_open)
+        private function apply_script_loading_attribute_mutations_with_processor($html, array $mutations)
         {
-            $tag = (string) $tag;
-            $new_open = (string) $new_open;
-            if ('' === $tag || '' === $new_open) {
-                return $tag;
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || empty($mutations)) {
+                return null;
             }
 
-            $replaced = preg_replace('/^<script\b[^>]*>/i', $new_open, $tag, 1);
-            return is_string($replaced) ? $replaced : $tag;
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $index = 0;
+                $changed = false;
+
+                while ($processor->next_tag('SCRIPT')) {
+                    if (!isset($mutations[$index])) {
+                        $index++;
+                        continue;
+                    }
+
+                    $action = (string) $mutations[$index];
+                    if ('strip-loading' === $action) {
+                        $processor->remove_attribute('async');
+                        $processor->remove_attribute('defer');
+                        $processor->remove_attribute('data-wp-strategy');
+                        $changed = true;
+                    } elseif ('defer' === $action) {
+                        $processor->remove_attribute('async');
+                        $processor->remove_attribute('data-wp-strategy');
+                        $processor->set_attribute('defer', 'defer');
+                        $changed = true;
+                    } elseif ('async' === $action) {
+                        $processor->remove_attribute('defer');
+                        $processor->remove_attribute('data-wp-strategy');
+                        $processor->set_attribute('async', 'async');
+                        $changed = true;
+                    }
+
+                    $index++;
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated = $processor->get_updated_html();
+                return is_string($updated) && '' !== $updated ? $updated : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
         }
 
         private function get_defer_stage_level(array $settings = array())
@@ -2121,38 +2119,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             }
 
             $processed = $this->normalize_protected_script_loading_attributes_with_processor($html, $settings);
-            if (is_string($processed)) {
-                return $processed;
-            }
-
-            $that = $this;
-            $defer_all_js = !empty($settings['defer_js']) && !empty($settings['defer_all_js']);
-            $rewritten = preg_replace_callback('/<script\b[^>]*>/i', static function ($matches) use ($that, $settings, $defer_all_js) {
-                $tag = isset($matches[0]) ? (string) $matches[0] : '';
-                if ('' === $tag) {
-                    return $tag;
-                }
-
-                if (false === stripos($tag, ' async') && false === stripos($tag, ' defer') && false === stripos($tag, 'data-wp-strategy=')) {
-                    return $tag;
-                }
-
-                $handle = $that->extract_attribute_from_html_tag($tag, 'id');
-                $src = $that->extract_attribute_from_html_tag($tag, 'src');
-
-                if ($that->should_keep_script_blocking_for_defer_all($handle, $src, $tag, $settings)
-                    || (!$defer_all_js && $that->is_script_force_blocking($handle, $src, $tag, $settings))) {
-                    return $that->strip_native_loading_attributes_from_script_tag($tag);
-                }
-
-                if ($that->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
-                    return $that->add_defer_attribute_to_script_tag($tag, true);
-                }
-
-                return $tag;
-            }, $html);
-
-            return is_string($rewritten) ? $rewritten : $html;
+            return is_string($processed) ? $processed : $html;
         }
 
         private function normalize_protected_script_loading_attributes_with_processor($html, array $settings = array())
@@ -2209,32 +2176,8 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             }
         }
 
-        private function script_handle_has_inline_segments($handle)
-        {
-            $handle = (string) $handle;
-            if ('' === $handle) {
-                return false;
-            }
 
-            global $wp_scripts;
-            if (!($wp_scripts instanceof WP_Scripts)) {
-                return false;
-            }
-
-            foreach (array('before', 'after', 'data') as $key) {
-                $segment = $wp_scripts->get_data($handle, $key);
-                if (is_array($segment) && !empty($segment)) {
-                    return true;
-                }
-                if (is_string($segment) && '' !== trim($segment)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private function script_handle_has_inline_after_segments($handle)
+private function script_handle_has_inline_after_segments($handle)
         {
             $handle = (string) $handle;
             if ('' === $handle) {
@@ -2506,63 +2449,8 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             return $list;
         }
 
-        private function get_defer_all_js_legacy_conservative_exclude_fragments()
-        {
-            return array(
-                'official-mailerlite-sign-up-forms/assets/js/localization/validation-messages.js',
-                'revslider',
-                'sliderrevolution',
-                'slider-revolution',
-                'revolution',
-                'sr7',
-                'rs6',
-                'rs7',
-                'tptools',
-                'tp-tools',
-                'rs-module',
-                'wp-block-themepunch-revslider',
-                'swiper',
-                'swiper-bundle',
-                'slick',
-                'splide',
-                'owl.carousel',
-                'smartslider',
-                'smart-slider',
-                'n2-ss',
-                'elementor',
-                'elementor-frontend',
-                'frontend-modules',
-                'webpack.runtime',
-                'webpack-pro.runtime',
-                'pro-elements-handlers',
-                'smartmenus',
-                'html_types/image',
-                'html_types/color',
-                'html_types/label',
-                'html_types/slide',
-                'html_types/slider',
-                'product-ajax-search',
-                'search-popup',
-                'nav-mobile',
-                'megamenu',
-                'header-cart',
-                'cart-canvas',
-                'off-canvas',
-                'woocommerce-products-filter',
-                'woof_',
-                'contact-form-7',
-                'author-arc',
-                'typewriting-author-arc/assets/js/form-handler.js',
-                'mailerlite',
-                'mailchimp',
-                'mc4wp',
-                'complianz',
-                'cmplz',
-                'cky-',
-            );
-        }
 
-        private function get_safe_stage_defer_exclude_fragments(array $settings = array())
+private function get_safe_stage_defer_exclude_fragments(array $settings = array())
         {
             /*
              * Former built-in defer fragments are now surfaced through the
@@ -2576,16 +2464,8 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             return $this->get_safe_stage_defer_exclude_fragments($settings);
         }
 
-        private function get_builtin_defer_js_exclude_fragments()
-        {
-            /*
-             * Deprecated runtime source. Kept for compatibility with older
-             * internal callers, but intentionally returns no hidden fragments.
-             */
-            return array();
-        }
 
-        private function get_force_blocking_script_handles(array $settings = array())
+private function get_force_blocking_script_handles(array $settings = array())
         {
             /*
              * No hidden force-blocking handles. Recommended dependency handles
@@ -2643,16 +2523,8 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             })));
         }
 
-        private function get_builtin_delay_non_critical_js_exclude_fragments()
-        {
-            /*
-             * Deprecated runtime source. The previous contents of this list are
-             * now visible in JS Delay / Defer Exclusions Populate Defaults.
-             */
-            return array();
-        }
 
-        private function script_handle_is_footer_group($handle)
+private function script_handle_is_footer_group($handle)
         {
             $handle = (string) $handle;
             if ('' === $handle) {
@@ -3588,6 +3460,68 @@ UCWP_DELAY_LOADER;
             echo $loader . "\n";
         }
 
+        private function apply_delayed_script_replacements_with_processor($html, array $records, array $replacements)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || empty($records) || empty($replacements)) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $html);
+                $index = 0;
+                $changed = false;
+
+                while ($processor->next_tag('SCRIPT')) {
+                    if (!isset($records[$index]) || !isset($replacements[$index])) {
+                        $index++;
+                        continue;
+                    }
+
+                    $replacement = (string) $replacements[$index];
+                    $replacement_attributes = $this->extract_html_tag_attributes($replacement);
+                    if (empty($replacement_attributes)) {
+                        $index++;
+                        continue;
+                    }
+
+                    $record = $records[$index];
+                    $open = isset($record['open']) ? (string) $record['open'] : '<script>';
+                    $original_attributes = $this->extract_html_tag_attributes($open);
+                    foreach (array_keys($original_attributes) as $attribute) {
+                        $attribute = strtolower(trim((string) $attribute));
+                        if ('' !== $attribute) {
+                            $processor->remove_attribute($attribute);
+                        }
+                    }
+
+                    foreach (array('src', 'async', 'defer', 'data-wp-strategy', 'type', 'id', 'crossorigin', 'referrerpolicy', 'integrity', 'nonce') as $attribute) {
+                        $processor->remove_attribute($attribute);
+                    }
+
+                    foreach ($replacement_attributes as $attribute => $value) {
+                        $attribute = strtolower(trim((string) $attribute));
+                        if ('' === $attribute) {
+                            continue;
+                        }
+
+                        $processor->set_attribute($attribute, (string) $value);
+                    }
+
+                    $changed = true;
+                    $index++;
+                }
+
+                if (!$changed) {
+                    return null;
+                }
+
+                $updated = $processor->get_updated_html();
+                return is_string($updated) && '' !== $updated ? $updated : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
         private function delay_third_party_analytics_scripts_in_html($html, array $settings = array())
         {
             if (!is_string($html) || '' === $html || false === stripos($html, '<script') || (empty($settings['delay_safe_third_party_js']) && empty($settings['delay_functional_third_party_js']) && empty($settings['delay_all_third_party_js']))) {
@@ -3737,18 +3671,9 @@ UCWP_DELAY_LOADER;
             }
 
             ksort($replacements);
-            $out = '';
-            $last = 0;
-            foreach ($replacements as $index => $replacement) {
-                if (!isset($records[$index])) {
-                    continue;
-                }
-                $record = $records[$index];
-                $out .= substr($html, $last, $record['offset'] - $last) . $replacement;
-                $last = $record['offset'] + strlen($record['tag']);
-            }
+            $processed = $this->apply_delayed_script_replacements_with_processor($html, $records, $replacements);
 
-            return $out . substr($html, $last);
+            return is_string($processed) ? $processed : $html;
         }
 
         private function infer_script_handle_from_tag($tag, $src = '')

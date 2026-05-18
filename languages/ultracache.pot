@@ -2,9 +2,9 @@
 # This file is distributed under the GPLv2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: UltraCache 2.58.05\n"
+"Project-Id-Version: UltraCache 2.58.34\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-14 12:08+0000\n"
+"POT-Creation-Date: 2026-05-18 01:04+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -3730,4 +3730,3 @@ msgstr ""
 #: includes/admin-dashboard.js:3040
 msgid "Write skips"
 msgstr ""
-
