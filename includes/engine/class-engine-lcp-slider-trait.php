@@ -1678,8 +1678,8 @@ private function inject_sr7_lcp_priority_runtime_script($html)
                 }
             }
             $selectors = array_values(array_unique($selectors));
-            $selectors_json = wp_json_encode($selectors);
-            if (!is_string($selectors_json) || '' === $selectors_json) {
+            $selectors_json = ucwp_json_encode_for_inline_script($selectors);
+            if ('' === $selectors_json) {
                 $selectors_json = '[]';
             }
 
@@ -4011,7 +4011,12 @@ private function prefer_existing_nextgen_revslider_url($url)
                 return $this->cleanup_ambiguous_sr7_generated_lcp_preloads($html);
             }
 
-            $link = '<link rel="preload" as="image" href="' . $src . '"';
+            $preload_href = esc_url($src);
+            if ('' === $preload_href) {
+                return $html;
+            }
+
+            $link = '<link rel="preload" as="image" href="' . $preload_href . '"';
             if ('' !== $mime_type) {
                 $link .= ' type="' . esc_attr($mime_type) . '"';
             }

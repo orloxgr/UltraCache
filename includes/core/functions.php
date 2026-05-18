@@ -12,6 +12,16 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+
+if (!function_exists('ucwp_json_encode_for_inline_script')) {
+    function ucwp_json_encode_for_inline_script($value, $extra_flags = 0)
+    {
+        $flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | (int) $extra_flags;
+        $json = wp_json_encode($value, $flags);
+        return is_string($json) && '' !== $json ? $json : '';
+    }
+}
+
 if (!function_exists('ucwp_is_sensitive_debug_key')) {
     function ucwp_is_sensitive_debug_key($key)
     {

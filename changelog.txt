@@ -1,3 +1,28 @@
+2.58.39 - Final WordPress.org package
+- Final submission package metadata refresh.
+- Verified no remote asset enqueue, no wp_localize_script usage, no global ob_start usage, and no unexpected direct wp_remote_* calls beyond guarded infrastructure wrappers.
+- Removed one frontend console warning from a MailerLite nonce fallback failure path.
+- No runtime feature behavior changes.
+
+2.58.38 - Escaping / returned HTML audit
+- Added a shared inline-script JSON encoder that applies JSON_HEX_* flags for script-safe JSON literals.
+- Updated runtime font map, speculation rules, runtime JS scan collector, and SR7/LCP selector inline scripts to use script-safe JSON output.
+- Escaped the fallback LCP image preload href before injecting the generated link tag.
+
+2.58.37 - Final regex review pass
+- Switched font/local stylesheet scanners to WP_HTML_Tag_Processor.
+- Removed legacy async CSS link rewrite regex fallbacks and moved noscript fallback insertion to the HTML API path.
+- Kept CSS text parsing regexes such as @font-face, url(), and @import unchanged.
+
+2.58.36 - Admin enqueue modernization
+- Updated the UltraCache admin dashboard script enqueue to use the WordPress 6.3+ args array with in_footer => true.
+- Kept admin script execution behavior unchanged and did not add a script loading strategy.
+
+2.58.35 - CSS bundle scanner HTML API
+- Switched CSS bundle stylesheet discovery to WP_HTML_Tag_Processor for head/link scanning.
+- Kept the existing stylesheet eligibility rules and bundle build behavior unchanged.
+- Removed the remaining CSS bundle link-scan regex path from the warm verification counter.
+
 2.58.34 - Final submission metadata cleanup
 - Refreshed plugin/readme/README/POT version metadata for the final review package.
 - Normalized the GPLv2 license URI between the plugin header and readme.

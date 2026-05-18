@@ -1145,10 +1145,13 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return '';
             }
 
-            $scan_id_json = wp_json_encode($scan_id);
-            $endpoint_json = wp_json_encode($endpoint);
-            $rest_nonce_json = wp_json_encode($rest_nonce);
-            $scan_context_json = wp_json_encode($scan_context);
+            $scan_id_json = ucwp_json_encode_for_inline_script($scan_id);
+            $endpoint_json = ucwp_json_encode_for_inline_script($endpoint);
+            $rest_nonce_json = ucwp_json_encode_for_inline_script($rest_nonce);
+            $scan_context_json = ucwp_json_encode_for_inline_script($scan_context);
+            if ('' === $scan_id_json || '' === $endpoint_json || '' === $rest_nonce_json || '' === $scan_context_json) {
+                return '';
+            }
 
             return '<script id="ucwp-runtime-js-scan-collector" data-ucwp-runtime-scan="early">' . "\n" .
                 "(function(){\n" .

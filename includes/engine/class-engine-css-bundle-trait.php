@@ -780,11 +780,10 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return $verification;
             }
 
-            if (preg_match_all('/<link\b[^>]*>/i', $html, $link_matches)) {
-                foreach ((array) $link_matches[0] as $tag_html) {
-                    if ($this->html_tag_rel_contains_stylesheet((string) $tag_html)) {
-                        $verification['stylesheetLinks']++;
-                    }
+            $link_scan = $this->collect_css_bundle_link_tags_from_html($html, false);
+            foreach ((array) ($link_scan['linkTags'] ?? array()) as $tag_html) {
+                if ($this->html_tag_rel_contains_stylesheet((string) $tag_html)) {
+                    $verification['stylesheetLinks']++;
                 }
             }
 
@@ -796,6 +795,90 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             $verification['message'] = $verification['containsCssBundle'] ? 'Cached HTML contains a CSS bundle reference.' : 'Cached HTML does not contain a CSS bundle reference.';
 
             return $verification;
+        }
+
+        private function build_css_bundle_link_tag_from_processor($processor)
+        {
+            if (!is_object($processor) || !method_exists($processor, 'get_attribute')) {
+                return '';
+            }
+
+            $attributes = array(
+                'rel',
+                'href',
+                'media',
+                'onload',
+                'disabled',
+                'data-href',
+                'data-src',
+                'data-ucwp-frontpage-css',
+                'data-ucwp-page-css-bundle',
+                'data-ucwp-async-css',
+            );
+
+            $tag = '<link';
+            foreach ($attributes as $attribute) {
+                $value = $processor->get_attribute($attribute);
+                if (null === $value || false === $value) {
+                    continue;
+                }
+
+                if (true === $value) {
+                    $value = 'disabled' === $attribute ? 'disabled' : '1';
+                }
+
+                $tag .= ' ' . $attribute . '="' . esc_attr((string) $value) . '"';
+            }
+
+            return $tag . ' />';
+        }
+
+        private function collect_css_bundle_link_tags_from_html($html, $head_only = true)
+        {
+            $result = array(
+                'headFound' => false,
+                'linkTags' => array(),
+            );
+
+            if (!$this->html_tag_processor_available()) {
+                return $result;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $html);
+                $inside_head = false;
+
+                while ($processor->next_tag(array('tag_closers' => 'visit'))) {
+                    $tag_name = strtoupper((string) $processor->get_tag());
+                    $is_closer = $processor->is_tag_closer();
+
+                    if ('HEAD' === $tag_name) {
+                        $result['headFound'] = true;
+                        $inside_head = !$is_closer;
+                        continue;
+                    }
+
+                    if ($head_only && !$inside_head) {
+                        if (!empty($result['headFound']) && 'BODY' === $tag_name && !$is_closer) {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    if ('LINK' !== $tag_name || $is_closer) {
+                        continue;
+                    }
+
+                    $tag_html = $this->build_css_bundle_link_tag_from_processor($processor);
+                    if ('' !== $tag_html) {
+                        $result['linkTags'][] = $tag_html;
+                    }
+                }
+            } catch (\Throwable $e) {
+                return $result;
+            }
+
+            return $result;
         }
 
         private function fetch_frontpage_css_source_html($url)
@@ -853,17 +936,17 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return array('success' => false, 'skipped' => true, 'message' => __('No stylesheet links were found on the page.', 'ultracache'), 'stats' => $stats);
             }
 
-            if (!preg_match('/<head\b[^>]*>([\s\S]*?)<\/head>/i', $html, $matches)) {
+            $link_scan = $this->collect_css_bundle_link_tags_from_html($html, true);
+            if (empty($link_scan['headFound'])) {
                 return array('success' => false, 'skipped' => true, 'message' => __('No <head> element was found on the page.', 'ultracache'), 'stats' => $stats);
             }
 
-            $head_inner = isset($matches[1]) ? (string) $matches[1] : '';
-            if (!preg_match_all('/<link\b[^>]*>/i', $head_inner, $tag_matches)) {
+            if (empty($link_scan['linkTags']) || !is_array($link_scan['linkTags'])) {
                 return array('success' => false, 'skipped' => true, 'message' => __('No <link> tags were found on the page.', 'ultracache'), 'stats' => $stats);
             }
 
             $assets = array();
-            foreach ((array) $tag_matches[0] as $tag_html) {
+            foreach ((array) $link_scan['linkTags'] as $tag_html) {
                 $tag_html = (string) $tag_html;
                 if (!$this->html_tag_rel_contains_stylesheet($tag_html)) {
                     continue;

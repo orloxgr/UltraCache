@@ -83,17 +83,6 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 return $processed;
             }
 
-            $stats = $this->get_default_safe_async_css_stats();
-            $updated_html = (string) preg_replace_callback(
-                '/<link\b[^>]*>/i',
-                function ($matches) use (&$stats) {
-                    return $this->maybe_rewrite_safe_async_css_link_tag((string) $matches[0], $stats);
-                },
-                $html
-            );
-
-            $result['html'] = $updated_html;
-            $result['stats'] = $stats;
             return $result;
         }
 
@@ -109,7 +98,6 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 $processor = new WP_HTML_Tag_Processor($html);
                 $changed = false;
                 $fallbacks = array();
-                $index = 0;
 
                 while ($processor->next_tag('LINK')) {
                     $rel = $processor->get_attribute('rel');
@@ -182,8 +170,7 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                         continue;
                     }
 
-                    $marker = 'ucwp-safe-async-' . md5($absolute_url . '|' . (++$index));
-                    $fallbacks[$marker] = $this->build_async_css_noscript_fallback_link($href, $processor->get_attribute('media'));
+                    $fallbacks[] = $this->build_async_css_noscript_fallback_link($href, $processor->get_attribute('media'));
 
                     $processor->set_attribute('media', 'print');
                     $processor->set_attribute('onload', "this.media='all'");
@@ -195,8 +182,6 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                         $processor->set_attribute('data-ucwp-css-role', $role);
                     }
                     $processor->set_attribute('data-ucwp-css-async-reason', $this->normalize_css_decision_attribute_value(isset($decision['reason']) ? (string) $decision['reason'] : 'eligible'));
-                    $processor->set_attribute('data-ucwp-noscript-token', $marker);
-
                     $stats['rewritten']++;
                     $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'applied', isset($decision['reason']) ? (string) $decision['reason'] : 'eligible', '' !== $role ? ('role=' . $role) : '');
                     $changed = true;
@@ -212,7 +197,7 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 }
 
                 return array(
-                    'html' => $this->append_async_css_noscript_fallbacks_from_markers($updated_html, $fallbacks),
+                    'html' => $this->append_async_css_noscript_fallbacks_to_head($updated_html, $fallbacks),
                     'stats' => $stats,
                 );
             } catch (\Throwable $e) {
@@ -234,94 +219,6 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 'reasons' => array(),
                 'items' => array(),
             );
-        }
-
-        private function maybe_rewrite_safe_async_css_link_tag($tag, array &$stats)
-        {
-            $tag = (string) $tag;
-            if ('' === $tag) {
-                return $tag;
-            }
-
-            if (!$this->html_tag_rel_contains_stylesheet($tag)) {
-                return $tag;
-            }
-
-            $stats['scanned']++;
-
-            $href = $this->extract_attribute_from_html_tag($tag, 'href');
-            $absolute_for_diag = '' !== $href ? $this->absolutize_public_resource_url($href, home_url('/')) : '';
-
-            if (false !== stripos($tag, 'data-ucwp-async-css=')) {
-                $stats['skipped']++;
-                $this->add_safe_async_css_diagnostic_item($stats, $absolute_for_diag, 'skipped', 'already_async');
-                return $tag;
-            }
-
-            if (false !== stripos($tag, 'data-ucwp-async-css-fallback=')
-                || false !== stripos($tag, 'data-ucwp-delayed-icon-fonts-noscript=')) {
-                $stats['skipped']++;
-                $this->add_safe_async_css_diagnostic_item($stats, $absolute_for_diag, 'skipped', 'noscript_fallback');
-                return $tag;
-            }
-
-            $is_ucwp_generated_css_link = false !== stripos($tag, 'data-ucwp-frontpage-css=')
-                || false !== stripos($tag, 'data-ucwp-page-css-bundle=')
-                || false !== stripos($tag, 'data-ucwp-leftover-css-bundle=');
-
-            if ('' === $href) {
-                $stats['unresolved']++;
-                $this->add_safe_async_css_diagnostic_item($stats, '', 'unresolved', 'missing_href');
-                return $tag;
-            }
-
-            $media = strtolower(trim((string) $this->extract_attribute_from_html_tag($tag, 'media')));
-            if ('' !== $media && 'all' !== $media) {
-                $stats['skipped']++;
-                $this->add_safe_async_css_diagnostic_item($stats, $absolute_for_diag, 'skipped', 'non_all_media', $media);
-                return $tag;
-            }
-
-            if (preg_match('/\s(?:disabled|onload)\b/i', $tag)) {
-                $stats['skipped']++;
-                $this->add_safe_async_css_diagnostic_item($stats, $absolute_for_diag, 'skipped', 'already_has_loading_attribute');
-                return $tag;
-            }
-
-            $absolute_url = $this->absolutize_public_resource_url($href, home_url('/'));
-            if ('' === $absolute_url || !$this->is_safe_local_public_stylesheet_url($absolute_url)) {
-                $stats['unresolved']++;
-                $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'unresolved', 'not_local_css');
-                return $tag;
-            }
-
-            $decision = $this->get_async_css_stylesheet_decision($absolute_url, $tag);
-            $role = isset($decision['role']) ? (string) $decision['role'] : $this->get_ultracache_generated_stylesheet_role($absolute_url, $tag);
-            if (empty($decision['eligible'])) {
-                $stats['skipped']++;
-                $reason = isset($decision['reason']) ? (string) $decision['reason'] : 'not_eligible';
-                $annotated = $this->annotate_generated_css_link_tag_with_decision($tag, $role, $reason, false);
-                $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'skipped', $reason, '' !== $role ? ('role=' . $role) : '');
-                return $annotated;
-            }
-
-            $rewritten = $this->remove_html_tag_attribute($tag, 'media');
-            $rewritten = $this->remove_html_tag_attribute($rewritten, 'onload');
-            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'media', 'print');
-            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'onload', "this.media='all'");
-            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-async-css', '1');
-            if (!empty($is_ucwp_generated_css_link) || '' !== $role) {
-                $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-generated-css-async', '1');
-            }
-            if ('' !== $role) {
-                $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-css-role', $role);
-            }
-            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-css-async-reason', $this->normalize_css_decision_attribute_value(isset($decision['reason']) ? (string) $decision['reason'] : 'eligible'));
-            $rewritten .= '<noscript>' . $tag . '</noscript>';
-
-            $stats['rewritten']++;
-            $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'applied', isset($decision['reason']) ? (string) $decision['reason'] : 'eligible', '' !== $role ? ('role=' . $role) : '');
-            return $rewritten;
         }
 
         private function html_tag_rel_contains_stylesheet($tag)
@@ -364,36 +261,18 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             return '<noscript><link ' . $attrs . ' data-ucwp-async-css-fallback="1" /></noscript>';
         }
 
-        private function append_async_css_noscript_fallbacks_from_markers($html, array $fallbacks)
+        private function append_async_css_noscript_fallbacks_to_head($html, array $fallbacks)
         {
             if (empty($fallbacks) || !is_string($html) || '' === $html) {
                 return $html;
             }
 
-            foreach ($fallbacks as $marker => $fallback) {
-                $marker = (string) $marker;
-                $fallback = (string) $fallback;
-                if ('' === $marker) {
-                    continue;
-                }
-
-                $pattern = '/<link\b(?=[^>]*\bdata-ucwp-noscript-token=("|\')' . preg_quote($marker, '/') . '\1)[^>]*>/i';
-                $updated = preg_replace_callback($pattern, function ($matches) use ($marker, $fallback) {
-                    $tag = (string) ($matches[0] ?? '');
-                    if ('' === $tag) {
-                        return $tag;
-                    }
-
-                    $tag = $this->remove_html_tag_attribute($tag, 'data-ucwp-noscript-token');
-                    return $tag . $fallback;
-                }, $html, 1);
-
-                if (is_string($updated) && '' !== $updated) {
-                    $html = $updated;
-                }
+            $markup = implode("\n", array_values(array_filter(array_map('strval', $fallbacks))));
+            if ('' === trim($markup)) {
+                return $html;
             }
 
-            return $html;
+            return $this->insert_html_before_closing_head($html, $markup);
         }
 
 

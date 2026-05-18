@@ -864,17 +864,8 @@ private function decode_google_fonts_html_url($url)
 
             $base_url = '' !== (string) $base_url ? (string) $base_url : home_url('/');
             $urls = array();
-            if (!preg_match_all('/<link\b[^>]*>/is', $html, $matches) || empty($matches[0])) {
-                return array();
-            }
-
-            foreach ((array) $matches[0] as $tag) {
-                $tag = (string) $tag;
-                if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
-                    continue;
-                }
-
-                $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'href'), ENT_QUOTES | ENT_HTML5);
+            foreach ($this->collect_stylesheet_link_attributes_from_html($html) as $link) {
+                $href = isset($link['href']) ? (string) $link['href'] : '';
                 if ('' === $href || false !== stripos($href, 'fonts.googleapis.com')) {
                     continue;
                 }
@@ -898,6 +889,39 @@ private function decode_google_fonts_html_url($url)
             }
 
             return array_values($urls);
+        }
+
+        private function collect_stylesheet_link_attributes_from_html($html)
+        {
+            $html = (string) $html;
+            if ('' === $html || false === stripos($html, '<link') || !$this->html_tag_processor_available()) {
+                return array();
+            }
+
+            $links = array();
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                while ($processor->next_tag('LINK')) {
+                    if (!$this->html_rel_attribute_contains_stylesheet($processor->get_attribute('rel'))) {
+                        continue;
+                    }
+
+                    $href = $processor->get_attribute('href');
+                    if (!is_string($href) || '' === $href) {
+                        continue;
+                    }
+
+                    $links[] = array(
+                        'href' => html_entity_decode($href, ENT_QUOTES | ENT_HTML5),
+                        'data_ucwp_font_display_patch' => null !== $processor->get_attribute('data-ucwp-font-display-patch'),
+                        'data_ucwp_delayed_icon_fonts' => null !== $processor->get_attribute('data-ucwp-delayed-icon-fonts'),
+                    );
+                }
+            } catch (\Throwable $e) {
+                return array();
+            }
+
+            return $links;
         }
 
         private function fetch_google_fonts_scan_css($url)
@@ -2122,17 +2146,8 @@ private function build_linked_woff2_font_face_registry_from_html($html)
                 return $registry;
             }
 
-            if (!preg_match_all('/<link\b[^>]*\bhref=("|\')(.*?)\1[^>]*>/is', $html, $matches, PREG_SET_ORDER)) {
-                return $registry;
-            }
-
-            foreach ($matches as $match) {
-                $tag = isset($match[0]) ? (string) $match[0] : '';
-                if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
-                    continue;
-                }
-
-                $href = isset($match[2]) ? html_entity_decode((string) $match[2], ENT_QUOTES) : '';
+            foreach ($this->collect_stylesheet_link_attributes_from_html($html) as $link) {
+                $href = isset($link['href']) ? (string) $link['href'] : '';
                 $stylesheet_url = $this->normalize_public_resource_url($this->absolutize_public_resource_url($href, home_url('/')));
                 if ('' === $stylesheet_url) {
                     continue;
@@ -2698,17 +2713,8 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
                 return $map;
             }
 
-            if (!preg_match_all('/<link\b[^>]*\bhref=(\"|\')(.*?)\1[^>]*>/is', $html, $matches, PREG_SET_ORDER)) {
-                return $map;
-            }
-
-            foreach ($matches as $match) {
-                $tag = isset($match[0]) ? (string) $match[0] : '';
-                if (!$this->html_tag_rel_contains_stylesheet($tag)) {
-                    continue;
-                }
-
-                $href = isset($match[2]) ? html_entity_decode((string) $match[2], ENT_QUOTES) : '';
+            foreach ($this->collect_stylesheet_link_attributes_from_html($html) as $link) {
+                $href = isset($link['href']) ? (string) $link['href'] : '';
                 $source_url = $this->normalize_public_resource_url($href);
                 if ('' === $source_url) {
                     continue;
@@ -2796,8 +2802,8 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
                 $this->save_runtime_local_font_css_url_map($map);
             }
 
-            $json = wp_json_encode($map);
-            if (!is_string($json) || '' === $json) {
+            $json = ucwp_json_encode_for_inline_script($map);
+            if ('' === $json) {
                 $json = '{}';
             }
 
@@ -3041,35 +3047,28 @@ private function get_local_font_css_scan_roots()
             }
 
             $hrefs = array();
-            if (preg_match_all('/<link\b[^>]*>/is', $html, $matches)) {
-                foreach ((array) $matches[0] as $tag) {
-                    $tag = (string) $tag;
-                    if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
-                        continue;
-                    }
-
-                    if (false !== stripos($tag, 'data-ucwp-font-display-patch=') || false !== stripos($tag, 'data-ucwp-delayed-icon-fonts=')) {
-                        continue;
-                    }
-
-                    $href = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'href'), ENT_QUOTES | ENT_HTML5);
-                    if ('' === $href) {
-                        continue;
-                    }
-
-                    $absolute_href = $this->absolutize_public_resource_url($href, home_url('/'));
-                    $normalized = $this->normalize_public_resource_url($absolute_href);
-                    if ('' === $normalized || !$this->is_cacheable_local_url($normalized)) {
-                        continue;
-                    }
-
-                    $path = strtolower((string) wp_parse_url($normalized, PHP_URL_PATH));
-                    if (false !== strpos($path, '/cache/ultracache/font-css/') || false !== strpos($path, '/cache/ultracache/css-bundles/') || false !== strpos($path, '/cache/ultracache/optimized-css/')) {
-                        continue;
-                    }
-
-                    $hrefs[$normalized] = $normalized;
+            foreach ($this->collect_stylesheet_link_attributes_from_html($html) as $link) {
+                if (!empty($link['data_ucwp_font_display_patch']) || !empty($link['data_ucwp_delayed_icon_fonts'])) {
+                    continue;
                 }
+
+                $href = isset($link['href']) ? (string) $link['href'] : '';
+                if ('' === $href) {
+                    continue;
+                }
+
+                $absolute_href = $this->absolutize_public_resource_url($href, home_url('/'));
+                $normalized = $this->normalize_public_resource_url($absolute_href);
+                if ('' === $normalized || !$this->is_cacheable_local_url($normalized)) {
+                    continue;
+                }
+
+                $path = strtolower((string) wp_parse_url($normalized, PHP_URL_PATH));
+                if (false !== strpos($path, '/cache/ultracache/font-css/') || false !== strpos($path, '/cache/ultracache/css-bundles/') || false !== strpos($path, '/cache/ultracache/optimized-css/')) {
+                    continue;
+                }
+
+                $hrefs[$normalized] = $normalized;
             }
 
             if (empty($hrefs)) {

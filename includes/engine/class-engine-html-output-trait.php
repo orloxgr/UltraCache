@@ -535,132 +535,73 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
 
         private function dedupe_ultracache_stylesheet_links_in_html($html)
         {
-            if (!is_string($html) || '' === $html || false === stripos($html, '<link')) {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link') || !$this->html_tag_processor_available()) {
                 return $html;
             }
 
-            $outer_seen = array();
-            $noscript_seen = array();
-            $noscript_blocks = array();
-            $placeholder_prefix = '%%UCWP_NOSCRIPT_CSS_DEDUPE_' . md5((string) strlen($html) . '|' . (defined('UCWP_VERSION') ? (string) UCWP_VERSION : '')) . '_';
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $seen = array();
+                $changed = false;
 
-            $without_noscript = preg_replace_callback('/<noscript\b[^>]*>.*?<\/noscript>/is', function ($matches) use (&$noscript_blocks, &$noscript_seen, $placeholder_prefix) {
-                $index = count($noscript_blocks);
-                $placeholder = $placeholder_prefix . $index . '%%';
-                $block = isset($matches[0]) ? (string) $matches[0] : '';
-                $noscript_blocks[$placeholder] = $this->dedupe_ultracache_stylesheet_links_in_fragment($block, true, $noscript_seen);
-                return $placeholder;
-            }, $html);
+                while ($processor->next_tag('LINK')) {
+                    if (!$this->html_rel_attribute_contains_stylesheet($processor->get_attribute('rel'))) {
+                        continue;
+                    }
 
-            if (!is_string($without_noscript) || '' === $without_noscript) {
+                    $href = $processor->get_attribute('href');
+                    if (!is_string($href) || '' === $href || false === stripos($href, '.css')) {
+                        continue;
+                    }
+
+                    $href_lc = strtolower(html_entity_decode($href, ENT_QUOTES | ENT_HTML5));
+                    $is_ucwp = false !== strpos($href_lc, '/wp-content/cache/ultracache/')
+                        || null !== $processor->get_attribute('data-ucwp-async-css')
+                        || null !== $processor->get_attribute('data-ucwp-delayed-icon-fonts')
+                        || null !== $processor->get_attribute('data-ucwp-css-async-reason')
+                        || null !== $processor->get_attribute('data-ucwp-frontpage-css')
+                        || null !== $processor->get_attribute('data-ucwp-page-css-bundle')
+                        || null !== $processor->get_attribute('data-ucwp-leftover-css-bundle')
+                        || null !== $processor->get_attribute('data-ucwp-async-css-fallback');
+                    if (!$is_ucwp) {
+                        continue;
+                    }
+
+                    $absolute = $this->absolutize_public_resource_url($href, home_url('/'));
+                    if (!is_string($absolute) || '' === $absolute) {
+                        $absolute = $href;
+                    }
+                    $absolute = strtolower((string) preg_replace('/#.*$/', '', (string) $absolute));
+                    $media = strtolower(trim((string) $processor->get_attribute('media')));
+                    $is_async = null !== $processor->get_attribute('data-ucwp-async-css')
+                        || null !== $processor->get_attribute('data-ucwp-delayed-icon-fonts')
+                        || null !== $processor->get_attribute('data-ucwp-css-async-reason')
+                        || null !== $processor->get_attribute('onload')
+                        || 'print' === $media;
+                    $key = ($is_async ? 'async|' : 'blocking|') . $absolute;
+
+                    if (!isset($seen[$key])) {
+                        $seen[$key] = true;
+                        continue;
+                    }
+
+                    $processor->remove_attribute('rel');
+                    $processor->remove_attribute('href');
+                    $processor->remove_attribute('media');
+                    $processor->remove_attribute('onload');
+                    $processor->set_attribute('data-ucwp-deduped-stylesheet-link', '1');
+                    $changed = true;
+                }
+
+                if (!$changed) {
+                    return $html;
+                }
+
+                $updated = $processor->get_updated_html();
+                return is_string($updated) && '' !== $updated ? $updated : $html;
+            } catch (\Throwable $e) {
                 return $html;
             }
-
-            $deduped = $this->dedupe_ultracache_stylesheet_links_in_fragment($without_noscript, false, $outer_seen);
-            if (!is_string($deduped) || '' === $deduped) {
-                return $html;
-            }
-
-            if (!empty($noscript_blocks)) {
-                $deduped = strtr($deduped, $noscript_blocks);
-            }
-
-            return $deduped;
-        }
-
-        private function dedupe_ultracache_stylesheet_links_in_fragment($html, $inside_noscript, array &$seen)
-        {
-            if (!is_string($html) || '' === $html || false === stripos($html, '<link')) {
-                return $html;
-            }
-
-            $updated = preg_replace_callback('/<link\b[^>]*>/i', function ($matches) use ($inside_noscript, &$seen) {
-                $tag = isset($matches[0]) ? (string) $matches[0] : '';
-                if ('' === $tag || !$this->html_tag_rel_contains_stylesheet($tag)) {
-                    return $tag;
-                }
-
-                $href = $this->extract_attribute_from_html_tag($tag, 'href');
-                if ('' === $href || false === stripos($href, '.css')) {
-                    return $tag;
-                }
-
-                if (!$this->is_ultracache_stylesheet_dedupe_candidate($tag, $href, (bool) $inside_noscript)) {
-                    return $tag;
-                }
-
-                $key = $this->build_ultracache_stylesheet_dedupe_key($tag, $href, (bool) $inside_noscript);
-                if ('' === $key) {
-                    return $tag;
-                }
-
-                if (isset($seen[$key])) {
-                    return '';
-                }
-
-                $seen[$key] = true;
-                return $tag;
-            }, $html);
-
-            return is_string($updated) ? $updated : $html;
-        }
-
-        private function is_ultracache_stylesheet_dedupe_candidate($tag, $href, $inside_noscript = false)
-        {
-            $tag = (string) $tag;
-            $href = (string) $href;
-            $tag_lc = strtolower($tag);
-            $href_lc = strtolower(html_entity_decode($href, ENT_QUOTES | ENT_HTML5));
-
-            if (false !== strpos($tag_lc, 'data-ucwp-')) {
-                return true;
-            }
-
-            if (false !== strpos($href_lc, '/wp-content/cache/ultracache/')) {
-                return true;
-            }
-
-            if ($inside_noscript && false !== strpos($tag_lc, 'data-ucwp-async-css-fallback')) {
-                return true;
-            }
-
-            return false;
-        }
-
-        private function build_ultracache_stylesheet_dedupe_key($tag, $href, $inside_noscript = false)
-        {
-            $tag = (string) $tag;
-            $href = trim(html_entity_decode((string) $href, ENT_QUOTES | ENT_HTML5));
-            if ('' === $href) {
-                return '';
-            }
-
-            $absolute = $this->absolutize_public_resource_url($href, home_url('/'));
-            if (!is_string($absolute) || '' === $absolute) {
-                $absolute = $href;
-            }
-
-            $absolute = strtolower($absolute);
-            $absolute = preg_replace('/#.*$/', '', $absolute);
-            $absolute = is_string($absolute) ? $absolute : strtolower($href);
-
-            if ($inside_noscript) {
-                return 'noscript|' . $absolute;
-            }
-
-            $tag_lc = strtolower($tag);
-            $media = strtolower(trim((string) $this->extract_attribute_from_html_tag($tag, 'media')));
-            $is_async = false !== strpos($tag_lc, 'data-ucwp-async-css')
-                || false !== strpos($tag_lc, 'data-ucwp-delayed-icon-fonts')
-                || false !== strpos($tag_lc, 'data-ucwp-css-async-reason')
-                || false !== strpos($tag_lc, 'onload=')
-                || 'print' === $media;
-
-            if ($is_async) {
-                return 'async|' . $absolute;
-            }
-
-            return 'blocking|' . $absolute;
         }
 
         private function inject_mailerlite_lazy_nonce_refresh($html)
@@ -782,8 +723,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
         return true;
       }
       return false;
-    }).catch(function(error){
-      try { console.warn('UltraCache MailerLite nonce refresh failed', error); } catch (e) {}
+    }).catch(function(){
       return false;
     }).then(function(ok){
       form.__ucwpMlNonceRefreshing = null;
@@ -849,8 +789,8 @@ JS;
                 }
             }
 
-            if (false !== stripos($html, '</head>')) {
-                return preg_replace('/<\/head>/i', $script . "\n</head>", $html, 1);
+            if (false !== stripos($html, '</head')) {
+                return $this->insert_html_before_closing_head($html, $script);
             }
 
             return $script . "\n" . $html;
@@ -888,28 +828,7 @@ JS;
             }
 
             $processed = $this->rewrite_chain_delay_stylesheet_links_with_processor($html, $fragments);
-            if (is_string($processed)) {
-                return $processed;
-            }
-
-            $that = $this;
-            $rewritten = preg_replace_callback('/<link\b[^>]*>/i', static function ($matches) use ($that, $fragments) {
-                $tag = isset($matches[0]) ? (string) $matches[0] : '';
-                if ('' === $tag || !$that->html_tag_rel_contains_stylesheet($tag)) {
-                    return $tag;
-                }
-                if (false !== stripos($tag, 'data-ucwp-async-css=') || false !== stripos($tag, 'data-ucwp-frontpage-css=') || false !== stripos($tag, 'data-ucwp-page-css-bundle=')) {
-                    return $tag;
-                }
-                $href = $that->extract_attribute_from_html_tag($tag, 'href');
-                if ('' === $href || !$that->asset_matches_fragment_list('', $href, $fragments)) {
-                    return $tag;
-                }
-
-                return $that->force_async_stylesheet_link_tag($tag);
-            }, $html);
-
-            return is_string($rewritten) ? $rewritten : $html;
+            return is_string($processed) ? $processed : $html;
         }
 
         private function rewrite_chain_delay_stylesheet_links_with_processor($html, array $fragments)
@@ -922,7 +841,6 @@ JS;
                 $processor = new WP_HTML_Tag_Processor($html);
                 $changed = false;
                 $fallbacks = array();
-                $index = 0;
 
                 while ($processor->next_tag('LINK')) {
                     $rel = $processor->get_attribute('rel');
@@ -945,13 +863,11 @@ JS;
                         continue;
                     }
 
-                    $marker = 'ucwp-chain-delay-' . md5($href . '|' . (++$index));
-                    $fallbacks[$marker] = $this->build_async_css_noscript_fallback_link($href, $processor->get_attribute('media'));
+                    $fallbacks[] = $this->build_async_css_noscript_fallback_link($href, $processor->get_attribute('media'));
 
                     $processor->set_attribute('media', 'print');
                     $processor->set_attribute('onload', "this.media='all'");
                     $processor->set_attribute('data-ucwp-async-css', '1');
-                    $processor->set_attribute('data-ucwp-noscript-token', $marker);
                     $changed = true;
                 }
 
@@ -964,24 +880,10 @@ JS;
                     return null;
                 }
 
-                return $this->append_async_css_noscript_fallbacks_from_markers($updated_html, $fallbacks);
+                return $this->append_async_css_noscript_fallbacks_to_head($updated_html, $fallbacks);
             } catch (\Throwable $e) {
                 return null;
             }
-        }
-
-        private function force_async_stylesheet_link_tag($tag)
-        {
-            $tag = (string) $tag;
-            if ('' === $tag || false !== stripos($tag, ' onload=')) {
-                return $tag;
-            }
-
-            $rewritten = $this->remove_html_tag_attribute($tag, 'media');
-            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'media', 'print');
-            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'onload', "this.media='all'");
-            $rewritten = $this->set_or_add_html_tag_attribute($rewritten, 'data-ucwp-async-css', '1');
-            return $rewritten . '<noscript>' . $tag . '</noscript>';
         }
 
         private function apply_asset_chain_cleanup_to_html($html, array $settings = array())
@@ -1016,24 +918,7 @@ JS;
             }
 
             $processed = $this->remove_asset_tags_matching_fragments_with_processor($html, $fragments);
-            if (is_string($processed)) {
-                return $processed;
-            }
-
-            $that = $this;
-            $html = preg_replace_callback('/<script\b[^>]*\bsrc=("|\')(.*?)\1[^>]*>\s*<\/script>/is', static function ($matches) use ($that, $fragments) {
-                $tag = isset($matches[0]) ? (string) $matches[0] : '';
-                $src = $that->extract_attribute_from_html_tag($tag, 'src');
-                return $that->asset_matches_fragment_list('', $src, $fragments) ? '' : $tag;
-            }, $html);
-
-            $html = preg_replace_callback('/<link\b[^>]*>/i', static function ($matches) use ($that, $fragments) {
-                $tag = isset($matches[0]) ? (string) $matches[0] : '';
-                $href = $that->extract_attribute_from_html_tag($tag, 'href');
-                return ('' !== $href && $that->asset_matches_fragment_list('', $href, $fragments)) ? '' : $tag;
-            }, is_string($html) ? $html : '');
-
-            return is_string($html) ? $html : '';
+            return is_string($processed) ? $processed : $html;
         }
 
         private function remove_asset_tags_matching_fragments_with_processor($html, array $fragments)
@@ -1200,8 +1085,8 @@ JS;
                 return $html;
             }
 
-            $json = wp_json_encode($rules, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            if (!is_string($json) || '' === $json) {
+            $json = ucwp_json_encode_for_inline_script($rules, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ('' === $json) {
                 return $html;
             }
 
@@ -1528,7 +1413,7 @@ private function html_tag_processor_available()
 
         private function insert_html_before_closing_head($html, $markup)
         {
-            if (!is_string($html) || '' === $html || false === stripos($html, '</head')) {
+            if (!is_string($html) || '' === $html) {
                 return $html;
             }
 
@@ -1537,8 +1422,13 @@ private function html_tag_processor_available()
                 return $html;
             }
 
-            $updated = preg_replace('/<\/head>/i', rtrim($markup) . "\n</head>", $html, 1);
-            return is_string($updated) && '' !== $updated ? $updated : $html;
+            $head_close = stripos($html, '</head');
+            if (false === $head_close) {
+                return $html;
+            }
+
+            return substr($html, 0, $head_close) . rtrim($markup) . "
+" . substr($html, $head_close);
         }
 
         private function normalize_public_resource_url($url)

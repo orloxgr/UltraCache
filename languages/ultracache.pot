@@ -2,7 +2,7 @@
 # This file is distributed under the GPLv2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: UltraCache 2.58.34\n"
+"Project-Id-Version: UltraCache 2.58.39\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-05-18 01:04+0000\n"
 "MIME-Version: 1.0\n"
