@@ -1,3 +1,8 @@
+2.58.40 - Targeted final validation fixes
+- CLI warm_frontpage_html_css now warms HTML-only with success when CSS Bundling is disabled instead of failing on missing bundle injection.
+- APCu object-cache CLI flush message now clarifies PHP-process scope and PHP-FPM/web APCu limitations.
+- Varnish purge coordination now records/warns when Varnish is enabled but Flush All Include Varnish is OFF, avoiding misleading full-purge feedback.
+
 2.58.39 - Final WordPress.org package
 - Final submission package metadata refresh.
 - Verified no remote asset enqueue, no wp_localize_script usage, no global ob_start usage, and no unexpected direct wp_remote_* calls beyond guarded infrastructure wrappers.

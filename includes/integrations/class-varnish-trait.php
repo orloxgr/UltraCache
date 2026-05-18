@@ -14,7 +14,17 @@ trait Ultra_Cache_WP_Varnish_Trait
         public function handle_varnish_after_purge_all($payload = array())
         {
             $settings = self::get_dashboard_settings();
+            if (empty($settings['varnishCliEnabled'])) {
+                return;
+            }
             if (empty($settings['flushAllIncludeVarnish'])) {
+                self::set_varnish_last_result(array(
+                    'success' => false,
+                    'skipped' => true,
+                    'message' => self::maybe_translate('Varnish integration is enabled, but Flush All Include Varnish is OFF. Reverse-proxy cache was not purged.'),
+                    'time'    => time(),
+                    'scope'   => 'all',
+                ));
                 return;
             }
             self::varnish_flush_all_current_host();

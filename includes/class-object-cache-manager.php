@@ -533,6 +533,9 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 					$base
 				);
 			}
+			if ('apcu' === $backend && defined('WP_CLI') && WP_CLI) {
+				return __('APCu object cache flushed for this PHP process. Note: PHP-FPM/web APCu pools may require a dashboard/web flush or PHP-FPM restart.', 'ultracache');
+			}
 			return sprintf(
 				/* translators: %s: object cache backend label, for example Redis. */
 				__('%s object cache flushed.', 'ultracache'),

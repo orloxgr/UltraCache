@@ -45,6 +45,19 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
                 WP_CLI::error('Full cache purge is already running or the purge lock could not be acquired.');
             }
 
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')) {
+                $settings = Ultra_Cache_WP::get_dashboard_settings();
+                if (!empty($settings['varnishCliEnabled']) && empty($settings['flushAllIncludeVarnish'])) {
+                    WP_CLI::warning('Varnish integration is enabled, but Flush All Include Varnish is OFF. The local UltraCache cache was purged, but reverse-proxy/Varnish cache was not purged.');
+                }
+                if (!empty($settings['varnishCliEnabled']) && !empty($settings['flushAllIncludeVarnish'])) {
+                    $varnish_result = get_transient('ultracache_varnish_last_result');
+                    if (is_array($varnish_result) && empty($varnish_result['success'])) {
+                        WP_CLI::warning(!empty($varnish_result['message']) ? (string) $varnish_result['message'] : 'Varnish purge did not report success.');
+                    }
+                }
+            }
+
             WP_CLI::success('Purged the full cache.');
         }
 
@@ -240,6 +253,22 @@ if (!trait_exists('UCWP_CLI_Cache_Trait')) {
             $frontpage_url = home_url('/');
             if (isset($assoc_args['purge-first']) && method_exists($engine, 'purge_url')) {
                 $engine->purge_url($frontpage_url);
+            }
+
+            $settings = (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')) ? Ultra_Cache_WP::get_dashboard_settings() : array();
+            if (empty($settings['homepageCssBundleEnabled'])) {
+                if (!method_exists($engine, 'warm_frontpage_html')) {
+                    WP_CLI::error('Front page HTML warming is not available while CSS Bundling is disabled.');
+                }
+
+                $result = $engine->warm_frontpage_html(array('force_refresh' => true));
+                if (!empty($result['success']) || !empty($result['skipped'])) {
+                    $message = !empty($result['message']) ? (string) $result['message'] : 'Front page HTML cache warmed.';
+                    WP_CLI::success('CSS Bundling is disabled; warmed front page HTML cache only. ' . $message);
+                    return;
+                }
+
+                WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Front page HTML warm failed while CSS Bundling is disabled.');
             }
 
             $result = $engine->warm_frontpage_html_with_css();
