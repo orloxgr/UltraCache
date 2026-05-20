@@ -207,6 +207,20 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             return $html;
         }
 
+        private function apply_final_font_display_rewrite_before_cache_store($html)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link') || false === stripos($html, '.css')) {
+                return $html;
+            }
+
+            $policy = $this->get_font_optimization_policy();
+            if (empty($policy['local_font_css_rewrite'])) {
+                return $html;
+            }
+
+            return $this->normalize_linked_local_stylesheet_font_display_in_html($html);
+        }
+
         /**
          * Force WordPress' template-enhancement output buffer for live Google
          * Fonts cleanup when a Google Fonts feature needs final HTML mutation.
@@ -221,7 +235,8 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
             }
 
             $settings = $this->get_settings();
-            return !empty($settings['google_fonts_local_optimization']) || !empty($settings['google_fonts_swap']);
+            $policy = $this->get_font_optimization_policy(is_array($settings) ? $settings : array());
+            return !empty($settings['google_fonts_local_optimization']) || !empty($settings['google_fonts_swap']) || !empty($policy['local_font_css_rewrite']);
         }
 
         /**
@@ -238,7 +253,8 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
                 return $html;
             }
 
-            return $this->apply_final_google_fonts_rewrite_before_cache_store($html);
+            $html = $this->apply_final_google_fonts_rewrite_before_cache_store($html);
+            return $this->apply_final_font_display_rewrite_before_cache_store($html);
         }
 
 
@@ -1521,6 +1537,12 @@ private function decode_google_fonts_html_url($url)
             static $request_assets = array();
 
             $source_url = $this->normalize_public_resource_url($url);
+            if ('' !== $source_url && !preg_match('#^https?://#i', $source_url)) {
+                $absolute_source_url = $this->absolutize_public_resource_url($source_url, home_url('/'));
+                if (is_string($absolute_source_url) && '' !== $absolute_source_url) {
+                    $source_url = $this->normalize_public_resource_url($absolute_source_url);
+                }
+            }
             if ('' === $source_url) {
                 return array();
             }

@@ -327,6 +327,7 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'scheduledWarmLimit',
                 'cacheFreshTtlMinutes',
                 'cacheMaxStaleMinutes',
+                'delayedLocalJsAutoStartSeconds',
             );
 
             $textarea_keys = array(

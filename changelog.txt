@@ -1,3 +1,128 @@
+2.58.76 - JS diagnostic queue DB compliance fix
+- Replaced interpolated JS diagnostic queue table SQL with prepared identifier placeholders.
+- Added targeted object-cache reads and invalidation for JS diagnostic queue job/status lookups.
+- Kept JS diagnostic UI/runtime behavior unchanged.
+
+2.58.75 - JS diagnostics spacing and label polish
+- Adds 12px gaps to JS diagnostics action button rows.
+- Adds 10px top spacing to Runtime Scan context, runtime action buttons, console action buttons, and runtime status message.
+- Sets Page URL to scan and Console errors to analyze labels to 12px and #6f7b8f.
+
+2.58.74 - Fixed JS diagnostics Browser Scanner / Console Error Handler two-column layout and title style consistency.
+2.58.73 - Fixed JS diagnostics layout regression where Clear Console Input referenced a missing React handler.
+2.58.72 - Reordered JS Delay/Defer diagnostics UI into exclusions, browser scanner, console handler, and shared queue status sections with improved runtime progress visibility.
+2.58.71 - Removed borders from Advanced Settings mini action/diagnostic boxes and populate-warning notices for a cleaner UI.
+2.58.70 - Fixed Advanced Settings & Exclusions layout so the five sections render as separate accordion card boxes instead of one shared wrapper.
+2.58.69 - Advanced Settings accordion split and JS diagnostic result UI polish
+- Adds a DB-backed JS diagnostic queue for browser runtime and pasted-console diagnostics.
+- Adds queue start, pause, resume, cancel, progress, latest status, and stored result buckets.
+- Stores Confirmed Error Fixes, Suggestions, Review Only, Already Listed, and Ignored buckets without auto-appending exclusions.
+
+2.58.66 - Theme scan stage
+- Adds a diagnostics-only Theme Scan Stage for unresolved runtime JS errors.
+- Scans the active child theme first, then the parent theme, using guarded UltraCache file reads.
+- Emits review-only exact theme JS candidates; Safe Defer toggle behavior is unchanged.
+
+2.58.65 - Runtime error group resolver
+- Added a Runtime Error Group Resolver for Safe Defer/Delay diagnostics.
+- Maps failing console/stack source URLs to known plugin groups where confirmed, including WooCommerce Products Filter.
+- Keeps MailerLite validation-messages.js as an exact confirmed source fix instead of a generic messages/global suggestion.
+- Unknown plugin/theme source owners are review-only and are not appendable confirmed fixes.
+
+2.58.64 - HTML adjacency resolver
+- Added a final-HTML external-script plus immediate-inline dependency resolver for runtime/console JS diagnostics.
+- Missing globals such as MailerLite messages now resolve to the adjacent provider script instead of a raw/global token.
+- No auto-append, no generic dependency fallback, and no font-display changes.
+
+2.58.63 - Safe Defer diagnostic fixes
+- Runtime/console diagnostics no longer append broad generic dependency fixes such as jquery, jquery-core, wp-i18n, wp-hooks, wp-api-fetch, react, react-dom, or wp-element.
+- Runtime diagnostics now keep WordPress/React foundation errors as exact resolved review-only candidates unless a specific plugin/script group is detected.
+- Added specific confirmed resolver entries for WOOF/WooCommerce Products Filter and direct MailerLite validation-messages.js errors.
+- Removed the browser-side console parser fallback from Extract Console Error Suggestions.
+- Replaced the remaining aggressive-profile broad JS exclusion seed with the curated tested dependency path list.
+
+2.58.62 - Safe Defer defaults cleanup
+- Safe Defer JS now appends only curated WordPress foundation script paths.
+- Removed broad generic dependency defaults from Append Tested Dependency Defaults.
+- Removed the legacy Safe Defer init-script scan from the Safe Defer toggle and profile apply flow.
+
+2.58.61 - Final font-display store-stage rewrite
+- Runs linked stylesheet font-display normalization at the absolute cache-store finalizer and inside the write path, after CSS/JS/LCP transformations.
+- Handles root-relative local stylesheet URLs before resolving source paths, so Elementor/theme/plugin font CSS can be rewritten to patched UltraCache CSS copies.
+- Does not add new frontend debug markers.
+
+2.58.60 - Final linked font-display normalization pass
+- Restored a final source-level linked stylesheet font-display normalization pass after async CSS transforms so late/restored local font CSS links are rewritten to UltraCache patched copies.
+- Keeps runtime CSSOM font-display patch as fallback only; primary fix is cached CSS href replacement.
+
+= 2.58.60 =
+* UI: align uc-field-label styling with switch title typography across Advanced Settings fields.
+
+2.58.58 - Dropdown title style alignment
+- Dropdown setting titles now use the same visual title styling as switch labels.
+
+2.58.57 - JS strategy cleanup and APCu flush lock
+- Removed Defer all eligible JS from the full-site strategy dropdown; full-site strategy is now Off or Delay all eligible JS.
+- Renamed LCP Boundary Defer to LCP Boundary Delay in the dashboard UI.
+- Replaced Delayed local JS auto-start mode/seconds fields with one dropdown: interaction only, 0.1, 0.5, and 1-9 seconds.
+- Removed the Disabled auto-start option; use the full-site delay switch instead.
+- Forced Also flush APCu ON when APCu is selected as the object cache backend, with updated UI text.
+
+2.58.56 - Native defer inline externalization
+- Defer all eligible JS now externalizes safe inline scripts into generated deferred cache files so inline companions keep DOM order with native deferred external scripts.
+- Delay all eligible JS remains the separate delayed-loader strategy.
+
+2.58.55 - JS full-site strategy dropdown and separated defer/delay all behavior
+2.58.54 - Visible delayed local JS auto-start controls
+- Added Advanced Settings & Exclusions controls for delayed local JS auto-start: interaction only, custom seconds, or disabled.
+- Replaced the hardcoded 12s local delayed JS auto-start with saved visible settings.
+- Kept uncapped parallel delayed JS loading, ordered execution, jQuery ready barrier, and Elementor lazy background helper.
+
+2.58.53 - Uncapped parallel delayed JS load without preload
+- Removed the hardcoded parallel group cap from the delayed JS loader.
+- External delayed scripts now load in uncapped contiguous parallel groups when the delayed batch starts.
+- Kept ordered DOM execution, jQuery ready barrier, Elementor lazy background helper, and no delayed-JS preload links.
+
+2.58.52 - Parallel delayed JS load without preload
+- Removed delayed JS preload-window link injection from 2.58.51.
+- Added windowed parallel script insertion with ordered execution for delayed JS batches.
+- Moved local delayed auto-start later so initial load is more interaction-first.
+
+2.58.52 - Delayed JS preload window
+- Added a bounded preload-ahead window for delayed local/all scripts to reduce one-by-one network waterfalls.
+- Kept strict DOM-order execution and the jQuery ready barrier so dependency order remains protected.
+- Kept the 2.58.50 Elementor lazy-background class helper and avoided the 2.58.49 faster-execute/preload regression.
+
+2.58.50 - Elementor lazy background compatibility rollback
+- Reverted the 2.58.49 faster-local-queue and Elementor background preload/reveal performance experiment.
+- Kept the 2.58.48 jQuery ready barrier and JS diagnostics UI cleanup.
+- Added a lightweight Elementor lazy-background class helper that reveals nearby containers without running Elementor JS earlier or preloading all backgrounds.
+
+2.58.48 - Delayed JS ready barrier and diagnostics UI cleanup
+- Added a delayed-JS jQuery ready barrier so local/all delayed batches hold jQuery ready callbacks until the delayed batch has finished in DOM order.
+- Cleaned the JS Delay / Defer Exclusions controls: confusing append/scan/debug buttons were replaced with explicit Analyze, Runtime Scan, Append Confirmed Error Fixes, and Append Suggestions actions.
+- Added visible explanations under each JS diagnostic/action button and removed the broad /wp-includes/js/ path from tested dependency defaults.
+
+2.58.47 - Precise JS exclusion matching for Delay all JS
+- Generic visible JS exclusions such as woocommerce no longer blind-match unrelated handles like googlesitekit-events-provider-woocommerce.
+- WooCommerce exclusions are now path/exact-handle aware, so real WooCommerce assets remain protectable without blocking Site Kit providers.
+- Auto init-scan output now rejects broad root tokens such as woocommerce, frontend, main, plugin, script, data, and params.
+
+2.58.46 - Delay wins over native defer
+- When Defer all JS is active, script_loader_tag no longer emits native defer for the remaining scripts.
+- Force-defer rules are suppressed during the absolute delay-all final pass so delayed Site Kit dependencies cannot run after native-deferred dependents.
+- The final ordered delayed queue remains the authoritative pass for all eligible external and inline scripts unless matched by visible JS exclusions.
+
+2.58.45 - Absolute Delay All JS rule
+- Defer all JS now converts every delayable external and inline script into the ordered delayed layer unless matched by unified JS exclusions.
+- Existing delayed scripts are normalized into the same all-js delayed queue so local and third-party pieces do not split execution order.
+- Unified exclusions remain authoritative for whole WordPress script groups.
+
+2.58.42 - JS exclusion and script group regression fix
+- Treat the unified JS Delay / Defer Exclusions list as the authoritative exclusion source across defer, delay, non-critical delay, and LCP boundary paths.
+- Normalize WordPress script group handles so one base-handle exclusion protects related js-before, js, js-after, js-extra, and translations companions.
+- Avoid splitting WordPress script groups at script_loader_tag time when inline companions are registered.
+
 2.58.40 - Targeted final validation fixes
 - CLI warm_frontpage_html_css now warms HTML-only with success when CSS Bundling is disabled instead of failing on missing bundle injection.
 - APCu object-cache CLI flush message now clarifies PHP-process scope and PHP-FPM/web APCu limitations.

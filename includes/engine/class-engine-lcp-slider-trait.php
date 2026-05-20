@@ -504,15 +504,18 @@ private function get_slider_hero_markup_markers()
                 return false;
             }
 
-            $exclude_fragments = $this->get_delay_non_critical_js_exclude_fragments();
-            if (!empty($settings['_lcp_boundary_callback_dependency_fragments']) && is_array($settings['_lcp_boundary_callback_dependency_fragments'])) {
-                $exclude_fragments = array_merge($exclude_fragments, (array) $settings['_lcp_boundary_callback_dependency_fragments']);
-            }
-            if ($this->script_matches_fragment_list($handle, $src, $exclude_fragments) || $this->lcp_boundary_script_tag_matches_fragments($tag, $exclude_fragments)) {
+            if ($this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings)) {
                 return false;
             }
 
-            if ($this->script_handle_has_inline_after_segments($handle)) {
+            if (!empty($settings['_lcp_boundary_callback_dependency_fragments']) && is_array($settings['_lcp_boundary_callback_dependency_fragments'])) {
+                $exclude_fragments = (array) $settings['_lcp_boundary_callback_dependency_fragments'];
+                if ($this->script_matches_fragment_list($handle, $src, $exclude_fragments) || $this->lcp_boundary_script_tag_matches_fragments($tag, $exclude_fragments)) {
+                    return false;
+                }
+            }
+
+            if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
                 return false;
             }
 

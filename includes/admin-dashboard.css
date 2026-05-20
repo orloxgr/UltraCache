@@ -805,10 +805,11 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 
 #uc-dashboard .uc-field-label {
 	display: block;
-	font-size: 12px;
-	font-weight: 700;
-	letter-spacing: 0.08em;
-	color: var(--uc-text-soft);
+	font-size: 14px;
+	line-height: 1.5;
+	font-weight: 500;
+	letter-spacing: normal;
+	color: #fff;
 	margin-bottom: 8px;
 }
 

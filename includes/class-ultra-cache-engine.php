@@ -561,6 +561,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 $html = $this->profile_store_stage('final_google_fonts_rewrite_before_skip_check', $html, function ($html) {
                     return $this->apply_final_google_fonts_rewrite_before_cache_store($html);
                 });
+                $html = $this->profile_store_stage('final-font-display-rewrite-before-store', $html, function ($html) {
+                    return $this->apply_final_font_display_rewrite_before_cache_store($html);
+                });
                 $html = $this->profile_store_stage('final-media-url-reconciliation', $html, function ($html) use ($context) {
                     return $this->apply_final_media_html_rewrite($html, $context);
                 });
@@ -573,6 +576,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
             $html = $this->apply_frontend_performance_optimizations($html, $context);
             $html = $this->apply_final_google_fonts_rewrite_before_cache_store($html);
+            $html = $this->apply_final_font_display_rewrite_before_cache_store($html);
             $html = $this->apply_final_media_html_rewrite($html, $context);
             $html = $this->normalize_generated_asset_urls_to_root_relative($html, $context);
 

@@ -34,6 +34,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'mediaOutputMode'            => 'auto',
                 'deferJsEnabled'             => false,
                 'deferAllJsEnabled'          => false,
+                'jsFullSiteStrategy'         => 'off',
+                'delayedLocalJsAutoStart'  => 'custom',
+                'delayedLocalJsAutoStartSeconds' => 1,
                 'delayAllThirdPartyJsEnabled' => false,
                 'deferJsForceList'           => '',
                 'deferJsExcludeList'         => implode("\n", self::get_default_js_delay_defer_exclusion_patterns()),
@@ -316,137 +319,23 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
         private static function get_default_js_delay_defer_exclusion_patterns()
         {
             /*
-             * Populate Defaults must expose only the hard dependency floor.
-             * Broad theme/plugin/slider/tracking fragments are intentionally
-             * excluded from this default payload because they can neutralize
-             * Defer all JS, Delay third-party JS, Main Thread Relief, and the
-             * LCP/dependency optimizers. If a specific site needs more
-             * protection, Runtime Scan / JS Delay-Defer Scan can suggest
-             * targeted lines and the user can save them in the visible textarea.
+             * Append Tested Dependency Defaults must expose only the tested
+             * WordPress foundation paths. Broad tokens such as jquery,
+             * jquery.min.js, wp-util, api-fetch, or /wp-includes/js/jquery/
+             * are intentionally excluded because they can catch unrelated
+             * plugin/theme scripts and weaken the JS optimization strategy.
              */
-            return array_values(array_unique(array(
-                'jquery',
-                'jquery-core',
-                'jquery.min.js',
-                'jquery-migrate',
-                'jquery-migrate.min.js',
-                '/wp-includes/js/',
-                'wp-hooks',
-                'wp-i18n',
-                'wp-util',
-                'wp-api',
-                'api-fetch',
-                'underscore',
-                'backbone',
-                'heartbeat',
-                'wp-dom-ready',
-                'wp-a11y',
-                'wp-components',
-                'wp-element',
-                'wp-data',
-                'wp-compose',
-                'jquery-js-after',
-                'wp-i18n-js-after',
-                'wp-api-fetch-js-after',
-                'wp-a11y-js-translations',
-                'media-views-js-translations',
-                'media-views.min.js',
-                'media-editor-js-translations',
-                'media-editor.min.js',
-                'wp-keycodes-js-translations',
-                'wp-date-js-after',
-                'wp-data-js-after',
-                'wp-rich-text-js-translations',
-                'wp-components-js-translations',
-                'js-translations',
-                '-js-translations',
-            )));
-        }
-
-        private static function get_defer_all_js_legacy_conservative_exclusion_patterns()
-        {
             return array(
-                'official-mailerlite-sign-up-forms/assets/js/localization/validation-messages.js',
-                'revslider',
-                'sliderrevolution',
-                'slider-revolution',
-                'revolution',
-                'sr7',
-                'rs6',
-                'rs7',
-                'tptools',
-                'tp-tools',
-                'rs-module',
-                'wp-block-themepunch-revslider',
-                'swiper',
-                'swiper-bundle',
-                'slick',
-                'splide',
-                'owl.carousel',
-                'smartslider',
-                'smart-slider',
-                'n2-ss',
-                'elementor',
-                'elementor-frontend',
-                'frontend-modules',
-                'webpack.runtime',
-                'webpack-pro.runtime',
-                'pro-elements-handlers',
-                'smartmenus',
-                'html_types/image',
-                'html_types/color',
-                'html_types/label',
-                'html_types/slide',
-                'html_types/slider',
-                'product-ajax-search',
-                'search-popup',
-                'nav-mobile',
-                'megamenu',
-                'header-cart',
-                'cart-canvas',
-                'off-canvas',
-                'woocommerce-products-filter',
-                'woof_',
-                'contact-form-7',
-                'author-arc',
-                'typewriting-author-arc/assets/js/form-handler.js',
-                'mailerlite',
-                'mailchimp',
-                'mc4wp',
-                'complianz',
-                'cmplz',
-                'cky-',
+                '/wp-includes/js/jquery/jquery.min.js',
+                '/wp-includes/js/jquery/jquery-migrate.min.js',
+                '/wp-includes/js/underscore.min.js',
+                '/wp-includes/js/wp-util.min.js',
+                '/wp-includes/js/dist/i18n.min.js',
+                '/wp-includes/js/dist/hooks.min.js',
+                '/wp-includes/js/dist/api-fetch.min.js',
+                '/wp-includes/js/api-request.min.js',
+                '/wp-includes/js/dist/dom-ready.min.js',
             );
-        }
-
-        private static function strip_defer_all_js_legacy_conservative_exclusions($value)
-        {
-            $normalized = self::normalize_textarea_setting($value);
-            if ('' === $normalized) {
-                return '';
-            }
-
-            $legacy = array();
-            foreach (self::get_defer_all_js_legacy_conservative_exclusion_patterns() as $pattern) {
-                $pattern = strtolower(trim((string) $pattern));
-                if ('' !== $pattern) {
-                    $legacy[$pattern] = true;
-                }
-            }
-
-            $kept = array();
-            foreach (preg_split('/\r\n|\r|\n/', $normalized) as $line) {
-                $line = trim((string) $line);
-                if ('' === $line) {
-                    continue;
-                }
-                if (isset($legacy[strtolower($line)])) {
-                    continue;
-                }
-                $kept[] = $line;
-            }
-
-            return implode("\n", array_values(array_unique($kept)));
         }
 
         private static function get_default_safe_third_party_delay_patterns()
@@ -747,6 +636,41 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             }
 
             return $value;
+        }
+
+        private static function sanitize_bounded_number_setting($value, $default, $min, $max)
+        {
+            $default = (float) $default;
+            $min = (float) $min;
+            $max = (float) $max;
+
+            if ($min > $max) {
+                $swap = $min;
+                $min = $max;
+                $max = $swap;
+            }
+
+            if ($default < $min || $default > $max) {
+                $default = max($min, min($max, $default));
+            }
+
+            if (is_string($value)) {
+                $value = trim($value);
+                if ('' === $value || !preg_match('/^\d+(?:\.\d+)?$/', $value)) {
+                    return $default;
+                }
+                $value = (float) $value;
+            } elseif (is_int($value) || is_float($value)) {
+                $value = (float) $value;
+            } else {
+                return $default;
+            }
+
+            if ($value < $min || $value > $max) {
+                return $default;
+            }
+
+            return (float) rtrim(rtrim(sprintf('%.3F', $value), '0'), '.');
         }
 
         private static function parse_textarea_setting($value)
@@ -1506,6 +1430,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['cacheSafeTrackingCookiesEnabled'] = self::normalize_boolean_setting_value($settings['cacheSafeTrackingCookiesEnabled'] ?? false, false);
             $settings['safeTrackingCookieList']    = self::sanitize_cookie_pattern_setting($settings['safeTrackingCookieList']);
             $settings['unsafeCacheCookieList']     = self::sanitize_cookie_pattern_setting($settings['unsafeCacheCookieList']);
+            $settings['jsFullSiteStrategy'] = in_array((string) ($settings['jsFullSiteStrategy'] ?? ''), array('off', 'delay_all'), true) ? (string) $settings['jsFullSiteStrategy'] : $defaults['jsFullSiteStrategy'];
+            $settings['delayedLocalJsAutoStart'] = in_array((string) ($settings['delayedLocalJsAutoStart'] ?? $defaults['delayedLocalJsAutoStart']), array('interaction', 'custom'), true) ? (string) $settings['delayedLocalJsAutoStart'] : $defaults['delayedLocalJsAutoStart'];
+            $settings['delayedLocalJsAutoStartSeconds'] = self::sanitize_bounded_number_setting($settings['delayedLocalJsAutoStartSeconds'] ?? $defaults['delayedLocalJsAutoStartSeconds'], $defaults['delayedLocalJsAutoStartSeconds'], 0.1, 9);
             $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
             $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
             // Existing installs keep their saved visible JS Delay / Defer Exclusions.
@@ -1533,6 +1460,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['criticalRequestChainDelayList'] = self::normalize_textarea_setting($settings['criticalRequestChainDelayList']);
             $settings['mediaOutputMode']           = self::sanitize_media_output_mode($settings['mediaOutputMode']);
             $settings['objectCacheBackend']        = self::sanitize_object_cache_backend($settings['objectCacheBackend']);
+            if ('apcu' === $settings['objectCacheBackend']) {
+                $settings['flushAllIncludeApcu'] = true;
+            }
             $settings['objectCacheFallbackBackend'] = self::sanitize_object_cache_fallback_backend($settings['objectCacheFallbackBackend'] ?? 'apcu');
             $settings['redisHost']                 = self::sanitize_redis_host($settings['redisHost']);
             $settings['redisPort']                 = self::sanitize_bounded_integer_setting($settings['redisPort'], $defaults['redisPort'], 1, 65535);
@@ -1823,14 +1753,16 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'unsafe_cache_cookie_count' => count($unsafe_cache_cookie_patterns),
             ));
             $defer_js_enabled = !empty($ui['deferJsEnabled']);
-            $defer_all_js_enabled = $defer_js_enabled && !empty($ui['deferAllJsEnabled']);
+            $js_full_site_strategy = isset($ui['jsFullSiteStrategy']) && in_array((string) $ui['jsFullSiteStrategy'], array('off', 'delay_all'), true) ? (string) $ui['jsFullSiteStrategy'] : 'off';
+            $defer_all_js_enabled = false;
+            $delay_all_js_enabled = ('delay_all' === $js_full_site_strategy);
             $delay_safe_third_party_js_enabled = !empty($ui['delaySafeThirdPartyJsEnabled']);
             $delay_functional_third_party_js_enabled = !empty($ui['delayFunctionalThirdPartyJsEnabled']);
             $delay_all_third_party_js_enabled = !empty($ui['delayAllThirdPartyJsEnabled']);
             $delay_non_critical_js_enabled = !empty($ui['delayNonCriticalJsEnabled']);
             $defer_stage_aggressive = $delay_non_critical_js_enabled;
             $defer_stage_balanced = $delay_safe_third_party_js_enabled || $delay_functional_third_party_js_enabled || $delay_all_third_party_js_enabled || $defer_stage_aggressive;
-            $defer_stage_safe = $defer_js_enabled || $defer_stage_balanced;
+            $defer_stage_safe = $defer_js_enabled || $defer_all_js_enabled || $delay_all_js_enabled || $defer_stage_balanced;
             $manual_lcp_selector_split = self::split_manual_lcp_selector_setting($ui['manualLcpHeroSelector'] ?? '');
             $defaults = self::get_dashboard_defaults();
 
@@ -1860,7 +1792,11 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cache_stats_enabled'          => !empty($ui['cacheStatsEnabled']),
                 'preload_on_save'              => !empty($ui['preRenderOnSave']),
                 'defer_js'                     => $defer_js_enabled,
+                'js_full_site_strategy'       => $js_full_site_strategy,
                 'defer_all_js'                 => $defer_all_js_enabled,
+                'delay_all_js'                 => $delay_all_js_enabled,
+                'delayed_local_js_auto_start' => in_array((string) ($ui['delayedLocalJsAutoStart'] ?? 'custom'), array('interaction', 'custom'), true) ? (string) ($ui['delayedLocalJsAutoStart'] ?? 'custom') : 'custom',
+                'delayed_local_js_auto_start_seconds' => self::sanitize_bounded_number_setting($ui['delayedLocalJsAutoStartSeconds'] ?? 1, 1, 0.1, 9),
                 'defer_stage_safe'             => $defer_stage_safe,
                 'defer_stage_balanced'         => $defer_stage_balanced,
                 'defer_stage_aggressive'       => $defer_stage_aggressive,
@@ -1928,7 +1864,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cache_cleanup_enabled'        => !empty($ui['cacheCleanupEnabled']),
                 'apcu_flush_on_scheduled_cleanup' => !empty($ui['apcuFlushOnScheduledCleanup']),
                 'flush_all_include_opcache'   => !empty($ui['flushAllIncludeOpcache']),
-                'flush_all_include_apcu'      => !empty($ui['flushAllIncludeApcu']),
+                'flush_all_include_apcu'      => ('apcu' === self::sanitize_object_cache_backend($ui['objectCacheBackend'] ?? 'redis')) || !empty($ui['flushAllIncludeApcu']),
                 'flush_all_include_litespeed' => !empty($ui['flushAllIncludeLiteSpeed']),
                 'flush_all_include_nginx'     => !empty($ui['flushAllIncludeNginx']),
                 'flush_all_include_varnish'   => !empty($ui['flushAllIncludeVarnish']),

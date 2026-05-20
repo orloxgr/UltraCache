@@ -2,7 +2,7 @@
 # This file is distributed under the GPLv2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: UltraCache 2.58.40\n"
+"Project-Id-Version: UltraCache 2.58.46\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-05-18 01:04+0000\n"
 "MIME-Version: 1.0\n"
@@ -10,6 +10,10 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: UltraCache i18n extractor\n"
 "X-Domain: ultracache\n"
+
+#: includes/admin-dashboard.js:8614
+msgid "Add native defer conservatively. When enabled, UltraCache appends only the curated WordPress foundation dependency defaults to the visible JS Delay / Defer Exclusions list."
+msgstr ""
 
 #: includes/admin-dashboard.js:4730
 msgid " · current "
@@ -53,10 +57,6 @@ msgstr ""
 
 #: includes/admin-dashboard.js:3113
 msgid "Activity Summary"
-msgstr ""
-
-#: includes/admin-dashboard.js:8367
-msgid "Add native defer conservatively. When enabled, UltraCache scans the front page once and appends detected theme/page-builder init scripts to the visible JS Delay / Defer Exclusions list."
 msgstr ""
 
 #: includes/diagnostics/class-diagnostics-trait.php:385
@@ -1027,10 +1027,6 @@ msgstr ""
 msgid "Detected %1$d likely icon font pattern(s) and %2$d non-icon font pattern(s) on the front page."
 msgstr ""
 
-#: includes/rest/class-rest-routes-trait.php:1109
-msgid "Detected %d likely theme/page-builder init exclusion pattern(s) on the front page."
-msgstr ""
-
 #: includes/rest/class-rest-routes-trait.php:1190
 msgid "Detected %d taxonomy/attribute query-string keys."
 msgstr ""
@@ -1696,7 +1692,7 @@ msgid "LCP"
 msgstr ""
 
 #: includes/admin-dashboard.js:8438
-msgid "LCP Boundary Defer"
+msgid "LCP Boundary Delay"
 msgstr ""
 
 #: includes/admin-dashboard.js:8330
@@ -2043,10 +2039,6 @@ msgstr ""
 msgid "No likely icon font patterns were detected on the front page."
 msgstr ""
 
-#: includes/rest/class-rest-routes-trait.php:1110
-msgid "No likely theme/page-builder init scripts were detected on the front page."
-msgstr ""
-
 #: includes/admin-dashboard.js:6630
 msgid "No non-icon front-page font patterns were detected."
 msgstr ""
@@ -2324,7 +2316,7 @@ msgid "Optional newline-separated handle or URL fragments. Matching stylesheets 
 msgstr ""
 
 #: includes/admin-dashboard.js:2540
-msgid "Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, Defer all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Defer, and Main Thread Relief where applicable. Populate Defaults adds only the hard dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved."
+msgid "Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, Defer all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Delay, and Main Thread Relief where applicable. Populate Defaults adds only the hard dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved."
 msgstr ""
 
 #: includes/admin-dashboard.js:8759
@@ -2843,10 +2835,6 @@ msgstr ""
 msgid "Run UltraCache self-test checks."
 msgstr ""
 
-#: includes/admin-dashboard.js:7006
-msgid "Running Safe Defer JS follow-up scan…"
-msgstr ""
-
 #: includes/admin-dashboard.js:8146
 msgid "Runs a capped manual scan of uploads/uc-images. Normal dashboard/status refreshes stay passive and do not crawl media directories."
 msgstr ""
@@ -2917,14 +2905,6 @@ msgstr ""
 
 #: includes/admin-dashboard.js:8366
 msgid "Safe Defer JS"
-msgstr ""
-
-#: includes/rest/class-rest-routes-trait.php:1032
-msgid "Safe Defer JS init-script scan failed: %s"
-msgstr ""
-
-#: includes/rest/class-rest-routes-trait.php:1042
-msgid "Safe Defer JS init-script scan returned empty HTML."
 msgstr ""
 
 #: includes/diagnostics/class-diagnostics-trait.php:375

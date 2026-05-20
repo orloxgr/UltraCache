@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.58.40
+ * Version: 2.58.76
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.58.40');
+    define('UCWP_VERSION', '2.58.76');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1993,6 +1993,7 @@ if (!class_exists('Ultra_Cache_WP')) {
 
             $tables = array(
                 'actionJobs' => $wpdb->prefix . 'ultracache_action_jobs',
+                'jsDiagnosticJobs' => $wpdb->prefix . 'ultracache_js_diagnostic_jobs',
                 'cronWarmQueue' => $wpdb->prefix . 'ultracache_cron_warm_queue',
                 'mediaPageRefs' => $wpdb->prefix . 'ultracache_media_page_refs',
                 'mediaQueue' => $wpdb->prefix . 'ultracache_media_queue',
@@ -3274,6 +3275,7 @@ private static function drop_plugin_custom_tables()
         $wpdb->prefix . 'ultracache_media_queue',
         $wpdb->prefix . 'ultracache_media_page_refs',
         $wpdb->prefix . 'ultracache_action_jobs',
+        $wpdb->prefix . 'ultracache_js_diagnostic_jobs',
         $wpdb->prefix . 'ultracache_cron_warm_queue',
         $wpdb->prefix . 'ultracache_analytics',
         $wpdb->prefix . 'ultracache_cache_asset_refs',
@@ -3314,6 +3316,7 @@ private static function delete_plugin_options_and_transients($keep_settings = fa
         $option_names[] = 'ultracache_media_queue_db_version';
         $option_names[] = 'ultracache_media_page_refs_db_version';
         $option_names[] = 'ultracache_action_jobs_db_version';
+        $option_names[] = 'ultracache_js_diagnostic_queue_db_version';
         $option_names[] = 'ultracache_cron_warm_queue_db_version';
         $option_names[] = 'ultracache_analytics_db_version';
         $option_names[] = self::get_cache_asset_refs_db_version_option_key();

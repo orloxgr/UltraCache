@@ -481,6 +481,12 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             if (!empty($settings['async_css']) || !empty($settings['aggressive_async_css'])) {
                 $html = $this->apply_async_css_links_to_html($html);
             }
+
+            if (!empty($font_policy['local_font_css_rewrite'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'final-linked-font-display-normalize', function ($html) {
+                    return $this->normalize_linked_local_stylesheet_font_display_in_html($html);
+                });
+            }
             if (!empty($settings['lazy_mailerlite_nonce'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'lazy-mailerlite-nonce-refresh', function ($html) {
                     return $this->inject_mailerlite_lazy_nonce_refresh($html);
@@ -513,13 +519,19 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['defer_js']) && !empty($settings['defer_all_js'])) {
-                $html = $this->apply_html_rewrite_safely($html, 'defer-all-js-final-pass', function ($html) use ($settings) {
+            if (!empty($settings['delay_all_js'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'delay-all-js-final-pass', function ($html) use ($settings) {
                     return $this->apply_defer_all_js_to_html($html, $settings);
                 });
             }
 
-            if (!empty($settings['defer_js']) || !empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js']) || !empty($settings['delay_all_third_party_js']) || !empty($settings['delay_non_critical_js'])) {
+            if (!empty($settings['defer_all_js']) && empty($settings['delay_all_js'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'native-defer-all-js-inline-externalize', function ($html) use ($settings) {
+                    return $this->apply_native_defer_all_js_to_html($html, $settings);
+                });
+            }
+
+            if (!empty($settings['delay_all_js']) || !empty($settings['defer_js']) || !empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js']) || !empty($settings['delay_all_third_party_js']) || !empty($settings['delay_non_critical_js'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'restore-user-excluded-delayed-js', function ($html) use ($settings) {
                     return $this->restore_user_excluded_delayed_scripts_in_html($html, $settings);
                 });

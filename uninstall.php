@@ -206,6 +206,7 @@ function ucwp_run_uninstall_cleanup()
             $ucwp_options[] = 'ultracache_media_queue_db_version';
             $ucwp_options[] = 'ultracache_media_page_refs_db_version';
             $ucwp_options[] = 'ultracache_action_jobs_db_version';
+            $ucwp_options[] = 'ultracache_js_diagnostic_queue_db_version';
             $ucwp_options[] = 'ultracache_cron_warm_queue_db_version';
             $ucwp_options[] = 'ultracache_analytics_db_version';
             $ucwp_options[] = 'ultracache_cache_asset_refs_db_version';
@@ -243,6 +244,7 @@ function ucwp_run_uninstall_cleanup()
             $wpdb->prefix . 'ultracache_media_queue',
             $wpdb->prefix . 'ultracache_media_page_refs',
             $wpdb->prefix . 'ultracache_action_jobs',
+            $wpdb->prefix . 'ultracache_js_diagnostic_jobs',
             $wpdb->prefix . 'ultracache_cron_warm_queue',
             $wpdb->prefix . 'ultracache_analytics',
             $wpdb->prefix . 'ultracache_cache_asset_refs',

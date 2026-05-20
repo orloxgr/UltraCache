@@ -209,6 +209,9 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
             $html = $this->profile_store_stage('final_google_fonts_rewrite_inside_write', $html, function ($html) {
                 return $this->apply_final_google_fonts_rewrite_before_cache_store($html);
             });
+            $html = $this->profile_store_stage('final_font_display_rewrite_inside_write', $html, function ($html) {
+                return $this->apply_final_font_display_rewrite_before_cache_store($html);
+            });
             $dir = dirname($file_path);
             if (!file_exists($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !file_exists($dir)) {
                 return false;

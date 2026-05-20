@@ -1356,6 +1356,7 @@ if (!function_exists('ucwp_get_allowed_custom_table_basenames')) {
             'ultracache_media_queue',
             'ultracache_media_page_refs',
             'ultracache_action_jobs',
+            'ultracache_js_diagnostic_jobs',
             'ultracache_cron_warm_queue',
             'ultracache_analytics',
             'ultracache_cache_asset_refs',

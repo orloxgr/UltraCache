@@ -135,13 +135,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return false;
             }
 
-            $lists = array();
-            if (isset($settings['defer_js_exclude_list']) && is_array($settings['defer_js_exclude_list'])) {
-                $lists = array_merge($lists, $settings['defer_js_exclude_list']);
-            }
-            if (isset($settings['delay_non_critical_js_exclude_list']) && is_array($settings['delay_non_critical_js_exclude_list'])) {
-                $lists = array_merge($lists, $settings['delay_non_critical_js_exclude_list']);
-            }
+            $lists = $this->get_unified_js_user_exclude_fragments($settings);
 
             foreach ($lists as $line) {
                 $line = strtolower(trim((string) $line));
@@ -811,7 +805,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'confidence' => 'review',
                     'appendable' => false,
                     'markers' => array('woocommerce', 'wc-', 'cart', 'checkout', 'account', 'add-to-cart', 'wc-cart-fragments'),
-                    'suggestions' => array('woocommerce', 'wc-', 'cart', 'checkout', 'account', 'add-to-cart', 'wc-cart-fragments'),
+                    'suggestions' => array('/wp-content/plugins/woocommerce/', 'woocommerce/assets/js/frontend/', 'wc-cart-fragments', 'wc-add-to-cart', 'add-to-cart', 'single-product', 'cart-fragments'),
                     'reason' => __('WooCommerce/cart/account markers were detected. Review these before excluding broadly because shop pages vary by site.', 'ultracache'),
                 ),
                 array(
@@ -1310,23 +1304,43 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return $tag;
             }
 
+            if ($this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings)) {
+                return $this->strip_native_loading_attributes_from_script_tag($tag);
+            }
+
+            /*
+             * Avoid splitting WordPress script groups at script_loader_tag time.
+             * If a handle has registered before/after/extra/translation inline
+             * companions, leave the external tag untouched here so later HTML
+             * passes can either keep or delay the whole group consistently.
+             */
+            if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
+                return $this->strip_native_loading_attributes_from_script_tag($tag);
+            }
+
             $defer_stage = $this->get_defer_stage_level($settings);
-            $defer_all_js = !empty($settings['defer_js']) && !empty($settings['defer_all_js']);
+            $defer_all_js = !empty($settings['defer_all_js']);
+            $delay_all_js = !empty($settings['delay_all_js']);
 
             if (!$defer_all_js && 0 < $defer_stage && $this->is_script_absolute_defer_blocking($handle, $src, $tag, $settings)) {
                 return $this->strip_native_loading_attributes_from_script_tag($tag);
             }
 
-            if (0 < $defer_stage && $this->is_script_user_defer_excluded($handle, $src, $settings)) {
+            if (0 < $defer_stage && $this->is_script_user_defer_excluded($handle, $src, $settings, $tag)) {
                 return $this->strip_native_loading_attributes_from_script_tag($tag);
             }
 
-            if (0 < $defer_stage && $this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+            if (!$defer_all_js && 0 < $defer_stage && $this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
                 return $this->add_defer_attribute_to_script_tag($tag, true);
             }
 
-            if ($defer_all_js && $this->should_native_defer_all_local_script($src, $settings) && $this->is_defer_all_js_candidate($handle, $src, $tag, $settings)) {
-                return $this->add_defer_attribute_to_script_tag($tag, false);
+            /*
+             * Delay-all final HTML processing owns the full ordered decision.
+             * Do not emit native defer while that delayed-loader pass is active,
+             * because that would create mixed defer/delay execution classes.
+             */
+            if ($delay_all_js && $this->is_defer_all_js_candidate($handle, $src, $tag, $settings)) {
+                return $tag;
             }
 
             if (!$defer_all_js && 0 < $defer_stage && $this->is_script_force_blocking($handle, $src, $tag, $settings)) {
@@ -1352,11 +1366,11 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return $this->add_async_attribute_to_script_tag($tag);
             }
 
-            if (0 === $defer_stage || empty($settings['defer_js'])) {
+            if (0 === $defer_stage || (empty($settings['defer_js']) && !$defer_all_js)) {
                 return $tag;
             }
 
-            if ($defer_all_js && !$this->is_defer_all_js_candidate($handle, $src, $tag, $settings)) {
+            if ($delay_all_js) {
                 return $tag;
             }
 
@@ -1369,7 +1383,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             // kept blocking are those matching the visible JS Delay / Defer
             // Exclusions field. WordPress/core/slider protections belong in that
             // editable list via Populate Defaults, not in hidden runtime rules.
-            return $this->is_script_user_defer_excluded($handle, $src, $settings);
+            return $this->is_script_user_defer_excluded($handle, $src, $settings, $tag);
         }
 
         private function should_native_defer_all_local_script($src, array $settings = array())
@@ -1387,7 +1401,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
         private function apply_defer_all_js_to_html($html, array $settings = array())
         {
-            if (empty($settings['defer_js']) || empty($settings['defer_all_js']) || !is_string($html) || '' === $html || false === stripos($html, '<script')) {
+            if (empty($settings['delay_all_js']) || !is_string($html) || '' === $html || false === stripos($html, '<script')) {
                 return $html;
             }
 
@@ -1396,36 +1410,234 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return $html;
             }
 
-            $protected_groups = array();
-            $user_protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
-            if (!empty($user_protected_groups)) {
-                $protected_groups = array_merge($protected_groups, $user_protected_groups);
-            }
-            $mutations = array();
+            $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
+            $replacements = array();
 
             foreach ($records as $index => $record) {
-                if (empty($record['has_src']) || empty($record['open']) || empty($record['tag'])) {
+                if (empty($record['tag']) || empty($record['open'])) {
                     continue;
                 }
 
                 $handle = isset($record['handle']) ? (string) $record['handle'] : '';
                 $src = isset($record['src']) ? (string) $record['src'] : '';
-                $open = isset($record['open']) ? (string) $record['open'] : '';
                 $group = isset($record['group']) ? (string) $record['group'] : '';
 
-                if ($this->should_keep_script_blocking_for_defer_all($handle, $src, $open, $settings) || ('' !== $group && !empty($protected_groups[$group]))) {
-                    $mutations[$index] = 'strip-loading';
-                } elseif ($this->is_defer_all_js_candidate($handle, $src, $open, $settings)) {
-                    $mutations[$index] = 'defer';
+                if ($this->script_record_matches_user_defer_exclusion($record, $settings) || ('' !== $group && !empty($protected_groups[$group]))) {
+                    continue;
                 }
+
+                $source_tag = !empty($record['delayed']) ? $this->restore_delayed_script_record_tag($record) : (string) $record['tag'];
+                if (!is_string($source_tag) || '' === $source_tag) {
+                    $source_tag = (string) $record['tag'];
+                }
+
+                if (!empty($record['has_src'])) {
+                    if ('' === $src) {
+                        continue;
+                    }
+                    $replacements[(int) $index] = $this->build_delayed_script_tag($source_tag, $handle, $src, 'all-js');
+                    continue;
+                }
+
+                if (!$this->is_delayable_inline_script_tag($source_tag)) {
+                    continue;
+                }
+
+                $replacements[(int) $index] = $this->build_delayed_inline_script_tag($source_tag, $handle, 'all-js');
             }
 
-            if (empty($mutations)) {
+            if (empty($replacements)) {
                 return $html;
             }
 
-            $updated = $this->apply_script_loading_attribute_mutations_with_processor($html, $mutations);
-            return is_string($updated) ? $updated : $html;
+            ksort($replacements);
+            $processed = $this->apply_delayed_script_replacements_with_processor($html, $records, $replacements);
+            return is_string($processed) ? $processed : $html;
+        }
+
+        private function apply_native_defer_all_js_to_html($html, array $settings = array())
+        {
+            if (empty($settings['defer_all_js']) || !empty($settings['delay_all_js']) || !is_string($html) || '' === $html || false === stripos($html, '<script')) {
+                return $html;
+            }
+
+            $records = $this->collect_script_dependency_records_from_html($html);
+            if (empty($records)) {
+                return $html;
+            }
+
+            $replacements = array();
+            foreach ($records as $index => $record) {
+                if (empty($record['tag']) || empty($record['open'])) {
+                    continue;
+                }
+
+                if (!empty($record['delayed'])) {
+                    continue;
+                }
+
+                $tag = (string) $record['tag'];
+                $open = (string) $record['open'];
+                $handle = isset($record['handle']) ? (string) $record['handle'] : '';
+                $src = isset($record['src']) ? (string) $record['src'] : '';
+
+                if ($this->script_record_matches_user_defer_exclusion($record, $settings)) {
+                    continue;
+                }
+
+                if (!empty($record['has_src'])) {
+                    if (!$this->is_defer_all_js_candidate($handle, $src, $open, $settings)) {
+                        continue;
+                    }
+                    $deferred = $this->add_defer_attribute_to_script_tag($tag, true);
+                    if (is_string($deferred) && '' !== $deferred && $deferred !== $tag) {
+                        $replacements[(int) $index] = $deferred;
+                    }
+                    continue;
+                }
+
+                if (!$this->is_delayable_inline_script_tag($tag)) {
+                    continue;
+                }
+
+                $externalized = $this->build_deferred_external_inline_script_tag($record);
+                if (is_string($externalized) && '' !== $externalized && $externalized !== $tag) {
+                    $replacements[(int) $index] = $externalized;
+                }
+            }
+
+            if (empty($replacements)) {
+                return $html;
+            }
+
+            ksort($replacements);
+            $out = '';
+            $last = 0;
+            foreach ($replacements as $index => $replacement) {
+                if (!isset($records[$index])) {
+                    continue;
+                }
+                $record = $records[$index];
+                $offset = isset($record['offset']) ? (int) $record['offset'] : -1;
+                $tag = isset($record['tag']) ? (string) $record['tag'] : '';
+                if ($offset < 0 || '' === $tag) {
+                    continue;
+                }
+                $out .= substr($html, $last, $offset - $last) . $replacement;
+                $last = $offset + strlen($tag);
+            }
+
+            return $out . substr($html, $last);
+        }
+
+        private function build_deferred_external_inline_script_tag(array $record)
+        {
+            $tag = isset($record['tag']) ? (string) $record['tag'] : '';
+            if ('' === $tag || !preg_match('/^<script\b[^>]*>(.*?)<\/script>$/is', $tag, $content_match)) {
+                return $tag;
+            }
+
+            $content = isset($content_match[1]) ? (string) $content_match[1] : '';
+            if ('' === trim($content)) {
+                return $tag;
+            }
+
+            $asset = $this->write_deferred_inline_js_asset($content, $record);
+            if (empty($asset['url'])) {
+                return $tag;
+            }
+
+            $original_attributes = $this->extract_html_tag_attributes($tag);
+            $attrs = array();
+            foreach ($original_attributes as $name => $value) {
+                $name_lc = strtolower((string) $name);
+                if (in_array($name_lc, array('src', 'async', 'defer', 'type', 'data-wp-strategy'), true)) {
+                    continue;
+                }
+                if (0 === strpos($name_lc, 'data-ucwp-')) {
+                    continue;
+                }
+                if (!preg_match('/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/', $name_lc)) {
+                    continue;
+                }
+                if (is_scalar($value)) {
+                    $attrs[$name_lc] = (string) $value;
+                }
+            }
+
+            $attrs['src'] = (string) $asset['url'];
+            $attrs['defer'] = 'defer';
+            $attrs['data-ucwp-deferred-inline'] = '1';
+            if (!empty($asset['hash'])) {
+                $attrs['data-ucwp-deferred-inline-hash'] = (string) $asset['hash'];
+            }
+
+            $compiled = array();
+            foreach ($attrs as $name => $value) {
+                $name = strtolower(trim((string) $name));
+                if ('' === $name || !preg_match('/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/', $name)) {
+                    continue;
+                }
+                if (true === $value || $value === $name) {
+                    $compiled[] = esc_attr($name);
+                    continue;
+                }
+                if ('src' === $name) {
+                    $compiled[] = 'src="' . esc_url((string) $value) . '"';
+                    continue;
+                }
+                $compiled[] = esc_attr($name) . '="' . esc_attr((string) $value) . '"';
+            }
+
+            if (empty($compiled)) {
+                return $tag;
+            }
+
+            return '<script ' . implode(' ', $compiled) . '></script>';
+        }
+
+        private function write_deferred_inline_js_asset($content, array $record = array())
+        {
+            $content = (string) $content;
+            if ('' === trim($content) || !defined('UCWP_CACHE_DIR')) {
+                return array();
+            }
+
+            $hash = substr(hash('sha256', $content), 0, 32);
+            $handle = isset($record['handle']) ? sanitize_key((string) $record['handle']) : '';
+            if ('' === $handle) {
+                $handle = 'inline';
+            }
+            $filename = 'defer-' . $handle . '-' . $hash . '.js';
+            $dir = trailingslashit(UCWP_CACHE_DIR) . 'deferred-inline-js/';
+            $file = $dir . $filename;
+
+            if (!is_dir($dir) && function_exists('wp_mkdir_p')) {
+                wp_mkdir_p($dir);
+            }
+            if (is_dir($dir)) {
+                $index = $dir . 'index.php';
+                if (!is_file($index)) {
+                    ucwp_safe_file_put_contents($index, "<?php\n// Silence is golden.\n", 0, 'deferred_inline_js_index');
+                }
+            }
+
+            if (!is_file($file)) {
+                $payload = $content;
+                if ('' !== $payload && "\n" !== substr($payload, -1)) {
+                    $payload .= "\n";
+                }
+                $written = ucwp_safe_file_put_contents($file, $payload, LOCK_EX, 'deferred_inline_js_asset');
+                if (false === $written) {
+                    return array();
+                }
+            }
+
+            return array(
+                'hash' => $hash,
+                'path' => $file,
+                'url'  => content_url('cache/ultracache/deferred-inline-js/' . rawurlencode($filename)),
+            );
         }
 
         private function restore_user_excluded_delayed_scripts_in_html($html, array $settings = array())
@@ -1884,56 +2096,16 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
 private function script_record_matches_user_defer_exclusion(array $record, array $settings = array())
         {
-            $fragments = $this->get_defer_stage_user_exclude_fragments($settings);
-            if (empty($fragments)) {
-                return false;
-            }
+            $tag = isset($record['tag']) ? (string) $record['tag'] : (isset($record['open']) ? (string) $record['open'] : '');
+            $code = isset($record['code']) ? (string) $record['code'] : '';
 
-            $handle = isset($record['handle']) ? (string) $record['handle'] : '';
-            $src = isset($record['src']) ? (string) $record['src'] : '';
-            if ($this->script_matches_fragment_list($handle, $src, $fragments)) {
-                return true;
-            }
-
-            $haystacks = array(
-                isset($record['id']) ? (string) $record['id'] : '',
-                isset($record['group']) ? (string) $record['group'] : '',
-                isset($record['open']) ? (string) $record['open'] : '',
-                isset($record['tag']) ? (string) $record['tag'] : '',
-                isset($record['code']) ? (string) $record['code'] : '',
+            return $this->is_js_excluded_by_user_patterns(
+                isset($record['handle']) ? (string) $record['handle'] : '',
+                isset($record['src']) ? (string) $record['src'] : '',
+                $tag,
+                $code,
+                $settings
             );
-
-            $normalized_haystacks = array();
-            foreach ($haystacks as $haystack) {
-                $haystack_lc = strtolower((string) $haystack);
-                if ('' !== $haystack_lc) {
-                    foreach ($fragments as $fragment) {
-                        $fragment = strtolower(trim((string) $fragment));
-                        if ('' !== $fragment && false !== strpos($haystack_lc, $fragment)) {
-                            return true;
-                        }
-                    }
-                    $normalized_haystacks[] = $this->normalize_js_fragment_match_text($haystack_lc);
-                }
-            }
-
-            foreach ($fragments as $fragment) {
-                $fragment = strtolower(trim((string) $fragment));
-                if ('' === $fragment) {
-                    continue;
-                }
-                $normalized_fragment = $this->normalize_js_fragment_match_text($fragment);
-                if (strlen($normalized_fragment) < 4) {
-                    continue;
-                }
-                foreach ($normalized_haystacks as $normalized_haystack) {
-                    if ('' !== $normalized_haystack && false !== strpos($normalized_haystack, $normalized_fragment)) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
         }
 
         private function get_nearby_script_dependency_groups(array $records, array $ordered_indexes, $index, $radius = 2)
@@ -2134,7 +2306,7 @@ private function script_record_matches_user_defer_exclusion(array $record, array
             try {
                 $processor = new WP_HTML_Tag_Processor((string) $html);
                 $changed = false;
-                $defer_all_js = !empty($settings['defer_js']) && !empty($settings['defer_all_js']);
+                $defer_all_js = !empty($settings['defer_all_js']);
 
                 while ($processor->next_tag('SCRIPT')) {
                     $async = $processor->get_attribute('async');
@@ -2159,7 +2331,7 @@ private function script_record_matches_user_defer_exclusion(array $record, array
                         continue;
                     }
 
-                    if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+                    if (!$defer_all_js && $this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
                         $processor->remove_attribute('async');
                         $processor->remove_attribute('data-wp-strategy');
                         $processor->set_attribute('defer', 'defer');
@@ -2180,10 +2352,31 @@ private function script_record_matches_user_defer_exclusion(array $record, array
         }
 
 
-private function script_handle_has_inline_after_segments($handle)
+private function script_handle_has_inline_before_segments($handle)
+        {
+            return $this->script_handle_has_wp_script_data_segment($handle, 'before');
+        }
+
+        private function script_handle_has_inline_after_segments($handle)
+        {
+            return $this->script_handle_has_wp_script_data_segment($handle, 'after');
+        }
+
+        private function script_handle_has_inline_extra_segments($handle)
+        {
+            return $this->script_handle_has_wp_script_data_segment($handle, 'data') || $this->script_handle_has_wp_script_data_segment($handle, 'translations');
+        }
+
+        private function script_handle_has_wp_inline_companion_segments($handle)
+        {
+            return $this->script_handle_has_inline_before_segments($handle) || $this->script_handle_has_inline_after_segments($handle) || $this->script_handle_has_inline_extra_segments($handle);
+        }
+
+        private function script_handle_has_wp_script_data_segment($handle, $key)
         {
             $handle = (string) $handle;
-            if ('' === $handle) {
+            $key = (string) $key;
+            if ('' === $handle || '' === $key) {
                 return false;
             }
 
@@ -2192,9 +2385,9 @@ private function script_handle_has_inline_after_segments($handle)
                 return false;
             }
 
-            $segment = $wp_scripts->get_data($handle, 'after');
-            if (is_array($segment) && !empty($segment)) {
-                return true;
+            $segment = $wp_scripts->get_data($handle, $key);
+            if (is_array($segment)) {
+                return !empty($segment);
             }
 
             return is_string($segment) && '' !== trim($segment);
@@ -2327,7 +2520,7 @@ private function script_handle_has_inline_after_segments($handle)
         private function is_script_optimization_excluded($handle, $src, $tag = '', array $settings = array())
         {
             return $this->is_script_force_blocking($handle, $src, $tag, $settings)
-                || $this->is_script_user_defer_excluded($handle, $src, $settings)
+                || $this->is_script_user_defer_excluded($handle, $src, $settings, $tag)
                 || $this->is_script_safe_stage_excluded($handle, $src, $tag, $settings);
         }
 
@@ -2412,9 +2605,9 @@ private function script_handle_has_inline_after_segments($handle)
             return false;
         }
 
-        private function is_script_user_defer_excluded($handle, $src, array $settings = array())
+        private function is_script_user_defer_excluded($handle, $src, array $settings = array(), $tag = '', $inline_code = '')
         {
-            return $this->script_matches_fragment_list($handle, $src, $this->get_defer_stage_user_exclude_fragments($settings));
+            return $this->is_js_excluded_by_user_patterns($handle, $src, $tag, $inline_code, $settings);
         }
 
         private function is_script_safe_stage_excluded($handle, $src, $tag = '', array $settings = array())
@@ -2425,7 +2618,7 @@ private function script_handle_has_inline_after_segments($handle)
              * Defaults exposes recommended dependency fragments for users to
              * add, edit, save, or remove.
              */
-            return $this->is_script_user_defer_excluded($handle, $src, $settings);
+            return $this->is_script_user_defer_excluded($handle, $src, $settings, $tag);
         }
 
         private function get_defer_stage_user_exclude_fragments(array $settings = array())
@@ -2450,6 +2643,134 @@ private function script_handle_has_inline_after_segments($handle)
             // fragments here; if the user adds validation-messages.js, sr7,
             // elementor, or any other broad line, it must remain effective.
             return $list;
+        }
+
+        private function get_unified_js_user_exclude_fragments(array $settings = array())
+        {
+            return $this->get_defer_stage_user_exclude_fragments($settings);
+        }
+
+        private function get_script_handle_group_variants($handle, $id = '')
+        {
+            $variants = array();
+
+            foreach (array($handle, $id) as $value) {
+                $value = strtolower(trim((string) $value));
+                if ('' === $value) {
+                    continue;
+                }
+
+                $variants[$value] = $value;
+
+                foreach ($this->get_js_handle_suffix_variants($value) as $variant) {
+                    if ('' !== $variant) {
+                        $variants[$variant] = $variant;
+                    }
+                }
+
+                $group = $this->normalize_delayed_script_group_handle($value);
+                if ('' !== $group) {
+                    $variants[$group] = $group;
+                }
+            }
+
+            return array_values(array_unique(array_filter($variants)));
+        }
+
+        private function get_js_handle_suffix_variants($value)
+        {
+            $value = strtolower(trim((string) $value));
+            if ('' === $value) {
+                return array();
+            }
+
+            $variants = array();
+            $suffixes = array('-js-translations', '-js-before', '-js-after', '-js-extra', '-translations', '-before', '-after', '-extra', '-js');
+            foreach ($suffixes as $suffix) {
+                if ($this->string_ends_with_fragment($value, $suffix)) {
+                    $base = substr($value, 0, -strlen($suffix));
+                    if ('' !== $base) {
+                        $variants[$base] = $base;
+                    }
+                }
+            }
+
+            foreach (array('.min.js', '.js') as $suffix) {
+                if ($this->string_ends_with_fragment($value, $suffix)) {
+                    $base = substr($value, 0, -strlen($suffix));
+                    if ('' !== $base) {
+                        $variants[$base] = $base;
+                    }
+                }
+            }
+
+            return array_values($variants);
+        }
+
+        private function string_ends_with_fragment($value, $suffix)
+        {
+            $value = (string) $value;
+            $suffix = (string) $suffix;
+            if ('' === $suffix || strlen($suffix) > strlen($value)) {
+                return false;
+            }
+
+            return substr($value, -strlen($suffix)) === $suffix;
+        }
+
+        private function build_js_exclusion_match_haystacks($handle, $src, $tag = '', $inline_code = '')
+        {
+            $id = '';
+            if ('' !== (string) $tag) {
+                $id = (string) $this->extract_attribute_from_html_tag($tag, 'id');
+                if ('' === $id) {
+                    $id = (string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-id');
+                }
+            }
+
+            $haystacks = array();
+            foreach ($this->get_script_handle_group_variants($handle, $id) as $variant) {
+                $haystacks[] = $variant;
+            }
+
+            $src_lc = strtolower(trim((string) $src));
+            if ('' !== $src_lc) {
+                $haystacks[] = $src_lc;
+                $path = strtolower((string) wp_parse_url($src_lc, PHP_URL_PATH));
+                if ('' !== $path) {
+                    $haystacks[] = $path;
+                    $base = basename($path);
+                    if ('' !== $base) {
+                        $haystacks[] = $base;
+                        foreach ($this->get_js_handle_suffix_variants($base) as $variant) {
+                            $haystacks[] = $variant;
+                        }
+                    }
+                }
+            }
+
+            if ('' !== (string) $tag) {
+                $haystacks[] = strtolower((string) $tag);
+            }
+
+            if ('' !== (string) $inline_code) {
+                $haystacks[] = strtolower((string) $inline_code);
+            }
+
+            return array_values(array_unique(array_filter($haystacks)));
+        }
+
+        private function is_js_excluded_by_user_patterns($handle, $src, $tag = '', $inline_code = '', array $settings = array())
+        {
+            $fragments = $this->get_unified_js_user_exclude_fragments($settings);
+            if (empty($fragments)) {
+                return false;
+            }
+
+            return $this->script_matches_fragment_list_from_haystacks(
+                $this->build_js_exclusion_match_haystacks($handle, $src, $tag, $inline_code),
+                $fragments
+            );
         }
 
 
@@ -2557,11 +2878,21 @@ private function script_handle_is_footer_group($handle)
 
         private function script_matches_fragment_list($handle, $src, array $fragments)
         {
-            $haystacks = array(
-                strtolower(trim((string) $handle)),
-                strtolower(trim((string) $src)),
-                strtolower((string) wp_parse_url((string) $src, PHP_URL_PATH)),
+            return $this->script_matches_fragment_list_from_haystacks(
+                $this->build_js_exclusion_match_haystacks($handle, $src),
+                $fragments
             );
+        }
+
+        private function script_matches_fragment_list_from_haystacks(array $haystacks, array $fragments)
+        {
+            $haystacks = array_values(array_unique(array_filter(array_map(static function ($value) {
+                return strtolower(trim((string) $value));
+            }, $haystacks))));
+
+            if (empty($haystacks) || empty($fragments)) {
+                return false;
+            }
 
             $normalized_haystacks = array();
             foreach ($haystacks as $haystack) {
@@ -2575,6 +2906,14 @@ private function script_handle_is_footer_group($handle)
                 if ('' === $fragment) {
                     continue;
                 }
+
+                if ($this->is_generic_root_js_exclusion_fragment($fragment)) {
+                    if ($this->generic_root_js_exclusion_matches_haystacks($fragment, $haystacks)) {
+                        return true;
+                    }
+                    continue;
+                }
+
                 foreach ($haystacks as $haystack) {
                     if ('' !== $haystack && false !== strpos($haystack, $fragment)) {
                         return true;
@@ -2587,6 +2926,61 @@ private function script_handle_is_footer_group($handle)
                 }
                 foreach ($normalized_haystacks as $normalized_haystack) {
                     if ('' !== $normalized_haystack && false !== strpos($normalized_haystack, $normalized_fragment)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private function is_generic_root_js_exclusion_fragment($fragment)
+        {
+            $fragment = strtolower(trim((string) $fragment));
+            if ('' === $fragment) {
+                return false;
+            }
+
+            return in_array($fragment, array(
+                'woocommerce',
+                'wordpress',
+                'frontend',
+                'main',
+                'plugin',
+                'plugins',
+                'script',
+                'scripts',
+                'data',
+                'params',
+                'cart',
+                'checkout',
+                'account',
+            ), true);
+        }
+
+        private function generic_root_js_exclusion_matches_haystacks($fragment, array $haystacks)
+        {
+            $fragment = strtolower(trim((string) $fragment));
+            if ('' === $fragment || empty($haystacks)) {
+                return false;
+            }
+
+            foreach ($haystacks as $haystack) {
+                $haystack = strtolower(trim((string) $haystack));
+                if ('' === $haystack) {
+                    continue;
+                }
+
+                if ($haystack === $fragment) {
+                    return true;
+                }
+
+                if ('woocommerce' === $fragment) {
+                    if (false !== strpos($haystack, '/wp-content/plugins/woocommerce/') || false !== strpos($haystack, '/plugins/woocommerce/') || false !== strpos($haystack, '/woocommerce/assets/')) {
+                        return true;
+                    }
+
+                    if (preg_match('/(?:^|[\s"\'=\/])woocommerce(?:-js(?:-(?:before|after|extra|translations))?|\.min\.js|\.js)?(?:$|[\s"\'<>\/])/', $haystack)) {
                         return true;
                     }
                 }
@@ -2671,11 +3065,11 @@ private function script_handle_is_footer_group($handle)
                 return false;
             }
 
-            if ($this->script_matches_fragment_list($handle, $src, $this->get_delay_non_critical_js_exclude_fragments())) {
+            if ($this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings)) {
                 return false;
             }
 
-            if ($this->script_handle_has_inline_after_segments($handle)) {
+            if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
                 return false;
             }
 
@@ -2748,7 +3142,7 @@ private function script_handle_is_footer_group($handle)
             if (false !== stripos($tag, 'type="text/ucwp-delayed-js"') || false !== stripos($tag, "type='text/ucwp-delayed-js'") || false !== stripos($tag, 'data-ucwp-src=')) {
                 return array('matched' => false);
             }
-            if ($this->is_third_party_delay_excluded($handle, $src, $settings)) {
+            if ($this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings)) {
                 return array('matched' => false, 'reason' => 'excluded');
             }
 
@@ -2808,6 +3202,11 @@ private function script_handle_is_footer_group($handle)
             }
 
             $handle = (string) $handle;
+            $inline_code = (string) $this->get_inline_script_code_from_tag($tag);
+            if ($this->is_js_excluded_by_user_patterns($handle, '', $tag, $inline_code, $settings)) {
+                return array('matched' => false, 'reason' => 'excluded');
+            }
+
             $haystacks = array(
                 strtolower(trim($handle)),
                 strtolower($tag),
@@ -2912,9 +3311,9 @@ private function script_handle_is_footer_group($handle)
             })));
         }
 
-        private function is_third_party_delay_excluded($handle, $src, array $settings = array())
+        private function is_third_party_delay_excluded($handle, $src, array $settings = array(), $tag = '')
         {
-            return $this->script_matches_fragment_list($handle, $src, $this->get_third_party_delay_exclude_fragments($settings));
+            return $this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings);
         }
 
         private function is_third_party_delay_dependency_library($handle, $src, $tag = '')
@@ -3450,15 +3849,27 @@ private function script_handle_is_footer_group($handle)
         public function print_delayed_script_loader()
         {
             $settings = $this->get_settings();
-            if ((empty($settings['delay_safe_third_party_js']) && empty($settings['delay_functional_third_party_js']) && empty($settings['delay_all_third_party_js']) && empty($settings['delay_non_critical_js']) && empty($settings['lcp_boundary_defer'])) || is_admin()) {
+            if ((empty($settings['delay_safe_third_party_js']) && empty($settings['delay_functional_third_party_js']) && empty($settings['delay_all_third_party_js']) && empty($settings['delay_non_critical_js']) && empty($settings['lcp_boundary_defer']) && empty($settings['delay_all_js'])) || is_admin()) {
                 return;
             }
 
             $main_thread_relief = !empty($settings['main_thread_relief']) ? '1' : '0';
+            $local_auto_mode = isset($settings['delayed_local_js_auto_start']) ? (string) $settings['delayed_local_js_auto_start'] : 'custom';
+            if (!in_array($local_auto_mode, array('interaction', 'custom'), true)) {
+                $local_auto_mode = 'custom';
+            }
+            $local_auto_seconds = isset($settings['delayed_local_js_auto_start_seconds']) ? (float) $settings['delayed_local_js_auto_start_seconds'] : 1.0;
+            $local_auto_seconds = max(0.1, min(9.0, $local_auto_seconds));
+            $local_auto_ms = (int) round(1000 * $local_auto_seconds);
+            $local_auto_fallback_ms = $local_auto_ms + (!empty($settings['main_thread_relief']) ? 10000 : 8000);
             $loader = <<<'UCWP_DELAY_LOADER'
-<script id="ucwp-delayed-loader" data-ucwp-loader-policy="third-party-after-load" data-ucwp-relief="__UCWP_RELIEF__">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var relief=__UCWP_RELIEF__;var timeoutMs=8000;var localAutoDone=false;var thirdPartyAutoDone=false;var allDone=false;var started=Date.now?Date.now():0;function root(){return document.documentElement||document.body||document.head;}function mark(k,v){try{var r=root();if(r){r.setAttribute('data-ucwp-delay-'+k,String(v));}}catch(e){}}function qa(){return Array.prototype.slice.call(document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src],script[type="text/ucwp-delayed-js"][data-ucwp-inline="1"]'));}function c(n,a){var v=n&&n.getAttribute?n.getAttribute('data-ucwp-'+a):'';return v||'';}function reason(n){return c(n,'delay-reason');}function isThirdPartyDelayed(n){var r=reason(n);return r==='safe-third-party'||r==='functional-third-party'||r==='all-third-party';}function q(mode){return qa().filter(function(n){if(!n||n.getAttribute('data-ucwp-loading')==='1'||n.getAttribute('data-ucwp-loaded')==='1'){return false;}if(mode==='thirdparty'){return isThirdPartyDelayed(n);}if(mode==='local'){return !isThirdPartyDelayed(n);}return true;});}function counts(){var all=qa(),tp=0,local=0;for(var i=0;i<all.length;i++){if(isThirdPartyDelayed(all[i])){tp++;}else{local++;}}mark('queued',all.length);mark('queued-local',local);mark('queued-thirdparty',tp);}function decodeAttrs(node){var raw=c(node,'attrs');var attrs={};if(raw){try{attrs=JSON.parse(atob(raw))||{};}catch(e){attrs={};}}['id','crossorigin','referrerpolicy','integrity','nonce'].forEach(function(attr){var val=c(node,attr);if(val&&!attrs[attr]){attrs[attr]=val;}});return attrs;}function applyAttrs(s,node){var attrs=decodeAttrs(node);Object.keys(attrs).forEach(function(attr){var val=attrs[attr];if(!attr||attr==='src'||attr==='async'||attr==='defer'||attr==='data-wp-strategy'||val===null||typeof val==='undefined'){return;}try{s.setAttribute(attr,String(val));}catch(e){}});}function idle(cb){if(!relief){cb();return;}if('requestIdleCallback' in window){window.requestIdleCallback(cb,{timeout:1200});return;}setTimeout(cb,60);}function wait(ms,cb){if(!relief||ms<=0){cb();return;}setTimeout(cb,ms);}function emit(name,detail){try{window.dispatchEvent(new CustomEvent(name,{detail:detail||{}}));}catch(e){}}function insertAndRemove(node,s){if(node.parentNode){node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);}else{(document.head||document.body||document.documentElement).appendChild(s);}}function loadOne(node,done){if(!node||node.getAttribute('data-ucwp-loading')==='1'||node.getAttribute('data-ucwp-loaded')==='1'){done();return;}node.setAttribute('data-ucwp-loading','1');var isInline=node.getAttribute('data-ucwp-inline')==='1';var src=node.getAttribute('data-ucwp-src');var s=document.createElement('script');applyAttrs(s,node);s.async=false;if(isInline){try{s.text=node.textContent||'';}catch(e){s.text='';}insertAndRemove(node,s);node.setAttribute('data-ucwp-loaded','1');done();return;}if(!src){done();return;}var finished=false;function finish(){if(finished){return;}finished=true;node.setAttribute('data-ucwp-loaded','1');done();}s.onload=finish;s.onerror=finish;setTimeout(finish,timeoutMs);s.src=src;insertAndRemove(node,s);}function load(list,i,mode){if(i>=list.length){mark(mode+'-done','1');emit('ucwp:delayed-scripts-done',{mode:mode,count:list.length});return;}idle(function(){loadOne(list[i],function(){wait(relief?80:0,function(){load(list,i+1,mode);});});});}function run(mode){counts();var list=q(mode);if(!list.length){mark(mode+'-done','empty');return;}mark(mode+'-started','1');mark(mode+'-count',list.length);emit('ucwp:delayed-scripts-start',{mode:mode,count:list.length});load(list,0,mode);}function triggerAll(){if(allDone){return;}allDone=true;localAutoDone=true;thirdPartyAutoDone=true;run('all');}function triggerLocal(){if(allDone||localAutoDone){return;}localAutoDone=true;run('local');}function triggerThirdParty(){if(allDone||thirdPartyAutoDone){return;}thirdPartyAutoDone=true;run('thirdparty');}function afterDomReady(cb,delay){if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',function(){setTimeout(cb,delay||0);},{once:true});}else{setTimeout(cb,delay||0);}}function afterLoad(cb,delay){if(document.readyState==='complete'){setTimeout(cb,delay||0);return;}window.addEventListener('load',function(){setTimeout(cb,delay||0);},{once:true});}counts();mark('loader','active');mark('policy','third-party-after-load');mark('started-ms',started);['scroll','mousemove','touchstart','keydown','click','pointerdown'].forEach(function(evt){window.addEventListener(evt,triggerAll,{passive:true,once:true});});afterDomReady(triggerLocal,relief?1800:900);setTimeout(function(){if(document.readyState==='complete'){triggerLocal();}},relief?6500:4500);afterLoad(triggerThirdParty,relief?4500:2500);setTimeout(function(){if(document.readyState==='complete'){triggerThirdParty();}},relief?18000:12000);}());</script>
+<script id="ucwp-delayed-loader" data-ucwp-loader-policy="third-party-after-load" data-ucwp-relief="__UCWP_RELIEF__" data-ucwp-ready-barrier="1" data-ucwp-parallel-loader="1">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var relief=__UCWP_RELIEF__;var timeoutMs=8000;var parallelWindow=0;var localAutoMode=__UCWP_LOCAL_AUTO_MODE__;var localAutoDelayMs=__UCWP_LOCAL_AUTO_MS__;var localAutoFallbackMs=__UCWP_LOCAL_FALLBACK_MS__;var localAutoDone=false;var thirdPartyAutoDone=false;var allDone=false;var started=Date.now?Date.now():0;var readyActive=false;var readyHooked=false;var readyQueue=[];var readyOriginal=null;function root(){return document.documentElement||document.body||document.head;}function mark(k,v){try{var r=root();if(r){r.setAttribute('data-ucwp-delay-'+k,String(v));}}catch(e){}}function qa(){return Array.prototype.slice.call(document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src],script[type="text/ucwp-delayed-js"][data-ucwp-inline="1"]'));}function c(n,a){var v=n&&n.getAttribute?n.getAttribute('data-ucwp-'+a):'';return v||'';}function reason(n){return c(n,'delay-reason');}function isThirdPartyDelayed(n){var r=reason(n);return r==='safe-third-party'||r==='functional-third-party'||r==='all-third-party';}function q(mode){return qa().filter(function(n){if(!n||n.getAttribute('data-ucwp-loading')==='1'||n.getAttribute('data-ucwp-loaded')==='1'){return false;}if(mode==='thirdparty'){return isThirdPartyDelayed(n);}if(mode==='local'){return !isThirdPartyDelayed(n);}return true;});}function counts(){var all=qa(),tp=0,local=0;for(var i=0;i<all.length;i++){if(isThirdPartyDelayed(all[i])){tp++;}else{local++;}}mark('queued',all.length);mark('queued-local',local);mark('queued-thirdparty',tp);}function decodeAttrs(node){var raw=c(node,'attrs');var attrs={};if(raw){try{attrs=JSON.parse(atob(raw))||{};}catch(e){attrs={};}}['id','crossorigin','referrerpolicy','integrity','nonce'].forEach(function(attr){var val=c(node,attr);if(val&&!attrs[attr]){attrs[attr]=val;}});return attrs;}function applyAttrs(s,node){var attrs=decodeAttrs(node);Object.keys(attrs).forEach(function(attr){var val=attrs[attr];if(!attr||attr==='src'||attr==='async'||attr==='defer'||attr==='data-wp-strategy'||val===null||typeof val==='undefined'){return;}try{s.setAttribute(attr,String(val));}catch(e){}});}function idle(cb){if(!relief){cb();return;}if('requestIdleCallback' in window){window.requestIdleCallback(cb,{timeout:1200});return;}setTimeout(cb,60);}function wait(ms,cb){if(!relief||ms<=0){cb();return;}setTimeout(cb,ms);}function emit(name,detail){try{window.dispatchEvent(new CustomEvent(name,{detail:detail||{}}));}catch(e){}}function shouldHoldReady(mode){return mode==='local'||mode==='all';}function tryHookReady(){var jq=window.jQuery;if(!readyActive||readyHooked||!jq||!jq.fn||typeof jq.fn.ready!=='function'){return;}readyOriginal=jq.fn.ready;jq.fn.ready=function(fn){if(readyActive&&typeof fn==='function'){readyQueue.push({fn:fn});mark('ready-held',readyQueue.length);return this;}return readyOriginal.apply(this,arguments);};readyHooked=true;mark('ready-hooked','1');}function beginReadyHold(mode){if(!shouldHoldReady(mode)){return;}readyActive=true;mark('ready-hold','1');tryHookReady();}function flushReadyHold(mode){if(!shouldHoldReady(mode)){return;}tryHookReady();readyActive=false;var jq=window.jQuery;if(readyHooked&&jq&&jq.fn&&readyOriginal){try{jq.fn.ready=readyOriginal;}catch(e){}}readyHooked=false;mark('ready-hold','0');mark('ready-flush-count',readyQueue.length);var queue=readyQueue.slice(0);readyQueue=[];emit('ucwp:delayed-jquery-ready-flush',{mode:mode,count:queue.length});for(var i=0;i<queue.length;i++){try{queue[i].fn.call(document,jq);}catch(err){setTimeout((function(e){return function(){throw e;};})(err),0);}}}function insertAndRemove(node,s){if(node.parentNode){node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);}else{(document.head||document.body||document.documentElement).appendChild(s);}}function isInlineNode(node){return node&&node.getAttribute('data-ucwp-inline')==='1';}function isExternalNode(node){return node&&node.getAttribute('data-ucwp-src')&&!isInlineNode(node);}function loadInline(node,done){if(!node||node.getAttribute('data-ucwp-loading')==='1'||node.getAttribute('data-ucwp-loaded')==='1'){done();return;}node.setAttribute('data-ucwp-loading','1');var s=document.createElement('script');applyAttrs(s,node);try{s.text=node.textContent||'';}catch(e){s.text='';}insertAndRemove(node,s);tryHookReady();node.setAttribute('data-ucwp-loaded','1');done();}function loadExternalGroup(list,start,mode,done){var end=start;var group=[];while(end<list.length&&isExternalNode(list[end])&&list[end].getAttribute('data-ucwp-loading')!=='1'&&list[end].getAttribute('data-ucwp-loaded')!=='1'){group.push(list[end]);end++;}if(!group.length){done(start+1);return;}var pending=group.length;var completed=0;mark('parallel-loader','1');mark('parallel-mode','uncapped');mark(mode+'-parallel-group-size',group.length);function completeOne(){completed++;mark(mode+'-parallel-completed',completed);if(completed>=pending){done(end);}}for(var i=0;i<group.length;i++){(function(node){node.setAttribute('data-ucwp-loading','1');var src=node.getAttribute('data-ucwp-src');var s=document.createElement('script');var finished=false;applyAttrs(s,node);s.async=false;function finish(){if(finished){return;}finished=true;tryHookReady();node.setAttribute('data-ucwp-loaded','1');completeOne();}s.onload=finish;s.onerror=finish;setTimeout(finish,timeoutMs);s.src=src;insertAndRemove(node,s);})(group[i]);}}function load(list,i,mode){while(i<list.length&&(list[i].getAttribute('data-ucwp-loaded')==='1'||list[i].getAttribute('data-ucwp-loading')==='1')){i++;}if(i>=list.length){flushReadyHold(mode);mark(mode+'-done','1');emit('ucwp:delayed-scripts-done',{mode:mode,count:list.length});return;}if(isInlineNode(list[i])){idle(function(){loadInline(list[i],function(){wait(relief?30:0,function(){load(list,i+1,mode);});});});return;}if(isExternalNode(list[i])){idle(function(){loadExternalGroup(list,i,mode,function(next){wait(relief?30:0,function(){load(list,next,mode);});});});return;}load(list,i+1,mode);}function run(mode){counts();var list=q(mode);if(!list.length){mark(mode+'-done','empty');return;}mark(mode+'-started','1');mark(mode+'-count',list.length);beginReadyHold(mode);emit('ucwp:delayed-scripts-start',{mode:mode,count:list.length});load(list,0,mode);}function triggerAll(){if(allDone){return;}allDone=true;localAutoDone=true;thirdPartyAutoDone=true;run('all');}function triggerLocal(){if(allDone||localAutoDone){return;}localAutoDone=true;run('local');}function triggerThirdParty(){if(allDone||thirdPartyAutoDone){return;}thirdPartyAutoDone=true;run('thirdparty');}function afterDomReady(cb,delay){if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',function(){setTimeout(cb,delay||0);},{once:true});}else{setTimeout(cb,delay||0);}}function afterLoad(cb,delay){if(document.readyState==='complete'){setTimeout(cb,delay||0);return;}window.addEventListener('load',function(){setTimeout(cb,delay||0);},{once:true});}function hasElementorInlineBg(n){try{return !!(n&&n.querySelector&&n.querySelector('[style*="background-image"],[style*="background:"]'));}catch(e){return false;}}function revealElementorLazyBgs(){try{var vh=Math.max(window.innerHeight||0,600);var parents=Array.prototype.slice.call(document.querySelectorAll('.e-con.e-parent:not(.e-lazyloaded):not(.e-no-lazyload)'));var checked=0,revealed=0;for(var i=0;i<parents.length&&checked<80;i++){var n=parents[i];checked++;if(!hasElementorInlineBg(n)){continue;}var r=n.getBoundingClientRect?n.getBoundingClientRect():{top:0,bottom:0};if(i<3||(r.top<vh*2&&r.bottom>-vh)){n.classList.add('e-lazyloaded');n.setAttribute('data-ucwp-elementor-bg-lazy-class','1');revealed++;}}mark('elementor-bg-lazy-checked',checked);mark('elementor-bg-lazy-revealed',revealed);}catch(e){mark('elementor-bg-lazy-error','1');}}function scheduleElementorLazyBgHelper(){var run=function(){revealElementorLazyBgs();};afterDomReady(run,0);afterDomReady(run,250);afterLoad(run,0);var scheduled=false;var queue=function(){if(scheduled){return;}scheduled=true;var cb=function(){scheduled=false;run();};if(window.requestAnimationFrame){window.requestAnimationFrame(cb);}else{setTimeout(cb,80);}};['scroll','resize','orientationchange','touchstart','pointerdown'].forEach(function(evt){window.addEventListener(evt,queue,{passive:true});});}counts();mark('loader','active');mark('policy','third-party-after-load');mark('started-ms',started);mark('parallel-mode','uncapped');mark('auto-local-mode',localAutoMode);mark('auto-local-delay-ms',localAutoDelayMs);scheduleElementorLazyBgHelper();['scroll','mousemove','touchstart','keydown','click','pointerdown'].forEach(function(evt){window.addEventListener(evt,triggerAll,{passive:true,once:true});});if(localAutoMode==='custom'){afterDomReady(triggerLocal,localAutoDelayMs);setTimeout(function(){if(document.readyState==='complete'){triggerLocal();}},localAutoFallbackMs);}afterLoad(triggerThirdParty,relief?4500:2500);setTimeout(function(){if(document.readyState==='complete'){triggerThirdParty();}},relief?18000:12000);}());</script>
 UCWP_DELAY_LOADER;
-            $loader = str_replace('__UCWP_RELIEF__', $main_thread_relief, $loader);
+            $loader = str_replace(
+                array('__UCWP_RELIEF__', '__UCWP_LOCAL_AUTO_MODE__', '__UCWP_LOCAL_AUTO_MS__', '__UCWP_LOCAL_FALLBACK_MS__'),
+                array($main_thread_relief, wp_json_encode($local_auto_mode), (string) $local_auto_ms, (string) $local_auto_fallback_ms),
+                $loader
+            );
             // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Static inline loader script with a validated numeric placeholder.
             echo $loader . "\n";
         }
@@ -3677,6 +4088,26 @@ UCWP_DELAY_LOADER;
             $processed = $this->apply_delayed_script_replacements_with_processor($html, $records, $replacements);
 
             return is_string($processed) ? $processed : $html;
+        }
+
+        private function get_inline_script_code_from_tag($tag)
+        {
+            $tag = (string) $tag;
+            if ('' === $tag) {
+                return '';
+            }
+
+            $start = stripos($tag, '>');
+            if (false === $start) {
+                return '';
+            }
+
+            $end = strripos($tag, '</script>');
+            if (false === $end || $end <= $start) {
+                return '';
+            }
+
+            return substr($tag, $start + 1, $end - $start - 1);
         }
 
         private function infer_script_handle_from_tag($tag, $src = '')

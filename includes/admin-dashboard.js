@@ -69,6 +69,9 @@
 		'mediaOutputMode',
 		'deferJsEnabled',
 		'deferAllJsEnabled',
+		'jsFullSiteStrategy',
+		'delayedLocalJsAutoStart',
+		'delayedLocalJsAutoStartSeconds',
 		'deferJsForceList',
 		'deferJsExcludeList',
 		'delaySafeThirdPartyJsEnabled',
@@ -161,6 +164,7 @@
 		'pageCssBundleOnEntryEnabled',
 		'pageAsyncBundleOnEntryEnabled',
 		'deferJsEnabled',
+		'jsFullSiteStrategy',
 		'delaySafeThirdPartyJsEnabled',
 		'delayAllThirdPartyJsEnabled',
 		'lazyMailerliteNonceEnabled',
@@ -244,7 +248,7 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: __("All Off", 'ultracache'), description: __("Disable optimization modules managed by profiles. Diagnostic counters, Automation & Scheduling, and Varnish settings are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, debugHeadersEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, deferAllJsEnabled: false, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
+			deferJsEnabled: false, deferAllJsEnabled: false, jsFullSiteStrategy: 'off', delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: 1, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false, cacheSafeTrackingCookiesEnabled: false, varnishCliEnabled: false,
@@ -271,6 +275,9 @@
 			mediaOutputMode: "auto",
 			deferJsEnabled: true,
 			deferAllJsEnabled: false,
+			jsFullSiteStrategy: 'off',
+			delayedLocalJsAutoStart: 'custom',
+			delayedLocalJsAutoStartSeconds: 1,
 			deferJsForceList: "",
 			deferJsExcludeList: "",
 			delaySafeThirdPartyJsEnabled: true,
@@ -364,6 +371,9 @@
 			mediaOutputMode: "auto",
 			deferJsEnabled: true,
 			deferAllJsEnabled: false,
+			jsFullSiteStrategy: 'off',
+			delayedLocalJsAutoStart: 'custom',
+			delayedLocalJsAutoStartSeconds: 1,
 			deferJsForceList: "",
 			deferJsExcludeList: "",
 			delaySafeThirdPartyJsEnabled: true,
@@ -436,7 +446,7 @@
 			cacheQueryStringsEnabled: false,
 			cacheSafeTrackingCookiesEnabled: true,
 		} },
-		aggressive: { label: __("Aggressive", 'ultracache'), description: __("Aggressive profile based on the exported Aggressive settings. Enables Defer all JS; Runtime Scan is recommended to detect broken JS dependencies and build JS Delay / Defer Exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
+		aggressive: { label: __("Aggressive", 'ultracache'), description: __("Aggressive profile based on the exported Aggressive settings. Enables Delay all eligible JS; Scan Browser Runtime Errors is recommended to detect broken JS dependencies and build JS Delay / Defer Exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: true,
 			objectCacheEnabled: true,
 			redisHost: "127.0.0.1",
@@ -456,9 +466,12 @@
 			mediaGenerateOnDemandEnabled: true,
 			mediaOutputMode: "auto",
 			deferJsEnabled: true,
-			deferAllJsEnabled: true,
+			deferAllJsEnabled: false,
+			jsFullSiteStrategy: 'delay_all',
+			delayedLocalJsAutoStart: 'custom',
+			delayedLocalJsAutoStartSeconds: 1,
 			deferJsForceList: "",
-			deferJsExcludeList: "wp-i18n\nwp-hooks\njquery\npage-builder.js\nindex.js\ncontact-form-7-js-translations",
+			deferJsExcludeList: "/wp-includes/js/jquery/jquery.min.js\n/wp-includes/js/jquery/jquery-migrate.min.js\n/wp-includes/js/underscore.min.js\n/wp-includes/js/wp-util.min.js\n/wp-includes/js/dist/i18n.min.js\n/wp-includes/js/dist/hooks.min.js\n/wp-includes/js/dist/api-fetch.min.js\n/wp-includes/js/api-request.min.js\n/wp-includes/js/dist/dom-ready.min.js",
 			delaySafeThirdPartyJsEnabled: true,
 			delayAllThirdPartyJsEnabled: true,
 			lazyMailerliteNonceEnabled: false,
@@ -1201,13 +1214,61 @@
 			.filter((line) => line.length > 0);
 	}
 
+	function isGenericRootJsExclusionLine(line) {
+		const value = String(line || '').trim().toLowerCase();
+		return [
+			'woocommerce',
+			'wordpress',
+			'frontend',
+			'main',
+			'plugin',
+			'plugins',
+			'script',
+			'scripts',
+			'data',
+			'params',
+			'cart',
+			'checkout',
+			'account'
+		].indexOf(value) !== -1;
+	}
+
+	function genericRootJsExclusionCoversTarget(line, target) {
+		const value = String(line || '').trim().toLowerCase();
+		const candidate = String(target || '').trim().toLowerCase();
+		if (!value || !candidate) {
+			return false;
+		}
+		if (candidate === value) {
+			return true;
+		}
+		if (value === 'woocommerce') {
+			return candidate.indexOf('/wp-content/plugins/woocommerce/') !== -1
+				|| candidate.indexOf('/plugins/woocommerce/') !== -1
+				|| candidate.indexOf('/woocommerce/assets/') !== -1;
+		}
+		return false;
+	}
+
+	function jsExclusionLineCoversTarget(existingLine, targetLine) {
+		const existing = String(existingLine || '').trim().toLowerCase();
+		const target = String(targetLine || '').trim().toLowerCase();
+		if (!existing || !target) {
+			return false;
+		}
+		if (isGenericRootJsExclusionLine(existing)) {
+			return genericRootJsExclusionCoversTarget(existing, target);
+		}
+		return existing === target || target.indexOf(existing) !== -1;
+	}
+
 	function mergeUniqueSettingLines(currentValue, additions) {
 		const currentLines = normalizeSettingListLines(currentValue);
 		const normalizedExisting = currentLines.map((line) => line.toLowerCase());
 		const addedLines = [];
 		normalizeSettingListLines(Array.isArray(additions) ? additions.join('\n') : additions).forEach((line) => {
 			const normalized = line.toLowerCase();
-			const duplicate = normalizedExisting.some((existing) => existing === normalized || normalized.indexOf(existing) !== -1);
+			const duplicate = normalizedExisting.some((existing) => jsExclusionLineCoversTarget(existing, normalized));
 			if (!duplicate) {
 				normalizedExisting.push(normalized);
 				currentLines.push(line);
@@ -1243,184 +1304,10 @@
 		if (!target) {
 			return false;
 		}
-		return lines.some((line) => line === target || target.indexOf(line) !== -1);
+		return lines.some((line) => jsExclusionLineCoversTarget(line, target));
 	}
 
 
-	function cleanConsoleErrorExclusionToken(token) {
-		let value = String(token || '').trim();
-		if (!value) {
-			return '';
-		}
-		value = value.replace(/[\u2026]/g, '');
-		value = value.replace(/^['"`(<\[]+|['"`)>\],.;:]+$/g, '');
-		value = value.replace(/\?.*$/, '');
-		value = value.replace(/#.*$/, '');
-		value = value.replace(/:\d+(?::\d+)?$/g, '');
-		value = value.replace(/^.*\/wp-content\/plugins\/([^\s'"()<>]+).*$/i, function(match, rest) {
-			const parts = String(rest || '').split('/').filter(Boolean);
-			return parts.length ? parts[0] : match;
-		});
-		value = value.trim();
-		if (!value || value.length < 3 || value.length > 160) {
-			return '';
-		}
-		const lower = value.toLowerCase();
-		if (/^(at|e|t|l|anonymous|undefined|null|true|false|object|array|function|functions|return|var|let|const|new|this|window|document|html(document)?|promise|uncaught|referenceerror|typeerror|syntaxerror|error|warning|jquery\.deferred|deferred|exception|woocommerce|wordpress|main|params|data)$/.test(lower)) {
-			return '';
-		}
-		if (/^(https?:)?\/\/$/.test(value) || /^\d+$/.test(value)) {
-			return '';
-		}
-		if (/^(jquery(?:-migrate)?(?:\.min)?|main|functions?|scripts?|script|custom|app|index|site|frontend|public|plugin)(?:\.min)?\.js$/i.test(value)) {
-			return '';
-		}
-		return value;
-	}
-
-	function addConsoleErrorSuggestionToken(suggestions, seen, token) {
-		const cleaned = cleanConsoleErrorExclusionToken(token);
-		if (!cleaned) {
-			return;
-		}
-		const lower = cleaned.toLowerCase();
-		if (seen[lower]) {
-			return;
-		}
-		seen[lower] = true;
-		suggestions.push(cleaned);
-	}
-
-	function addConsoleErrorUrlSuggestions(suggestions, seen, url) {
-		let raw = String(url || '').trim();
-		if (!raw) {
-			return;
-		}
-		raw = raw.replace(/[\u2026]/g, '');
-		raw = raw.replace(/[),.;]+$/g, '');
-		let parsed = null;
-		try {
-			parsed = new URL(raw, (typeof window !== 'undefined' && window.location ? window.location.href : 'https://example.com/'));
-		} catch (error) {
-			parsed = null;
-		}
-		const pathname = parsed && parsed.pathname ? String(parsed.pathname || '') : raw.split('?')[0];
-		const lowerPath = pathname.toLowerCase();
-		const pluginMatch = pathname.match(/\/wp-content\/plugins\/([^\/\s'"()<>]+)/i);
-		if (pluginMatch && pluginMatch[1]) {
-			addConsoleErrorSuggestionToken(suggestions, seen, pluginMatch[1]);
-		}
-		const fileMatch = pathname.match(/([^\/\s'"()<>]+\.(?:min\.)?(?:js|mjs))(?:$|[?#:])/i) || pathname.match(/([^\/\s'"()<>]+\.(?:min\.)?(?:js|mjs))$/i);
-		if (fileMatch && fileMatch[1]) {
-			const file = fileMatch[1];
-			addConsoleErrorSuggestionToken(suggestions, seen, file);
-			const base = file.replace(/\.min\.js$/i, '').replace(/\.js$/i, '');
-			if (!/^(main|index|frontend|script|scripts|app|site|jquery|jquery\.min)$/i.test(base)) {
-				addConsoleErrorSuggestionToken(suggestions, seen, base);
-			}
-		}
-		if (lowerPath.indexOf('woocommerce-coupon-box') !== -1) {
-			addConsoleErrorSuggestionToken(suggestions, seen, 'woocommerce-coupon-box');
-		}
-		if (lowerPath.indexOf('complianz') !== -1 || lowerPath.indexOf('cmplz') !== -1) {
-			addConsoleErrorSuggestionToken(suggestions, seen, 'complianz');
-		}
-	}
-
-	function getConsoleErrorRelevantText(rawInput) {
-		const lines = String(rawInput || '').replace(/\r\n?/g, '\n').split('\n');
-		const blocks = [];
-		let current = [];
-		let inError = false;
-		const errorLineRegex = /(?:Uncaught\s+)?(?:ReferenceError|TypeError|SyntaxError|RangeError|EvalError|URIError|Error):|jQuery\.Deferred exception|\bis not defined\b|\bis not a function\b|Cannot read properties|window\[[^\]]+\]\s+is\s+not\s+a\s+function/i;
-		const stackLineRegex = /^\s*at\s+|\.(?:m?js)(?:\?[^\s)]*)?(?::\d+(?::\d+)?)?/i;
-		const harmlessRegex = /^\s*(?:JQMIGRATE:\s*Migrate is installed|opt-in|Understand this (?:error|warning))\s*$/i;
-
-		lines.forEach((line) => {
-			const text = String(line || '').trim();
-			if (!text || harmlessRegex.test(text)) {
-				if (!text && current.length) {
-					blocks.push(current.join('\n'));
-					current = [];
-					inError = false;
-				}
-				return;
-			}
-
-			if (errorLineRegex.test(text)) {
-				if (current.length) {
-					blocks.push(current.join('\n'));
-				}
-				current = [text];
-				inError = true;
-				return;
-			}
-
-			if (inError && stackLineRegex.test(text)) {
-				current.push(text);
-				return;
-			}
-
-			if (current.length) {
-				blocks.push(current.join('\n'));
-				current = [];
-			}
-			inError = false;
-		});
-
-		if (current.length) {
-			blocks.push(current.join('\n'));
-		}
-
-		return blocks.join('\n');
-	}
-
-	function extractConsoleErrorExclusions(rawInput) {
-		const text = getConsoleErrorRelevantText(rawInput);
-		const suggestions = [];
-		const seen = {};
-		let match;
-
-		const urlRegex = /https?:\/\/[^\s'"<>),]+/gi;
-		while ((match = urlRegex.exec(text)) !== null) {
-			addConsoleErrorUrlSuggestions(suggestions, seen, match[0]);
-		}
-
-		const sourceRegex = /(^|\s|\()([A-Za-z0-9_./@%+-]+\.(?:min\.)?(?:js|mjs))(?:\?[^\s:)]*)?(?::\d+(?::\d+)?)?/g;
-		while ((match = sourceRegex.exec(text)) !== null) {
-			addConsoleErrorUrlSuggestions(suggestions, seen, match[2]);
-		}
-
-		const notDefinedRegex = /(?:ReferenceError:\s*)?([A-Za-z_$][A-Za-z0-9_$.-]{2,})\s+is\s+not\s+defined/gi;
-		while ((match = notDefinedRegex.exec(text)) !== null) {
-			addConsoleErrorSuggestionToken(suggestions, seen, match[1]);
-		}
-
-		const wpInlineRegex = /([A-Za-z0-9_-]+-js-(?:after|before|extra|translations))/gi;
-		while ((match = wpInlineRegex.exec(text)) !== null) {
-			addConsoleErrorSuggestionToken(suggestions, seen, match[1]);
-			addConsoleErrorSuggestionToken(suggestions, seen, match[1].replace(/-js-(?:after|before|extra|translations)$/i, ''));
-		}
-
-		const knownNeedles = [
-			'woocommerce-google',
-			'woocommerce-coupon-box',
-			'wcb_params',
-			'complianz',
-			'cmplz',
-			'contact-form-7',
-			'wp-api-fetch',
-			'api-fetch.min.js'
-		];
-		const lowerText = text.toLowerCase();
-		knownNeedles.forEach((needle) => {
-			if (lowerText.indexOf(String(needle).toLowerCase()) !== -1) {
-				addConsoleErrorSuggestionToken(suggestions, seen, needle);
-			}
-		});
-
-		return suggestions.slice(0, 60);
-	}
 
 	function sleep(ms) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1566,6 +1453,11 @@
 			runtime_js_scan_report: { path: 'runtime-js-scan/report', method: 'GET' },
 			runtime_js_scan_submit: { path: 'runtime-js-scan/report', method: 'POST' },
 			runtime_js_scan_parse_console: { path: 'runtime-js-scan/parse-console', method: 'POST' },
+			runtime_js_diagnostic_queue_start: { path: 'runtime-js-diagnostic-queue/start', method: 'POST' },
+			runtime_js_diagnostic_queue_status: { path: 'runtime-js-diagnostic-queue/status', method: 'GET' },
+			runtime_js_diagnostic_queue_pause: { path: 'runtime-js-diagnostic-queue/pause', method: 'POST' },
+			runtime_js_diagnostic_queue_resume: { path: 'runtime-js-diagnostic-queue/resume', method: 'POST' },
+			runtime_js_diagnostic_queue_cancel: { path: 'runtime-js-diagnostic-queue/cancel', method: 'POST' },
 			cron_warm_start: { path: 'cron-warm/start', method: 'POST' },
 			cron_warm_stop: { path: 'cron-warm/stop', method: 'POST' },
 			cron_warm_tick: { path: 'cron-warm/tick', method: 'POST' },
@@ -1577,7 +1469,6 @@
 			delete_all_data: { path: 'delete-all-data', method: 'POST' },
 			populate_query_allowlist: { path: 'query-string-allowlist/populate', method: 'POST' },
 			font_patterns_scan: { path: 'font-patterns/scan-frontpage', method: 'POST' },
-			safe_defer_init_scan: { path: 'safe-defer/init-scan', method: 'POST' },
 		};
 
 		const route = routes[subAction];
@@ -2171,6 +2062,27 @@
 		]);
 	}
 
+
+	function AccordionBox({ title, description, children, keyName }) {
+		return h('details', { className: 'uc-accordion uc-accordion--card', key: keyName || String(title || '') }, [
+			h('summary', { className: 'uc-accordion__summary' }, [
+				h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
+					h('div', { className: 'uc-accordion__title' }, title),
+					description ? h('div', { className: 'uc-accordion__description' }, description) : null,
+				]),
+				h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
+			]),
+			h('div', { className: 'uc-accordion__body space-y-4' }, children),
+		]);
+	}
+
+	function SettingsAccordionCard({ title, description, children, keyName }) {
+		return h('div', { className: 'uc-card', key: (keyName || String(title || 'settings-accordion')) + '-card' }, [
+			AccordionBox({ title, description, children, keyName }),
+		]);
+	}
+
+
 	function StatCard({ label, value, hint, action }) {
 		return h('div', { className: 'uc-card relative' }, [
 			h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-2 pr-8', key: 'label' }, label),
@@ -2322,7 +2234,7 @@
 				placeholder: placeholder || '',
 				onChange: (e) => setDraft(e.target.value),
 			}),
-			hasPopulate && hasDraftContent ? h('div', { className: 'mt-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, populateWarning || 'Your current whitelist will be replaced.') : null,
+			hasPopulate && hasDraftContent ? h('div', { className: 'mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-xl px-3 py-2' }, populateWarning || 'Your current whitelist will be replaced.') : null,
 			h('div', { className: 'mt-3 flex items-center justify-between gap-3' }, [
 				hasPopulate ? h(Button, {
 					onClick: handlePopulateClick,
@@ -2337,14 +2249,13 @@
 		]);
 	}
 
-	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onSafeInitScan, onScan, onRuntimeScan, onLoadLatestProfileScan }) {
+	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onRuntimeScan, onLoadLatestProfileScan }) {
 		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
 		const [draft, setDraft] = useState(value || "");
 		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
 		const [scan, setScan] = useState(null);
 		const [populateBusy, setPopulateBusy] = useState(false);
 		const [scanBusy, setScanBusy] = useState(false);
-		const [initScanBusy, setInitScanBusy] = useState(false);
 		const [debugScanBusy, setDebugScanBusy] = useState(false);
 		const [runtimeScanBusy, setRuntimeScanBusy] = useState(false);
 		const [runtimeScanStatus, setRuntimeScanStatus] = useState('');
@@ -2354,6 +2265,8 @@
 		const [consoleErrorScan, setConsoleErrorScan] = useState(null);
 		const [consoleErrorStatus, setConsoleErrorStatus] = useState('');
 		const [consoleErrorBusy, setConsoleErrorBusy] = useState(false);
+		const [jsDiagnosticQueue, setJsDiagnosticQueue] = useState(null);
+		const [jsDiagnosticQueueBusy, setJsDiagnosticQueueBusy] = useState(false);
 
 		useEffect(() => {
 			setDraft(value || '');
@@ -2371,6 +2284,10 @@
 		const missingReviewOnlySuggestions = reviewOnlySuggestions.filter((item) => !isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
 		const totalDetected = scan && typeof scan.suggestionCount !== 'undefined' ? Number(scan.suggestionCount || 0) : suggestions.length;
 		const liveMissingCount = missingAppendableSuggestions.length;
+		const confirmedRuntimeErrorCount = Number(scan && scan.runtimeErrorCount ? scan.runtimeErrorCount : 0) || (scan && Array.isArray(scan.errors) ? scan.errors.length : 0);
+		const hasConfirmedRuntimeErrors = !!(scan && (scan.source === 'browser-runtime' || confirmedRuntimeErrorCount > 0) && confirmedRuntimeErrorCount > 0);
+		const confirmedErrorMissingCount = hasConfirmedRuntimeErrors ? missingAppendableSuggestions.length : 0;
+		const suggestionMissingCount = hasConfirmedRuntimeErrors ? 0 : liveMissingCount;
 		const liveAlreadyListedCount = alreadyListedAppendableSuggestions.length;
 		const reviewOnlyCount = reviewOnlySuggestions.length;
 		const runtimeErrors = scan && Array.isArray(scan.errors) ? scan.errors : [];
@@ -2383,6 +2300,13 @@
 		const consoleAppendableSuggestions = consoleActionableSuggestions.filter((item) => item.appendable !== false && item.category !== 'review-only');
 		const consoleReviewOnlySuggestions = consoleActionableSuggestions.filter((item) => item.appendable === false || item.category === 'review-only');
 		const missingConsoleReviewOnlySuggestions = consoleReviewOnlySuggestions.filter((item) => !isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
+		const jsDiagnosticQueueResult = jsDiagnosticQueue && jsDiagnosticQueue.result && typeof jsDiagnosticQueue.result === 'object' ? jsDiagnosticQueue.result : null;
+		const jsDiagnosticQueueBucketCounts = jsDiagnosticQueueResult && jsDiagnosticQueueResult.bucketCounts ? jsDiagnosticQueueResult.bucketCounts : {};
+		const jsDiagnosticQueueBuckets = jsDiagnosticQueueResult && jsDiagnosticQueueResult.buckets && typeof jsDiagnosticQueueResult.buckets === 'object' ? jsDiagnosticQueueResult.buckets : {};
+		const jsDiagnosticQueueProgressTotal = jsDiagnosticQueue ? Math.max(1, Number(jsDiagnosticQueue.progressTotal || 100)) : 100;
+		const jsDiagnosticQueueProgressCurrent = jsDiagnosticQueue ? Math.max(0, Math.min(jsDiagnosticQueueProgressTotal, Number(jsDiagnosticQueue.progressCurrent || 0))) : 0;
+		const jsDiagnosticQueueProgressPercent = jsDiagnosticQueue ? Math.round((jsDiagnosticQueueProgressCurrent / jsDiagnosticQueueProgressTotal) * 100) : 0;
+
 
 		function appendJsExclusionLine(line) {
 			const suggestion = String(line || '').trim();
@@ -2405,7 +2329,7 @@
 				['Confidence', item && item.confidence ? String(item.confidence) : '—', 'text-zinc-300'],
 				['Category', item && item.categoryLabel ? String(item.categoryLabel) : (reviewOnly ? 'Review-only candidates' : 'Detected recommendation'), reviewOnly ? 'text-sky-300' : 'text-violet-300'],
 			];
-			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-3 space-y-2 border border-white/5', key: keyPrefix + '-' + index + '-' + line }, [
+			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-3 space-y-2', key: keyPrefix + '-' + index + '-' + line }, [
 				h('div', { className: 'space-y-1' }, [
 					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Suggested exclusion", 'ultracache')),
 					h('div', { className: 'flex flex-wrap items-center gap-2' }, [
@@ -2422,6 +2346,45 @@
 					h('span', { className: 'text-zinc-400 font-semibold' }, __("Sample: ", 'ultracache')),
 					String(item.sample),
 				]) : null,
+			]);
+		}
+
+
+		function renderJsDiagnosticQueueItem(item, keyPrefix, index, options) {
+			const line = item && item.suggestedExclusion ? String(item.suggestedExclusion) : '';
+			const readOnly = !!(options && options.readOnly);
+			const present = line ? isSuggestionPresentInDraft(draftValue, line) : false;
+			const canAppend = !readOnly && item && item.appendable !== false && line && !present;
+			const status = readOnly ? (present ? 'already listed' : 'read only') : (present ? 'already listed' : 'ready to append');
+			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-3 space-y-2', key: keyPrefix + '-' + index + '-' + line }, [
+				h('div', { className: 'flex flex-wrap items-center gap-2' }, [
+					h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
+					canAppend ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled, onClick: () => appendJsExclusionLine(line) }, 'Append') : null,
+				]),
+				h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-2' }, [
+					h('div', { className: 'rounded bg-black/15 px-2 py-1' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Status'), h('div', { className: present ? 'text-[11px] font-semibold text-emerald-300' : 'text-[11px] font-semibold text-zinc-300' }, status)]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-1' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Confidence'), h('div', { className: 'text-[11px] font-semibold text-zinc-300' }, item && item.confidence ? String(item.confidence) : '—')]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-1' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Type'), h('div', { className: 'text-[11px] font-semibold text-violet-300' }, item && item.categoryLabel ? String(item.categoryLabel) : (options && options.title ? String(options.title) : 'Diagnostic result'))]),
+				]),
+				item && item.reason ? h('div', { className: 'text-zinc-400 leading-relaxed pt-1' }, item.reason) : null,
+				item && item.sample ? h('div', { className: 'text-zinc-500 leading-relaxed break-all bg-black/15 rounded px-2 py-1.5' }, [h('span', { className: 'text-zinc-400 font-semibold' }, __("Sample: ", 'ultracache')), String(item.sample)]) : null,
+			]);
+		}
+
+		function renderJsDiagnosticQueueCategory(title, count, items, emptyText, keyPrefix, options) {
+			const list = Array.isArray(items) ? items : [];
+			if (!count && !list.length) {
+				return null;
+			}
+			return h('div', { className: 'rounded-xl bg-black/15 px-3 py-3 space-y-2', key: keyPrefix }, [
+				h('div', { className: 'flex flex-wrap items-center justify-between gap-2' }, [
+					h('div', null, [
+						h('div', { className: 'text-zinc-200 font-semibold' }, title),
+						options && options.help ? h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, options.help) : null,
+					]),
+					h('div', { className: 'font-mono text-[12px] text-zinc-300' }, String(count || list.length || 0)),
+				]),
+				list.length ? h('div', { className: 'space-y-2' }, list.map((item, index) => renderJsDiagnosticQueueItem(item, keyPrefix + '-item', index, Object.assign({}, options || {}, { title: title })))) : h('div', { className: 'text-[11px] text-zinc-500' }, emptyText),
 			]);
 		}
 
@@ -2572,6 +2535,69 @@
 			]);
 		}
 
+
+		function applyJsDiagnosticQueueJob(job) {
+			if (!job || typeof job !== 'object') {
+				return null;
+			}
+			setJsDiagnosticQueue(job);
+			const result = job.result && typeof job.result === 'object' ? job.result : null;
+			const dashboardScan = result && result.dashboardScan && typeof result.dashboardScan === 'object' ? result.dashboardScan : null;
+			if (dashboardScan) {
+				if (job.scanType === 'console') {
+					setConsoleErrorScan(dashboardScan);
+					setConsoleErrorSuggestions(getJsDelaySafetySuggestions(dashboardScan));
+				} else {
+					setScan(dashboardScan);
+				}
+			}
+			return job;
+		}
+
+		function applyJsDiagnosticQueueResponse(response) {
+			const job = response && response.jsDiagnosticQueue ? response.jsDiagnosticQueue : null;
+			return applyJsDiagnosticQueueJob(job);
+		}
+
+		async function refreshJsDiagnosticQueue(jobId) {
+			setJsDiagnosticQueueBusy(true);
+			try {
+				const response = await apiRequest('runtime_js_diagnostic_queue_status', jobId ? { jobId } : {});
+				const job = applyJsDiagnosticQueueResponse(response);
+				if (job && job.result && job.result.dashboardScan) {
+					pushToast({ type: 'success', text: 'Loaded stored JS diagnostic queue result.' });
+				} else if (job) {
+					pushToast({ type: 'info', text: 'Loaded JS diagnostic queue status: ' + String(job.status || 'unknown') + '.' });
+				}
+				return job;
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'Could not load JS diagnostic queue status.' });
+				return null;
+			} finally {
+				setJsDiagnosticQueueBusy(false);
+			}
+		}
+
+		async function transitionJsDiagnosticQueue(action) {
+			const jobId = jsDiagnosticQueue && jsDiagnosticQueue.id ? String(jsDiagnosticQueue.id) : '';
+			if (!jobId) {
+				pushToast({ type: 'warning', text: 'No JS diagnostic queue job is selected.' });
+				return;
+			}
+			setJsDiagnosticQueueBusy(true);
+			try {
+				const response = await apiRequest('runtime_js_diagnostic_queue_' + action, { jobId });
+				const job = applyJsDiagnosticQueueResponse(response);
+				pushToast({ type: 'success', text: 'JS diagnostic queue ' + action + ' completed.' });
+				return job;
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : 'JS diagnostic queue action failed.' });
+				return null;
+			} finally {
+				setJsDiagnosticQueueBusy(false);
+			}
+		}
+
 		async function handleExtractConsoleErrors() {
 			const input = String(consoleErrorInput || '');
 			if (!input.trim()) {
@@ -2581,10 +2607,11 @@
 				return;
 			}
 			setConsoleErrorBusy(true);
-			setConsoleErrorStatus('Parsing console errors with the Runtime Scan suggestion engine…');
+			setConsoleErrorStatus('Parsing console errors with the DB-backed Runtime Scan suggestion engine…');
 			try {
-				const response = await apiRequest('runtime_js_scan_parse_console', { text: input, url: scanUrl || defaultScanUrl });
-				const scan = response && response.consoleErrorScan ? response.consoleErrorScan : (response && response.jsDelaySafetyScan ? response.jsDelaySafetyScan : null);
+				const response = await apiRequest('runtime_js_diagnostic_queue_start', { scanType: 'console', text: input, url: scanUrl || defaultScanUrl, scanContext: runtimeScanContext });
+				const job = applyJsDiagnosticQueueResponse(response);
+				const scan = job && job.result && job.result.dashboardScan ? job.result.dashboardScan : null;
 				const extracted = getJsDelaySafetySuggestions(scan);
 				const reviewOnly = getJsDelayReviewSuggestions(scan);
 				setConsoleErrorSuggestions(extracted);
@@ -2594,13 +2621,12 @@
 				} else if (!extracted.length) {
 					setConsoleErrorStatus('Detected ' + reviewOnly.length + ' review-only Runtime Scan candidate(s). They are shown below for manual review and can be appended one by one.');
 				} else {
-					setConsoleErrorStatus('Detected ' + extracted.length + ' appendable Runtime Scan suggestion(s)' + (reviewOnly.length ? (' and ' + reviewOnly.length + ' review-only candidate(s)') : '') + '. Review the preview, then append missing recommended tokens.');
+					setConsoleErrorStatus('Detected ' + extracted.length + ' appendable Runtime Scan suggestion(s)' + (reviewOnly.length ? (' and ' + reviewOnly.length + ' review-only candidate(s)') : '') + '. Review the preview, then append only the confirmed fixes you want.');
 				}
 			} catch (error) {
-				const fallback = extractConsoleErrorExclusions(input);
-				setConsoleErrorSuggestions(fallback);
+				setConsoleErrorSuggestions([]);
 				setConsoleErrorScan(null);
-				setConsoleErrorStatus('Runtime Scan parser failed, so UltraCache used the local fallback parser. ' + (error && error.message ? String(error.message) : ''));
+				setConsoleErrorStatus('Runtime Scan parser failed. Safe Defer diagnostics now require the REST/runtime scan parser; fix the parser error and run extraction again. ' + (error && error.message ? String(error.message) : ''));
 			} finally {
 				setConsoleErrorBusy(false);
 			}
@@ -2609,12 +2635,19 @@
 		function handleAppendConsoleErrors() {
 			const lines = missingConsoleErrorSuggestions;
 			if (!lines.length) {
-				setConsoleErrorStatus(consoleErrorSuggestions.length ? 'All extracted console-error exclusions are already listed.' : 'Extract suggestions before appending.');
+				setConsoleErrorStatus(consoleErrorSuggestions.length ? 'All extracted console-error exclusions are already listed.' : 'Extract console error suggestions before appending.');
 				return;
 			}
 			const merged = mergeUniqueSettingLines(draftValue, lines);
 			setDraft(merged.value);
 			setConsoleErrorStatus(merged.added ? ('Appended ' + merged.added + ' console-error exclusion(s).') : 'All extracted console-error exclusions are already listed.');
+		}
+
+		function handleClearConsoleErrors() {
+			setConsoleErrorInput('');
+			setConsoleErrorSuggestions([]);
+			setConsoleErrorScan(null);
+			setConsoleErrorStatus('');
 		}
 
 		async function handlePopulateDefaults() {
@@ -2629,21 +2662,6 @@
 				}
 			} finally {
 				setPopulateBusy(false);
-			}
-		}
-
-		async function handleSafeInitScan() {
-			if (disabled || initScanBusy || typeof onSafeInitScan !== 'function') {
-				return;
-			}
-			setInitScanBusy(true);
-			try {
-				const next = await onSafeInitScan(draftValue);
-				if (typeof next === 'string') {
-					setDraft(next);
-				}
-			} finally {
-				setInitScanBusy(false);
 			}
 		}
 
@@ -2668,13 +2686,19 @@
 				return;
 			}
 			setRuntimeScanBusy(true);
-			setRuntimeScanStatus('Opening diagnostic page…');
+			setRuntimeScanStatus('Creating DB-backed JS diagnostic queue job…');
 			try {
+				const startResponse = await apiRequest('runtime_js_diagnostic_queue_start', { scanType: 'runtime', url: scanUrl || defaultScanUrl, scanContext: runtimeScanContext });
+				const queueJob = applyJsDiagnosticQueueResponse(startResponse);
+				const queueJobId = queueJob && queueJob.id ? String(queueJob.id) : '';
 				const result = await onRuntimeScan(scanUrl, function(statusText) {
 					setRuntimeScanStatus(String(statusText || ''));
-				});
+				}, { context: runtimeScanContext, queueJobId: queueJobId });
 				if (result && typeof result === 'object') {
 					setScan(result);
+				}
+				if (queueJobId) {
+					await refreshJsDiagnosticQueue(queueJobId);
 				}
 			} finally {
 				setRuntimeScanBusy(false);
@@ -2696,8 +2720,13 @@
 			}
 		}
 
-		function handleAppendSuggestions() {
-			const lines = getJsDelaySafetySuggestions(scan).filter((line) => !isSuggestionPresentInDraft(draftValue, line));
+		function handleAppendConfirmedErrorFixes() {
+			if (!hasConfirmedRuntimeErrors) {
+				return;
+			}
+			const lines = missingAppendableSuggestions
+				.map((item) => String(item && item.suggestedExclusion ? item.suggestedExclusion : '').trim())
+				.filter(Boolean);
 			if (!lines.length) {
 				return;
 			}
@@ -2705,9 +2734,33 @@
 			setDraft(merged.value);
 		}
 
+		function handleAppendSuggestions() {
+			if (hasConfirmedRuntimeErrors) {
+				return;
+			}
+			const lines = missingAppendableSuggestions
+				.map((item) => String(item && item.suggestedExclusion ? item.suggestedExclusion : '').trim())
+				.filter(Boolean);
+			if (!lines.length) {
+				return;
+			}
+			const merged = mergeUniqueSettingLines(draftValue, lines);
+			setDraft(merged.value);
+		}
+
+		const runtimeStatusText = String(runtimeScanStatus || '');
+		const runtimeStatusMatch = runtimeStatusText.match(/(\d+)\s*\/\s*(\d+)/);
+		const runtimeStatusCurrent = runtimeStatusMatch ? Number(runtimeStatusMatch[1] || 0) : (runtimeScanBusy ? 1 : 0);
+		const runtimeStatusTotal = runtimeStatusMatch ? Math.max(1, Number(runtimeStatusMatch[2] || 1)) : (runtimeScanBusy ? 100 : 100);
+		const runtimeStatusPercent = runtimeScanBusy ? Math.max(5, Math.min(100, Math.round((runtimeStatusCurrent / runtimeStatusTotal) * 100))) : 0;
+		const queueStatusText = jsDiagnosticQueue ? String(jsDiagnosticQueue.status || 'unknown') : 'idle';
+		const queueStatusClass = queueStatusText === 'done'
+			? 'text-emerald-300 font-mono text-[11px]'
+			: (queueStatusText === 'running' ? 'text-sky-300 font-mono text-[11px]' : (queueStatusText === 'paused' ? 'text-amber-300 font-mono text-[11px]' : 'text-zinc-400 font-mono text-[11px]'));
+
 		return h('div', { className: 'uc-field-wrap', style: { gridColumn: '1 / -1' } }, [
-			h('label', { className: 'uc-field-label' }, __("JS Delay / Defer Exclusions", 'ultracache')),
-			h('div', { className: 'text-xs text-zinc-500 mb-2' }, __("Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, Defer all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Defer, and Main Thread Relief where applicable. Populate Defaults adds only the hard dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.", 'ultracache')),
+			h('label', { className: 'uc-field-label' }, __('JS Delay / Defer Exclusions', 'ultracache')),
+			h('div', { className: 'text-xs text-zinc-500 mb-2' }, __('Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, JavaScript full-site strategy, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Delay, and Main Thread Relief where applicable. Append Tested Dependency Defaults adds only the tested dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.', 'ultracache')),
 			h('textarea', {
 				className: 'uc-field-input uc-field-textarea',
 				value: draft,
@@ -2715,101 +2768,143 @@
 				placeholder: placeholder || '',
 				onChange: (e) => setDraft(e.target.value),
 			}),
-			h('div', { className: 'mt-3 mb-2' }, [
-				h('label', { className: 'uc-field-label' }, __("Page URL to scan", 'ultracache')),
-				h('input', {
-					type: 'url',
-					className: 'uc-field-input',
-					value: scanUrl,
-					disabled: !!disabled || scanBusy,
-					placeholder: defaultScanUrl || 'https://example.com/page/',
-					onChange: (e) => setScanUrl(e.target.value),
-				}),
-				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'Scan a same-site page. UltraCache profiles the final HTML and shows missing visible exclusions, including inline dependency blocks such as jquery-js-after, wp-i18n-js-after, wp-api-fetch-js-after, and *-js-translations. Nothing is applied automatically by the scan button; Safe Defer JS can append detected init scripts here only when you enable that switch.'),
+			h('div', { className: 'flex flex-wrap items-center', style: { marginTop: '10px', gap: '12px' } }, [
+				h(Button, { key: 'defaults', onClick: handlePopulateDefaults, disabled: !!disabled || populateBusy }, populateBusy ? 'Appending…' : 'Append Tested Dependency Defaults'),
+				h(Button, { key: 'scan', onClick: handleScan, disabled: !!disabled || scanBusy }, scanBusy ? 'Analyzing…' : 'Analyze HTML JS Dependencies'),
+				h(Button, { key: 'append-suggestions', onClick: handleAppendSuggestions, disabled: !!disabled || !suggestionMissingCount }, 'Append Suggestions' + (suggestionMissingCount ? ' (' + suggestionMissingCount + ')' : '')),
+				h(Button, { key: 'save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __('Save', 'ultracache')),
 			]),
-			h('div', { className: 'mt-2 mb-2 flex flex-wrap items-center text-[11px] text-zinc-500' }, [
-				h('span', { className: 'text-zinc-400', style: { marginRight: '10px' } }, __("Runtime Scan context", 'ultracache')),
-				h('select', {
-					className: 'uc-field-input uc-field-select',
-					style: { maxWidth: '260px', marginRight: '8px', paddingLeft: '8px', paddingRight: '34px', paddingTop: '7px', paddingBottom: '7px' },
-					value: runtimeScanContext,
-					disabled: !!disabled || runtimeScanBusy,
-					onChange: (e) => setRuntimeScanContext(e && e.target ? String(e.target.value || 'anonymous') : 'anonymous'),
-				}, [
-					h('option', { value: 'anonymous' }, __("Anonymous frontend", 'ultracache')),
-					h('option', { value: 'logged-in' }, __("Logged-in/admin frontend", 'ultracache')),
-				]),
-				h('span', null, runtimeScanContext === 'anonymous' ? 'Recommended for public cache debugging. Admin cookies are ignored while rendering the scan page.' : 'Useful only for admin-bar/editor/frontend issues.'),
-			]),
-			h('div', { className: 'uc-js-scan-actions mt-3 mb-3' }, [
-				h(Button, { key: 'defaults', onClick: handlePopulateDefaults, disabled: !!disabled || populateBusy }, populateBusy ? 'Populating…' : 'Populate Defaults'),
-				h(Button, { key: 'safe-init-scan', onClick: handleSafeInitScan, disabled: !!disabled || initScanBusy }, initScanBusy ? 'Scanning init scripts…' : 'Scan & append detected init scripts'),
-				h(Button, { key: 'scan', onClick: handleScan, disabled: !!disabled || scanBusy }, scanBusy ? 'Scanning…' : 'JS Delay / Defer Scan'),
-				h(Button, { key: 'runtime-scan', onClick: handleRuntimeScan, disabled: !!disabled || runtimeScanBusy }, runtimeScanBusy ? 'Runtime scanning…' : 'Runtime Scan'),
-				h(Button, { key: 'debug-scan', onClick: handleDebugLoadLatestProfileScan, disabled: !!disabled || debugScanBusy }, debugScanBusy ? 'Loading…' : 'Debug Profile'),
-				h(Button, { key: 'append', onClick: handleAppendSuggestions, disabled: !!disabled || !liveMissingCount }, 'Append Missing' + (liveMissingCount ? ' (' + liveMissingCount + ')' : '')),
-				h(Button, { key: 'save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __("Save", 'ultracache')),
-			]),
-			h('div', { className: 'mt-3 mb-3 rounded-xl bg-black/20 px-3 py-3 border border-white/5' }, [
-				h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
-					h('span', { className: 'text-zinc-200 font-semibold' }, __("Console Error Handler", 'ultracache')),
-					consoleErrorSuggestions.length ? h('span', { className: missingConsoleErrorSuggestions.length ? 'text-amber-300 font-mono text-[11px]' : 'text-emerald-300 font-mono text-[11px]' }, String(missingConsoleErrorSuggestions.length) + ' missing / ' + String(consoleErrorSuggestions.length) + ' detected') : null,
-				]),
-				h('div', { className: 'text-[11px] text-zinc-500 mb-2' }, 'Paste browser console errors here. UltraCache uses the selected Scan URL/front page to read the same-site JS files loaded by that HTML, resolve missing jQuery plugin methods/globals to their provider scripts where possible, and append clean deduplicated tokens to JS Delay / Defer Exclusions. Broad sources such as jquery.min.js, main.js, functions.js, and same-origin domains are ignored.'),
-				h('textarea', {
-					className: 'uc-field-input uc-field-textarea',
-					style: { minHeight: '105px' },
-					value: consoleErrorInput,
-					disabled: !!disabled,
-					placeholder: 'Paste console errors, e.g. "complianz is not defined" or stack lines containing /wp-content/plugins/example/js/file.min.js',
-					onChange: (e) => setConsoleErrorInput(e.target.value),
-				}),
-				h('div', { className: 'mt-3 flex flex-wrap items-center gap-2' }, [
-					h(Button, { key: 'extract-console-errors', onClick: handleExtractConsoleErrors, disabled: !!disabled || consoleErrorBusy }, consoleErrorBusy ? 'Extracting…' : 'Extract suggestions'),
-					h(Button, { key: 'append-console-errors', onClick: handleAppendConsoleErrors, disabled: !!disabled || !missingConsoleErrorSuggestions.length }, 'Append to exclusions' + (missingConsoleErrorSuggestions.length ? ' (' + missingConsoleErrorSuggestions.length + ')' : '')),
-					h(Button, { key: 'clear-console-errors', onClick: () => { setConsoleErrorInput(''); setConsoleErrorSuggestions([]); setConsoleErrorScan(null); setConsoleErrorStatus(''); }, disabled: !!disabled || (!consoleErrorInput && !consoleErrorSuggestions.length && !consoleErrorScan) }, __("Clear", 'ultracache')),
-				]),
-				consoleErrorStatus ? h('div', { className: 'mt-2 text-[11px] text-sky-300' }, consoleErrorStatus) : null,
-				consoleErrorSuggestions.length ? h('div', { className: 'mt-3' }, [
-					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500 mb-2' }, __("Extracted appendable exclusion preview", 'ultracache')),
-					h('div', { className: 'flex flex-wrap gap-1' }, consoleErrorSuggestions.map((line, index) => h('code', { className: isSuggestionPresentInDraft(draftValue, line) ? 'font-mono text-[11px] text-emerald-300 bg-black/25 rounded px-2 py-1 break-all' : 'font-mono text-[11px] text-amber-300 bg-black/25 rounded px-2 py-1 break-all', key: 'console-error-suggestion-' + index + '-' + line }, line))),
-				]) : null,
-				consoleErrorScan ? h('div', { className: 'mt-3 text-xs bg-black/20 rounded-xl px-3 py-3', key: 'console-error-scan-preview' }, [
+			h('div', { className: 'mt-5 mb-4', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px', alignItems: 'start' } }, [
+				h('div', { key: 'browser-scanner-panel', className: 'uc-field-wrap', style: { minWidth: 0 } }, [
 					h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
-						h('span', { className: 'text-zinc-300 font-bold' }, __("Console Extract Suggestions", 'ultracache')),
-						h('span', { className: 'text-zinc-500 font-mono break-all' }, consoleErrorScan.scannedUrl ? String(consoleErrorScan.scannedUrl) : ''),
+						h('label', { className: 'uc-field-label' }, __('Browser Scanner', 'ultracache')),
+						runtimeScanBusy ? h('span', { className: 'text-sky-300 font-mono text-[11px]' }, 'running') : null,
 					]),
-					h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-2 mb-3' }, [
-						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Appendable", 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(consoleAppendableSuggestions.length))]),
-						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Review-only", 'ultracache')), h('div', { className: missingConsoleReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(consoleReviewOnlySuggestions.length))]),
-						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Script inventory", 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(consoleErrorScan.scriptInventoryCount || 0))]),
+					h('div', { className: 'text-xs text-zinc-500 mb-3 leading-relaxed' }, 'Scan a same-site page. Analyze reads the final HTML and shows dependency/order candidates. Runtime Scan opens the frontend in a browser and captures real console/runtime errors. Scan buttons never change exclusions automatically.'),
+					h('label', { className: 'uc-field-label', style: { fontSize: '12px', color: '#6f7b8f' } }, __('Page URL to scan', 'ultracache')),
+					h('input', {
+						type: 'url',
+						className: 'uc-field-input',
+						value: scanUrl,
+						disabled: !!disabled || scanBusy || runtimeScanBusy,
+						placeholder: defaultScanUrl || 'https://example.com/page/',
+						onChange: (e) => setScanUrl(e.target.value),
+					}),
+					h('div', { className: 'flex flex-wrap items-center text-[11px] text-zinc-500', style: { marginTop: '10px' } }, [
+						h('span', { className: 'text-zinc-400', style: { marginRight: '10px' } }, __('Runtime Scan context', 'ultracache')),
+						h('select', {
+							className: 'uc-field-input uc-field-select',
+							style: { maxWidth: '260px', marginRight: '8px', paddingLeft: '8px', paddingRight: '34px', paddingTop: '7px', paddingBottom: '7px' },
+							value: runtimeScanContext,
+							disabled: !!disabled || runtimeScanBusy,
+							onChange: (e) => setRuntimeScanContext(e && e.target ? String(e.target.value || 'anonymous') : 'anonymous'),
+						}, [
+							h('option', { value: 'anonymous' }, __('Anonymous frontend', 'ultracache')),
+							h('option', { value: 'logged-in' }, __('Logged-in/admin frontend', 'ultracache')),
+						]),
 					]),
-					consoleErrorScan.scriptInventorySummary ? h('div', { className: 'text-[11px] text-zinc-500 mb-3 font-mono break-all' }, 'Inventory detail: external ' + String(consoleErrorScan.scriptInventorySummary.external || 0) + ' · inline ' + String(consoleErrorScan.scriptInventorySummary.inline || 0) + ' · delayed ' + String(consoleErrorScan.scriptInventorySummary.delayed || 0) + ' · sourceURL ' + String(consoleErrorScan.scriptInventorySummary.sourceUrl || 0)) : null,
-					renderRuntimeErrorsSection(consoleErrorScan.errors || []),
-					renderSuggestionSection('Console review-only candidates', consoleReviewOnlySuggestions.length, consoleReviewOnlySuggestions, 'No review-only candidates were detected from this console paste.', 'console-review-only', 'These are exact stack-frame/script-inventory ids or paths. Review them and append only the candidates that match the affected feature.', { grouped: true, collapsed: false }),
-				]) : null,
+					h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, runtimeScanContext === 'anonymous' ? 'Recommended for public cache debugging. Admin cookies are ignored while rendering the scan page.' : 'Useful only for admin-bar/editor/frontend issues.'),
+					h('div', { className: 'flex flex-wrap', style: { marginTop: '10px', gap: '12px' } }, [
+						h(Button, { key: 'runtime-scan', onClick: handleRuntimeScan, disabled: !!disabled || runtimeScanBusy }, runtimeScanBusy ? 'Runtime scanning…' : 'Scan Browser Runtime Errors'),
+						h(Button, { key: 'append-confirmed-errors', onClick: handleAppendConfirmedErrorFixes, disabled: !!disabled || !confirmedErrorMissingCount }, 'Append Confirmed Error Fixes' + (confirmedErrorMissingCount ? ' (' + confirmedErrorMissingCount + ')' : '')),
+						h(Button, { key: 'browser-save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __('Save', 'ultracache')),
+					]),
+					runtimeScanStatus ? h('div', { className: 'rounded-lg bg-emerald-500/10 px-3 py-2', style: { marginTop: '10px' } }, [
+						h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
+							h('span', { className: 'text-emerald-200 font-semibold text-[12px]' }, runtimeScanStatus),
+							h('span', { className: 'text-emerald-300 font-mono text-[11px]' }, runtimeScanBusy ? String(runtimeStatusPercent) + '%' : ''),
+						]),
+						h('div', { className: 'w-full h-2 rounded bg-black/30 overflow-hidden' }, [
+							h('div', { className: 'h-2 rounded bg-emerald-500/80', style: { width: String(runtimeScanBusy ? runtimeStatusPercent : 100) + '%' } }),
+						]),
+					]) : null,
+				]),
+				h('div', { key: 'console-handler-panel', className: 'uc-field-wrap', style: { minWidth: 0 } }, [
+					h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
+						h('label', { className: 'uc-field-label' }, __('Console Error Handler', 'ultracache')),
+						consoleErrorSuggestions.length ? h('span', { className: missingConsoleErrorSuggestions.length ? 'text-amber-300 font-mono text-[11px]' : 'text-emerald-300 font-mono text-[11px]' }, String(missingConsoleErrorSuggestions.length) + ' missing / ' + String(consoleErrorSuggestions.length) + ' detected') : null,
+					]),
+					h('div', { className: 'text-xs text-zinc-500 mb-3 leading-relaxed' }, 'Paste browser console errors here. UltraCache uses the selected Page URL/front page to resolve missing jQuery plugin methods/globals to exact provider scripts where possible. Extraction only previews suggestions; it does not change exclusions until you click Append Console Error Fixes.'),
+					h('label', { className: 'uc-field-label', style: { fontSize: '12px', color: '#6f7b8f' } }, __('Console errors to analyze', 'ultracache')),
+					h('textarea', {
+						className: 'uc-field-input uc-field-textarea',
+						style: { minHeight: '142px' },
+						value: consoleErrorInput,
+						disabled: !!disabled,
+						placeholder: 'Paste console errors, e.g. "complianz is not defined" or stack lines containing /wp-content/plugins/example/js/file.min.js',
+						onChange: (e) => setConsoleErrorInput(e.target.value),
+					}),
+					h('div', { className: 'flex flex-wrap', style: { marginTop: '10px', gap: '12px' } }, [
+						h(Button, { key: 'extract-console-errors', onClick: handleExtractConsoleErrors, disabled: !!disabled || consoleErrorBusy }, consoleErrorBusy ? 'Extracting…' : 'Extract Console Error Suggestions'),
+						h(Button, { key: 'append-console-errors', onClick: handleAppendConsoleErrors, disabled: !!disabled || !missingConsoleErrorSuggestions.length }, 'Append Console Error Fixes' + (missingConsoleErrorSuggestions.length ? ' (' + missingConsoleErrorSuggestions.length + ')' : '')),
+						h(Button, { key: 'clear-console-errors', onClick: handleClearConsoleErrors, disabled: !!disabled || (!consoleErrorInput && !consoleErrorSuggestions.length) }, 'Clear Console Input'),
+						h(Button, { key: 'console-save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __('Save', 'ultracache')),
+					]),
+					consoleErrorStatus ? h('div', { className: 'mt-2 text-[11px] text-sky-300' }, consoleErrorStatus) : null,
+				])
 			]),
-			runtimeScanStatus ? h('div', { className: 'uc-js-runtime-scan-status mt-1 mb-2 text-[11px] text-sky-300' }, runtimeScanStatus) : null,
+			jsDiagnosticQueue ? h('div', { className: 'mt-3 mb-3 rounded-xl bg-black/20 px-3 py-3' }, [
+				h('div', { className: 'flex flex-wrap items-start justify-between gap-3 mb-2' }, [
+					h('div', null, [
+						h('div', { className: 'text-zinc-200 font-semibold' }, 'JS Diagnostic Queue Status'),
+						h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, 'DB-backed JS Diagnostic Queue · latest stored diagnostic job'),
+						h('div', { className: 'text-[11px] text-zinc-500 font-mono break-all mt-1' }, String(jsDiagnosticQueue.id || '') + ' · ' + String(jsDiagnosticQueue.scanType || 'runtime') + ' · ' + String(jsDiagnosticQueue.status || 'unknown')),
+					]),
+					h('div', { className: 'text-right' }, [
+						h('div', { className: 'font-mono text-emerald-300' }, String(jsDiagnosticQueueProgressPercent) + '%'),
+						h('div', { className: queueStatusClass }, queueStatusText),
+						h('div', { className: 'text-[11px] text-zinc-500' }, String(jsDiagnosticQueue.message || '')),
+					]),
+				]),
+				h('div', { className: 'w-full h-2 rounded bg-black/30 overflow-hidden mb-3' }, [
+					h('div', { className: 'h-2 rounded bg-emerald-500/80', style: { width: String(jsDiagnosticQueueProgressPercent) + '%' } }),
+				]),
+				h('div', { className: 'grid grid-cols-2 md:grid-cols-5 gap-2 mb-3' }, [
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Confirmed Error Fixes'), h('div', { className: 'font-mono text-amber-300' }, String(jsDiagnosticQueueBucketCounts.confirmedErrorFixes || 0))]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Suggestions'), h('div', { className: 'font-mono text-zinc-200' }, String(jsDiagnosticQueueBucketCounts.suggestions || 0))]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Review Only'), h('div', { className: 'font-mono text-sky-300' }, String(jsDiagnosticQueueBucketCounts.reviewOnly || 0))]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Already Listed'), h('div', { className: 'font-mono text-emerald-300' }, String(jsDiagnosticQueueBucketCounts.alreadyListed || 0))]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Ignored'), h('div', { className: 'font-mono text-zinc-400' }, String(jsDiagnosticQueueBucketCounts.ignored || 0))]),
+				]),
+				h('div', { className: 'space-y-2 mb-3' }, [
+					renderJsDiagnosticQueueCategory('Confirmed Error Fixes', jsDiagnosticQueueBucketCounts.confirmedErrorFixes || 0, jsDiagnosticQueueBuckets.confirmedErrorFixes || [], 'No confirmed fixes in this stored result.', 'jsdq-confirmed', { help: 'Ready-to-append fixes detected from confirmed runtime/console errors.' }),
+					renderJsDiagnosticQueueCategory('Suggestions', jsDiagnosticQueueBucketCounts.suggestions || 0, jsDiagnosticQueueBuckets.suggestions || [], 'No suggestions in this stored result.', 'jsdq-suggestions', { help: 'Potential fixes. Review before appending.' }),
+					renderJsDiagnosticQueueCategory('Review Only', jsDiagnosticQueueBucketCounts.reviewOnly || 0, jsDiagnosticQueueBuckets.reviewOnly || [], 'No review-only items in this stored result.', 'jsdq-review-only', { readOnly: true, help: 'Information only. These are not appendable automatically.' }),
+					renderJsDiagnosticQueueCategory('Already Listed', jsDiagnosticQueueBucketCounts.alreadyListed || 0, jsDiagnosticQueueBuckets.alreadyListed || [], 'No already listed items in this stored result.', 'jsdq-already-listed', { readOnly: true, help: 'These items are already in your JS Delay / Defer Exclusions.' }),
+					renderJsDiagnosticQueueCategory('Ignored', jsDiagnosticQueueBucketCounts.ignored || 0, jsDiagnosticQueueBuckets.ignored || [], 'No ignored items in this stored result.', 'jsdq-ignored', { readOnly: true, help: 'Ignored findings do not require action.' }),
+				]),
+				h('div', { className: 'flex flex-wrap gap-2' }, [
+					h(Button, { onClick: () => refreshJsDiagnosticQueue(jsDiagnosticQueue && jsDiagnosticQueue.id), disabled: !!disabled || jsDiagnosticQueueBusy }, jsDiagnosticQueueBusy ? 'Refreshing…' : 'Refresh Stored Results'),
+					h(Button, { onClick: () => transitionJsDiagnosticQueue('pause'), disabled: !!disabled || jsDiagnosticQueueBusy || !jsDiagnosticQueue || jsDiagnosticQueue.status !== 'running' }, 'Pause'),
+					h(Button, { onClick: () => transitionJsDiagnosticQueue('resume'), disabled: !!disabled || jsDiagnosticQueueBusy || !jsDiagnosticQueue || jsDiagnosticQueue.status !== 'paused' }, 'Resume'),
+					h(Button, { onClick: () => transitionJsDiagnosticQueue('cancel'), disabled: !!disabled || jsDiagnosticQueueBusy || !jsDiagnosticQueue || ['done', 'failed', 'cancelled'].indexOf(String(jsDiagnosticQueue.status || '')) !== -1 }, 'Cancel'),
+				]),
+			]) : h('div', { className: 'mt-3 mb-3 rounded-xl bg-black/15 px-3 py-3 text-[11px] text-zinc-500' }, [
+				h('div', { className: 'text-zinc-300 font-semibold mb-1' }, 'JS Diagnostic Queue Status'),
+				h('div', null, 'Runtime and console diagnostics create DB-backed queue jobs. Stored results appear here after Extract Console Error Suggestions or Scan Browser Runtime Errors.'),
+				h(Button, { onClick: () => refreshJsDiagnosticQueue(''), disabled: !!disabled || jsDiagnosticQueueBusy, className: 'mt-2' }, jsDiagnosticQueueBusy ? 'Loading…' : 'Load Latest Stored Results'),
+			]),
 			scan ? h('div', { className: 'mt-3 mb-2 text-xs bg-black/20 rounded-xl px-3 py-3', style: { padding: '5px' } }, [
 				h('div', { className: 'flex flex-wrap items-center justify-between gap-3 mb-2' }, [
-					h('span', { className: 'text-zinc-300 font-bold' }, __("JS Delay / Defer Safety Scan", 'ultracache')),
+					h('span', { className: 'text-zinc-300 font-bold' }, __('JS Delay / Defer Safety Scan', 'ultracache')),
 					h('span', { className: 'text-zinc-500 font-mono break-all' }, [(scan.scanContext || runtimeScanContext) ? ('Context: ' + (String(scan.scanContext || runtimeScanContext) === 'logged-in' ? 'Logged-in/admin frontend' : 'Anonymous frontend') + ' · ') : '', (scan.scannedUrl || scan.profileUrl || scan.url) ? String(scan.scannedUrl || scan.profileUrl || scan.url) : '']),
 				]),
 				h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-2 mb-3' }, [
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Detected", 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(totalDetected || suggestions.length || 0))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Recommended", 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(appendableSuggestions.length))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Missing", 'ultracache')), h('div', { className: liveMissingCount ? 'font-mono text-amber-300' : 'font-mono text-emerald-300' }, String(liveMissingCount))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Already listed", 'ultracache')), h('div', { className: 'font-mono text-emerald-300' }, String(liveAlreadyListedCount))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Review-only", 'ultracache')), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Blocked resources", 'ultracache')), h('div', { className: resourceErrorCount ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(resourceErrorCount || 0))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Detected', 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(totalDetected || suggestions.length || 0))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Recommended', 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(appendableSuggestions.length))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Missing', 'ultracache')), h('div', { className: liveMissingCount ? 'font-mono text-amber-300' : 'font-mono text-emerald-300' }, String(liveMissingCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Already listed', 'ultracache')), h('div', { className: 'font-mono text-emerald-300' }, String(liveAlreadyListedCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Review-only', 'ultracache')), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Blocked resources', 'ultracache')), h('div', { className: resourceErrorCount ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(resourceErrorCount || 0))]),
 				]),
 				renderResourceErrorsSection(resourceErrors),
 				renderRuntimeErrorsSection(runtimeErrors),
-				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing recommended exclusions. The visible JS Delay / Defer Exclusions list already covers the appendable scan results.', 'missing-recommended', 'These are the only lines Append Missing Recommended will add.'),
+				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing recommended exclusions. The visible JS Delay / Defer Exclusions list already covers the appendable scan results.', 'missing-recommended', 'These are the only lines Append Suggestions or Append Confirmed Error Fixes can add in bulk for this scan.'),
 				renderSuggestionSection('Already listed recommended', liveAlreadyListedCount, alreadyListedAppendableSuggestions, 'No recommended exclusions are already listed yet.', 'already-listed-recommended', 'Grouped and collapsed by default. These scan matches are already covered by your textarea, including broad fragments that cover variant paths.', { grouped: true, collapsed: true }),
 				renderSuggestionSection('Review-only detected', reviewOnlyCount, reviewOnlySuggestions, 'No review-only candidates were detected.', 'review-only-detected', 'Grouped and collapsed by default. Review-only items can be appended one by one after manual review.', { grouped: true, collapsed: true }),
-			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, __("Enter a same-site URL. JS Delay / Defer Scan reads final HTML; Runtime Scan opens the page in your browser, defaults to anonymous frontend mode, captures console/runtime errors, and turns them into suggested exclusions. Debug Profile loads the last WP-CLI/advanced profile only.", 'ultracache')),
+			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, __('Enter a same-site URL. Analyze HTML JS Dependencies reads final HTML. Scan Browser Runtime Errors opens the page in your browser, defaults to anonymous frontend mode, and captures console/runtime errors. Scan buttons do not change exclusions automatically.', 'ultracache')),
 		]);
+
 	}
 
 
@@ -3058,8 +3153,8 @@
 
 	function SelectField({ label, description, value, onChange, disabled, options }) {
 		return h('div', { className: 'uc-field-wrap' }, [
-			label ? h('label', { className: 'uc-field-label' }, label) : null,
-			description ? h('div', { className: 'text-xs text-zinc-500 mb-2' }, description) : null,
+			label ? h('label', { className: 'block text-sm font-medium text-white' }, label) : null,
+			description ? h('div', { className: 'text-xs text-zinc-500 mt-1 mb-2' }, description) : null,
 			h('div', { className: 'uc-select-wrap' }, [
 				h('select', {
 					className: 'uc-field-input uc-field-select',
@@ -3138,8 +3233,8 @@
 		}
 
 		return h('div', { className: 'uc-field-wrap' }, [
-			label ? h('label', { className: 'uc-field-label' }, label) : null,
-			description ? h('div', { className: 'text-xs text-zinc-500 mb-2' }, description) : null,
+			label ? h('label', { className: 'block text-sm font-medium text-white' }, label) : null,
+			description ? h('div', { className: 'text-xs text-zinc-500 mt-1 mb-2' }, description) : null,
 			h('details', { className: classNames('uc-switch-dropdown', disabled ? 'opacity-60 pointer-events-none' : '') }, [
 				h('summary', { className: 'uc-switch-dropdown-summary' }, [
 					h('span', { key: 'label' }, selected.length ? (selected.length + ' source' + (selected.length === 1 ? '' : 's') + ' selected') : 'Select full-site sources'),
@@ -4500,7 +4595,7 @@
 		const showVarnishCandidate = !!((varnishLayer && varnishLayer.detected) || reverseProxyLooksLikeVarnish || varnishConfigured);
 		const candidates = [
 			{ key: 'opcache', setting: 'flushAllIncludeOpcache', label: 'OPcache', description: __("Also reset PHP OPcache when Flush All Cache runs.", 'ultracache') },
-			{ key: 'apcu', setting: 'flushAllIncludeApcu', label: 'APCu', description: __("Also clear the APCu user cache when Flush All Cache runs.", 'ultracache') },
+			{ key: 'apcu', setting: 'flushAllIncludeApcu', label: 'APCu', description: __("Also clear the APCu user cache when Flush All Cache runs. This is always on if APCu cache is used.", 'ultracache') },
 			{ key: 'litespeed', setting: 'flushAllIncludeLiteSpeed', label: __("LiteSpeed Cache", 'ultracache'), description: __("Also purge LiteSpeed Cache when Flush All Cache runs. Uses the LiteSpeed plugin API when present, otherwise the server-level X-LiteSpeed-Purge response header.", 'ultracache') },
 			{ key: 'nginx', setting: 'flushAllIncludeNginx', label: __("Nginx Cache", 'ultracache'), description: __("Also trigger the detected Nginx Helper purge hook when Flush All Cache runs.", 'ultracache') },
 			{ key: 'varnish', setting: 'flushAllIncludeVarnish', label: __("Varnish Cache", 'ultracache'), description: __("Also flush the configured UltraCache Varnish endpoint when Flush All Cache runs.", 'ultracache') },
@@ -4515,8 +4610,10 @@
 		const renderCandidate = (item) => {
 			const layer = layers[item.key] || {};
 			const isVarnish = item.key === 'varnish';
+			const isApcu = item.key === 'apcu';
+			const apcuObjectCacheSelected = !!(settings && String(settings.objectCacheBackend || '').toLowerCase() === 'apcu');
 			const flushable = !!layer.flushable;
-			const disabled = !!busy || (isVarnish && !flushable);
+			const disabled = !!busy || (isVarnish && !flushable) || (isApcu && apcuObjectCacheSelected);
 			let description = item.description;
 			if (isVarnish && !flushable) {
 				description = 'Varnish is detected or configured, but UltraCache Varnish purge is currently disabled or not flushable. Enable and test the Varnish purge integration before including it in Flush All Cache.';
@@ -4524,8 +4621,8 @@
 			return h(ToggleRow, {
 				label: 'Also flush ' + item.label,
 				description: description,
-				checked: !!(settings && settings[item.setting]),
-				onChange: (value) => onToggle(item.setting, value),
+				checked: !!(isApcu && apcuObjectCacheSelected) || !!(settings && settings[item.setting]),
+				onChange: (value) => onToggle(item.setting, isApcu && apcuObjectCacheSelected ? true : value),
 				disabled: disabled,
 				key: item.setting,
 			});
@@ -5475,11 +5572,11 @@
 			if (key === 'objectCacheBackend') {
 				const nextBackend = normalizedBackend(value);
 				setRedisForm((current) => Object.assign({}, current, { objectCacheBackend: nextBackend }));
-				queueSettingsPatch({
+				queueSettingsPatch(Object.assign({
 					objectCacheEnabled: currentEnabled,
 					objectCacheBackend: nextBackend,
 					objectCacheFallbackBackend: currentFallback,
-				});
+				}, nextBackend === 'apcu' ? { flushAllIncludeApcu: true } : {}));
 				return;
 			}
 
@@ -5553,6 +5650,9 @@
 					redisConnectTimeoutMs: form.redisConnectTimeoutMs,
 					redisReadTimeoutMs: form.redisReadTimeoutMs,
 				};
+				if (String(patch.objectCacheBackend || '').toLowerCase() === 'apcu') {
+					patch.flushAllIncludeApcu = true;
+				}
 				if (String(form.redisPassword || '').trim()) {
 					patch.redisPassword = String(form.redisPassword || '');
 				}
@@ -6612,11 +6712,11 @@
 				const currentSettings = settingsRef.current || {};
 				const backend = String(currentForm.objectCacheBackend || currentSettings.objectCacheBackend || 'redis').toLowerCase();
 				const fallback = String(currentForm.objectCacheFallbackBackend || currentSettings.objectCacheFallbackBackend || 'apcu').toLowerCase();
-				queueSettingsPatch({
+				queueSettingsPatch(Object.assign({
 					objectCacheEnabled: !!value,
 					objectCacheBackend: ['redis', 'apcu', 'disk'].indexOf(backend) !== -1 ? backend : 'redis',
 					objectCacheFallbackBackend: ['none', 'runtime'].indexOf(fallback) !== -1 ? 'none' : (['apcu', 'disk'].indexOf(fallback) !== -1 ? fallback : 'apcu'),
-				});
+				}, backend === 'apcu' ? { flushAllIncludeApcu: true } : {}));
 				return;
 			}
 			queueSettingsPatch({ [key]: value });
@@ -6656,9 +6756,13 @@
 			if (!enabled) {
 				return;
 			}
-			window.setTimeout(() => {
+
+			window.setTimeout(async () => {
 				const current = settingsRef.current && typeof settingsRef.current.deferJsExcludeList !== 'undefined' ? settingsRef.current.deferJsExcludeList : '';
-				scanSafeDeferInitScriptsAndMerge(current, true);
+				const merged = await populateDeferDelayExclusionDefaults(current);
+				if (merged !== null && String(merged || '') !== String(current || '')) {
+					queueSettingsPatch({ deferJsExcludeList: String(merged || '') });
+				}
 			}, 0);
 		}
 
@@ -6727,29 +6831,6 @@
 			return value;
 		}
 
-		async function scanSafeDeferInitScriptsAndMerge(currentDraft, saveImmediately) {
-			try {
-				const response = await apiRequest('safe_defer_init_scan', {});
-				const items = Array.isArray(response && response.items) ? response.items : [];
-				if (!items.length) {
-					pushToast({ type: 'info', text: response && response.message ? response.message : 'No likely theme/page-builder init scripts were detected.' });
-					return String(currentDraft || '');
-				}
-				const merged = mergeUniqueSettingLines(currentDraft, items.join('\n'));
-				if (saveImmediately && merged.added) {
-					queueSettingsPatch({ deferJsExcludeList: merged.value });
-				}
-				pushToast({
-					type: merged.added ? 'success' : 'info',
-					text: merged.added ? ('Added ' + merged.added + ' detected theme/page-builder init exclusion(s).') : 'Detected init scripts are already listed in JS Delay / Defer Exclusions.',
-				});
-				return merged.value;
-			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Safe Defer JS init-script scan failed.' });
-				return null;
-			}
-		}
-
 		async function populateDeferDelayExclusionDefaults(currentDraft) {
 			const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
 			let defaults = ucwp && typeof ucwp.jsDelayDeferRecommendedExclusions !== 'undefined'
@@ -6758,7 +6839,7 @@
 			if (!defaults.trim() && Object.prototype.hasOwnProperty.call(defaultsPayload, 'deferJsExcludeList')) {
 				defaults = String(defaultsPayload.deferJsExcludeList || '');
 			}
-			// 2.57.96: Populate Defaults is intentionally limited to the
+			// 2.58.48: Append Tested Dependency Defaults is intentionally limited to the
 			// hard dependency floor. Slider, theme, WooCommerce, Elementor,
 			// tracking, popup, and form fragments are left to Scan/Runtime Scan
 			// or manual user additions so defaults do not over-protect heavy JS.
@@ -6905,7 +6986,7 @@
 		}
 
 
-		function readPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl) {
+		function readPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, queueJobId) {
 			try {
 				if (!popup || popup.closed || !popup.__ucwpRuntimeJsScan) {
 					return null;
@@ -6921,14 +7002,15 @@
 					userAgent: String((popup.navigator && popup.navigator.userAgent) || ''),
 					elapsedMs: state.injectedAt ? Math.max(0, Date.now() - Number(state.injectedAt || 0)) : 0,
 					debug: Object.assign({}, state.debug || {}, { directHarvest: true, sentCount: state.sentCount || 0 }),
+					queueJobId: queueJobId || '',
 				};
 			} catch (error) {
 				return null;
 			}
 		}
 
-		async function submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, completed) {
-			const snapshot = readPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl);
+		async function submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, completed, queueJobId) {
+			const snapshot = readPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, queueJobId);
 			if (!snapshot) {
 				return null;
 			}
@@ -6962,12 +7044,12 @@
 
 			try { popup.focus(); } catch (error) {}
 			setRuntimeStatus('Diagnostic page opened in ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' mode. Waiting for browser errors…');
-			pushToast({ type: 'info', text: 'Runtime Scan opened the page in ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' mode. Keep it open for a few seconds.' });
+			pushToast({ type: 'info', text: 'Browser Runtime Scan opened the page in ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' mode. Keep it open for a few seconds.' });
 			let latestReport = null;
 			for (let i = 0; i < 18; i++) {
 				setRuntimeStatus('Waiting for runtime scan report… ' + (i + 1) + '/18');
 				await sleep(i < 2 ? 900 : 1200);
-				const directReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, false);
+				const directReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, false, scanOptions.queueJobId || '');
 				if (directReport && Number(directReport.errorCount || 0) > 0) {
 					latestReport = directReport;
 				}
@@ -6984,7 +7066,7 @@
 					}
 				} catch (error) {}
 			}
-			const finalDirectReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, true);
+			const finalDirectReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, true, scanOptions.queueJobId || '');
 			if (finalDirectReport && (!latestReport || Number(finalDirectReport.errorCount || 0) >= Number(latestReport.errorCount || 0))) {
 				latestReport = finalDirectReport;
 			}
@@ -7195,16 +7277,18 @@
 				}
 
 				if (!!mainPatch.deferJsEnabled) {
-					pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: __("Running Safe Defer JS follow-up scan…", 'ultracache'), persistent: true });
+					pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: __("Appending Safe Defer JS dependency defaults…", 'ultracache'), persistent: true });
 					const currentExclusions = settingsRef.current && typeof settingsRef.current.deferJsExcludeList !== 'undefined' ? settingsRef.current.deferJsExcludeList : '';
-					const scannedExclusions = await scanSafeDeferInitScriptsAndMerge(currentExclusions, false);
-					if (scannedExclusions !== null) {
-						const scanPatch = { deferJsExcludeList: String(scannedExclusions || '') };
-						const scanOptimistic = Object.assign({}, settingsRef.current || {}, scanPatch);
-						settingsRef.current = scanOptimistic;
-						setSettings(scanOptimistic);
-						const scanResponse = await saveSettingsPatch(scanPatch);
-						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: String(scanPatch.deferJsExcludeList || '') === String(currentExclusions || '') ? 'Safe Defer JS scan finalized; no new init exclusions were needed.' : 'Safe Defer JS scan exclusions saved.', persistent: true });
+					const defaultExclusions = await populateDeferDelayExclusionDefaults(currentExclusions);
+					if (defaultExclusions !== null && String(defaultExclusions || '') !== String(currentExclusions || '')) {
+						const defaultsPatch = { deferJsExcludeList: String(defaultExclusions || '') };
+						const defaultsOptimistic = Object.assign({}, settingsRef.current || {}, defaultsPatch);
+						settingsRef.current = defaultsOptimistic;
+						setSettings(defaultsOptimistic);
+						await saveSettingsPatch(defaultsPatch);
+						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Safe Defer JS dependency defaults saved.', persistent: true });
+					} else {
+						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Safe Defer JS dependency defaults already present.', persistent: true });
 					}
 				}
 
@@ -8530,20 +8614,34 @@ h(ToggleRow, {
 					[
 						h(ToggleRow, {
 									label: __("Safe Defer JS", 'ultracache'),
-									description: __("Add native defer conservatively. When enabled, UltraCache scans the front page once and appends detected theme/page-builder init scripts to the visible JS Delay / Defer Exclusions list.", 'ultracache'),
+									description: __("Add native defer conservatively. When enabled, UltraCache appends only the curated WordPress foundation dependency defaults to the visible JS Delay / Defer Exclusions list.", 'ultracache'),
 									checked: settings.deferJsEnabled,
 									onChange: (value) => updateSafeDeferJs(value),
 									disabled: busy,
 									key: 'defer-stage-one',
 								}),
-h(ToggleRow, {
-									label: __("Defer all JS", 'ultracache'),
-									description: __("Aggressive manual mode. When Safe Defer JS is on, UltraCache adds native defer to every eligible frontend script. If JS Delay / Defer Exclusions is empty, UltraCache really defers everything eligible. Populate Defaults is optional and only adds visible recommendations; scan suggestions help you build exclusions after testing.", 'ultracache'),
-									checked: !!settings.deferAllJsEnabled,
-									onChange: (value) => updateSetting('deferAllJsEnabled', value),
-									disabled: busy || !settings.deferJsEnabled,
-									key: 'defer-all-js',
+h(SelectField, {
+									label: __("JavaScript full-site strategy", 'ultracache'),
+									description: __("Choose whether UltraCache should apply a full-site delayed JavaScript strategy. Off applies no full-site delay rule. Delay all eligible JS uses the UltraCache delayed loader with ordered execution, interaction triggers, jQuery ready barrier, and Elementor lazy background compatibility. Native full-site Defer all was removed because it is unsafe for many WordPress inline/dependency chains.", 'ultracache'),
+									value: settings.jsFullSiteStrategy === 'delay_all' ? 'delay_all' : 'off',
+									onChange: (value) => updateSetting('jsFullSiteStrategy', value),
+									disabled: busy,
+									options: [
+										{ value: 'off', label: __('Off', 'ultracache') },
+										{ value: 'delay_all', label: __('Delay all eligible JS', 'ultracache') },
+									],
+									key: 'js-full-site-strategy',
 								}),
+
+h(ToggleRow, {
+									label: __("LCP Boundary Delay", 'ultracache'),
+									description: __("Uses the LCP image detected by LCP Image Priority as a visual boundary. Eligible local scripts printed after that image in the HTML are delayed through the UltraCache delayed loader.", 'ultracache'),
+									checked: !!settings.lcpBoundaryDeferEnabled,
+									onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
+									disabled: busy || !settings.lcpImagePriorityEnabled,
+									key: 'lcp-boundary-defer',
+								}),
+
 h(ToggleRow, {
 									label: __("Delay safe third-party JS", 'ultracache'),
 									description: __("Delay analytics, pixels, ads, tracking, and marketing scripts until user interaction or a late safe fallback timeout, keeping them out of the initial PageSpeed/LCP/TBT critical window. Examples: Google Analytics, gtag, GTM, Google Site Kit event providers, Meta Pixel, TikTok Pixel, LinkedIn Insight, Pinterest Tag, Bing UET, Hotjar, Clarity, DoubleClick, Google Ads, Taboola, Outbrain, and Yahoo tracking.", 'ultracache'),
@@ -8552,14 +8650,42 @@ h(ToggleRow, {
 									disabled: busy,
 									key: 'delay-safe-third-party-js',
 								}),
-h(ToggleRow, {
-									label: __("Lazy MailerLite nonce refresh", 'ultracache'),
-									description: 'Prevents MailerLite forms from calling wp-admin/admin-ajax.php on page load for ml_create_nonce. The nonce is refreshed on first form interaction or before submit, so cached pages avoid the load-time admin-ajax request.',
-									checked: !!settings.lazyMailerliteNonceEnabled,
-									onChange: (value) => updateSetting('lazyMailerliteNonceEnabled', value),
-									disabled: busy,
-									key: 'lazy-mailerlite-nonce-refresh',
-								}),
+h(SelectField, {
+											label: __("Delayed local JS auto-start", 'ultracache'),
+											description: __("Controls when local delayed scripts are released. Interaction only waits for mousemove, scroll, click, touch, pointer, or keyboard activity. Timed options also start the local batch automatically after DOM ready.", 'ultracache'),
+											value: (settings.delayedLocalJsAutoStart || 'custom') === 'interaction' ? 'interaction' : String(typeof settings.delayedLocalJsAutoStartSeconds !== 'undefined' ? settings.delayedLocalJsAutoStartSeconds : 1),
+											onChange: (value) => {
+												if (value === 'interaction') {
+													queueSettingsPatch({ delayedLocalJsAutoStart: 'interaction' });
+													return;
+												}
+												queueSettingsPatch({ delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: Number(value) });
+											},
+											disabled: busy || settings.jsFullSiteStrategy !== 'delay_all',
+											options: [
+												{ value: 'interaction', label: __('On interaction only', 'ultracache') },
+												{ value: '0.1', label: __('0.1 seconds', 'ultracache') },
+												{ value: '0.5', label: __('0.5 seconds', 'ultracache') },
+												{ value: '1', label: __('1 second', 'ultracache') },
+												{ value: '2', label: __('2 seconds', 'ultracache') },
+												{ value: '3', label: __('3 seconds', 'ultracache') },
+												{ value: '4', label: __('4 seconds', 'ultracache') },
+												{ value: '5', label: __('5 seconds', 'ultracache') },
+												{ value: '6', label: __('6 seconds', 'ultracache') },
+												{ value: '7', label: __('7 seconds', 'ultracache') },
+												{ value: '8', label: __('8 seconds', 'ultracache') },
+												{ value: '9', label: __('9 seconds', 'ultracache') },
+											],
+											key: 'delayed-local-js-auto-start-mode',
+										}),
+					h(ToggleRow, {
+						label: __("Delay non-critical/local JS", 'ultracache'),
+						description: __("Delay selected same-host enhancement scripts such as popups, sliders, filters, consent extras, marketing helpers, and other local footer scripts unless protected or excluded here.", 'ultracache'),
+						checked: settings.delayNonCriticalJsEnabled,
+						onChange: (value) => updateSetting('delayNonCriticalJsEnabled', value),
+						disabled: busy,
+						key: 'defer-stage-three',
+					}),
 	h(ToggleRow, {
 									label: __("Delay known functional third-party JS", 'ultracache'),
 									description: __("Delay matched third-party scripts that provide visible functionality, such as cookie banners, captcha, maps, chat widgets, booking widgets, embedded forms, opt-in popups, newsletter widgets, and review widgets. Matching is based on the visible include/exclude patterns below. If a form, map, captcha, checkout, or cookie banner misbehaves, add its script keyword to exclusions.", 'ultracache'),
@@ -8576,38 +8702,7 @@ h(ToggleRow, {
 										disabled: busy,
 										key: 'delay-all-third-party-js',
 									}),
-					h(ToggleRow, {
-						label: __("Delay non-critical/local JS", 'ultracache'),
-						description: __("Delay selected same-host enhancement scripts such as popups, sliders, filters, consent extras, marketing helpers, and other local footer scripts unless protected or excluded here.", 'ultracache'),
-						checked: settings.delayNonCriticalJsEnabled,
-						onChange: (value) => updateSetting('delayNonCriticalJsEnabled', value),
-						disabled: busy,
-						key: 'defer-stage-three',
-					}),
-h(ToggleRow, {
-									label: __("Main Thread Relief", 'ultracache'),
-									description: __("Load delayed scripts gradually during browser idle time instead of releasing the full delayed queue at once. Works with Stage two and Stage three delayed scripts.", 'ultracache'),
-									checked: settings.mainThreadReliefEnabled,
-									onChange: (value) => updateSetting('mainThreadReliefEnabled', value),
-									disabled: busy,
-									key: 'main-thread-relief',
-								}),
-h(ToggleRow, {
-									label: __("Critical Request Chain Relief", 'ultracache'),
-									description: __("Preload known critical requests and let selected non-critical chained assets be delayed so the browser has a shorter critical network chain.", 'ultracache'),
-									checked: settings.criticalRequestChainReliefEnabled,
-									onChange: (value) => updateSetting('criticalRequestChainReliefEnabled', value),
-									disabled: busy,
-									key: 'critical-request-chain-relief',
-								}),
-h(ToggleRow, {
-									label: __("LCP Boundary Defer", 'ultracache'),
-									description: __("Uses the LCP image detected by LCP Image Priority as a visual boundary. Eligible local scripts printed after that image in the HTML are delayed.", 'ultracache'),
-									checked: !!settings.lcpBoundaryDeferEnabled,
-									onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
-										disabled: busy || !settings.lcpImagePriorityEnabled,
-									key: 'lcp-boundary-defer',
-								})
+
 					]
 				),
 h(
@@ -8687,6 +8782,14 @@ h(ToggleRow, {
 							disabled: busy,
 							key: 'async-css',
 						}),
+h(ToggleRow, {
+											label: __("Aggressive Async CSS", 'ultracache'),
+											description: __("Optional advanced mode. Rewrite almost all remaining local stylesheet links, including late footer output, to non-blocking print+onload loading with a noscript fallback. Use the exclude list for styles that must stay blocking.", 'ultracache'),
+											checked: settings.aggressiveAsyncCssEnabled,
+											onChange: (value) => updateSetting('aggressiveAsyncCssEnabled', value),
+											disabled: busy,
+											key: 'aggressive-async-css',
+										}),
 					]
 				),
 h(
@@ -8767,281 +8870,319 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 				),
 			]),
 
-			h('div', { className: 'uc-card', key: 'cache-engine-advanced-settings-exclusions-card' }, [
-h('details', { className: 'uc-accordion uc-accordion--card', key: 'cache-engine-advanced-settings-exclusions' }, [
-									h('summary', { className: 'uc-accordion__summary' }, [
-										h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
-											h('div', { className: 'uc-accordion__title' }, __("Advanced Settings & Exclusions", 'ultracache')),
-											h('div', { className: 'uc-accordion__description' }, __("Manual include/exclude lists and higher-risk toggles for frontend delivery, CSS/JS handling, asset cleanup, and LCP image handling.", 'ultracache')),
-										]),
-										h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
-									]),
-									h('div', { className: 'uc-accordion__body space-y-4' }, [
-										h(ToggleRow, {
-											label: __("Fix sliders / hero sections", 'ultracache'),
-											description: __("When Revolution Slider, SR7, Swiper, Slick, or similar hero/slider markup is detected, UltraCache protects slider/runtime assets, skips risky structural rewrites, and keeps SR7 first-slide LCP priority on the lifecycle-safe path when LCP Image Priority is enabled.", 'ultracache'),
-											checked: !!settings.sliderSafeModeEnabled,
-											onChange: (value) => updateSliderSafeModeSetting(value),
-											disabled: busy,
-											key: 'slider-safe-mode',
-										}),
-										h(ToggleRow, {
-											label: __("Enable Debug", 'ultracache'),
-											description: __("Allow request-triggered UltraCache debug/source headers such as X-Ultra-Cache-Source when X-UltraCache-Debug: 1 is sent. Keep OFF on production unless actively debugging.", 'ultracache'),
-											checked: !!settings.debugHeadersEnabled,
-											onChange: (value) => updateSetting('debugHeadersEnabled', value),
-											disabled: busy,
-											key: 'enable-debug-headers',
-										}),
-										h(ToggleRow, {
-											label: __("Aggressive Async CSS", 'ultracache'),
-											description: __("Optional advanced mode. Rewrite almost all remaining local stylesheet links, including late footer output, to non-blocking print+onload loading with a noscript fallback. Use the exclude list for styles that must stay blocking.", 'ultracache'),
-											checked: settings.aggressiveAsyncCssEnabled,
-											onChange: (value) => updateSetting('aggressiveAsyncCssEnabled', value),
-											disabled: busy,
-											key: 'aggressive-async-css',
-										}),
-										h(ToggleRow, {
-								label: __("Enable query-string args caching", 'ultracache'),
-								description: __("Allow UltraCache to cache URL variants that include query-string args. Excluded query-string args always bypass cache. If the whitelist below is empty, all non-excluded query-string variants can be cached.", 'ultracache'),
-								checked: !!settings.cacheQueryStringsEnabled,
-								onChange: (value) => updateSetting('cacheQueryStringsEnabled', value),
-								disabled: busy,
-								key: 'query-string-caching',
-							}),
-											h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'cache-engine-advanced-fields' }, [
-											h(SaveableTextAreaField, {
-												label: __("Exclude Paths From Caching", 'ultracache'),
-												description: __("One path per line. This is the visible/editable cache path safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.", 'ultracache'),
-												value: settings.cacheExceptionPaths || '',
-												onSave: (value) => updateSetting('cacheExceptionPaths', value),
-												disabled: busy,
-												placeholder: '/cart/\n/checkout/\n/my-account/',
-												saveLabel: 'Save Excluded Paths',
-												populateLabel: __("Populate Defaults", 'ultracache'),
-												populateWarning: 'Your current excluded paths will be replaced with the recommended defaults.',
-												onPopulate: () => populateDefaultSettingList('cacheExceptionPaths', 'excluded paths'),
-												key: 'exclude-paths-from-caching',
-											}),
-											h(SaveableTextAreaField, {
-												label: __("Excluded query-string args from Caching", 'ultracache'),
-												description: __("One query key per line. This is the visible/editable unsafe query-arg safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.", 'ultracache'),
-												value: settings.cacheExceptionQueryArgs || '',
-												onSave: (value) => updateSetting('cacheExceptionQueryArgs', value),
-												disabled: busy,
-												placeholder: 'preview\nadd-to-cart\nwc-ajax',
-												saveLabel: 'Save Excluded Query-string Args',
-												populateLabel: __("Populate Defaults", 'ultracache'),
-												populateWarning: 'Your current excluded query-string args will be replaced with the recommended defaults.',
-												onPopulate: () => populateDefaultSettingList('cacheExceptionQueryArgs', 'excluded query-string args'),
-												key: 'excluded-query-string-args-from-caching',
-											}),
-											h(SaveableTextAreaField, {
-												label: __("Query-string args whitelist", 'ultracache'),
-												description: __("Optional. One query key per line. When query-string caching is enabled, UltraCache caches a query-string URL only when every query arg is listed here. Populate appends detected attributes, taxonomies, categories and tags without removing custom entries.", 'ultracache'),
-												value: settings.cacheQueryStringAllowlist || '',
-												onSave: (value) => updateSetting('cacheQueryStringAllowlist', value),
-												disabled: busy,
-												placeholder: 'product_cat\nproduct_tag\ncategory_name\ntag\nfilter_format\nquery_type_format\npa_format',
-												saveLabel: 'Save Query-string Whitelist',
-												populateLabel: __("Populate", 'ultracache'),
-												populateWarning: 'Detected taxonomy/attribute query args will be appended. Existing custom entries are preserved.',
-												onPopulate: populateQueryStringAllowlist,
-												key: 'query-string-args-whitelist',
-											}),
-											h(SaveableTextAreaField, {
-												label: __("Additional URLs for Google Fonts scanning", 'ultracache'),
-												description: 'Optional local site URLs, one per line. When Local Google Fonts Optimization is enabled, UltraCache scans the homepage plus these URLs from admin/save or manual rebuild, downloads Google Fonts CSS/WOFF2 into wp-content/cache/ultracache/google-fonts, and never builds them on live frontend requests.',
-												value: settings.googleFontsAdditionalScanUrls || '',
-												onSave: saveGoogleFontsAdditionalScanUrls,
-												disabled: busy || !settings.googleFontsLocalOptimizationEnabled,
-												placeholder: '/shop/\n/category/books/\n/product/example-book/',
-												saveLabel: 'Save Google Fonts URLs',
-												populateLabel: __("Rebuild Google Fonts Cache", 'ultracache'),
-												populateBusyLabel: __("Rebuilding…", 'ultracache'),
-												populateWarning: 'This will rebuild the local Google Fonts cache from the homepage and the URLs listed here. Existing Google Fonts cache files will be replaced. Flush All Cache will not delete this font cache.',
-												onPopulate: rebuildGoogleFontsCacheFromSettings,
-												key: 'google-fonts-additional-scan-urls',
-											}),
-											h(SaveableTextAreaField, {
-												label: __("Defer those scripts", 'ultracache'),
-												description: __("Optional newline-separated handle or URL fragments. Matching frontend scripts are forced to native defer even when Defer JS is off or the script would normally be protected. Use carefully for scripts you explicitly want deferred.", 'ultracache'),
-												value: settings.deferJsForceList || '',
-												onSave: (value) => updateSetting('deferJsForceList', value),
-												disabled: busy,
-												placeholder: 'my-theme-script\n/custom-plugin/assets/app.js',
-												saveLabel: 'Save Force Defer List',
-												key: 'defer-those-scripts-list',
-											}),
-											null,
-											h(SaveableTextAreaField, {
-												label: __("Safe Third-Party Delay Patterns", 'ultracache'),
-												description: __("Visible/default patterns used by Delay safe third-party JS. Matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded. Safe third-party scripts use a later automatic fallback than functional/local delayed scripts.", 'ultracache'),
-												value: settings.delaySafeThirdPartyJsPatterns || '',
-												onSave: (value) => updateSetting('delaySafeThirdPartyJsPatterns', value),
-												disabled: busy || !settings.delaySafeThirdPartyJsEnabled,
-												placeholder: 'googletagmanager.com\ngoogle-analytics.com\nconnect.facebook.net\nclarity.ms',
-												saveLabel: 'Save Safe Third-Party Patterns',
-												populateLabel: __("Populate Defaults", 'ultracache'),
-												populateWarning: 'Your current safe third-party delay patterns will be replaced with the recommended defaults.',
-												onPopulate: () => populateDefaultSettingList('delaySafeThirdPartyJsPatterns', 'safe third-party delay patterns'),
-												key: 'delay-safe-third-party-patterns',
-											}),
-											h(SaveableTextAreaField, {
-												label: __("Known Functional Third-Party Delay Patterns", 'ultracache'),
-												description: __("Visible/default patterns used by Delay known functional third-party JS. Matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded.", 'ultracache'),
-												value: settings.delayFunctionalThirdPartyJsPatterns || '',
-												onSave: (value) => updateSetting('delayFunctionalThirdPartyJsPatterns', value),
-												disabled: busy || !settings.delayFunctionalThirdPartyJsEnabled,
-												placeholder: 'recaptcha\nhcaptcha\nmaps.googleapis.com\ncomplianz\ncmplz',
-												saveLabel: 'Save Known Functional Third-Party Patterns',
-												populateLabel: __("Populate Defaults", 'ultracache'),
-												populateWarning: 'Your current known functional third-party delay patterns will be replaced with the recommended defaults.',
-												onPopulate: () => populateDefaultSettingList('delayFunctionalThirdPartyJsPatterns', 'known functional third-party delay patterns'),
-												key: 'delay-functional-third-party-patterns',
-											}),
-											h(SaveableTextAreaField, {
-												label: __("Priority Preloads", 'ultracache'),
-												description: __("Optional newline-separated priority resources for early discovery. Prefix each line with image, style, script, font, or fetch. Use fetch for dynamic frontend requests, slider JSON/assets, or request chains that are not discovered early in the initial HTML. Image entries receive fetchpriority=high.", 'ultracache'),
-												value: settings.criticalResourcePreloadList || '',
-												onSave: (value) => updateSetting('criticalResourcePreloadList', value),
-												disabled: busy || !settings.criticalRequestChainReliefEnabled,
-												placeholder: 'image /wp-content/uploads/hero.webp\nstyle /wp-content/cache/ultracache/homepage-css/homepage.css\nfont /wp-content/uploads/fonts/manrope.woff2\nfetch /sliders/1?srengine=7',
-												saveLabel: 'Save Priority Preloads',
-												key: 'critical-resource-preload-list',
-											}),
-											h(SaveableTextAreaField, {
-												label: __("Delay Non-Critical Request Chains", 'ultracache'),
-												description: __("Optional newline-separated handle or URL fragments. Matching local scripts are delayed and matching stylesheets are converted to async print/onload loading.", 'ultracache'),
-												value: settings.criticalRequestChainDelayList || '',
-												onSave: (value) => updateSetting('criticalRequestChainDelayList', value),
-												disabled: busy || !settings.criticalRequestChainReliefEnabled,
-												placeholder: 'tooltipster\nplainoverlay\nion.rangeSlider\nsourcebuster',
-												saveLabel: 'Save Chain Delay List',
-												key: 'critical-request-chain-delay-list',
-											}),
-											h(SaveableTextAreaField, {
-												label: __("Asset Cleanup Exclusions", 'ultracache'),
-												description: __("Optional newline-separated handle, URL, or HTML fragments. This is the visible/editable Asset Cleanup safeguard list for builders, search, carts, checkout, and custom widgets.", 'ultracache'),
-												value: settings.assetCleanupExcludeList || '',
-												onSave: (value) => updateSetting('assetCleanupExcludeList', value),
-												disabled: busy || !settings.assetChainCleanupEnabled,
-												placeholder: 'elementor\nrevslider\nfibosearch\ncart\ncheckout',
-												saveLabel: 'Save Asset Exclusions',
-												populateLabel: __("Populate Defaults", 'ultracache'),
-												populateWarning: 'Your current Asset Cleanup exclusions will be replaced with the recommended defaults.',
-												onPopulate: () => populateDefaultSettingList('assetCleanupExcludeList', 'Asset Cleanup exclusions'),
-												key: 'asset-cleanup-exclude-list',
-											}),
-											null,
-											h(SaveableTextAreaField, {
-												label: __("Async CSS Exclude List", 'ultracache'),
-												description: __("Optional newline-separated handle or URL fragments. Matching stylesheets stay in the normal blocking flow for both Enable Async CSS and Aggressive Async CSS. This is the single visible/editable Async CSS safeguard list.", 'ultracache'),
-												value: settings.asyncCssExcludeList || '',
-												onSave: (value) => updateSetting('asyncCssExcludeList', value),
-												disabled: busy || (!settings.asyncCssEnabled && !settings.aggressiveAsyncCssEnabled),
-												placeholder: '/post-21.css\n/base/elementor.css',
-												saveLabel: 'Save Exclude List',
-												key: 'async-css-exclude-list',
-											}),
-										h(SaveableTextAreaField, {
-											label: __("Manual LCP selector", 'ultracache'),
-											description: __("Optional newline-separated CSS selectors, plain IDs, or image URL/fragments for the main above-the-fold hero/LCP target. CSS entries scope LCP discovery to that block; image entries become manual LCP preload targets.", 'ultracache'),
-											value: settings.manualLcpHeroSelector || '',
-											onSave: (value) => updateSetting('manualLcpHeroSelector', value),
-											disabled: busy || !settings.lcpImagePriorityEnabled,
-											placeholder: '#main-hero\n.hero-slider\n/wp-content/uploads/hero.webp\nhero-home.jpg',
-											saveLabel: 'Save Manual LCP Selector',
-											key: 'manual-lcp-hero-selector',
-											}),
-										]),
-										h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'font-pattern-exclusions-grid' }, [
-										h(SaveableTextAreaField, {
-											label: __("Delay These Fonts / Patterns", 'ultracache'),
-											description: __("Newline-separated font-family, filename, or URL fragments. Scan the front page or add manual patterns. Matching @font-face blocks from bundled or standalone CSS are moved into a delayed non-render-blocking font stylesheet. Use this mainly for icon fonts.", 'ultracache'),
-											value: settings.delayIconFontsList || '',
-											onSave: (value) => updateSetting('delayIconFontsList', value),
-											disabled: busy,
-											placeholder: __("Scan the front page to detect likely icon font families/files. You can also add manual fragments, one per line.", 'ultracache'),
-											saveLabel: 'Save Delayed Font Patterns',
-											populateLabel: __("Scan Front Page", 'ultracache'),
-											populateBusyLabel: __("Scanning…", 'ultracache'),
-											onPopulate: populateDelayIconFontsDefaults,
-											populateWarning: 'Detected front-page icon font patterns will be appended to your current list.',
-											key: 'delay-icon-fonts-list',
-										}),
-										h(SaveableTextAreaField, {
-											label: __("Never Delay These Fonts / Patterns", 'ultracache'),
-											description: __("Newline-separated font-family, filename, or URL fragments that must stay inside the normal CSS flow. Scan the front page to append detected non-icon text/brand fonts, then add manual safeguards if needed.", 'ultracache'),
-											value: settings.delayIconFontsExcludeList || '',
-											onSave: (value) => updateSetting('delayIconFontsExcludeList', value),
-											disabled: busy,
-											placeholder: __("Scan the front page to detect non-icon text/brand font families. You can also add manual fragments, one per line.", 'ultracache'),
-											saveLabel: 'Save Font Exclusions',
-											populateLabel: __("Scan Front Page", 'ultracache'),
-											populateBusyLabel: __("Scanning…", 'ultracache'),
-											onPopulate: populateDelayIconFontExclusionDefaults,
-											populateWarning: 'Detected front-page non-icon fonts will be appended to your current list.',
-											key: 'delay-icon-fonts-exclude-list',
-										}),
-										h(SaveableTextAreaField, {
-											label: __("Safe Tracking Cookies", 'ultracache'),
-											description: __("Cookie names or fragments that may be ignored for public cache eligibility and safe Set-Cookie storage decisions. Use this only for analytics/marketing identifiers that do not change the HTML. UltraCache never stores or replays Set-Cookie headers.", 'ultracache'),
-											value: settings.safeTrackingCookieList || '',
-											onSave: (value) => updateSetting('safeTrackingCookieList', value),
-											disabled: busy,
-											placeholder: '_fbp\n_fbc\n_ga\n_gid\n_clck\n_clsk',
-											saveLabel: 'Save Safe Tracking Cookies',
-											populateLabel: __("Populate Defaults", 'ultracache'),
-											populateWarning: 'Your current safe tracking cookie list will be replaced with the recommended defaults.',
-											onPopulate: () => populateDefaultSettingList('safeTrackingCookieList', 'safe tracking cookies'),
-											key: 'safe-tracking-cookie-list',
-										}),
-										h(SaveableTextAreaField, {
-											label: __("Never Cache When These Cookies Exist", 'ultracache'),
-											description: __("Cookie names or fragments that can change visible HTML, cart/session/account state, prices, wishlist, compare, checkout, protected content, or comment forms. Matching requests bypass public HTML cache.", 'ultracache'),
-											value: settings.unsafeCacheCookieList || '',
-											onSave: (value) => updateSetting('unsafeCacheCookieList', value),
-											disabled: busy,
-											placeholder: 'wordpress_logged_in_\nwp_woocommerce_session_\nwoocommerce_items_in_cart\nwoocommerce_cart_hash',
-											saveLabel: 'Save Unsafe Cookies',
-											populateLabel: __("Populate Defaults", 'ultracache'),
-											populateWarning: 'Your current unsafe cookie list will be replaced with the recommended defaults.',
-											onPopulate: () => populateDefaultSettingList('unsafeCacheCookieList', 'unsafe cache cookies'),
-											key: 'unsafe-cache-cookie-list',
-										}),
-										]),
-										
-										h(CssBundleExclusionsDiagnosticsField, {
-											value: settings.homepageCssBundleExcludeList || '',
-											onSave: (value) => updateSetting('homepageCssBundleExcludeList', value),
-											disabled: busy || !settings.homepageCssBundleEnabled,
-											placeholder: '/wp-content/plugins/plugin-name/assets/style.css\n/wp-content/themes/theme-name/assets/critical.css',
-											onPopulateDefaults: populateCssBundleExclusionDefaults,
-											onRunDiagnostics: runCssDiagnosticsForUrl,
-											onDownloadJson: downloadCssDiagnosticsJson,
-											onClearResult: clearCssDiagnosticsResult,
-											profile: performanceProfile,
-											onCopyCssExclusion: copyCssBundleExclusionSuggestion,
-											key: 'homepage-css-bundle-exclude-diagnostics-field',
-										}),
-
-										h(DeferDelayExclusionsField, {
-											value: settings.deferJsExcludeList || '',
-											onSave: (value) => updateSetting('deferJsExcludeList', value),
-											disabled: busy,
-											placeholder: 'jquery\njquery-migrate\n/wp-includes/js/\nwp-util\nunderscore\ncart\ncheckout',
-											onPopulateDefaults: populateDeferDelayExclusionDefaults,
-											onSafeInitScan: (currentDraft) => scanSafeDeferInitScriptsAndMerge(currentDraft, false),
-											onScan: runJsDelaySafetyScanForUrl,
-											onRuntimeScan: runBrowserRuntimeJsScanForUrl,
-											onLoadLatestProfileScan: loadLatestJsDelaySafetyScan,
-											key: 'defer-stages-exclude-list-final',
-										}),
-									]),
-								])
-			]),
-
+				SettingsAccordionCard({
+						keyName: 'advanced-settings-box',
+						title: __("Advanced settings", 'ultracache'),
+						description: __("General advanced controls kept separate from exclusion lists.", 'ultracache'),
+						children: [
+							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'advanced-settings-grid' }, [
+															h(ToggleRow, {
+																							label: __("Lazy MailerLite nonce refresh", 'ultracache'),
+																							description: 'Prevents MailerLite forms from calling wp-admin/admin-ajax.php on page load for ml_create_nonce. The nonce is refreshed on first form interaction or before submit, so cached pages avoid the load-time admin-ajax request.',
+																							checked: !!settings.lazyMailerliteNonceEnabled,
+																							onChange: (value) => updateSetting('lazyMailerliteNonceEnabled', value),
+																							disabled: busy,
+																							key: 'lazy-mailerlite-nonce-refresh',
+																						}),
+															h(ToggleRow, {
+																							label: __("Main Thread Relief", 'ultracache'),
+																							description: __("Load delayed scripts gradually during browser idle time instead of releasing the full delayed queue at once. Works with Stage two and Stage three delayed scripts.", 'ultracache'),
+																							checked: settings.mainThreadReliefEnabled,
+																							onChange: (value) => updateSetting('mainThreadReliefEnabled', value),
+																							disabled: busy,
+																							key: 'main-thread-relief',
+																						}),
+															h(ToggleRow, {
+																							label: __("Critical Request Chain Relief", 'ultracache'),
+																							description: __("Preload known critical requests and let selected non-critical chained assets be delayed so the browser has a shorter critical network chain.", 'ultracache'),
+																							checked: settings.criticalRequestChainReliefEnabled,
+																							onChange: (value) => updateSetting('criticalRequestChainReliefEnabled', value),
+																							disabled: busy,
+																							key: 'critical-request-chain-relief',
+																						}),
+															h(ToggleRow, {
+																										label: __("Fix sliders / hero sections", 'ultracache'),
+																										description: __("When Revolution Slider, SR7, Swiper, Slick, or similar hero/slider markup is detected, UltraCache protects slider/runtime assets, skips risky structural rewrites, and keeps SR7 first-slide LCP priority on the lifecycle-safe path when LCP Image Priority is enabled.", 'ultracache'),
+																										checked: !!settings.sliderSafeModeEnabled,
+																										onChange: (value) => updateSliderSafeModeSetting(value),
+																										disabled: busy,
+																										key: 'slider-safe-mode',
+																									}),
+															h(ToggleRow, {
+																										label: __("Enable Debug", 'ultracache'),
+																										description: __("Allow request-triggered UltraCache debug/source headers such as X-Ultra-Cache-Source when X-UltraCache-Debug: 1 is sent. Keep OFF on production unless actively debugging.", 'ultracache'),
+																										checked: !!settings.debugHeadersEnabled,
+																										onChange: (value) => updateSetting('debugHeadersEnabled', value),
+																										disabled: busy,
+																										key: 'enable-debug-headers',
+																									}),
+															h(SaveableTextAreaField, {
+																											label: __("Additional URLs for Google Fonts scanning", 'ultracache'),
+																											description: 'Optional local site URLs, one per line. When Local Google Fonts Optimization is enabled, UltraCache scans the homepage plus these URLs from admin/save or manual rebuild, downloads Google Fonts CSS/WOFF2 into wp-content/cache/ultracache/google-fonts, and never builds them on live frontend requests.',
+																											value: settings.googleFontsAdditionalScanUrls || '',
+																											onSave: saveGoogleFontsAdditionalScanUrls,
+																											disabled: busy || !settings.googleFontsLocalOptimizationEnabled,
+																											placeholder: '/shop/\n/category/books/\n/product/example-book/',
+																											saveLabel: 'Save Google Fonts URLs',
+																											populateLabel: __("Rebuild Google Fonts Cache", 'ultracache'),
+																											populateBusyLabel: __("Rebuilding…", 'ultracache'),
+																											populateWarning: 'This will rebuild the local Google Fonts cache from the homepage and the URLs listed here. Existing Google Fonts cache files will be replaced. Flush All Cache will not delete this font cache.',
+																											onPopulate: rebuildGoogleFontsCacheFromSettings,
+																											key: 'google-fonts-additional-scan-urls',
+																										}),
+														]),
+						],
+					}),
+			SettingsAccordionCard({
+						keyName: 'query-string-args-caching-box',
+						title: __("Query-string args caching", 'ultracache'),
+						description: __("Control which query-string URL variants are eligible for public HTML cache.", 'ultracache'),
+						children: [
+							h(ToggleRow, {
+															label: __("Enable query-string args caching", 'ultracache'),
+															description: __("Allow UltraCache to cache URL variants that include query-string args. Excluded query-string args always bypass cache. If the whitelist below is empty, all non-excluded query-string variants can be cached.", 'ultracache'),
+															checked: !!settings.cacheQueryStringsEnabled,
+															onChange: (value) => updateSetting('cacheQueryStringsEnabled', value),
+															disabled: busy,
+															key: 'query-string-caching',
+														}),
+							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'query-string-fields' }, [
+															h(SaveableTextAreaField, {
+																											label: __("Query-string args whitelist", 'ultracache'),
+																											description: __("Optional. One query key per line. When query-string caching is enabled, UltraCache caches a query-string URL only when every query arg is listed here. Populate appends detected attributes, taxonomies, categories and tags without removing custom entries.", 'ultracache'),
+																											value: settings.cacheQueryStringAllowlist || '',
+																											onSave: (value) => updateSetting('cacheQueryStringAllowlist', value),
+																											disabled: busy,
+																											placeholder: 'product_cat\nproduct_tag\ncategory_name\ntag\nfilter_format\nquery_type_format\npa_format',
+																											saveLabel: 'Save Query-string Whitelist',
+																											populateLabel: __("Populate", 'ultracache'),
+																											populateWarning: 'Detected taxonomy/attribute query args will be appended. Existing custom entries are preserved.',
+																											onPopulate: populateQueryStringAllowlist,
+																											key: 'query-string-args-whitelist',
+																										}),
+															h(SaveableTextAreaField, {
+																											label: __("Excluded query-string args from Caching", 'ultracache'),
+																											description: __("One query key per line. This is the visible/editable unsafe query-arg safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.", 'ultracache'),
+																											value: settings.cacheExceptionQueryArgs || '',
+																											onSave: (value) => updateSetting('cacheExceptionQueryArgs', value),
+																											disabled: busy,
+																											placeholder: 'preview\nadd-to-cart\nwc-ajax',
+																											saveLabel: 'Save Excluded Query-string Args',
+																											populateLabel: __("Populate Defaults", 'ultracache'),
+																											populateWarning: 'Your current excluded query-string args will be replaced with the recommended defaults.',
+																											onPopulate: () => populateDefaultSettingList('cacheExceptionQueryArgs', 'excluded query-string args'),
+																											key: 'excluded-query-string-args-from-caching',
+																										}),
+														]),
+						],
+					}),
+			SettingsAccordionCard({
+						keyName: 'general-exclusions-box',
+						title: __("General Exclusions", 'ultracache'),
+						description: __("General cache, cookie, asset-cleanup, LCP, and request-chain safeguards.", 'ultracache'),
+						children: [
+							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'general-exclusions-grid' }, [
+															h(SaveableTextAreaField, {
+																											label: __("Exclude Paths From Caching", 'ultracache'),
+																											description: __("One path per line. This is the visible/editable cache path safeguard list. Reset restores defaults; Populate re-adds recommended defaults without resetting all settings.", 'ultracache'),
+																											value: settings.cacheExceptionPaths || '',
+																											onSave: (value) => updateSetting('cacheExceptionPaths', value),
+																											disabled: busy,
+																											placeholder: '/cart/\n/checkout/\n/my-account/',
+																											saveLabel: 'Save Excluded Paths',
+																											populateLabel: __("Populate Defaults", 'ultracache'),
+																											populateWarning: 'Your current excluded paths will be replaced with the recommended defaults.',
+																											onPopulate: () => populateDefaultSettingList('cacheExceptionPaths', 'excluded paths'),
+																											key: 'exclude-paths-from-caching',
+																										}),
+															h(SaveableTextAreaField, {
+																										label: __("Safe Tracking Cookies", 'ultracache'),
+																										description: __("Cookie names or fragments that may be ignored for public cache eligibility and safe Set-Cookie storage decisions. Use this only for analytics/marketing identifiers that do not change the HTML. UltraCache never stores or replays Set-Cookie headers.", 'ultracache'),
+																										value: settings.safeTrackingCookieList || '',
+																										onSave: (value) => updateSetting('safeTrackingCookieList', value),
+																										disabled: busy,
+																										placeholder: '_fbp\n_fbc\n_ga\n_gid\n_clck\n_clsk',
+																										saveLabel: 'Save Safe Tracking Cookies',
+																										populateLabel: __("Populate Defaults", 'ultracache'),
+																										populateWarning: 'Your current safe tracking cookie list will be replaced with the recommended defaults.',
+																										onPopulate: () => populateDefaultSettingList('safeTrackingCookieList', 'safe tracking cookies'),
+																										key: 'safe-tracking-cookie-list',
+																									}),
+															h(SaveableTextAreaField, {
+																										label: __("Never Cache When These Cookies Exist", 'ultracache'),
+																										description: __("Cookie names or fragments that can change visible HTML, cart/session/account state, prices, wishlist, compare, checkout, protected content, or comment forms. Matching requests bypass public HTML cache.", 'ultracache'),
+																										value: settings.unsafeCacheCookieList || '',
+																										onSave: (value) => updateSetting('unsafeCacheCookieList', value),
+																										disabled: busy,
+																										placeholder: 'wordpress_logged_in_\nwp_woocommerce_session_\nwoocommerce_items_in_cart\nwoocommerce_cart_hash',
+																										saveLabel: 'Save Unsafe Cookies',
+																										populateLabel: __("Populate Defaults", 'ultracache'),
+																										populateWarning: 'Your current unsafe cookie list will be replaced with the recommended defaults.',
+																										onPopulate: () => populateDefaultSettingList('unsafeCacheCookieList', 'unsafe cache cookies'),
+																										key: 'unsafe-cache-cookie-list',
+																									}),
+															h(SaveableTextAreaField, {
+																											label: __("Asset Cleanup Exclusions", 'ultracache'),
+																											description: __("Optional newline-separated handle, URL, or HTML fragments. This is the visible/editable Asset Cleanup safeguard list for builders, search, carts, checkout, and custom widgets.", 'ultracache'),
+																											value: settings.assetCleanupExcludeList || '',
+																											onSave: (value) => updateSetting('assetCleanupExcludeList', value),
+																											disabled: busy || !settings.assetChainCleanupEnabled,
+																											placeholder: 'elementor\nrevslider\nfibosearch\ncart\ncheckout',
+																											saveLabel: 'Save Asset Exclusions',
+																											populateLabel: __("Populate Defaults", 'ultracache'),
+																											populateWarning: 'Your current Asset Cleanup exclusions will be replaced with the recommended defaults.',
+																											onPopulate: () => populateDefaultSettingList('assetCleanupExcludeList', 'Asset Cleanup exclusions'),
+																											key: 'asset-cleanup-exclude-list',
+																										}),
+															h(SaveableTextAreaField, {
+																										label: __("Manual LCP selector", 'ultracache'),
+																										description: __("Optional newline-separated CSS selectors, plain IDs, or image URL/fragments for the main above-the-fold hero/LCP target. CSS entries scope LCP discovery to that block; image entries become manual LCP preload targets.", 'ultracache'),
+																										value: settings.manualLcpHeroSelector || '',
+																										onSave: (value) => updateSetting('manualLcpHeroSelector', value),
+																										disabled: busy || !settings.lcpImagePriorityEnabled,
+																										placeholder: '#main-hero\n.hero-slider\n/wp-content/uploads/hero.webp\nhero-home.jpg',
+																										saveLabel: 'Save Manual LCP Selector',
+																										key: 'manual-lcp-hero-selector',
+																										}),
+															h(SaveableTextAreaField, {
+																											label: __("Priority Preloads", 'ultracache'),
+																											description: __("Optional newline-separated priority resources for early discovery. Prefix each line with image, style, script, font, or fetch. Use fetch for dynamic frontend requests, slider JSON/assets, or request chains that are not discovered early in the initial HTML. Image entries receive fetchpriority=high.", 'ultracache'),
+																											value: settings.criticalResourcePreloadList || '',
+																											onSave: (value) => updateSetting('criticalResourcePreloadList', value),
+																											disabled: busy || !settings.criticalRequestChainReliefEnabled,
+																											placeholder: 'image /wp-content/uploads/hero.webp\nstyle /wp-content/cache/ultracache/homepage-css/homepage.css\nfont /wp-content/uploads/fonts/manrope.woff2\nfetch /sliders/1?srengine=7',
+																											saveLabel: 'Save Priority Preloads',
+																											key: 'critical-resource-preload-list',
+																										}),
+															h(SaveableTextAreaField, {
+																											label: __("Delay Non-Critical Request Chains", 'ultracache'),
+																											description: __("Optional newline-separated handle or URL fragments. Matching local scripts are delayed and matching stylesheets are converted to async print/onload loading.", 'ultracache'),
+																											value: settings.criticalRequestChainDelayList || '',
+																											onSave: (value) => updateSetting('criticalRequestChainDelayList', value),
+																											disabled: busy || !settings.criticalRequestChainReliefEnabled,
+																											placeholder: 'tooltipster\nplainoverlay\nion.rangeSlider\nsourcebuster',
+																											saveLabel: 'Save Chain Delay List',
+																											key: 'critical-request-chain-delay-list',
+																										}),
+														]),
+						],
+					}),
+			SettingsAccordionCard({
+						keyName: 'css-bundle-exclusions-diagnostics-box',
+						title: __("CSS Bundle Exclusions & Diagnostics", 'ultracache'),
+						description: __("CSS bundle, async CSS, and delayed font CSS safeguards plus diagnostics.", 'ultracache'),
+						children: [
+							h(CssBundleExclusionsDiagnosticsField, {
+																		value: settings.homepageCssBundleExcludeList || '',
+																		onSave: (value) => updateSetting('homepageCssBundleExcludeList', value),
+																		disabled: busy || !settings.homepageCssBundleEnabled,
+																		placeholder: '/wp-content/plugins/plugin-name/assets/style.css\n/wp-content/themes/theme-name/assets/critical.css',
+																		onPopulateDefaults: populateCssBundleExclusionDefaults,
+																		onRunDiagnostics: runCssDiagnosticsForUrl,
+																		onDownloadJson: downloadCssDiagnosticsJson,
+																		onClearResult: clearCssDiagnosticsResult,
+																		profile: performanceProfile,
+																		onCopyCssExclusion: copyCssBundleExclusionSuggestion,
+																		key: 'homepage-css-bundle-exclude-diagnostics-field',
+																	}),
+							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'css-exclusions-grid' }, [
+															h(SaveableTextAreaField, {
+																											label: __("Async CSS Exclude List", 'ultracache'),
+																											description: __("Optional newline-separated handle or URL fragments. Matching stylesheets stay in the normal blocking flow for both Enable Async CSS and Aggressive Async CSS. This is the single visible/editable Async CSS safeguard list.", 'ultracache'),
+																											value: settings.asyncCssExcludeList || '',
+																											onSave: (value) => updateSetting('asyncCssExcludeList', value),
+																											disabled: busy || (!settings.asyncCssEnabled && !settings.aggressiveAsyncCssEnabled),
+																											placeholder: '/post-21.css\n/base/elementor.css',
+																											saveLabel: 'Save Exclude List',
+																											key: 'async-css-exclude-list',
+																										}),
+															h(SaveableTextAreaField, {
+																										label: __("Delay These Fonts / Patterns", 'ultracache'),
+																										description: __("Newline-separated font-family, filename, or URL fragments. Scan the front page or add manual patterns. Matching @font-face blocks from bundled or standalone CSS are moved into a delayed non-render-blocking font stylesheet. Use this mainly for icon fonts.", 'ultracache'),
+																										value: settings.delayIconFontsList || '',
+																										onSave: (value) => updateSetting('delayIconFontsList', value),
+																										disabled: busy,
+																										placeholder: __("Scan the front page to detect likely icon font families/files. You can also add manual fragments, one per line.", 'ultracache'),
+																										saveLabel: 'Save Delayed Font Patterns',
+																										populateLabel: __("Scan Front Page", 'ultracache'),
+																										populateBusyLabel: __("Scanning…", 'ultracache'),
+																										onPopulate: populateDelayIconFontsDefaults,
+																										populateWarning: 'Detected front-page icon font patterns will be appended to your current list.',
+																										key: 'delay-icon-fonts-list',
+																									}),
+															h(SaveableTextAreaField, {
+																										label: __("Never Delay These Fonts / Patterns", 'ultracache'),
+																										description: __("Newline-separated font-family, filename, or URL fragments that must stay inside the normal CSS flow. Scan the front page to append detected non-icon text/brand fonts, then add manual safeguards if needed.", 'ultracache'),
+																										value: settings.delayIconFontsExcludeList || '',
+																										onSave: (value) => updateSetting('delayIconFontsExcludeList', value),
+																										disabled: busy,
+																										placeholder: __("Scan the front page to detect non-icon text/brand font families. You can also add manual fragments, one per line.", 'ultracache'),
+																										saveLabel: 'Save Font Exclusions',
+																										populateLabel: __("Scan Front Page", 'ultracache'),
+																										populateBusyLabel: __("Scanning…", 'ultracache'),
+																										onPopulate: populateDelayIconFontExclusionDefaults,
+																										populateWarning: 'Detected front-page non-icon fonts will be appended to your current list.',
+																										key: 'delay-icon-fonts-exclude-list',
+																									}),
+														]),
+						],
+					}),
+			SettingsAccordionCard({
+						keyName: 'js-delay-defer-exclusions-diagnostics-box',
+						title: __("JS Delay / Defer Exclusions & Diagnostics", 'ultracache'),
+						description: __("Visible JS delay/defer exclusions, third-party delay patterns, and runtime diagnostics.", 'ultracache'),
+						children: [
+							h(DeferDelayExclusionsField, {
+																		value: settings.deferJsExcludeList || '',
+																		onSave: (value) => updateSetting('deferJsExcludeList', value),
+																		disabled: busy,
+																		placeholder: '/wp-includes/js/jquery/jquery.min.js\n/wp-includes/js/wp-util.min.js\n/wp-includes/js/dist/api-fetch.min.js',
+																		onPopulateDefaults: populateDeferDelayExclusionDefaults,
+																		onScan: runJsDelaySafetyScanForUrl,
+																		onRuntimeScan: runBrowserRuntimeJsScanForUrl,
+																		onLoadLatestProfileScan: loadLatestJsDelaySafetyScan,
+																		key: 'defer-stages-exclude-list-final',
+																	}),
+							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'js-exclusions-grid' }, [
+															h(SaveableTextAreaField, {
+																											label: __("Defer those scripts", 'ultracache'),
+																											description: __("Optional newline-separated handle or URL fragments. Matching frontend scripts are forced to native defer even when Defer JS is off or the script would normally be protected. Use carefully for scripts you explicitly want deferred.", 'ultracache'),
+																											value: settings.deferJsForceList || '',
+																											onSave: (value) => updateSetting('deferJsForceList', value),
+																											disabled: busy,
+																											placeholder: 'my-theme-script\n/custom-plugin/assets/app.js',
+																											saveLabel: 'Save Force Defer List',
+																											key: 'defer-those-scripts-list',
+																										}),
+															h(SaveableTextAreaField, {
+																											label: __("Safe Third-Party Delay Patterns", 'ultracache'),
+																											description: __("Visible/default patterns used by Delay safe third-party JS. Matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded. Safe third-party scripts use a later automatic fallback than functional/local delayed scripts.", 'ultracache'),
+																											value: settings.delaySafeThirdPartyJsPatterns || '',
+																											onSave: (value) => updateSetting('delaySafeThirdPartyJsPatterns', value),
+																											disabled: busy || !settings.delaySafeThirdPartyJsEnabled,
+																											placeholder: 'googletagmanager.com\ngoogle-analytics.com\nconnect.facebook.net\nclarity.ms',
+																											saveLabel: 'Save Safe Third-Party Patterns',
+																											populateLabel: __("Populate Defaults", 'ultracache'),
+																											populateWarning: 'Your current safe third-party delay patterns will be replaced with the recommended defaults.',
+																											onPopulate: () => populateDefaultSettingList('delaySafeThirdPartyJsPatterns', 'safe third-party delay patterns'),
+																											key: 'delay-safe-third-party-patterns',
+																										}),
+															h(SaveableTextAreaField, {
+																											label: __("Known Functional Third-Party Delay Patterns", 'ultracache'),
+																											description: __("Visible/default patterns used by Delay known functional third-party JS. Matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded.", 'ultracache'),
+																											value: settings.delayFunctionalThirdPartyJsPatterns || '',
+																											onSave: (value) => updateSetting('delayFunctionalThirdPartyJsPatterns', value),
+																											disabled: busy || !settings.delayFunctionalThirdPartyJsEnabled,
+																											placeholder: 'recaptcha\nhcaptcha\nmaps.googleapis.com\ncomplianz\ncmplz',
+																											saveLabel: 'Save Known Functional Third-Party Patterns',
+																											populateLabel: __("Populate Defaults", 'ultracache'),
+																											populateWarning: 'Your current known functional third-party delay patterns will be replaced with the recommended defaults.',
+																											onPopulate: () => populateDefaultSettingList('delayFunctionalThirdPartyJsPatterns', 'known functional third-party delay patterns'),
+																											key: 'delay-functional-third-party-patterns',
+																										}),
+														]),
+						],
+					}),
 			h(RedisCard, { form: redisForm, diagnostics, busy: hasDashboardWorkInProgress(), objectCacheEnabled: settings.objectCacheEnabled, onObjectCacheEnabledChange: (value) => updateSetting('objectCacheEnabled', value), onFieldChange: updateRedisField, onSave: saveRedisSettings, onTest: testObjectCacheBackend, onFlush: flushObjectCache, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'redis-card' }),
 
 			h(
