@@ -278,7 +278,7 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'cacheStatsEnabled',
                 'mediaOptimizationEnabled',
                 'deferJsEnabled',
-                'deferAllJsEnabled',
+                'delayAllJsEnabled',
                 'delaySafeThirdPartyJsEnabled',
                 'delayAllThirdPartyJsEnabled',
                 'delayFunctionalThirdPartyJsEnabled',

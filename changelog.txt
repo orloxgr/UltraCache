@@ -1,4 +1,4 @@
-= 2.58.81 =
+= 2.58.82 =
 * Synced performance profiles with the unified delayed JS auto-start model.
 * Renamed Safe Defer JS to Defer JS and Frontend JS & Request Chains to Frontend Javascript manipulation.
 * Safe profile keeps all Frontend Javascript manipulation switches off.

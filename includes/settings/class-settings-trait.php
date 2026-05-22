@@ -33,8 +33,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'mediaGenerateOnDemandEnabled' => false,
                 'mediaOutputMode'            => 'auto',
                 'deferJsEnabled'             => false,
-                'deferAllJsEnabled'          => false,
-                'jsFullSiteStrategy'         => 'off',
+                'delayAllJsEnabled'          => false,
                 'delayedLocalJsAutoStart'  => 'custom',
                 'delayedLocalJsAutoStartSeconds' => 0.05,
                 'delayedJsAutostartAfterLoadEnabled' => false,
@@ -1436,7 +1435,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['cacheSafeTrackingCookiesEnabled'] = self::normalize_boolean_setting_value($settings['cacheSafeTrackingCookiesEnabled'] ?? false, false);
             $settings['safeTrackingCookieList']    = self::sanitize_cookie_pattern_setting($settings['safeTrackingCookieList']);
             $settings['unsafeCacheCookieList']     = self::sanitize_cookie_pattern_setting($settings['unsafeCacheCookieList']);
-            $settings['jsFullSiteStrategy'] = in_array((string) ($settings['jsFullSiteStrategy'] ?? ''), array('off', 'delay_all'), true) ? (string) $settings['jsFullSiteStrategy'] : $defaults['jsFullSiteStrategy'];
             $settings['delayedLocalJsAutoStart'] = in_array((string) ($settings['delayedLocalJsAutoStart'] ?? $defaults['delayedLocalJsAutoStart']), array('interaction', 'custom'), true) ? (string) $settings['delayedLocalJsAutoStart'] : $defaults['delayedLocalJsAutoStart'];
             $settings['delayedLocalJsAutoStartSeconds'] = self::sanitize_bounded_number_setting($settings['delayedLocalJsAutoStartSeconds'] ?? $defaults['delayedLocalJsAutoStartSeconds'], $defaults['delayedLocalJsAutoStartSeconds'], 0.05, 5);
             foreach (array('delayedJsAutostartAfterLoadEnabled', 'delayedJsAutostartMousemoveEnabled', 'delayedJsAutostartScrollEnabled', 'delayedJsAutostartClickEnabled', 'delayedJsAutostartTouchPointerEnabled', 'delayedJsAutostartKeyboardEnabled') as $delayed_js_trigger_key) {
@@ -1762,9 +1760,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'unsafe_cache_cookie_count' => count($unsafe_cache_cookie_patterns),
             ));
             $defer_js_enabled = !empty($ui['deferJsEnabled']);
-            $js_full_site_strategy = isset($ui['jsFullSiteStrategy']) && in_array((string) $ui['jsFullSiteStrategy'], array('off', 'delay_all'), true) ? (string) $ui['jsFullSiteStrategy'] : 'off';
             $defer_all_js_enabled = false;
-            $delay_all_js_enabled = ('delay_all' === $js_full_site_strategy);
+            $delay_all_js_enabled = !empty($ui['delayAllJsEnabled']);
             $delay_safe_third_party_js_enabled = !empty($ui['delaySafeThirdPartyJsEnabled']);
             $delay_functional_third_party_js_enabled = !empty($ui['delayFunctionalThirdPartyJsEnabled']);
             $delay_all_third_party_js_enabled = !empty($ui['delayAllThirdPartyJsEnabled']);
@@ -1801,7 +1798,6 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'cache_stats_enabled'          => !empty($ui['cacheStatsEnabled']),
                 'preload_on_save'              => !empty($ui['preRenderOnSave']),
                 'defer_js'                     => $defer_js_enabled,
-                'js_full_site_strategy'       => $js_full_site_strategy,
                 'defer_all_js'                 => $defer_all_js_enabled,
                 'delay_all_js'                 => $delay_all_js_enabled,
                 'delayed_local_js_auto_start' => in_array((string) ($ui['delayedLocalJsAutoStart'] ?? 'custom'), array('interaction', 'custom'), true) ? (string) ($ui['delayedLocalJsAutoStart'] ?? 'custom') : 'custom',
