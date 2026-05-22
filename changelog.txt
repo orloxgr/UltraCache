@@ -1,13 +1,10 @@
-= 2.58.80 =
-* Unified Delayed JS auto-start controls now apply one trigger/fallback scheduler to all delayed JS features. Delay all JS is an ON/OFF switch.
-
-
-= 2.58.80 =
-* Fix JS Delay ordered execution so delayed external scripts execute serially in DOM order while preserving safe download behavior.
-* Keep inline consumer/config blocks attached to explicitly excluded provider scripts out of the delayed queue.
-* Clean up internal diagnostic copy that exposed development wording in runtime-scan results.
-2.58.80 - LCP Boundary Delay now checks visible JS Delay / Defer Exclusions before converting scripts.
-- Replaced the Google Fonts resource hint fallback host regex with deterministic non-regex parsing to avoid PHP preg_replace warnings on partial/relative hint values.
+= 2.58.81 =
+* Synced performance profiles with the unified delayed JS auto-start model.
+* Renamed Safe Defer JS to Defer JS and Frontend JS & Request Chains to Frontend Javascript manipulation.
+* Safe profile keeps all Frontend Javascript manipulation switches off.
+* Balanced enables only the selected delayed JS features: safe third-party, non-critical/local, known functional third-party, and all third-party delay.
+* Aggressive adds Delay all JS with a 0.05s unified fallback.
+* Moved Delayed JS auto-start triggers into one dropdown and set all event triggers off by default.
 
 2.58.76 - JS diagnostic queue DB compliance fix
 - Replaced interpolated JS diagnostic queue table SQL with prepared identifier placeholders.

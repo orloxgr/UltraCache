@@ -254,13 +254,13 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: __("All Off", 'ultracache'), description: __("Disable optimization modules managed by profiles. Diagnostic counters, Automation & Scheduling, and Varnish settings are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, debugHeadersEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, deferAllJsEnabled: false, jsFullSiteStrategy: 'off', delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: 1, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: true, delayedJsAutostartScrollEnabled: true, delayedJsAutostartClickEnabled: true, delayedJsAutostartTouchPointerEnabled: true, delayedJsAutostartKeyboardEnabled: true, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
+			deferJsEnabled: false, deferAllJsEnabled: false, jsFullSiteStrategy: 'off', delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: 0.05, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: false, delayedJsAutostartScrollEnabled: false, delayedJsAutostartClickEnabled: false, delayedJsAutostartTouchPointerEnabled: false, delayedJsAutostartKeyboardEnabled: false, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false, cacheSafeTrackingCookiesEnabled: false, varnishCliEnabled: false,
 			homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: false, cssBundleScope: 'homepage', mediaOutputMode: 'auto',
 		} },
-		safe: { label: __("Safe", 'ultracache'), description: __("Public-safe profile based on the exported Safe settings. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
+		safe: { label: __("Safe", 'ultracache'), description: __("Safe baseline with frontend JavaScript manipulation disabled. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: true,
 			objectCacheEnabled: true,
 			redisHost: "127.0.0.1",
@@ -279,14 +279,14 @@
 			mediaGenerateOnUploadEnabled: false,
 			mediaGenerateOnDemandEnabled: false,
 			mediaOutputMode: "auto",
-			deferJsEnabled: true,
+			deferJsEnabled: false,
 			deferAllJsEnabled: false,
 			jsFullSiteStrategy: 'off',
 			delayedLocalJsAutoStart: 'custom',
-			delayedLocalJsAutoStartSeconds: 1, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: true, delayedJsAutostartScrollEnabled: true, delayedJsAutostartClickEnabled: true, delayedJsAutostartTouchPointerEnabled: true, delayedJsAutostartKeyboardEnabled: true,
+			delayedLocalJsAutoStartSeconds: 0.05, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: false, delayedJsAutostartScrollEnabled: false, delayedJsAutostartClickEnabled: false, delayedJsAutostartTouchPointerEnabled: false, delayedJsAutostartKeyboardEnabled: false,
 			deferJsForceList: "",
 			deferJsExcludeList: "",
-			delaySafeThirdPartyJsEnabled: true,
+			delaySafeThirdPartyJsEnabled: false,
 			delayAllThirdPartyJsEnabled: false,
 			lazyMailerliteNonceEnabled: false,
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
@@ -312,7 +312,7 @@
 			lazyLoadImagesEnabled: false,
 			lcpBoundaryDeferEnabled: false,
 			manualLcpHeroSelector: "",
-			mainThreadReliefEnabled: true,
+			mainThreadReliefEnabled: false,
 			criticalRequestChainReliefEnabled: false,
 			criticalResourcePreloadList: "",
 			criticalRequestChainDelayList: "",
@@ -356,7 +356,7 @@
 			cacheQueryStringsEnabled: false,
 			cacheSafeTrackingCookiesEnabled: true,
 		} },
-		balanced: { label: __("Balanced", 'ultracache'), description: __("Balanced profile based on the exported Balanced settings. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
+		balanced: { label: __("Balanced", 'ultracache'), description: __("Balanced profile enables the selected delayed JavaScript features without Delay all JS. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: true,
 			objectCacheEnabled: true,
 			redisHost: "127.0.0.1",
@@ -375,15 +375,15 @@
 			mediaGenerateOnUploadEnabled: true,
 			mediaGenerateOnDemandEnabled: false,
 			mediaOutputMode: "auto",
-			deferJsEnabled: true,
+			deferJsEnabled: false,
 			deferAllJsEnabled: false,
 			jsFullSiteStrategy: 'off',
 			delayedLocalJsAutoStart: 'custom',
-			delayedLocalJsAutoStartSeconds: 1, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: true, delayedJsAutostartScrollEnabled: true, delayedJsAutostartClickEnabled: true, delayedJsAutostartTouchPointerEnabled: true, delayedJsAutostartKeyboardEnabled: true,
+			delayedLocalJsAutoStartSeconds: 0.05, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: false, delayedJsAutostartScrollEnabled: false, delayedJsAutostartClickEnabled: false, delayedJsAutostartTouchPointerEnabled: false, delayedJsAutostartKeyboardEnabled: false,
 			deferJsForceList: "",
 			deferJsExcludeList: "",
 			delaySafeThirdPartyJsEnabled: true,
-			delayAllThirdPartyJsEnabled: false,
+			delayAllThirdPartyJsEnabled: true,
 			lazyMailerliteNonceEnabled: false,
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
 			delayFunctionalThirdPartyJsEnabled: true,
@@ -408,7 +408,7 @@
 			lazyLoadImagesEnabled: true,
 			lcpBoundaryDeferEnabled: false,
 			manualLcpHeroSelector: "",
-			mainThreadReliefEnabled: true,
+			mainThreadReliefEnabled: false,
 			criticalRequestChainReliefEnabled: false,
 			criticalResourcePreloadList: "",
 			criticalRequestChainDelayList: "",
@@ -452,7 +452,7 @@
 			cacheQueryStringsEnabled: false,
 			cacheSafeTrackingCookiesEnabled: true,
 		} },
-		aggressive: { label: __("Aggressive", 'ultracache'), description: __("Aggressive profile based on the exported Aggressive settings. Enables Delay all eligible JS; Scan Browser Runtime Errors is recommended to detect broken JS dependencies and build JS Delay / Defer Exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
+		aggressive: { label: __("Aggressive", 'ultracache'), description: __("Aggressive profile enables Balanced delayed JavaScript plus Delay all JS with the unified 0.05 second fallback. Scan Browser Runtime Errors is recommended to build visible JS Delay / Defer Exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: true,
 			objectCacheEnabled: true,
 			redisHost: "127.0.0.1",
@@ -471,11 +471,11 @@
 			mediaGenerateOnUploadEnabled: true,
 			mediaGenerateOnDemandEnabled: true,
 			mediaOutputMode: "auto",
-			deferJsEnabled: true,
+			deferJsEnabled: false,
 			deferAllJsEnabled: false,
 			jsFullSiteStrategy: 'delay_all',
 			delayedLocalJsAutoStart: 'custom',
-			delayedLocalJsAutoStartSeconds: 1, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: true, delayedJsAutostartScrollEnabled: true, delayedJsAutostartClickEnabled: true, delayedJsAutostartTouchPointerEnabled: true, delayedJsAutostartKeyboardEnabled: true,
+			delayedLocalJsAutoStartSeconds: 0.05, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: false, delayedJsAutostartScrollEnabled: false, delayedJsAutostartClickEnabled: false, delayedJsAutostartTouchPointerEnabled: false, delayedJsAutostartKeyboardEnabled: false,
 			deferJsForceList: "",
 			deferJsExcludeList: "/wp-includes/js/jquery/jquery.min.js\n/wp-includes/js/jquery/jquery-migrate.min.js\n/wp-includes/js/underscore.min.js\n/wp-includes/js/wp-util.min.js\n/wp-includes/js/dist/i18n.min.js\n/wp-includes/js/dist/hooks.min.js\n/wp-includes/js/dist/api-fetch.min.js\n/wp-includes/js/api-request.min.js\n/wp-includes/js/dist/dom-ready.min.js",
 			delaySafeThirdPartyJsEnabled: true,
@@ -502,10 +502,10 @@
 			delayNonCriticalJsExcludeList: "",
 			lcpImagePriorityEnabled: true,
 			lazyLoadImagesEnabled: true,
-			lcpBoundaryDeferEnabled: true,
+			lcpBoundaryDeferEnabled: false,
 			manualLcpHeroSelector: "",
-			mainThreadReliefEnabled: true,
-			criticalRequestChainReliefEnabled: true,
+			mainThreadReliefEnabled: false,
+			criticalRequestChainReliefEnabled: false,
 			criticalResourcePreloadList: "",
 			criticalRequestChainDelayList: "",
 			assetChainCleanupEnabled: true,
@@ -2766,7 +2766,7 @@
 
 		return h('div', { className: 'uc-field-wrap', style: { gridColumn: '1 / -1' } }, [
 			h('label', { className: 'uc-field-label' }, __('JS Delay / Defer Exclusions', 'ultracache')),
-			h('div', { className: 'text-xs text-zinc-500 mb-2' }, __('Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, Delay all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Delay, and Main Thread Relief where applicable. Append Tested Dependency Defaults adds only the tested dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.', 'ultracache')),
+			h('div', { className: 'text-xs text-zinc-500 mb-2' }, __('Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Defer JS, Delay all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Delay, and Main Thread Relief where applicable. Append Tested Dependency Defaults adds only the tested dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.', 'ultracache')),
 			h('textarea', {
 				className: 'uc-field-input uc-field-textarea',
 				value: draft,
@@ -3216,6 +3216,39 @@
 				className: classNames('uc-custom-select-option', option.value === value ? 'is-selected' : ''),
 				onClick: () => selectOption(option.value),
 			}, option.label))) : null,
+		]);
+	}
+
+	function DelayedJsAutostartEventsField({ label, description, settings, onChange, disabled }) {
+		const options = [
+			{ key: 'delayedJsAutostartAfterLoadEnabled', label: __('After page load', 'ultracache') },
+			{ key: 'delayedJsAutostartMousemoveEnabled', label: __('Mouse move', 'ultracache') },
+			{ key: 'delayedJsAutostartScrollEnabled', label: __('Scroll', 'ultracache') },
+			{ key: 'delayedJsAutostartKeyboardEnabled', label: __('Keyboard', 'ultracache') },
+			{ key: 'delayedJsAutostartTouchPointerEnabled', label: __('Touch / pointer', 'ultracache') },
+			{ key: 'delayedJsAutostartClickEnabled', label: __('Click', 'ultracache') },
+		];
+		const selected = options.filter((option) => !!settings[option.key]);
+		return h('div', { className: 'uc-field-wrap' }, [
+			label ? h('label', { className: 'block text-sm font-medium text-white' }, label) : null,
+			description ? h('div', { className: 'text-xs text-zinc-500 mt-1 mb-2' }, description) : null,
+			h('details', { className: classNames('uc-switch-dropdown', disabled ? 'opacity-60 pointer-events-none' : '') }, [
+				h('summary', { className: 'uc-switch-dropdown-summary' }, [
+					h('span', { key: 'label' }, selected.length ? (selected.length + ' trigger' + (selected.length === 1 ? '' : 's') + ' selected') : __('No event triggers selected', 'ultracache')),
+					h('span', { key: 'icon', className: 'uc-select-icon', 'aria-hidden': 'true' }, '▾'),
+				]),
+				h('div', { className: 'uc-switch-dropdown-panel' }, options.map((option) => {
+					const checked = !!settings[option.key];
+					return h('label', { className: 'uc-switch-dropdown-row', key: option.key }, [
+						h('span', { className: 'uc-switch-dropdown-text' }, option.label),
+						h('span', { className: classNames('uc-toggle', disabled ? 'opacity-60 pointer-events-none' : '') }, [
+							h('input', { type: 'checkbox', checked: checked, disabled: !!disabled, onChange: (event) => onChange(option.key, event.target.checked) }),
+							h('span', { className: 'slider' }),
+						]),
+					]);
+				})),
+			]),
+			h('div', { className: 'text-[11px] text-zinc-500 mt-2' }, selected.length ? ('Selected: ' + selected.length) : __('No event triggers selected. Delayed JS will release only by fallback timer.', 'ultracache')),
 		]);
 	}
 
@@ -7283,7 +7316,7 @@
 				}
 
 				if (!!mainPatch.deferJsEnabled) {
-					pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: __("Appending Safe Defer JS dependency defaults…", 'ultracache'), persistent: true });
+					pushToast({ id: toastId, type: 'info', title: 'Apply ' + profile.label + ' profile', text: __("Appending Defer JS dependency defaults…", 'ultracache'), persistent: true });
 					const currentExclusions = settingsRef.current && typeof settingsRef.current.deferJsExcludeList !== 'undefined' ? settingsRef.current.deferJsExcludeList : '';
 					const defaultExclusions = await populateDeferDelayExclusionDefaults(currentExclusions);
 					if (defaultExclusions !== null && String(defaultExclusions || '') !== String(currentExclusions || '')) {
@@ -7292,9 +7325,9 @@
 						settingsRef.current = defaultsOptimistic;
 						setSettings(defaultsOptimistic);
 						await saveSettingsPatch(defaultsPatch);
-						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Safe Defer JS dependency defaults saved.', persistent: true });
+						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Defer JS dependency defaults saved.', persistent: true });
 					} else {
-						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Safe Defer JS dependency defaults already present.', persistent: true });
+						pushToast({ id: toastId, type: 'success', title: 'Apply ' + profile.label + ' profile', text: 'Defer JS dependency defaults already present.', persistent: true });
 					}
 				}
 
@@ -8613,13 +8646,13 @@ h(ToggleRow, {
 				h(
 					Card,
 					{
-						title: __("Frontend JS & Request Chains", 'ultracache'),
-						description: __("Defer/delay safe scripts and prioritize known critical request chains.", 'ultracache'),
+						title: __("Frontend Javascript manipulation", 'ultracache'),
+						description: __("Control frontend JavaScript defer/delay behavior and the unified delayed JS release timing.", 'ultracache'),
 						key: 'frontend-js-request-chains-card',
 					},
 					[
 						h(ToggleRow, {
-									label: __("Safe Defer JS", 'ultracache'),
+									label: __("Defer JS", 'ultracache'),
 									description: __("Add native defer conservatively. When enabled, UltraCache appends only the curated WordPress foundation dependency defaults to the visible JS Delay / Defer Exclusions list.", 'ultracache'),
 									checked: settings.deferJsEnabled,
 									onChange: (value) => updateSafeDeferJs(value),
@@ -8646,7 +8679,7 @@ h(ToggleRow, {
 
 h(ToggleRow, {
 									label: __("Delay safe third-party JS", 'ultracache'),
-									description: __("Delay analytics, pixels, ads, tracking, and marketing scripts until user interaction or a late safe fallback timeout, keeping them out of the initial PageSpeed/LCP/TBT critical window. Examples: Google Analytics, gtag, GTM, Google Site Kit event providers, Meta Pixel, TikTok Pixel, LinkedIn Insight, Pinterest Tag, Bing UET, Hotjar, Clarity, DoubleClick, Google Ads, Taboola, Outbrain, and Yahoo tracking.", 'ultracache'),
+									description: __("Delay analytics, pixels, ads, tracking, and marketing scripts according to the unified Delayed JS auto-start controls, keeping them out of the initial PageSpeed/LCP/TBT critical window. Examples: Google Analytics, gtag, GTM, Google Site Kit event providers, Meta Pixel, TikTok Pixel, LinkedIn Insight, Pinterest Tag, Bing UET, Hotjar, Clarity, DoubleClick, Google Ads, Taboola, Outbrain, and Yahoo tracking.", 'ultracache'),
 									checked: settings.delaySafeThirdPartyJsEnabled,
 									onChange: (value) => updateSetting('delaySafeThirdPartyJsEnabled', value),
 									disabled: busy,
@@ -8670,7 +8703,7 @@ h(ToggleRow, {
 								}),
 	h(ToggleRow, {
 										label: __("Delay all third-party JS", 'ultracache'),
-										description: __("Delays external scripts loaded from third-party domains until user interaction or a safe fallback timeout. JS Delay / Defer Exclusions is respected; use exclusions for captcha, payments, consent, login, booking, or critical form scripts that must run immediately.", 'ultracache'),
+										description: __("Delays external scripts loaded from third-party domains according to the unified Delayed JS auto-start controls. JS Delay / Defer Exclusions is respected; use exclusions for captcha, payments, consent, login, booking, or critical form scripts that must run immediately.", 'ultracache'),
 										checked: !!settings.delayAllThirdPartyJsEnabled,
 										onChange: (value) => updateSetting('delayAllThirdPartyJsEnabled', value),
 										disabled: busy,
@@ -8678,20 +8711,20 @@ h(ToggleRow, {
 									}),
 
 h('div', { className: 'mt-4 pt-4 border-t border-white/5', key: 'delayed-js-auto-start-controls' }, [
-										h('div', { className: 'text-sm font-medium text-white' }, __("Delayed JS auto-start", 'ultracache')),
-										h('div', { className: 'text-xs text-zinc-500 mt-1 mb-3' }, __("Controls when all delayed JavaScript queues are released. Applies to Delay all JS, Delay non-critical/local JS, LCP Boundary Delay, known functional third-party delay, and all third-party delay.", 'ultracache')),
-										h('div', { className: 'grid gap-2', style: { gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' } }, [
-											h(ToggleField, { label: __("After page load", 'ultracache'), description: __("Release delayed JS on the window load event.", 'ultracache'), checked: !!settings.delayedJsAutostartAfterLoadEnabled, onChange: (value) => updateSetting('delayedJsAutostartAfterLoadEnabled', value), disabled: busy, key: 'delayed-js-trigger-load' }),
-											h(ToggleField, { label: __("Mouse move", 'ultracache'), description: __("Release delayed JS on mouse movement.", 'ultracache'), checked: !!settings.delayedJsAutostartMousemoveEnabled, onChange: (value) => updateSetting('delayedJsAutostartMousemoveEnabled', value), disabled: busy, key: 'delayed-js-trigger-mousemove' }),
-											h(ToggleField, { label: __("Scroll", 'ultracache'), description: __("Release delayed JS on scroll.", 'ultracache'), checked: !!settings.delayedJsAutostartScrollEnabled, onChange: (value) => updateSetting('delayedJsAutostartScrollEnabled', value), disabled: busy, key: 'delayed-js-trigger-scroll' }),
-											h(ToggleField, { label: __("Click", 'ultracache'), description: __("Release delayed JS on click.", 'ultracache'), checked: !!settings.delayedJsAutostartClickEnabled, onChange: (value) => updateSetting('delayedJsAutostartClickEnabled', value), disabled: busy, key: 'delayed-js-trigger-click' }),
-											h(ToggleField, { label: __("Touch / pointer", 'ultracache'), description: __("Release delayed JS on touchstart or pointerdown.", 'ultracache'), checked: !!settings.delayedJsAutostartTouchPointerEnabled, onChange: (value) => updateSetting('delayedJsAutostartTouchPointerEnabled', value), disabled: busy, key: 'delayed-js-trigger-touch-pointer' }),
-											h(ToggleField, { label: __("Keyboard", 'ultracache'), description: __("Release delayed JS on keydown.", 'ultracache'), checked: !!settings.delayedJsAutostartKeyboardEnabled, onChange: (value) => updateSetting('delayedJsAutostartKeyboardEnabled', value), disabled: busy, key: 'delayed-js-trigger-keyboard' }),
-										]),
+										h('div', { className: 'text-sm font-medium text-white' }, __('Delayed JS auto-start', 'ultracache')),
+										h('div', { className: 'text-xs text-zinc-500 mt-1 mb-3' }, __('Controls when all delayed JavaScript queues are released. Applies to Delay all JS, Delay non-critical/local JS, LCP Boundary Delay, known functional third-party delay, and all third-party delay.', 'ultracache')),
+										h(DelayedJsAutostartEventsField, {
+											label: __('Event triggers', 'ultracache'),
+											description: __('Optional. Keep these off for pure timer-based release. If enabled, these events can request the delayed JS queue release.', 'ultracache'),
+											settings: settings,
+											onChange: (key, value) => updateSetting(key, value),
+											disabled: busy,
+											key: 'delayed-js-autostart-events-dropdown',
+										}),
 										h(SelectField, {
-											label: __("If no event happens, autostart JS after", 'ultracache'),
-											description: __("Fallback timer for all delayed JavaScript queues.", 'ultracache'),
-											value: String(typeof settings.delayedLocalJsAutoStartSeconds !== 'undefined' ? settings.delayedLocalJsAutoStartSeconds : 1),
+											label: __('If no event happens, autostart JS after', 'ultracache'),
+											description: __('Fallback timer for all delayed JavaScript queues.', 'ultracache'),
+											value: String(typeof settings.delayedLocalJsAutoStartSeconds !== 'undefined' ? settings.delayedLocalJsAutoStartSeconds : 0.05),
 											onChange: (value) => queueSettingsPatch({ delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: Number(value) }),
 											disabled: busy,
 											options: [
@@ -8706,7 +8739,7 @@ h('div', { className: 'mt-4 pt-4 border-t border-white/5', key: 'delayed-js-auto
 											],
 											key: 'delayed-js-auto-start-fallback',
 										}),
-									]),
+									])
 
 					]
 				),

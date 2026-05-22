@@ -3933,7 +3933,7 @@ private function script_handle_is_footer_group($handle)
             }
             $auto_events = array_values(array_unique($auto_events));
             $auto_after_load = !empty($settings['delayed_js_autostart_after_load']) ? '1' : '0';
-            $auto_seconds = isset($settings['delayed_local_js_auto_start_seconds']) ? (float) $settings['delayed_local_js_auto_start_seconds'] : 1.0;
+            $auto_seconds = isset($settings['delayed_local_js_auto_start_seconds']) ? (float) $settings['delayed_local_js_auto_start_seconds'] : 0.05;
             $auto_seconds = max(0.05, min(5.0, $auto_seconds));
             $auto_ms = (int) round(1000 * $auto_seconds);
             $loader = <<<'UCWP_DELAY_LOADER'
