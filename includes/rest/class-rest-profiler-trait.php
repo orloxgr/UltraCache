@@ -934,9 +934,10 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
             $confidence = strtolower(trim((string) $confidence));
             if ('' === $confidence) {
-                $confidence = 'high';
+                $confidence = 'recommended';
             }
-            $appendable = !in_array($confidence, array('review', 'review-only', 'manual'), true);
+            $ignored = in_array($confidence, array('ignored', 'not-fixable'), true);
+            $appendable = !$ignored;
             $key = strtolower($suggested_exclusion . '|' . (string) $source . '|' . (string) $symbol);
             if (isset($seen[$key])) {
                 return;
@@ -945,17 +946,106 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $suggestions[] = array(
                 'symbol'             => (string) $symbol,
                 'source'             => 'browser-runtime-error',
-                'category'           => $appendable ? 'browser-runtime-error' : 'review-only',
-                'categoryLabel'      => $appendable ? 'Browser runtime errors' : 'Review-only candidates',
+                'category'           => $ignored ? 'ignored' : 'appendable-fix',
+                'categoryLabel'      => $ignored ? 'Ignored / not fixable by exclusion' : 'Appendable fixes',
                 'sample'             => substr((string) $message, 0, 500),
                 'definingScriptUrl'  => (string) $source,
                 'definingHandle'     => '',
                 'suggestedExclusion' => $suggested_exclusion,
-                'confidence'         => (string) $confidence,
+                'confidence'         => $ignored ? 'ignored' : (string) $confidence,
                 'reason'             => (string) $reason,
                 'alreadyExcluded'    => $this->runtime_js_scan_exclusion_already_matches($suggested_exclusion, $exclusions),
                 'appendable'         => $appendable,
             );
+        }
+
+        private function runtime_js_scan_add_evidence_source_suggestions(&$suggestions, &$seen, $source, $message, $detail, array $exclusions, array $scripts = array())
+        {
+            $text = (string) $source . "\n" . (string) $message . "\n" . (string) $detail;
+            $candidates = array();
+            $candidate_seen = array();
+            $push = function ($candidate) use (&$candidates, &$candidate_seen) {
+                $candidate = $this->runtime_js_scan_clean_console_candidate((string) $candidate);
+                if ('' === $candidate) {
+                    return;
+                }
+                $base = $this->runtime_js_scan_basename_from_source($candidate);
+                if ('' !== $base && $this->runtime_js_scan_is_generic_script_basename($base)) {
+                    return;
+                }
+                $key = strtolower($candidate);
+                if (isset($candidate_seen[$key])) {
+                    return;
+                }
+                $candidate_seen[$key] = true;
+                $candidates[] = $candidate;
+            };
+
+            foreach ($this->runtime_js_scan_source_candidates_from_error($source, $message, $detail) as $candidate) {
+                $push($candidate);
+            }
+            foreach ($this->runtime_js_scan_console_sources_from_text($text) as $candidate) {
+                $push($candidate);
+            }
+            foreach ($this->runtime_js_scan_script_basenames_from_text($text) as $candidate) {
+                $push($candidate);
+            }
+
+            $added = false;
+            foreach ($candidates as $candidate) {
+                $fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($candidate, 5);
+                if ('' !== $fragment) {
+                    $this->runtime_js_scan_add_suggestion(
+                        $suggestions,
+                        $seen,
+                        $fragment,
+                        'console stack source',
+                        $candidate,
+                        $message,
+                        'Found directly in the console error or stack trace. Add this visible exclusion so this script is not delayed/deferred while testing the failing dependency chain.',
+                        $exclusions,
+                        'recommended'
+                    );
+                    $added = true;
+                }
+
+                $base = $this->runtime_js_scan_basename_from_source($candidate);
+                if ('' !== $base && !$this->runtime_js_scan_is_generic_script_basename($base)) {
+                    $this->runtime_js_scan_add_suggestion(
+                        $suggestions,
+                        $seen,
+                        $base,
+                        'console stack source basename',
+                        $candidate,
+                        $message,
+                        'Found directly in the console error or stack trace. The basename is appendable when the pasted console output does not include a full local WordPress path.',
+                        $exclusions,
+                        'recommended'
+                    );
+                    $added = true;
+                }
+
+                foreach ($this->runtime_js_scan_find_scripts_by_source_hint($candidate, $scripts) as $script) {
+                    $script_src = isset($script['src']) ? (string) $script['src'] : '';
+                    $script_fragment = $this->runtime_js_scan_path_fragment_from_source($script_src, 5);
+                    if ('' !== $script_fragment) {
+                        $this->runtime_js_scan_add_suggestion(
+                            $suggestions,
+                            $seen,
+                            $script_fragment,
+                            'final HTML script inventory match',
+                            $script_src,
+                            $message,
+                            'Matched the console source against the final HTML script inventory and found the exact loaded script path.',
+                            $exclusions,
+                            'recommended'
+                        );
+                        $added = true;
+                    }
+                }
+            }
+
+            return $added;
         }
 
         private function runtime_js_scan_targeted_source_fragment_from_source($source, $fallback_parts = 4)
@@ -1012,13 +1102,13 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
         {
             $fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($source, 4);
             if ('' !== $fragment) {
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $fragment, $label, $source, $message, $reason, $exclusions, 'review');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $fragment, $label, $source, $message, $reason, $exclusions, 'recommended');
                 return;
             }
 
             $source_base = $this->runtime_js_scan_basename_from_source($source);
             if ('' !== $source_base && !$this->runtime_js_scan_is_generic_script_basename($source_base)) {
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, $label . ' basename', $source, $message, $reason, $exclusions, 'review');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, $label . ' basename', $source, $message, $reason, $exclusions, 'recommended');
             }
         }
 
@@ -1036,7 +1126,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     'WooCommerce Products Filter dependency group',
                     $source,
                     $message,
-                    'Runtime Error Group Resolver detected a WOOF/WooCommerce Products Filter runtime error. Use the plugin group exclusion instead of chasing individual WOOF globals one by one.',
+                    'Legacy resolver detected a WOOF/WooCommerce Products Filter runtime error. Use the plugin group exclusion instead of chasing individual WOOF globals one by one.',
                     $exclusions,
                     'recommended'
                 );
@@ -1180,7 +1270,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         'WooCommerce Products Filter runtime group',
                         $owner_source,
                         $message,
-                        'Runtime Error Group Resolver mapped the failing console/stack source to WooCommerce Products Filter. Keep the plugin group out of Safe Defer/Delay instead of chasing individual WOOF globals/scripts one by one.',
+                        'Legacy resolver mapped the failing console/stack source to WooCommerce Products Filter. Keep the plugin group out of Safe Defer/Delay instead of chasing individual WOOF globals/scripts one by one.',
                         $exclusions,
                         'recommended'
                     );
@@ -1196,7 +1286,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         'MailerLite validation messages script',
                         $owner_source,
                         $message,
-                        'Runtime Error Group Resolver mapped the failing console/stack source to the MailerLite validation messages provider script. Keep this exact script out of Safe Defer/Delay so the dependent inline validation block can read its messages object.',
+                        'Legacy resolver mapped the failing console/stack source to the MailerLite validation messages provider script. Keep this exact script out of Safe Defer/Delay so the dependent inline validation block can read its messages object.',
                         $exclusions,
                         'recommended'
                     );
@@ -1222,7 +1312,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     'runtime error ' . $kind_label . ' owner group',
                     $owner_source,
                     $message,
-                    'Runtime Error Group Resolver mapped the failing console/stack source to this ' . $kind_label . ' owner. This is review-only because it is not a confirmed known resolver yet.',
+                    'Legacy resolver mapped the failing console/stack source to this ' . $kind_label . ' owner. This is informational because it was not derived from a direct source/stack or code-search match.',
                     $exclusions,
                     'review'
                 );
@@ -1890,7 +1980,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             } else {
                 $service_fragment = $this->runtime_js_scan_service_fragment_from_source($script_src, $global);
                 if ('' !== $service_fragment) {
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $service_fragment, $label . ' service endpoint', $source_for_display, $message, $reason, $exclusions, 'review');
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $service_fragment, $label . ' service endpoint', $source_for_display, $message, $reason, $exclusions, 'recommended');
                 }
             }
             if ('' !== $script_id) {
@@ -1936,12 +2026,12 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             $GLOBALS['ucwp_runtime_js_scan_scripts'] = $scripts;
             foreach ($globals as $global) {
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $global, 'resolved dynamic window callback global', $source, $message, $reason, $exclusions, 'review');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $global, 'resolved dynamic window callback global', $source, $message, $reason, $exclusions, 'recommended');
                 foreach ($this->runtime_js_scan_find_scripts_with_symbol_text($global, $scripts) as $provider) {
-                    $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $provider, 'resolved dynamic callback context script', $source, $message, $reason, $exclusions, 'review', $global);
+                    $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $provider, 'resolved dynamic callback context script', $source, $message, $reason, $exclusions, 'recommended', $global);
                 }
                 foreach ($this->runtime_js_scan_find_scripts_by_global_source_hint($global, $scripts) as $provider) {
-                    $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $provider, 'resolved dynamic callback source/provider hint', $source, $message, $reason, $exclusions, 'review', $global);
+                    $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $provider, 'resolved dynamic callback source/provider hint', $source, $message, $reason, $exclusions, 'recommended', $global);
                 }
             }
             unset($GLOBALS['ucwp_runtime_js_scan_scripts']);
@@ -2660,7 +2750,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 " . (string) $message;
 
             if ('' !== $source_base && preg_match('/\.js$/i', $source_base) && !$this->runtime_js_scan_is_generic_script_basename($source_base)) {
-                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'runtime function error source', $source, $message, $reason, $exclusions, 'review');
+                $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'runtime function error source', $source, $message, $reason, $exclusions, 'recommended');
             }
 
             // Do not append raw function/global names as exclusions. Only exact provider/consumer scripts or resolved URL fragments are actionable.
@@ -2674,7 +2764,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
                 $provider_base = $this->runtime_js_scan_basename_from_source($provider_src);
                 if ('' !== $provider_base && !$this->runtime_js_scan_is_generic_script_basename($provider_base)) {
-                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_base, 'callback provider script basename', $provider_src, $message, $reason, $exclusions, 'review');
+                    $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_base, 'callback provider script basename', $provider_src, $message, $reason, $exclusions, 'recommended');
                 }
                 if ('' !== $provider_id) {
                     $this->runtime_js_scan_add_suggestion($suggestions, $seen, $provider_id, 'callback provider handle/id', $provider_src, $message, $reason, $exclusions, 'recommended');
@@ -2765,16 +2855,16 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 $matched = true;
                 $reason = 'Browser runtime error points to a WordPress core dependency that executed before its provider. If the recommended dependency paths are already listed, this indicates a script execution-order issue rather than a missing exclusion.';
                 $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, $reason, $exclusions, 'wp-dependent direct source');
-                $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'wp-dependent resolved source', 'review', true);
-                $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'review');
+                $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'wp-dependent resolved source', 'recommended', true);
+                $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'recommended');
             }
 
             if (false !== strpos($text, 'react is not defined') || false !== strpos($text, "react' is not defined") || false !== strpos($text, "can't find variable: react") || false !== strpos($text, 'reactdom is not defined')) {
                 $matched = true;
                 $reason = 'Browser runtime error points to a React dependency that executed before its provider. Review the exact source shown by the scanner; do not add broad framework handles blindly.';
                 $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, $reason, $exclusions, 'React dependent direct source');
-                $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'React dependent resolved source', 'review', true);
-                $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'review');
+                $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'React dependent resolved source', 'recommended', true);
+                $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'recommended');
             }
 
             return $matched;
@@ -3018,9 +3108,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         'Theme Scan Stage ' . $stage,
                         $url,
                         $message,
-                        'Theme Scan Stage scanned the ' . $stage . ' after page inventory and known runtime resolvers did not produce a confirmed fix. It found unresolved token(s) ' . implode(', ', array_map('sanitize_text_field', $matched_tokens)) . ' in this exact theme JS file. Review before appending.',
+                        'Theme code search found unresolved token(s) ' . implode(', ', array_map('sanitize_text_field', $matched_tokens)) . ' in this exact active theme JS file.',
                         $exclusions,
-                        'review'
+                        'recommended'
                     );
 
                     if (count($matched_tokens) > 0 && count($suggestions) >= 80) {
@@ -3270,9 +3360,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         'Plugin Scan Stage ' . $stage,
                         $url,
                         $message,
-                        'Plugin Scan Stage scanned the ' . $stage . ' after page inventory, known runtime resolvers, and theme scan did not produce a confirmed fix. It found unresolved token(s) ' . implode(', ', array_map('sanitize_text_field', $matched_tokens)) . ' in this exact active plugin JS file. Review before appending.',
+                        'Plugin code search found unresolved token(s) ' . implode(', ', array_map('sanitize_text_field', $matched_tokens)) . ' in this exact active plugin JS file.',
                         $exclusions,
-                        'review'
+                        'recommended'
                     );
 
                     if (count($suggestions) >= 80) {
@@ -3307,31 +3397,24 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 $text = strtolower($message . ' ' . $source . ' ' . $detail);
                 $source_base = $this->runtime_js_scan_basename_from_source($source);
 
-                if ($this->runtime_js_scan_add_known_specific_error_group_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions)) {
-                    continue;
-                }
+                $this->runtime_js_scan_add_evidence_source_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions, $scripts);
 
-                if ($this->runtime_js_scan_add_runtime_error_group_resolver_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions)) {
-                    continue;
-                }
-
-                if ($this->runtime_js_scan_add_known_dependency_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions, $scripts)) {
-                    continue;
-                }
+                // Evidence-based scanner only: no hardcoded error => exclusion mapping here.
+                // Suggestions below are derived from console/stack sources, final HTML inventory, or active plugin/theme code search.
 
                 if (false !== strpos($text, 'jquery is not defined') || preg_match('/\$ is not defined/', $text)) {
                     $reason = 'Browser runtime error says jQuery was not available when an inline block or script executed. If the WordPress jQuery dependency paths are already listed, this indicates an execution-order issue rather than a missing exclusion.';
                     $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, $reason, $exclusions, 'jQuery dependent direct source');
-                    $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'jQuery dependent resolved source', 'review', true);
-                    $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'review');
+                    $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'jQuery dependent resolved source', 'recommended', true);
+                    $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'recommended');
                     continue;
                 }
 
                 if (false !== strpos($text, 'wp is not defined')) {
                     $reason = 'Browser runtime error says a WordPress JavaScript global was not available. If the recommended WordPress dependency paths are already listed, this indicates an execution-order issue rather than a missing exclusion.';
                     $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, $reason, $exclusions, 'wp-dependent direct source');
-                    $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'wp-dependent resolved source', 'review', true);
-                    $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'review');
+                    $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'wp-dependent resolved source', 'recommended', true);
+                    $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'recommended');
                     continue;
                 }
 
@@ -3364,9 +3447,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                                         $related_src = isset($related['src']) ? (string) $related['src'] : '';
                                         $related_fragment = $this->runtime_js_scan_path_fragment_from_source($related_src, 4);
                                         if ('' !== $related_fragment) {
-                                            $this->runtime_js_scan_add_suggestion($suggestions, $seen, $related_fragment, 'missing global related external script', $related_src, $message, 'The missing global was found in an inline companion script. This is the related external script id/path from the same scanned page inventory.', $exclusions, 'review');
+                                            $this->runtime_js_scan_add_suggestion($suggestions, $seen, $related_fragment, 'missing global related external script', $related_src, $message, 'The missing global was found in an inline companion script. This is the related external script id/path from the same scanned page inventory.', $exclusions, 'recommended');
                                         }
-                                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $related_id, 'missing global related handle/id', $related_src, $message, 'The missing global was found in an inline companion script. This is the related WordPress script handle/id from the same scanned page inventory.', $exclusions, 'review');
+                                        $this->runtime_js_scan_add_suggestion($suggestions, $seen, $related_id, 'missing global related handle/id', $related_src, $message, 'The missing global was found in an inline companion script. This is the related WordPress script handle/id from the same scanned page inventory.', $exclusions, 'recommended');
                                     }
                                 }
                             }
@@ -3383,7 +3466,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                             $scripts,
                             (string) $detail . "\n" . (string) $message,
                             $message,
-                            'The browser stack references a WordPress inline script handle. UltraCache shows that exact inline id and any related external handle/path found in the scanned page inventory as review-only candidates.',
+                            'The browser stack references a WordPress inline script handle. UltraCache shows that exact inline id and any related external handle/path found in the scanned page inventory as not-fixable informational items.',
                             $exclusions,
                             'review'
                         );
@@ -3408,7 +3491,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                             $this->runtime_js_scan_add_suggestion($suggestions, $seen, $fragment, 'runtime stack URL fragment', $source, $message, $reason, $exclusions, 'recommended');
                         }
                         if ('' !== $source_base && !$this->runtime_js_scan_is_generic_script_basename($source_base)) {
-                            $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'missing global error source', $source, $message, $reason, $exclusions, 'review');
+                            $this->runtime_js_scan_add_suggestion($suggestions, $seen, $source_base, 'missing global error source', $source, $message, $reason, $exclusions, 'recommended');
                         }
                     }
                     continue;
@@ -3428,7 +3511,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
 
                 if (preg_match('/window\s*\[\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\]\s+is\s+not\s+a\s+function/i', $message . ' ' . $detail)) {
-                    $dynamic_reason = 'A script made a dynamic window[callbackName]() call, but the callback name is not visible in the browser error. UltraCache resolves the failing browser source, sourceURL inline stack frames, and matching inline config from the scanned page inventory. It shows exact loaded ids/paths and any resolved callback global as review-only candidates.';
+                    $dynamic_reason = 'A script made a dynamic window[callbackName]() call, but the callback name is not visible in the browser error. UltraCache resolves the failing browser source, sourceURL inline stack frames, and matching inline config from the scanned page inventory. It shows exact loaded ids/paths and any resolved callback global as not-fixable informational items.';
                     $this->runtime_js_scan_add_dynamic_window_global_suggestions($suggestions, $seen, $scripts, $source, $message, $detail, $exclusions);
                     $this->runtime_js_scan_add_script_source_resolution_suggestions(
                         $suggestions,
@@ -3462,7 +3545,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     if ($this->runtime_js_scan_add_plugin_stage_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions)) {
                         continue;
                     }
-                    $function_reason = 'A function call failed at runtime. UltraCache resolves the failing browser source and any inline stack-frame handles against the scanned page script inventory and shows exact loaded ids/paths as review-only candidates.';
+                    $function_reason = 'A function call failed at runtime. UltraCache resolves the failing browser source and any inline stack-frame handles against the scanned page script inventory and shows exact loaded ids/paths as not-fixable informational items.';
                     $this->runtime_js_scan_add_script_source_resolution_suggestions(
                         $suggestions,
                         $seen,
@@ -3490,7 +3573,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
                 if ('' !== $source_base && preg_match('/\.js$/i', $source_base)) {
                     $this->runtime_js_scan_add_plugin_stage_suggestions($suggestions, $seen, $source, $message, $detail, $exclusions);
-                    $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, 'This script produced a browser runtime error. UltraCache shows exact source paths as review-only candidates unless a specific confirmed plugin/script resolver matched.', $exclusions, 'runtime error direct source');
+                    $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, 'This script produced a browser runtime error. UltraCache shows exact source paths as not-fixable informational items unless a specific confirmed plugin/script resolver matched.', $exclusions, 'runtime error direct source');
                     $this->runtime_js_scan_add_script_source_resolution_suggestions(
                         $suggestions,
                         $seen,
@@ -3985,13 +4068,13 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     $buckets['alreadyListed'][] = $item;
                     continue;
                 }
-                if (empty($item['appendable']) || (isset($item['category']) && 'review-only' === (string) $item['category'])) {
+                if (empty($item['appendable'])) {
                     $buckets['reviewOnly'][] = $item;
                     continue;
                 }
                 if (isset($scan['source']) && 'browser-runtime' === (string) $scan['source']) {
                     $buckets['confirmedErrorFixes'][] = $item;
-                } elseif (isset($item['category']) && 'browser-runtime-error' === (string) $item['category']) {
+                } elseif (isset($item['category']) && in_array((string) $item['category'], array('browser-runtime-error', 'appendable-fix'), true)) {
                     $buckets['confirmedErrorFixes'][] = $item;
                 } else {
                     $buckets['suggestions'][] = $item;

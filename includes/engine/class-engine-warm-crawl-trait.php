@@ -573,7 +573,8 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
                 $wrote = $this->write_cache_file($file_path, $html);
                 if (!$wrote || !file_exists($file_path)) {
-                    $last_error = 'Failed to write cache file.';
+                    $write_error = method_exists($this, 'get_last_cache_write_error_message') ? $this->get_last_cache_write_error_message() : '';
+                    $last_error = '' !== (string) $write_error ? 'Failed to write cache file: ' . (string) $write_error : 'Failed to write cache file.';
                     continue;
                 }
 

@@ -570,6 +570,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
                 $html = $this->profile_store_stage('final-generated-asset-root-relative-urls', $html, function ($html) use ($context) {
                     return $this->normalize_generated_asset_urls_to_root_relative($html, $context);
                 });
+                $html = $this->profile_store_stage('remove-hrefless-link-placeholders', $html, function ($html) {
+                    return $this->remove_hrefless_ucwp_link_placeholders($html);
+                });
 
                 return is_string($html) ? $html : '';
             }
@@ -579,8 +582,83 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $html = $this->apply_final_font_display_rewrite_before_cache_store($html);
             $html = $this->apply_final_media_html_rewrite($html, $context);
             $html = $this->normalize_generated_asset_urls_to_root_relative($html, $context);
+            $html = $this->remove_hrefless_ucwp_link_placeholders($html);
 
             return is_string($html) ? $html : '';
+        }
+
+        /**
+         * Remove frontend-only UltraCache diagnostic link placeholders.
+         *
+         * Removed source stylesheets/resource hints must not remain as href-less
+         * <link> elements. Third-party scripts such as Slider Revolution inspect
+         * document link nodes and assume link.href is a real load-bearing URL.
+         * With debug disabled the placeholder is removed entirely; with debug
+         * enabled it is converted to an HTML comment so diagnostics remain visible
+         * in View Source without creating a DOM link node.
+         *
+         * @param string $html Full frontend HTML.
+         * @return string
+         */
+        private function remove_hrefless_ucwp_link_placeholders($html)
+        {
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link') || false === stripos($html, 'data-ucwp-')) {
+                return $html;
+            }
+
+            $settings = $this->get_settings();
+            $debug_enabled = !empty($settings['debug_headers_enabled']) || !empty($settings['debugHeadersEnabled']);
+
+            $updated = preg_replace_callback('#<link\b[^>]*>#i', function ($matches) use ($debug_enabled) {
+                $tag = isset($matches[0]) ? (string) $matches[0] : '';
+                if ('' === $tag || false === stripos($tag, 'data-ucwp-')) {
+                    return $tag;
+                }
+
+                $attrs = array();
+                if (!preg_match_all('/\s([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*("([^"]*)"|\'([^\']*)\'|([^\s>]+))/u', $tag, $attrs, PREG_SET_ORDER)) {
+                    return $tag;
+                }
+
+                $has_href = false;
+                $ucwp_attrs = array();
+                foreach ($attrs as $attr) {
+                    $name = strtolower((string) ($attr[1] ?? ''));
+                    if ('href' === $name) {
+                        $has_href = true;
+                        break;
+                    }
+
+                    if (0 === strpos($name, 'data-ucwp-')) {
+                        $value = isset($attr[3]) && '' !== $attr[3]
+                            ? (string) $attr[3]
+                            : (isset($attr[4]) && '' !== $attr[4] ? (string) $attr[4] : (string) ($attr[5] ?? ''));
+                        $ucwp_attrs[$name] = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    }
+                }
+
+                if ($has_href || empty($ucwp_attrs)) {
+                    return $tag;
+                }
+
+                if (!$debug_enabled) {
+                    return '';
+                }
+
+                $parts = array();
+                foreach ($ucwp_attrs as $name => $value) {
+                    $value = preg_replace('/\s+/', ' ', (string) $value);
+                    $parts[] = $name . '=' . $value;
+                }
+
+                $summary = implode('; ', $parts);
+                $summary = str_replace(array('--', '<', '>'), array('—', '&lt;', '&gt;'), $summary);
+                $summary = substr($summary, 0, 900);
+
+                return '<!-- UltraCache removed link placeholder: ' . $summary . ' -->';
+            }, $html);
+
+            return is_string($updated) ? $updated : $html;
         }
 
         /**

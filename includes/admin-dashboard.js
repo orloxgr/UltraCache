@@ -1287,7 +1287,7 @@
 	function getJsDelaySafetySuggestions(scan) {
 		const suggestions = scan && Array.isArray(scan.suggestions) ? scan.suggestions : [];
 		return suggestions
-			.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored && item.appendable !== false && item.category !== 'review-only')
+			.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored && item.appendable !== false)
 			.map((item) => String(item.suggestedExclusion).trim())
 			.filter((line) => line.length > 0);
 	}
@@ -1295,7 +1295,7 @@
 	function getJsDelayReviewSuggestions(scan) {
 		const suggestions = scan && Array.isArray(scan.suggestions) ? scan.suggestions : [];
 		return suggestions
-			.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored && (item.appendable === false || item.category === 'review-only'))
+			.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored && item.appendable === false)
 			.map((item) => String(item.suggestedExclusion).trim())
 			.filter((line) => line.length > 0);
 	}
@@ -2279,8 +2279,8 @@
 		const hasChanges = draftValue !== currentValue;
 		const suggestions = scan && Array.isArray(scan.suggestions) ? scan.suggestions : [];
 		const actionableSuggestions = suggestions.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored);
-		const appendableSuggestions = actionableSuggestions.filter((item) => item.appendable !== false && item.category !== 'review-only');
-		const reviewOnlySuggestions = actionableSuggestions.filter((item) => item.appendable === false || item.category === 'review-only');
+		const appendableSuggestions = actionableSuggestions.filter((item) => item.appendable !== false);
+		const reviewOnlySuggestions = actionableSuggestions.filter((item) => item.appendable === false);
 		const missingAppendableSuggestions = appendableSuggestions.filter((item) => !isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
 		const alreadyListedAppendableSuggestions = appendableSuggestions.filter((item) => isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
 		const missingReviewOnlySuggestions = reviewOnlySuggestions.filter((item) => !isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
@@ -2299,8 +2299,8 @@
 		const missingConsoleErrorSuggestions = consoleErrorSuggestions.filter((line) => !isSuggestionPresentInDraft(draftValue, line));
 		const consoleSuggestions = consoleErrorScan && Array.isArray(consoleErrorScan.suggestions) ? consoleErrorScan.suggestions : [];
 		const consoleActionableSuggestions = consoleSuggestions.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored);
-		const consoleAppendableSuggestions = consoleActionableSuggestions.filter((item) => item.appendable !== false && item.category !== 'review-only');
-		const consoleReviewOnlySuggestions = consoleActionableSuggestions.filter((item) => item.appendable === false || item.category === 'review-only');
+		const consoleAppendableSuggestions = consoleActionableSuggestions.filter((item) => item.appendable !== false);
+		const consoleReviewOnlySuggestions = consoleActionableSuggestions.filter((item) => item.appendable === false);
 		const missingConsoleReviewOnlySuggestions = consoleReviewOnlySuggestions.filter((item) => !isSuggestionPresentInDraft(draftValue, item.suggestedExclusion));
 		const jsDiagnosticQueueResult = jsDiagnosticQueue && jsDiagnosticQueue.result && typeof jsDiagnosticQueue.result === 'object' ? jsDiagnosticQueue.result : null;
 		const jsDiagnosticQueueBucketCounts = jsDiagnosticQueueResult && jsDiagnosticQueueResult.bucketCounts ? jsDiagnosticQueueResult.bucketCounts : {};
@@ -2323,20 +2323,20 @@
 		function renderSuggestionItem(item, keyPrefix, index) {
 			const line = item && item.suggestedExclusion ? String(item.suggestedExclusion) : '';
 			const present = isSuggestionPresentInDraft(draftValue, line);
-			const reviewOnly = item && (item.appendable === false || item.category === 'review-only');
-			const statusText = reviewOnly ? (present ? 'already listed · review only' : 'review only') : (present ? 'already listed' : 'missing');
+			const reviewOnly = item && item.appendable === false;
+			const statusText = reviewOnly ? (present ? 'already listed · not fixable' : 'not fixable') : (present ? 'already listed' : 'missing');
 			const statusClass = reviewOnly ? 'text-sky-300' : (present ? 'text-emerald-400' : 'text-amber-300');
 			const metaRows = [
 				['Status', statusText, statusClass],
 				['Confidence', item && item.confidence ? String(item.confidence) : '—', 'text-zinc-300'],
-				['Category', item && item.categoryLabel ? String(item.categoryLabel) : (reviewOnly ? 'Review-only candidates' : 'Detected recommendation'), reviewOnly ? 'text-sky-300' : 'text-violet-300'],
+				['Category', item && item.categoryLabel ? String(item.categoryLabel) : (reviewOnly ? 'Not fixable candidates' : 'Detected recommendation'), reviewOnly ? 'text-sky-300' : 'text-violet-300'],
 			];
 			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-3 space-y-2', key: keyPrefix + '-' + index + '-' + line }, [
 				h('div', { className: 'space-y-1' }, [
 					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Suggested exclusion", 'ultracache')),
 					h('div', { className: 'flex flex-wrap items-center gap-2' }, [
 						h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
-						line ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled || present, onClick: () => appendJsExclusionLine(line) }, reviewOnly ? (present ? 'Already in exclusions' : 'Append reviewed') : (present ? 'Already in exclusions' : 'Append')) : null,
+						line ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled || present, onClick: () => appendJsExclusionLine(line) }, present ? 'Already in exclusions' : 'Append') : null,
 					]),
 				]),
 				h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-2' }, metaRows.map((row, rowIndex) => h('div', { className: 'rounded bg-black/15 px-2 py-1', key: keyPrefix + '-meta-' + index + '-' + rowIndex }, [
@@ -2434,7 +2434,7 @@
 				return { key: 'ecommerce-checkout', title: __("WooCommerce / ecommerce", 'ultracache'), reason: 'Commerce or checkout-related markers were detected. Review before excluding broadly.' };
 			}
 			if (/gtag|gtm|datalayer|adsbygoogle|stats\.wp\.com|_stq|facebook\.net|fbevents|hotjar|clarity|googletagmanager|google-analytics/.test(text)) {
-				return { key: 'tracking-ads', title: __("Tracking / ads", 'ultracache'), reason: 'Tracking or ads scripts were detected. These are review-only because delaying them often improves performance but may affect tracking timing.' };
+				return { key: 'tracking-ads', title: __("Tracking / ads", 'ultracache'), reason: 'Tracking or ads scripts were detected. These are not-fixable because delaying them often improves performance but may affect tracking timing.' };
 			}
 			return { key: item && item.category ? String(item.category) : 'other', title: item && item.categoryLabel ? String(item.categoryLabel) : 'Other detected recommendation', reason: reason };
 		}
@@ -2456,9 +2456,9 @@
 		function renderSuggestionGroup(group, keyPrefix, index, collapsed) {
 			const items = group && Array.isArray(group.items) ? group.items : [];
 			const missingCount = items.filter((item) => !isSuggestionPresentInDraft(draftValue, item && item.suggestedExclusion)).length;
-			const reviewOnly = items.some((item) => item && (item.appendable === false || item.category === 'review-only'));
+			const reviewOnly = items.some((item) => item && item.appendable === false);
 			const lines = items.map((item) => String(item && item.suggestedExclusion ? item.suggestedExclusion : '').trim()).filter(Boolean);
-			const summaryStatus = reviewOnly ? 'review only' : (missingCount ? (missingCount + ' missing') : 'covered');
+			const summaryStatus = reviewOnly ? 'not fixable' : (missingCount ? (missingCount + ' missing') : 'covered');
 			return h('details', { className: 'rounded-lg bg-black/20 px-3 py-2', key: keyPrefix + '-group-' + index + '-' + group.key, open: !collapsed }, [
 				h('summary', { className: 'cursor-pointer list-none flex flex-wrap items-center justify-between gap-2' }, [
 					h('span', { className: 'text-zinc-200 font-semibold' }, group.title || 'Detected group'),
@@ -2466,7 +2466,7 @@
 				]),
 				group.reason ? h('div', { className: 'text-zinc-500 mt-2' }, group.reason) : null,
 				lines.length ? h('div', { className: 'mt-2 flex flex-wrap gap-1' }, lines.map((line, lineIndex) => h('code', { className: 'font-mono text-[11px] text-emerald-300 bg-black/25 rounded px-2 py-1 break-all', key: keyPrefix + '-line-' + index + '-' + lineIndex }, line))) : null,
-				reviewOnly ? h('div', { className: 'mt-2 text-[11px] text-zinc-500' }, __("Review-only candidates are shown for manual judgement and can be appended one by one. They are never appended automatically.", 'ultracache')) : null,
+				reviewOnly ? h('div', { className: 'mt-2 text-[11px] text-zinc-500' }, __("Not-fixable items are informational and are not added to exclusions.", 'ultracache')) : null,
 				h('div', { className: 'mt-2 space-y-2' }, items.map((item, itemIndex) => renderSuggestionItem(item, keyPrefix + '-detail-' + index, itemIndex))),
 			]);
 		}
@@ -2621,9 +2621,9 @@
 				if (!extracted.length && !reviewOnly.length) {
 					setConsoleErrorStatus('No Runtime Scan suggestions were detected. Broad/generic sources such as jquery.min.js and same-origin domains are ignored unless the scanned HTML inventory can resolve an exact path or inline handle.');
 				} else if (!extracted.length) {
-					setConsoleErrorStatus('Detected ' + reviewOnly.length + ' review-only Runtime Scan candidate(s). They are shown below for manual review and can be appended one by one.');
+					setConsoleErrorStatus('Detected ' + reviewOnly.length + ' not-fixable Runtime Scan candidate(s). They are shown below for checking and can be appended one by one.');
 				} else {
-					setConsoleErrorStatus('Detected ' + extracted.length + ' appendable Runtime Scan suggestion(s)' + (reviewOnly.length ? (' and ' + reviewOnly.length + ' review-only candidate(s)') : '') + '. Review the preview, then append only the confirmed fixes you want.');
+					setConsoleErrorStatus('Detected ' + extracted.length + ' appendable Runtime Scan suggestion(s)' + (reviewOnly.length ? (' and ' + reviewOnly.length + ' not-fixable candidate(s)') : '') + '. Check the preview, then append the fixes you want.');
 				}
 			} catch (error) {
 				setConsoleErrorSuggestions([]);
@@ -2808,7 +2808,7 @@
 					h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, runtimeScanContext === 'anonymous' ? 'Recommended for public cache debugging. Admin cookies are ignored while rendering the scan page.' : 'Useful only for admin-bar/editor/frontend issues.'),
 					h('div', { className: 'flex flex-wrap', style: { marginTop: '10px', gap: '12px' } }, [
 						h(Button, { key: 'runtime-scan', onClick: handleRuntimeScan, disabled: !!disabled || runtimeScanBusy }, runtimeScanBusy ? 'Runtime scanning…' : 'Scan Browser Runtime Errors'),
-						h(Button, { key: 'append-confirmed-errors', onClick: handleAppendConfirmedErrorFixes, disabled: !!disabled || !confirmedErrorMissingCount }, 'Append Confirmed Error Fixes' + (confirmedErrorMissingCount ? ' (' + confirmedErrorMissingCount + ')' : '')),
+						h(Button, { key: 'append-confirmed-errors', onClick: handleAppendConfirmedErrorFixes, disabled: !!disabled || !confirmedErrorMissingCount }, 'Append Error Fixes' + (confirmedErrorMissingCount ? ' (' + confirmedErrorMissingCount + ')' : '')),
 						h(Button, { key: 'browser-save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __('Save', 'ultracache')),
 					]),
 					runtimeScanStatus ? h('div', { className: 'rounded-lg bg-emerald-500/10 px-3 py-2', style: { marginTop: '10px' } }, [
@@ -2826,7 +2826,7 @@
 						h('label', { className: 'uc-field-label' }, __('Console Error Handler', 'ultracache')),
 						consoleErrorSuggestions.length ? h('span', { className: missingConsoleErrorSuggestions.length ? 'text-amber-300 font-mono text-[11px]' : 'text-emerald-300 font-mono text-[11px]' }, String(missingConsoleErrorSuggestions.length) + ' missing / ' + String(consoleErrorSuggestions.length) + ' detected') : null,
 					]),
-					h('div', { className: 'text-xs text-zinc-500 mb-3 leading-relaxed' }, 'Paste browser console errors here. UltraCache uses the selected Page URL/front page to resolve missing jQuery plugin methods/globals to exact provider scripts where possible. Extraction only previews suggestions; it does not change exclusions until you click Append Console Error Fixes.'),
+					h('div', { className: 'text-xs text-zinc-500 mb-3 leading-relaxed' }, 'Paste browser console errors here. UltraCache uses the selected Page URL/front page to resolve missing jQuery plugin methods/globals to exact provider scripts where possible. Extraction only previews suggestions; it does not change exclusions until you click Append Console Fixes.'),
 					h('label', { className: 'uc-field-label', style: { fontSize: '12px', color: '#6f7b8f' } }, __('Console errors to analyze', 'ultracache')),
 					h('textarea', {
 						className: 'uc-field-input uc-field-textarea',
@@ -2838,7 +2838,7 @@
 					}),
 					h('div', { className: 'flex flex-wrap', style: { marginTop: '10px', gap: '12px' } }, [
 						h(Button, { key: 'extract-console-errors', onClick: handleExtractConsoleErrors, disabled: !!disabled || consoleErrorBusy }, consoleErrorBusy ? 'Extracting…' : 'Extract Console Error Suggestions'),
-						h(Button, { key: 'append-console-errors', onClick: handleAppendConsoleErrors, disabled: !!disabled || !missingConsoleErrorSuggestions.length }, 'Append Console Error Fixes' + (missingConsoleErrorSuggestions.length ? ' (' + missingConsoleErrorSuggestions.length + ')' : '')),
+						h(Button, { key: 'append-console-errors', onClick: handleAppendConsoleErrors, disabled: !!disabled || !missingConsoleErrorSuggestions.length }, 'Append Console Fixes' + (missingConsoleErrorSuggestions.length ? ' (' + missingConsoleErrorSuggestions.length + ')' : '')),
 						h(Button, { key: 'clear-console-errors', onClick: handleClearConsoleErrors, disabled: !!disabled || (!consoleErrorInput && !consoleErrorSuggestions.length) }, 'Clear Console Input'),
 						h(Button, { key: 'console-save', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __('Save', 'ultracache')),
 					]),
@@ -2862,16 +2862,16 @@
 					h('div', { className: 'h-2 rounded bg-emerald-500/80', style: { width: String(jsDiagnosticQueueProgressPercent) + '%' } }),
 				]),
 				h('div', { className: 'grid grid-cols-2 md:grid-cols-5 gap-2 mb-3' }, [
-					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Confirmed Error Fixes'), h('div', { className: 'font-mono text-amber-300' }, String(jsDiagnosticQueueBucketCounts.confirmedErrorFixes || 0))]),
-					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Suggestions'), h('div', { className: 'font-mono text-zinc-200' }, String(jsDiagnosticQueueBucketCounts.suggestions || 0))]),
-					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Review Only'), h('div', { className: 'font-mono text-sky-300' }, String(jsDiagnosticQueueBucketCounts.reviewOnly || 0))]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Appendable Fixes'), h('div', { className: 'font-mono text-amber-300' }, String(jsDiagnosticQueueBucketCounts.confirmedErrorFixes || 0))]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Additional Matches'), h('div', { className: 'font-mono text-zinc-200' }, String(jsDiagnosticQueueBucketCounts.suggestions || 0))]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Not Fixable'), h('div', { className: 'font-mono text-sky-300' }, String(jsDiagnosticQueueBucketCounts.reviewOnly || 0))]),
 					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Already Listed'), h('div', { className: 'font-mono text-emerald-300' }, String(jsDiagnosticQueueBucketCounts.alreadyListed || 0))]),
 					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Ignored'), h('div', { className: 'font-mono text-zinc-400' }, String(jsDiagnosticQueueBucketCounts.ignored || 0))]),
 				]),
 				h('div', { className: 'space-y-2 mb-3' }, [
-					renderJsDiagnosticQueueCategory('Confirmed Error Fixes', jsDiagnosticQueueBucketCounts.confirmedErrorFixes || 0, jsDiagnosticQueueBuckets.confirmedErrorFixes || [], 'No confirmed fixes in this stored result.', 'jsdq-confirmed', { help: 'Ready-to-append fixes detected from confirmed runtime/console errors.' }),
-					renderJsDiagnosticQueueCategory('Suggestions', jsDiagnosticQueueBucketCounts.suggestions || 0, jsDiagnosticQueueBuckets.suggestions || [], 'No suggestions in this stored result.', 'jsdq-suggestions', { help: 'Potential fixes. Review before appending.' }),
-					renderJsDiagnosticQueueCategory('Review Only', jsDiagnosticQueueBucketCounts.reviewOnly || 0, jsDiagnosticQueueBuckets.reviewOnly || [], 'No review-only items in this stored result.', 'jsdq-review-only', { readOnly: true, help: 'Information only. These are not appendable automatically.' }),
+					renderJsDiagnosticQueueCategory('Appendable Fixes', jsDiagnosticQueueBucketCounts.confirmedErrorFixes || 0, jsDiagnosticQueueBuckets.confirmedErrorFixes || [], 'No confirmed fixes in this stored result.', 'jsdq-confirmed', { help: 'Ready-to-append fixes detected from confirmed runtime/console errors.' }),
+					renderJsDiagnosticQueueCategory('Additional Matches', jsDiagnosticQueueBucketCounts.suggestions || 0, jsDiagnosticQueueBuckets.suggestions || [], 'No suggestions in this stored result.', 'jsdq-suggestions', { help: 'Potential fixes. Append the exact source path or basename, then save and rescan.' }),
+					renderJsDiagnosticQueueCategory('Not Fixable', jsDiagnosticQueueBucketCounts.reviewOnly || 0, jsDiagnosticQueueBuckets.reviewOnly || [], 'No not-fixable items in this stored result.', 'jsdq-not-fixable', { readOnly: true, help: 'Information only. These findings are not fixable by a JS exclusion.' }),
 					renderJsDiagnosticQueueCategory('Already Listed', jsDiagnosticQueueBucketCounts.alreadyListed || 0, jsDiagnosticQueueBuckets.alreadyListed || [], 'No already listed items in this stored result.', 'jsdq-already-listed', { readOnly: true, help: 'These items are already in your JS Delay / Defer Exclusions.' }),
 					renderJsDiagnosticQueueCategory('Ignored', jsDiagnosticQueueBucketCounts.ignored || 0, jsDiagnosticQueueBuckets.ignored || [], 'No ignored items in this stored result.', 'jsdq-ignored', { readOnly: true, help: 'Ignored findings do not require action.' }),
 				]),
@@ -2896,14 +2896,14 @@
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Recommended', 'ultracache')), h('div', { className: 'font-mono text-zinc-200' }, String(appendableSuggestions.length))]),
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Missing', 'ultracache')), h('div', { className: liveMissingCount ? 'font-mono text-amber-300' : 'font-mono text-emerald-300' }, String(liveMissingCount))]),
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Already listed', 'ultracache')), h('div', { className: 'font-mono text-emerald-300' }, String(liveAlreadyListedCount))]),
-					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Review-only', 'ultracache')), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Not fixable', 'ultracache')), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Blocked resources', 'ultracache')), h('div', { className: resourceErrorCount ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(resourceErrorCount || 0))]),
 				]),
 				renderResourceErrorsSection(resourceErrors),
 				renderRuntimeErrorsSection(runtimeErrors),
-				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing recommended exclusions. The visible JS Delay / Defer Exclusions list already covers the appendable scan results.', 'missing-recommended', 'These are the only lines Append Suggestions or Append Confirmed Error Fixes can add in bulk for this scan.'),
+				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing recommended exclusions. The visible JS Delay / Defer Exclusions list already covers the appendable scan results.', 'missing-recommended', 'These are the only lines Append Suggestions or Append Error Fixes can add in bulk for this scan.'),
 				renderSuggestionSection('Already listed recommended', liveAlreadyListedCount, alreadyListedAppendableSuggestions, 'No recommended exclusions are already listed yet.', 'already-listed-recommended', 'Grouped and collapsed by default. These scan matches are already covered by your textarea, including broad fragments that cover variant paths.', { grouped: true, collapsed: true }),
-				renderSuggestionSection('Review-only detected', reviewOnlyCount, reviewOnlySuggestions, 'No review-only candidates were detected.', 'review-only-detected', 'Grouped and collapsed by default. Review-only items can be appended one by one after manual review.', { grouped: true, collapsed: true }),
+				renderSuggestionSection('Not fixable detected', reviewOnlyCount, reviewOnlySuggestions, 'No not-fixable candidates were detected.', 'not-fixable-detected', 'Grouped and collapsed by default. Items listed here are informational and are not fixable by appending a JS exclusion.', { grouped: true, collapsed: true }),
 			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, __('Enter a same-site URL. Analyze HTML JS Dependencies reads final HTML. Scan Browser Runtime Errors opens the page in your browser, defaults to anonymous frontend mode, and captures console/runtime errors. Scan buttons do not change exclusions automatically.', 'ultracache')),
 		]);
 

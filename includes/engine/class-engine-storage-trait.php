@@ -6,6 +6,74 @@ if (!defined('ABSPATH')) {
 if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
     trait Ultra_Cache_Engine_Storage_Trait
     {
+        private $last_cache_write_error = array();
+        private $last_atomic_write_error = array();
+
+        private function reset_cache_write_error()
+        {
+            $this->last_cache_write_error = array();
+        }
+
+        private function set_cache_write_error($code, $message, array $context = array())
+        {
+            $this->last_cache_write_error = array_merge(
+                array(
+                    'code'    => sanitize_key((string) $code),
+                    'message' => sanitize_text_field((string) $message),
+                ),
+                $context
+            );
+        }
+
+        private function get_last_cache_write_error()
+        {
+            return is_array($this->last_cache_write_error) ? $this->last_cache_write_error : array();
+        }
+
+        private function get_last_cache_write_error_message()
+        {
+            $error = $this->get_last_cache_write_error();
+            if (empty($error['message'])) {
+                return '';
+            }
+
+            $message = (string) $error['message'];
+            if (!empty($error['code'])) {
+                $message .= ' [' . (string) $error['code'] . ']';
+            }
+
+            if (!empty($error['missing']) && is_array($error['missing'])) {
+                $message .= ' Missing: ' . implode(', ', array_slice(array_map('strval', $error['missing']), 0, 5));
+            }
+
+            if (!empty($error['file'])) {
+                $message .= ' File: ' . basename((string) $error['file']);
+            }
+
+            return $message;
+        }
+
+        private function reset_atomic_write_error()
+        {
+            $this->last_atomic_write_error = array();
+        }
+
+        private function set_atomic_write_error($code, $message, array $context = array())
+        {
+            $this->last_atomic_write_error = array_merge(
+                array(
+                    'code'    => sanitize_key((string) $code),
+                    'message' => sanitize_text_field((string) $message),
+                ),
+                $context
+            );
+        }
+
+        private function get_last_atomic_write_error()
+        {
+            return is_array($this->last_atomic_write_error) ? $this->last_atomic_write_error : array();
+        }
+
         private function wait_for_page_cache_file($file_path, $timeout_seconds = 12.0)
         {
             $file_path = (string) $file_path;
@@ -163,13 +231,81 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
             );
 
             $refs = array();
-            foreach ($generated_asset_patterns as $generated_asset_pattern) {
-                $matches = array();
-                $matched = preg_match_all($generated_asset_pattern, $html, $matches);
-                if (false === $matched || empty($matches[0]) || !is_array($matches[0])) {
-                    continue;
+            $collect_generated_refs = function ($value) use (&$refs, $generated_asset_patterns) {
+                $value = html_entity_decode((string) $value, ENT_QUOTES, 'UTF-8');
+                if ('' === $value || false === stripos($value, '/cache/ultracache/')) {
+                    return;
                 }
-                $refs = array_merge($refs, $matches[0]);
+
+                foreach ($generated_asset_patterns as $generated_asset_pattern) {
+                    $matches = array();
+                    $matched = preg_match_all($generated_asset_pattern, $value, $matches);
+                    if (false === $matched || empty($matches[0]) || !is_array($matches[0])) {
+                        continue;
+                    }
+
+                    foreach ($matches[0] as $match) {
+                        $refs[] = (string) $match;
+                    }
+                }
+            };
+
+            /*
+             * Only validate load-bearing generated CSS references. UltraCache stores
+             * internal source/debug metadata in data-* attributes such as
+             * data-ucwp-css-bundle-original-href. Those metadata URLs are not browser
+             * requests and must not block page-cache writes when their generated
+             * intermediate files have already been bundled/removed.
+             */
+            $link_tags = array();
+            if (preg_match_all('#<link\b[^>]*>#i', $html, $link_tags) && !empty($link_tags[0])) {
+                foreach ($link_tags[0] as $link_tag) {
+                    $attr_matches = array();
+                    if (!preg_match_all('/\s([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*("([^"]*)"|\'([^\']*)\'|([^\s>]+))/u', (string) $link_tag, $attr_matches, PREG_SET_ORDER)) {
+                        continue;
+                    }
+
+                    foreach ($attr_matches as $attr_match) {
+                        $attr_name = strtolower((string) $attr_match[1]);
+                        if ('href' !== $attr_name) {
+                            continue;
+                        }
+
+                        $attr_value = isset($attr_match[3]) && '' !== $attr_match[3]
+                            ? (string) $attr_match[3]
+                            : (isset($attr_match[4]) && '' !== $attr_match[4] ? (string) $attr_match[4] : (string) $attr_match[5]);
+                        $collect_generated_refs($attr_value);
+                    }
+                }
+            }
+
+            $style_blocks = array();
+            if (preg_match_all('#<style\b[^>]*>(.*?)</style>#is', $html, $style_blocks) && !empty($style_blocks[1])) {
+                foreach ($style_blocks[1] as $style_block) {
+                    $collect_generated_refs($style_block);
+                }
+            }
+
+            $style_attr_tags = array();
+            if (preg_match_all('#<[^>]+\sstyle\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)[^>]*>#i', $html, $style_attr_tags) && !empty($style_attr_tags[0])) {
+                foreach ($style_attr_tags[0] as $tag_with_style) {
+                    $attr_matches = array();
+                    if (!preg_match_all('/\s([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*("([^"]*)"|\'([^\']*)\'|([^\s>]+))/u', (string) $tag_with_style, $attr_matches, PREG_SET_ORDER)) {
+                        continue;
+                    }
+
+                    foreach ($attr_matches as $attr_match) {
+                        $attr_name = strtolower((string) $attr_match[1]);
+                        if ('style' !== $attr_name) {
+                            continue;
+                        }
+
+                        $attr_value = isset($attr_match[3]) && '' !== $attr_match[3]
+                            ? (string) $attr_match[3]
+                            : (isset($attr_match[4]) && '' !== $attr_match[4] ? (string) $attr_match[4] : (string) $attr_match[5]);
+                        $collect_generated_refs($attr_value);
+                    }
+                }
             }
 
             $refs = array_values(array_unique(array_map('strval', $refs)));
@@ -206,35 +342,72 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
 
         private function write_cache_file($file_path, $html)
         {
+            $file_path = (string) $file_path;
+            $this->reset_cache_write_error();
+            $this->set_cache_write_error('started', 'Cache write started.', array('file' => $file_path));
+
             $html = $this->profile_store_stage('final_google_fonts_rewrite_inside_write', $html, function ($html) {
                 return $this->apply_final_google_fonts_rewrite_before_cache_store($html);
             });
             $html = $this->profile_store_stage('final_font_display_rewrite_inside_write', $html, function ($html) {
                 return $this->apply_final_font_display_rewrite_before_cache_store($html);
             });
+            if (method_exists($this, 'remove_hrefless_ucwp_link_placeholders')) {
+                $html = $this->profile_store_stage('remove_hrefless_link_placeholders_inside_write', $html, function ($html) {
+                    return $this->remove_hrefless_ucwp_link_placeholders($html);
+                });
+            }
+
             $dir = dirname($file_path);
             if (!file_exists($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !file_exists($dir)) {
+                $this->set_cache_write_error('mkdir_failed', 'Could not create cache directory.', array('file' => $file_path, 'dir' => $dir));
+                $this->record_cache_event('store-mkdir-failed', array('file' => $file_path, 'dir' => $dir));
+                return false;
+            }
+
+            if (!is_writable($dir)) {
+                $this->set_cache_write_error('dir_not_writable', 'Cache directory is not writable.', array('file' => $file_path, 'dir' => $dir));
+                $this->record_cache_event('store-dir-not-writable', array('file' => $file_path, 'dir' => $dir));
                 return false;
             }
 
             if ($this->page_cache_variant_cap_reached($file_path)) {
+                $this->set_cache_write_error('variant_cap_reached', 'Page cache variant cap reached for this URL/bucket.', array('file' => $file_path));
                 $this->record_cache_event('variant-cap', array('file' => $file_path));
                 return false;
             }
 
             $write_lock_name = 'page-cache-write-' . md5((string) $file_path);
             if (!$this->acquire_runtime_lock($write_lock_name, 90)) {
+                $this->set_cache_write_error('write_lock_busy', 'Page cache write lock is busy.', array('file' => $file_path));
                 $this->record_cache_event('store-write-lock-busy', array('file' => $file_path));
                 return false;
             }
 
             try {
-                if (!$this->validate_cached_html_css_bundle_refs($html, '')) {
-                    $this->record_cache_event('skip-store-missing-css-bundle-ref', array('file' => $file_path));
+                $missing_css_refs = $this->get_missing_css_bundle_refs_from_html($html);
+                if (!empty($missing_css_refs)) {
+                    $this->set_cache_write_error('missing_generated_css_refs', 'Cached HTML references generated CSS files that are missing on disk.', array(
+                        'file' => $file_path,
+                        'missing' => array_slice(array_values($missing_css_refs), 0, 20),
+                        'missing_count' => count($missing_css_refs),
+                    ));
+                    $this->record_cache_event('skip-store-missing-css-bundle-ref', array(
+                        'file' => $file_path,
+                        'missing' => array_slice(array_values($missing_css_refs), 0, 20),
+                        'missing_count' => count($missing_css_refs),
+                    ));
                     return false;
                 }
 
                 if (!$this->write_cache_variant_atomically($file_path, $html)) {
+                    $atomic_error = $this->get_last_atomic_write_error();
+                    $this->set_cache_write_error(
+                        !empty($atomic_error['code']) ? (string) $atomic_error['code'] : 'atomic_write_failed',
+                        !empty($atomic_error['message']) ? (string) $atomic_error['message'] : 'Atomic cache write failed.',
+                        array_merge(array('file' => $file_path), is_array($atomic_error) ? $atomic_error : array())
+                    );
+                    $this->record_cache_event('store-atomic-write-failed', $this->get_last_cache_write_error());
                     return false;
                 }
 
@@ -258,6 +431,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                     Ultra_Cache_WP::track_cache_asset_refs_for_file($file_path, $html);
                 }
 
+                $this->set_cache_write_error('ok', 'Cache file written successfully.', array('file' => $file_path));
                 return true;
             } finally {
                 $this->release_runtime_lock($write_lock_name);
@@ -304,19 +478,30 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
 
         private function write_cache_variant_atomically($path, $contents)
         {
+            $path = (string) $path;
+            $this->reset_atomic_write_error();
+
             $dir = dirname($path);
             if (!file_exists($dir) && !ucwp_safe_mkdir($dir, 0755, true) && !file_exists($dir)) {
+                $this->set_atomic_write_error('atomic_mkdir_failed', 'Could not create cache directory for atomic write.', array('path' => $path, 'dir' => $dir));
+                return false;
+            }
+
+            if (!is_writable($dir)) {
+                $this->set_atomic_write_error('atomic_dir_not_writable', 'Cache directory is not writable for atomic write.', array('path' => $path, 'dir' => $dir));
                 return false;
             }
 
             $tmp = $path . '.tmp-' . uniqid('', true);
             $result = ucwp_safe_file_put_contents($tmp, $contents, LOCK_EX);
             if (false === $result) {
+                $this->set_atomic_write_error('atomic_tmp_write_failed', 'Could not write temporary cache file.', array('path' => $path, 'tmp' => $tmp));
                 ucwp_safe_unlink($tmp);
                 return false;
             }
 
             if (!ucwp_safe_rename($tmp, $path)) {
+                $this->set_atomic_write_error('atomic_rename_failed', 'Could not rename temporary cache file into place.', array('path' => $path, 'tmp' => $tmp));
                 ucwp_safe_unlink($tmp);
                 return false;
             }
@@ -324,10 +509,12 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
             clearstatcache(true, $tmp);
             clearstatcache(true, $path);
             if (!file_exists($path) || file_exists($tmp)) {
+                $this->set_atomic_write_error('atomic_final_missing', 'Atomic write finished but final cache file was not found.', array('path' => $path, 'tmp' => $tmp));
                 ucwp_safe_unlink($tmp);
                 return false;
             }
 
+            $this->set_atomic_write_error('ok', 'Atomic write completed.', array('path' => $path));
             return true;
         }
 
