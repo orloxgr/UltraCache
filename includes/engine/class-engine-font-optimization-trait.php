@@ -125,7 +125,17 @@ if (!trait_exists('Ultra_Cache_Engine_Font_Optimization_Trait')) {
 
             $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
             if ('' === $host) {
-                $host = strtolower(trim(preg_replace('#[/?#].*$#', '', ltrim($url, '/'))));
+                $fallback_host = ltrim($url, '/');
+                $cut_at = strlen($fallback_host);
+
+                foreach (array('/', '?', '#') as $separator) {
+                    $position = strpos($fallback_host, $separator);
+                    if (false !== $position && $position < $cut_at) {
+                        $cut_at = $position;
+                    }
+                }
+
+                $host = strtolower(trim(substr($fallback_host, 0, $cut_at)));
             }
 
             return in_array($host, array('fonts.googleapis.com', 'fonts.gstatic.com'), true);

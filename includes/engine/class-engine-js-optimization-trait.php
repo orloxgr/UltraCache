@@ -1411,6 +1411,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             }
 
             $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
+            $protected_indexes = $this->get_user_excluded_script_dependency_indexes($records, $settings);
             $replacements = array();
 
             foreach ($records as $index => $record) {
@@ -1422,7 +1423,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $src = isset($record['src']) ? (string) $record['src'] : '';
                 $group = isset($record['group']) ? (string) $record['group'] : '';
 
-                if ($this->script_record_matches_user_defer_exclusion($record, $settings) || ('' !== $group && !empty($protected_groups[$group]))) {
+                if (isset($protected_indexes[(int) $index]) || $this->script_record_matches_user_defer_exclusion($record, $settings) || ('' !== $group && !empty($protected_groups[$group]))) {
                     continue;
                 }
 
@@ -1652,6 +1653,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             }
 
             $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
+            $protected_indexes = $this->get_user_excluded_script_dependency_indexes($records, $settings);
             $replacements = array();
 
             foreach ($records as $index => $record) {
@@ -1660,7 +1662,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 }
 
                 $group = isset($record['group']) ? (string) $record['group'] : '';
-                if (!$this->script_record_matches_user_defer_exclusion($record, $settings) && ('' === $group || empty($protected_groups[$group]))) {
+                if (!isset($protected_indexes[(int) $index]) && !$this->script_record_matches_user_defer_exclusion($record, $settings) && ('' === $group || empty($protected_groups[$group]))) {
                     continue;
                 }
 
@@ -1908,28 +1910,86 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
         private function get_user_excluded_script_dependency_groups(array $records, array $settings = array())
         {
             $protected = array();
-            $matched_indexes = array();
-            $ordered_indexes = array_keys($records);
-            sort($ordered_indexes);
 
-            foreach ($records as $index => $record) {
+            foreach ($records as $record) {
                 if (!$this->script_record_matches_user_defer_exclusion($record, $settings)) {
                     continue;
                 }
 
-                $matched_indexes[(int) $index] = true;
                 $group = isset($record['group']) ? (string) $record['group'] : '';
                 if ('' !== $group) {
                     $protected[$group] = true;
                 }
             }
 
-            /*
-             * Do not add hidden nearby/defining-script/jQuery cluster rules.
-             * If those dependencies are needed, Populate Defaults adds visible
-             * editable entries such as jquery, jquery-migrate, functions.js,
-             * 360imagerotate.js, and WooCommerce/Google Analytics tokens.
-             */
+            return $protected;
+        }
+
+        private function get_user_excluded_script_dependency_indexes(array $records, array $settings = array())
+        {
+            $protected = array();
+            $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
+            $ordered_indexes = array_keys($records);
+            sort($ordered_indexes);
+            $count = count($ordered_indexes);
+
+            foreach ($ordered_indexes as $position => $index) {
+                if (!isset($records[$index])) {
+                    continue;
+                }
+
+                $record = $records[$index];
+                $group = isset($record['group']) ? (string) $record['group'] : '';
+                $matches_user_exclusion = $this->script_record_matches_user_defer_exclusion($record, $settings);
+                $matches_protected_group = ('' !== $group && !empty($protected_groups[$group]));
+
+                if (!$matches_user_exclusion && !$matches_protected_group) {
+                    continue;
+                }
+
+                $protected[(int) $index] = true;
+
+                if (empty($record['has_src'])) {
+                    continue;
+                }
+
+                /*
+                 * A visible exclusion for an external provider must also keep
+                 * its immediately attached inline consumer/config blocks in the
+                 * same parser-executed sequence. This is inheritance from the
+                 * user's explicit exclusion line, not a hidden default rule.
+                 */
+                for ($next_position = $position + 1; $next_position < $count; $next_position++) {
+                    $next_index = $ordered_indexes[$next_position];
+                    if (!isset($records[$next_index])) {
+                        continue;
+                    }
+
+                    $next_record = $records[$next_index];
+                    if (!empty($next_record['has_src'])) {
+                        break;
+                    }
+
+                    if (!$this->is_delayable_inline_script_tag(isset($next_record['tag']) ? (string) $next_record['tag'] : '')) {
+                        continue;
+                    }
+
+                    $protected[(int) $next_index] = true;
+
+                    $next_group = isset($next_record['group']) ? (string) $next_record['group'] : '';
+                    if ('' !== $next_group) {
+                        $protected_groups[$next_group] = true;
+                    }
+                }
+            }
+
+            foreach ($records as $index => $record) {
+                $group = isset($record['group']) ? (string) $record['group'] : '';
+                if ('' !== $group && !empty($protected_groups[$group])) {
+                    $protected[(int) $index] = true;
+                }
+            }
+
             return $protected;
         }
 
@@ -3854,20 +3914,34 @@ private function script_handle_is_footer_group($handle)
             }
 
             $main_thread_relief = !empty($settings['main_thread_relief']) ? '1' : '0';
-            $local_auto_mode = isset($settings['delayed_local_js_auto_start']) ? (string) $settings['delayed_local_js_auto_start'] : 'custom';
-            if (!in_array($local_auto_mode, array('interaction', 'custom'), true)) {
-                $local_auto_mode = 'custom';
+            $auto_events = array();
+            if (!empty($settings['delayed_js_autostart_mousemove'])) {
+                $auto_events[] = 'mousemove';
             }
-            $local_auto_seconds = isset($settings['delayed_local_js_auto_start_seconds']) ? (float) $settings['delayed_local_js_auto_start_seconds'] : 1.0;
-            $local_auto_seconds = max(0.1, min(9.0, $local_auto_seconds));
-            $local_auto_ms = (int) round(1000 * $local_auto_seconds);
-            $local_auto_fallback_ms = $local_auto_ms + (!empty($settings['main_thread_relief']) ? 10000 : 8000);
+            if (!empty($settings['delayed_js_autostart_scroll'])) {
+                $auto_events[] = 'scroll';
+            }
+            if (!empty($settings['delayed_js_autostart_click'])) {
+                $auto_events[] = 'click';
+            }
+            if (!empty($settings['delayed_js_autostart_touch_pointer'])) {
+                $auto_events[] = 'touchstart';
+                $auto_events[] = 'pointerdown';
+            }
+            if (!empty($settings['delayed_js_autostart_keyboard'])) {
+                $auto_events[] = 'keydown';
+            }
+            $auto_events = array_values(array_unique($auto_events));
+            $auto_after_load = !empty($settings['delayed_js_autostart_after_load']) ? '1' : '0';
+            $auto_seconds = isset($settings['delayed_local_js_auto_start_seconds']) ? (float) $settings['delayed_local_js_auto_start_seconds'] : 1.0;
+            $auto_seconds = max(0.05, min(5.0, $auto_seconds));
+            $auto_ms = (int) round(1000 * $auto_seconds);
             $loader = <<<'UCWP_DELAY_LOADER'
-<script id="ucwp-delayed-loader" data-ucwp-loader-policy="third-party-after-load" data-ucwp-relief="__UCWP_RELIEF__" data-ucwp-ready-barrier="1" data-ucwp-parallel-loader="1">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var relief=__UCWP_RELIEF__;var timeoutMs=8000;var parallelWindow=0;var localAutoMode=__UCWP_LOCAL_AUTO_MODE__;var localAutoDelayMs=__UCWP_LOCAL_AUTO_MS__;var localAutoFallbackMs=__UCWP_LOCAL_FALLBACK_MS__;var localAutoDone=false;var thirdPartyAutoDone=false;var allDone=false;var started=Date.now?Date.now():0;var readyActive=false;var readyHooked=false;var readyQueue=[];var readyOriginal=null;function root(){return document.documentElement||document.body||document.head;}function mark(k,v){try{var r=root();if(r){r.setAttribute('data-ucwp-delay-'+k,String(v));}}catch(e){}}function qa(){return Array.prototype.slice.call(document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src],script[type="text/ucwp-delayed-js"][data-ucwp-inline="1"]'));}function c(n,a){var v=n&&n.getAttribute?n.getAttribute('data-ucwp-'+a):'';return v||'';}function reason(n){return c(n,'delay-reason');}function isThirdPartyDelayed(n){var r=reason(n);return r==='safe-third-party'||r==='functional-third-party'||r==='all-third-party';}function q(mode){return qa().filter(function(n){if(!n||n.getAttribute('data-ucwp-loading')==='1'||n.getAttribute('data-ucwp-loaded')==='1'){return false;}if(mode==='thirdparty'){return isThirdPartyDelayed(n);}if(mode==='local'){return !isThirdPartyDelayed(n);}return true;});}function counts(){var all=qa(),tp=0,local=0;for(var i=0;i<all.length;i++){if(isThirdPartyDelayed(all[i])){tp++;}else{local++;}}mark('queued',all.length);mark('queued-local',local);mark('queued-thirdparty',tp);}function decodeAttrs(node){var raw=c(node,'attrs');var attrs={};if(raw){try{attrs=JSON.parse(atob(raw))||{};}catch(e){attrs={};}}['id','crossorigin','referrerpolicy','integrity','nonce'].forEach(function(attr){var val=c(node,attr);if(val&&!attrs[attr]){attrs[attr]=val;}});return attrs;}function applyAttrs(s,node){var attrs=decodeAttrs(node);Object.keys(attrs).forEach(function(attr){var val=attrs[attr];if(!attr||attr==='src'||attr==='async'||attr==='defer'||attr==='data-wp-strategy'||val===null||typeof val==='undefined'){return;}try{s.setAttribute(attr,String(val));}catch(e){}});}function idle(cb){if(!relief){cb();return;}if('requestIdleCallback' in window){window.requestIdleCallback(cb,{timeout:1200});return;}setTimeout(cb,60);}function wait(ms,cb){if(!relief||ms<=0){cb();return;}setTimeout(cb,ms);}function emit(name,detail){try{window.dispatchEvent(new CustomEvent(name,{detail:detail||{}}));}catch(e){}}function shouldHoldReady(mode){return mode==='local'||mode==='all';}function tryHookReady(){var jq=window.jQuery;if(!readyActive||readyHooked||!jq||!jq.fn||typeof jq.fn.ready!=='function'){return;}readyOriginal=jq.fn.ready;jq.fn.ready=function(fn){if(readyActive&&typeof fn==='function'){readyQueue.push({fn:fn});mark('ready-held',readyQueue.length);return this;}return readyOriginal.apply(this,arguments);};readyHooked=true;mark('ready-hooked','1');}function beginReadyHold(mode){if(!shouldHoldReady(mode)){return;}readyActive=true;mark('ready-hold','1');tryHookReady();}function flushReadyHold(mode){if(!shouldHoldReady(mode)){return;}tryHookReady();readyActive=false;var jq=window.jQuery;if(readyHooked&&jq&&jq.fn&&readyOriginal){try{jq.fn.ready=readyOriginal;}catch(e){}}readyHooked=false;mark('ready-hold','0');mark('ready-flush-count',readyQueue.length);var queue=readyQueue.slice(0);readyQueue=[];emit('ucwp:delayed-jquery-ready-flush',{mode:mode,count:queue.length});for(var i=0;i<queue.length;i++){try{queue[i].fn.call(document,jq);}catch(err){setTimeout((function(e){return function(){throw e;};})(err),0);}}}function insertAndRemove(node,s){if(node.parentNode){node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);}else{(document.head||document.body||document.documentElement).appendChild(s);}}function isInlineNode(node){return node&&node.getAttribute('data-ucwp-inline')==='1';}function isExternalNode(node){return node&&node.getAttribute('data-ucwp-src')&&!isInlineNode(node);}function loadInline(node,done){if(!node||node.getAttribute('data-ucwp-loading')==='1'||node.getAttribute('data-ucwp-loaded')==='1'){done();return;}node.setAttribute('data-ucwp-loading','1');var s=document.createElement('script');applyAttrs(s,node);try{s.text=node.textContent||'';}catch(e){s.text='';}insertAndRemove(node,s);tryHookReady();node.setAttribute('data-ucwp-loaded','1');done();}function loadExternalGroup(list,start,mode,done){var end=start;var group=[];while(end<list.length&&isExternalNode(list[end])&&list[end].getAttribute('data-ucwp-loading')!=='1'&&list[end].getAttribute('data-ucwp-loaded')!=='1'){group.push(list[end]);end++;}if(!group.length){done(start+1);return;}var pending=group.length;var completed=0;mark('parallel-loader','1');mark('parallel-mode','uncapped');mark(mode+'-parallel-group-size',group.length);function completeOne(){completed++;mark(mode+'-parallel-completed',completed);if(completed>=pending){done(end);}}for(var i=0;i<group.length;i++){(function(node){node.setAttribute('data-ucwp-loading','1');var src=node.getAttribute('data-ucwp-src');var s=document.createElement('script');var finished=false;applyAttrs(s,node);s.async=false;function finish(){if(finished){return;}finished=true;tryHookReady();node.setAttribute('data-ucwp-loaded','1');completeOne();}s.onload=finish;s.onerror=finish;setTimeout(finish,timeoutMs);s.src=src;insertAndRemove(node,s);})(group[i]);}}function load(list,i,mode){while(i<list.length&&(list[i].getAttribute('data-ucwp-loaded')==='1'||list[i].getAttribute('data-ucwp-loading')==='1')){i++;}if(i>=list.length){flushReadyHold(mode);mark(mode+'-done','1');emit('ucwp:delayed-scripts-done',{mode:mode,count:list.length});return;}if(isInlineNode(list[i])){idle(function(){loadInline(list[i],function(){wait(relief?30:0,function(){load(list,i+1,mode);});});});return;}if(isExternalNode(list[i])){idle(function(){loadExternalGroup(list,i,mode,function(next){wait(relief?30:0,function(){load(list,next,mode);});});});return;}load(list,i+1,mode);}function run(mode){counts();var list=q(mode);if(!list.length){mark(mode+'-done','empty');return;}mark(mode+'-started','1');mark(mode+'-count',list.length);beginReadyHold(mode);emit('ucwp:delayed-scripts-start',{mode:mode,count:list.length});load(list,0,mode);}function triggerAll(){if(allDone){return;}allDone=true;localAutoDone=true;thirdPartyAutoDone=true;run('all');}function triggerLocal(){if(allDone||localAutoDone){return;}localAutoDone=true;run('local');}function triggerThirdParty(){if(allDone||thirdPartyAutoDone){return;}thirdPartyAutoDone=true;run('thirdparty');}function afterDomReady(cb,delay){if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',function(){setTimeout(cb,delay||0);},{once:true});}else{setTimeout(cb,delay||0);}}function afterLoad(cb,delay){if(document.readyState==='complete'){setTimeout(cb,delay||0);return;}window.addEventListener('load',function(){setTimeout(cb,delay||0);},{once:true});}function hasElementorInlineBg(n){try{return !!(n&&n.querySelector&&n.querySelector('[style*="background-image"],[style*="background:"]'));}catch(e){return false;}}function revealElementorLazyBgs(){try{var vh=Math.max(window.innerHeight||0,600);var parents=Array.prototype.slice.call(document.querySelectorAll('.e-con.e-parent:not(.e-lazyloaded):not(.e-no-lazyload)'));var checked=0,revealed=0;for(var i=0;i<parents.length&&checked<80;i++){var n=parents[i];checked++;if(!hasElementorInlineBg(n)){continue;}var r=n.getBoundingClientRect?n.getBoundingClientRect():{top:0,bottom:0};if(i<3||(r.top<vh*2&&r.bottom>-vh)){n.classList.add('e-lazyloaded');n.setAttribute('data-ucwp-elementor-bg-lazy-class','1');revealed++;}}mark('elementor-bg-lazy-checked',checked);mark('elementor-bg-lazy-revealed',revealed);}catch(e){mark('elementor-bg-lazy-error','1');}}function scheduleElementorLazyBgHelper(){var run=function(){revealElementorLazyBgs();};afterDomReady(run,0);afterDomReady(run,250);afterLoad(run,0);var scheduled=false;var queue=function(){if(scheduled){return;}scheduled=true;var cb=function(){scheduled=false;run();};if(window.requestAnimationFrame){window.requestAnimationFrame(cb);}else{setTimeout(cb,80);}};['scroll','resize','orientationchange','touchstart','pointerdown'].forEach(function(evt){window.addEventListener(evt,queue,{passive:true});});}counts();mark('loader','active');mark('policy','third-party-after-load');mark('started-ms',started);mark('parallel-mode','uncapped');mark('auto-local-mode',localAutoMode);mark('auto-local-delay-ms',localAutoDelayMs);scheduleElementorLazyBgHelper();['scroll','mousemove','touchstart','keydown','click','pointerdown'].forEach(function(evt){window.addEventListener(evt,triggerAll,{passive:true,once:true});});if(localAutoMode==='custom'){afterDomReady(triggerLocal,localAutoDelayMs);setTimeout(function(){if(document.readyState==='complete'){triggerLocal();}},localAutoFallbackMs);}afterLoad(triggerThirdParty,relief?4500:2500);setTimeout(function(){if(document.readyState==='complete'){triggerThirdParty();}},relief?18000:12000);}());</script>
+<script id="ucwp-delayed-loader" data-ucwp-loader-policy="unified-auto-start" data-ucwp-relief="__UCWP_RELIEF__" data-ucwp-ready-barrier="1" data-ucwp-parallel-loader="1">(function(){if(window.__ucwpDelayLoader){return;}window.__ucwpDelayLoader=1;var relief=__UCWP_RELIEF__;var autoEvents=__UCWP_AUTO_EVENTS__;var autoAfterLoad=__UCWP_AUTO_AFTER_LOAD__;var autoDelayMs=__UCWP_AUTO_DELAY_MS__;var allDone=false;var started=Date.now?Date.now():0;var readyActive=false;var readyHooked=false;var readyQueue=[];var readyOriginal=null;function root(){return document.documentElement||document.body||document.head;}function mark(k,v){try{var r=root();if(r){r.setAttribute('data-ucwp-delay-'+k,String(v));}}catch(e){}}function qa(){return Array.prototype.slice.call(document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src],script[type="text/ucwp-delayed-js"][data-ucwp-inline="1"]'));}function c(n,a){var v=n&&n.getAttribute?n.getAttribute('data-ucwp-'+a):'';return v||'';}function counts(){var all=qa(),tp=0,local=0;for(var i=0;i<all.length;i++){var r=c(all[i],'delay-reason');if(r==='safe-third-party'||r==='functional-third-party'||r==='all-third-party'){tp++;}else{local++;}}mark('queued',all.length);mark('queued-local',local);mark('queued-thirdparty',tp);}function decodeAttrs(node){var raw=c(node,'attrs');var attrs={};if(raw){try{attrs=JSON.parse(atob(raw))||{};}catch(e){attrs={};}}['id','crossorigin','referrerpolicy','integrity','nonce'].forEach(function(attr){var val=c(node,attr);if(val&&!attrs[attr]){attrs[attr]=val;}});return attrs;}function applyAttrs(s,node){var attrs=decodeAttrs(node);Object.keys(attrs).forEach(function(attr){var val=attrs[attr];if(!attr||attr==='src'||attr==='async'||attr==='defer'||attr==='data-wp-strategy'||val===null||typeof val==='undefined'){return;}try{s.setAttribute(attr,String(val));}catch(e){}});}function idle(cb){if(!relief){cb();return;}if('requestIdleCallback' in window){window.requestIdleCallback(cb,{timeout:1200});return;}setTimeout(cb,60);}function wait(ms,cb){if(!relief||ms<=0){cb();return;}setTimeout(cb,ms);}function emit(name,detail){try{window.dispatchEvent(new CustomEvent(name,{detail:detail||{}}));}catch(e){}}function tryHookReady(){var jq=window.jQuery;if(!readyActive||readyHooked||!jq||!jq.fn||typeof jq.fn.ready!=='function'){return;}readyOriginal=jq.fn.ready;jq.fn.ready=function(fn){if(readyActive&&typeof fn==='function'){readyQueue.push({fn:fn});mark('ready-held',readyQueue.length);return this;}return readyOriginal.apply(this,arguments);};readyHooked=true;mark('ready-hooked','1');}function beginReadyHold(){readyActive=true;mark('ready-hold','1');tryHookReady();}function flushReadyHold(){tryHookReady();readyActive=false;var jq=window.jQuery;if(readyHooked&&jq&&jq.fn&&readyOriginal){try{jq.fn.ready=readyOriginal;}catch(e){}}readyHooked=false;mark('ready-hold','0');mark('ready-flush-count',readyQueue.length);var queue=readyQueue.slice(0);readyQueue=[];emit('ucwp:delayed-jquery-ready-flush',{mode:'all',count:queue.length});for(var i=0;i<queue.length;i++){try{queue[i].fn.call(document,jq);}catch(err){setTimeout((function(e){return function(){throw e;};})(err),0);}}}function insertAndRemove(node,s){if(node.parentNode){node.parentNode.insertBefore(s,node);node.parentNode.removeChild(node);}else{(document.head||document.body||document.documentElement).appendChild(s);}}function isInlineNode(node){return node&&node.getAttribute('data-ucwp-inline')==='1';}function isExternalNode(node){return node&&node.getAttribute('data-ucwp-src')&&!isInlineNode(node);}function loadInline(node,done){if(!node||node.getAttribute('data-ucwp-loading')==='1'||node.getAttribute('data-ucwp-loaded')==='1'){done();return;}node.setAttribute('data-ucwp-loading','1');var s=document.createElement('script');applyAttrs(s,node);try{s.text=node.textContent||'';}catch(e){s.text='';}insertAndRemove(node,s);tryHookReady();node.setAttribute('data-ucwp-loaded','1');done();}function loadExternalGroup(list,start,done){var end=start;var group=[];while(end<list.length&&isExternalNode(list[end])&&list[end].getAttribute('data-ucwp-loading')!=='1'&&list[end].getAttribute('data-ucwp-loaded')!=='1'){group.push(list[end]);end++;}if(!group.length){done(start+1);return;}var completed=0;mark('parallel-loader','0');mark('parallel-mode','ordered');mark('all-ordered-group-size',group.length);function loadOne(pos){if(pos>=group.length){done(end);return;}var node=group[pos];node.setAttribute('data-ucwp-loading','1');var src=node.getAttribute('data-ucwp-src');var s=document.createElement('script');var finished=false;applyAttrs(s,node);s.async=false;function finish(){if(finished){return;}finished=true;tryHookReady();node.setAttribute('data-ucwp-loaded','1');completed++;mark('all-ordered-completed',completed);loadOne(pos+1);}s.onload=finish;s.onerror=finish;s.src=src;insertAndRemove(node,s);}loadOne(0);}function load(list,i){while(i<list.length&&(list[i].getAttribute('data-ucwp-loaded')==='1'||list[i].getAttribute('data-ucwp-loading')==='1')){i++;}if(i>=list.length){flushReadyHold();mark('all-done','1');emit('ucwp:delayed-scripts-done',{mode:'all',count:list.length});return;}if(isInlineNode(list[i])){idle(function(){loadInline(list[i],function(){wait(relief?30:0,function(){load(list,i+1);});});});return;}if(isExternalNode(list[i])){idle(function(){loadExternalGroup(list,i,function(next){wait(relief?30:0,function(){load(list,next);});});});return;}load(list,i+1);}function run(){counts();var list=qa().filter(function(n){return n&&n.getAttribute('data-ucwp-loading')!=='1'&&n.getAttribute('data-ucwp-loaded')!=='1';});if(!list.length){mark('all-done','empty');return;}mark('all-started','1');mark('all-count',list.length);beginReadyHold();emit('ucwp:delayed-scripts-start',{mode:'all',count:list.length});load(list,0);}function triggerAll(){if(allDone){return;}allDone=true;run();}function afterDomReady(cb,delay){if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',function(){setTimeout(cb,delay||0);},{once:true});}else{setTimeout(cb,delay||0);}}function afterLoad(cb,delay){if(document.readyState==='complete'){setTimeout(cb,delay||0);return;}window.addEventListener('load',function(){setTimeout(cb,delay||0);},{once:true});}function hasElementorInlineBg(n){try{return !!(n&&n.querySelector&&n.querySelector('[style*="background-image"],[style*="background:"]'));}catch(e){return false;}}function revealElementorLazyBgs(){try{var vh=Math.max(window.innerHeight||0,600);var parents=Array.prototype.slice.call(document.querySelectorAll('.e-con.e-parent:not(.e-lazyloaded):not(.e-no-lazyload)'));var checked=0,revealed=0;for(var i=0;i<parents.length&&checked<80;i++){var n=parents[i];checked++;if(!hasElementorInlineBg(n)){continue;}var r=n.getBoundingClientRect?n.getBoundingClientRect():{top:0,bottom:0};if(i<3||(r.top<vh*2&&r.bottom>-vh)){n.classList.add('e-lazyloaded');n.setAttribute('data-ucwp-elementor-bg-lazy-class','1');revealed++;}}mark('elementor-bg-lazy-checked',checked);mark('elementor-bg-lazy-revealed',revealed);}catch(e){mark('elementor-bg-lazy-error','1');}}function scheduleElementorLazyBgHelper(){var run=function(){revealElementorLazyBgs();};afterDomReady(run,0);afterDomReady(run,250);afterLoad(run,0);var scheduled=false;var queue=function(){if(scheduled){return;}scheduled=true;var cb=function(){scheduled=false;run();};if(window.requestAnimationFrame){window.requestAnimationFrame(cb);}else{setTimeout(cb,80);}};['scroll','resize','orientationchange','touchstart','pointerdown'].forEach(function(evt){window.addEventListener(evt,queue,{passive:true});});}counts();mark('loader','active');mark('policy','unified-auto-start');mark('started-ms',started);mark('parallel-mode','ordered');mark('auto-delay-ms',autoDelayMs);mark('auto-after-load',autoAfterLoad);mark('auto-events',autoEvents.join(','));scheduleElementorLazyBgHelper();if(autoEvents&&autoEvents.length){autoEvents.forEach(function(evt){window.addEventListener(evt,triggerAll,{passive:true,once:true});});}if(autoAfterLoad){afterLoad(triggerAll,0);}if(autoDelayMs>=0){afterDomReady(triggerAll,autoDelayMs);}}());</script>
 UCWP_DELAY_LOADER;
             $loader = str_replace(
-                array('__UCWP_RELIEF__', '__UCWP_LOCAL_AUTO_MODE__', '__UCWP_LOCAL_AUTO_MS__', '__UCWP_LOCAL_FALLBACK_MS__'),
-                array($main_thread_relief, wp_json_encode($local_auto_mode), (string) $local_auto_ms, (string) $local_auto_fallback_ms),
+                array('__UCWP_RELIEF__', '__UCWP_AUTO_EVENTS__', '__UCWP_AUTO_AFTER_LOAD__', '__UCWP_AUTO_DELAY_MS__'),
+                array($main_thread_relief, wp_json_encode($auto_events), $auto_after_load, (string) $auto_ms),
                 $loader
             );
             // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Static inline loader script with a validated numeric placeholder.
@@ -4007,6 +4081,7 @@ UCWP_DELAY_LOADER;
             }
 
             $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
+            $protected_indexes = $this->get_user_excluded_script_dependency_indexes($records, $settings);
             $replacements = array();
             foreach ($records as $index => $record) {
                 if (empty($record['has_src']) || '' === $record['src']) {
@@ -4014,7 +4089,7 @@ UCWP_DELAY_LOADER;
                 }
 
                 $record_group = isset($record['group']) ? (string) $record['group'] : '';
-                if ($this->script_record_matches_user_defer_exclusion($record, $settings) || ('' !== $record_group && !empty($protected_groups[$record_group]))) {
+                if (isset($protected_indexes[(int) $index]) || $this->script_record_matches_user_defer_exclusion($record, $settings) || ('' !== $record_group && !empty($protected_groups[$record_group]))) {
                     continue;
                 }
 
@@ -4035,7 +4110,7 @@ UCWP_DELAY_LOADER;
                         continue;
                     }
                     $inline_group = isset($inline_record['group']) ? (string) $inline_record['group'] : '';
-                    if ('' !== $inline_group && !empty($protected_groups[$inline_group])) {
+                    if (isset($protected_indexes[(int) $inline_index]) || ('' !== $inline_group && !empty($protected_groups[$inline_group]))) {
                         continue;
                     }
                     if ('' === $inline_record['group'] || $inline_record['group'] !== $record['group']) {
@@ -4053,7 +4128,7 @@ UCWP_DELAY_LOADER;
                     continue;
                 }
                 $inline_group = isset($inline_record['group']) ? (string) $inline_record['group'] : '';
-                if ($this->script_record_matches_user_defer_exclusion($inline_record, $settings) || ('' !== $inline_group && !empty($protected_groups[$inline_group]))) {
+                if (isset($protected_indexes[(int) $inline_index]) || $this->script_record_matches_user_defer_exclusion($inline_record, $settings) || ('' !== $inline_group && !empty($protected_groups[$inline_group]))) {
                     continue;
                 }
                 if (!$this->is_delayable_inline_script_tag($inline_record['tag'])) {

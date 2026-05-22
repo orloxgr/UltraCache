@@ -1,3 +1,14 @@
+= 2.58.80 =
+* Unified Delayed JS auto-start controls now apply one trigger/fallback scheduler to all delayed JS features. Delay all JS is an ON/OFF switch.
+
+
+= 2.58.80 =
+* Fix JS Delay ordered execution so delayed external scripts execute serially in DOM order while preserving safe download behavior.
+* Keep inline consumer/config blocks attached to explicitly excluded provider scripts out of the delayed queue.
+* Clean up internal diagnostic copy that exposed development wording in runtime-scan results.
+2.58.80 - LCP Boundary Delay now checks visible JS Delay / Defer Exclusions before converting scripts.
+- Replaced the Google Fonts resource hint fallback host regex with deterministic non-regex parsing to avoid PHP preg_replace warnings on partial/relative hint values.
+
 2.58.76 - JS diagnostic queue DB compliance fix
 - Replaced interpolated JS diagnostic queue table SQL with prepared identifier placeholders.
 - Added targeted object-cache reads and invalidation for JS diagnostic queue job/status lookups.

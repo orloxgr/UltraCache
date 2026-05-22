@@ -37,6 +37,12 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'jsFullSiteStrategy'         => 'off',
                 'delayedLocalJsAutoStart'  => 'custom',
                 'delayedLocalJsAutoStartSeconds' => 1,
+                'delayedJsAutostartAfterLoadEnabled' => false,
+                'delayedJsAutostartMousemoveEnabled' => true,
+                'delayedJsAutostartScrollEnabled' => true,
+                'delayedJsAutostartClickEnabled' => true,
+                'delayedJsAutostartTouchPointerEnabled' => true,
+                'delayedJsAutostartKeyboardEnabled' => true,
                 'delayAllThirdPartyJsEnabled' => false,
                 'deferJsForceList'           => '',
                 'deferJsExcludeList'         => implode("\n", self::get_default_js_delay_defer_exclusion_patterns()),
@@ -1432,7 +1438,10 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['unsafeCacheCookieList']     = self::sanitize_cookie_pattern_setting($settings['unsafeCacheCookieList']);
             $settings['jsFullSiteStrategy'] = in_array((string) ($settings['jsFullSiteStrategy'] ?? ''), array('off', 'delay_all'), true) ? (string) $settings['jsFullSiteStrategy'] : $defaults['jsFullSiteStrategy'];
             $settings['delayedLocalJsAutoStart'] = in_array((string) ($settings['delayedLocalJsAutoStart'] ?? $defaults['delayedLocalJsAutoStart']), array('interaction', 'custom'), true) ? (string) $settings['delayedLocalJsAutoStart'] : $defaults['delayedLocalJsAutoStart'];
-            $settings['delayedLocalJsAutoStartSeconds'] = self::sanitize_bounded_number_setting($settings['delayedLocalJsAutoStartSeconds'] ?? $defaults['delayedLocalJsAutoStartSeconds'], $defaults['delayedLocalJsAutoStartSeconds'], 0.1, 9);
+            $settings['delayedLocalJsAutoStartSeconds'] = self::sanitize_bounded_number_setting($settings['delayedLocalJsAutoStartSeconds'] ?? $defaults['delayedLocalJsAutoStartSeconds'], $defaults['delayedLocalJsAutoStartSeconds'], 0.05, 5);
+            foreach (array('delayedJsAutostartAfterLoadEnabled', 'delayedJsAutostartMousemoveEnabled', 'delayedJsAutostartScrollEnabled', 'delayedJsAutostartClickEnabled', 'delayedJsAutostartTouchPointerEnabled', 'delayedJsAutostartKeyboardEnabled') as $delayed_js_trigger_key) {
+                $settings[$delayed_js_trigger_key] = !empty($settings[$delayed_js_trigger_key]);
+            }
             $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
             $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
             // Existing installs keep their saved visible JS Delay / Defer Exclusions.
@@ -1796,7 +1805,13 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'defer_all_js'                 => $defer_all_js_enabled,
                 'delay_all_js'                 => $delay_all_js_enabled,
                 'delayed_local_js_auto_start' => in_array((string) ($ui['delayedLocalJsAutoStart'] ?? 'custom'), array('interaction', 'custom'), true) ? (string) ($ui['delayedLocalJsAutoStart'] ?? 'custom') : 'custom',
-                'delayed_local_js_auto_start_seconds' => self::sanitize_bounded_number_setting($ui['delayedLocalJsAutoStartSeconds'] ?? 1, 1, 0.1, 9),
+                'delayed_local_js_auto_start_seconds' => self::sanitize_bounded_number_setting($ui['delayedLocalJsAutoStartSeconds'] ?? 1, 1, 0.05, 5),
+                'delayed_js_autostart_after_load' => !empty($ui['delayedJsAutostartAfterLoadEnabled']),
+                'delayed_js_autostart_mousemove' => !empty($ui['delayedJsAutostartMousemoveEnabled']),
+                'delayed_js_autostart_scroll' => !empty($ui['delayedJsAutostartScrollEnabled']),
+                'delayed_js_autostart_click' => !empty($ui['delayedJsAutostartClickEnabled']),
+                'delayed_js_autostart_touch_pointer' => !empty($ui['delayedJsAutostartTouchPointerEnabled']),
+                'delayed_js_autostart_keyboard' => !empty($ui['delayedJsAutostartKeyboardEnabled']),
                 'defer_stage_safe'             => $defer_stage_safe,
                 'defer_stage_balanced'         => $defer_stage_balanced,
                 'defer_stage_aggressive'       => $defer_stage_aggressive,

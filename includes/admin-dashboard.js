@@ -72,6 +72,12 @@
 		'jsFullSiteStrategy',
 		'delayedLocalJsAutoStart',
 		'delayedLocalJsAutoStartSeconds',
+		'delayedJsAutostartAfterLoadEnabled',
+		'delayedJsAutostartMousemoveEnabled',
+		'delayedJsAutostartScrollEnabled',
+		'delayedJsAutostartClickEnabled',
+		'delayedJsAutostartTouchPointerEnabled',
+		'delayedJsAutostartKeyboardEnabled',
 		'deferJsForceList',
 		'deferJsExcludeList',
 		'delaySafeThirdPartyJsEnabled',
@@ -248,7 +254,7 @@
 	const PERFORMANCE_PROFILES = {
 		off: { label: __("All Off", 'ultracache'), description: __("Disable optimization modules managed by profiles. Diagnostic counters, Automation & Scheduling, and Varnish settings are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, debugHeadersEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
-			deferJsEnabled: false, deferAllJsEnabled: false, jsFullSiteStrategy: 'off', delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: 1, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
+			deferJsEnabled: false, deferAllJsEnabled: false, jsFullSiteStrategy: 'off', delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: 1, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: true, delayedJsAutostartScrollEnabled: true, delayedJsAutostartClickEnabled: true, delayedJsAutostartTouchPointerEnabled: true, delayedJsAutostartKeyboardEnabled: true, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
 			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false, cacheSafeTrackingCookiesEnabled: false, varnishCliEnabled: false,
@@ -277,7 +283,7 @@
 			deferAllJsEnabled: false,
 			jsFullSiteStrategy: 'off',
 			delayedLocalJsAutoStart: 'custom',
-			delayedLocalJsAutoStartSeconds: 1,
+			delayedLocalJsAutoStartSeconds: 1, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: true, delayedJsAutostartScrollEnabled: true, delayedJsAutostartClickEnabled: true, delayedJsAutostartTouchPointerEnabled: true, delayedJsAutostartKeyboardEnabled: true,
 			deferJsForceList: "",
 			deferJsExcludeList: "",
 			delaySafeThirdPartyJsEnabled: true,
@@ -373,7 +379,7 @@
 			deferAllJsEnabled: false,
 			jsFullSiteStrategy: 'off',
 			delayedLocalJsAutoStart: 'custom',
-			delayedLocalJsAutoStartSeconds: 1,
+			delayedLocalJsAutoStartSeconds: 1, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: true, delayedJsAutostartScrollEnabled: true, delayedJsAutostartClickEnabled: true, delayedJsAutostartTouchPointerEnabled: true, delayedJsAutostartKeyboardEnabled: true,
 			deferJsForceList: "",
 			deferJsExcludeList: "",
 			delaySafeThirdPartyJsEnabled: true,
@@ -469,7 +475,7 @@
 			deferAllJsEnabled: false,
 			jsFullSiteStrategy: 'delay_all',
 			delayedLocalJsAutoStart: 'custom',
-			delayedLocalJsAutoStartSeconds: 1,
+			delayedLocalJsAutoStartSeconds: 1, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: true, delayedJsAutostartScrollEnabled: true, delayedJsAutostartClickEnabled: true, delayedJsAutostartTouchPointerEnabled: true, delayedJsAutostartKeyboardEnabled: true,
 			deferJsForceList: "",
 			deferJsExcludeList: "/wp-includes/js/jquery/jquery.min.js\n/wp-includes/js/jquery/jquery-migrate.min.js\n/wp-includes/js/underscore.min.js\n/wp-includes/js/wp-util.min.js\n/wp-includes/js/dist/i18n.min.js\n/wp-includes/js/dist/hooks.min.js\n/wp-includes/js/dist/api-fetch.min.js\n/wp-includes/js/api-request.min.js\n/wp-includes/js/dist/dom-ready.min.js",
 			delaySafeThirdPartyJsEnabled: true,
@@ -2760,7 +2766,7 @@
 
 		return h('div', { className: 'uc-field-wrap', style: { gridColumn: '1 / -1' } }, [
 			h('label', { className: 'uc-field-label' }, __('JS Delay / Defer Exclusions', 'ultracache')),
-			h('div', { className: 'text-xs text-zinc-500 mb-2' }, __('Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, JavaScript full-site strategy, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Delay, and Main Thread Relief where applicable. Append Tested Dependency Defaults adds only the tested dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.', 'ultracache')),
+			h('div', { className: 'text-xs text-zinc-500 mb-2' }, __('Optional newline-separated handle or URL fragments. UltraCache uses this visible/editable safeguard list for Safe Defer JS, Delay all JS, Delay safe/known functional/all third-party JS, Delay non-critical/local JS, LCP Boundary Delay, and Main Thread Relief where applicable. Append Tested Dependency Defaults adds only the tested dependency-safety floor here; broad slider/theme/WooCommerce/Elementor/tracking protections are not added by default. UltraCache does not silently apply recommended defaults when this box is empty or user-edited. Scan suggestions are appended only if missing; existing custom lines are preserved.', 'ultracache')),
 			h('textarea', {
 				className: 'uc-field-input uc-field-textarea',
 				value: draft,
@@ -8620,17 +8626,13 @@ h(ToggleRow, {
 									disabled: busy,
 									key: 'defer-stage-one',
 								}),
-h(SelectField, {
-									label: __("JavaScript full-site strategy", 'ultracache'),
-									description: __("Choose whether UltraCache should apply a full-site delayed JavaScript strategy. Off applies no full-site delay rule. Delay all eligible JS uses the UltraCache delayed loader with ordered execution, interaction triggers, jQuery ready barrier, and Elementor lazy background compatibility. Native full-site Defer all was removed because it is unsafe for many WordPress inline/dependency chains.", 'ultracache'),
-									value: settings.jsFullSiteStrategy === 'delay_all' ? 'delay_all' : 'off',
-									onChange: (value) => updateSetting('jsFullSiteStrategy', value),
+h(ToggleRow, {
+									label: __("Delay all JS", 'ultracache'),
+									description: __("Delay all eligible JavaScript through the UltraCache ordered delayed loader. Visible JS Delay / Defer Exclusions always win and are not delayed.", 'ultracache'),
+									checked: settings.jsFullSiteStrategy === 'delay_all',
+									onChange: (value) => updateSetting('jsFullSiteStrategy', value ? 'delay_all' : 'off'),
 									disabled: busy,
-									options: [
-										{ value: 'off', label: __('Off', 'ultracache') },
-										{ value: 'delay_all', label: __('Delay all eligible JS', 'ultracache') },
-									],
-									key: 'js-full-site-strategy',
+									key: 'delay-all-js',
 								}),
 
 h(ToggleRow, {
@@ -8650,34 +8652,6 @@ h(ToggleRow, {
 									disabled: busy,
 									key: 'delay-safe-third-party-js',
 								}),
-h(SelectField, {
-											label: __("Delayed local JS auto-start", 'ultracache'),
-											description: __("Controls when local delayed scripts are released. Interaction only waits for mousemove, scroll, click, touch, pointer, or keyboard activity. Timed options also start the local batch automatically after DOM ready.", 'ultracache'),
-											value: (settings.delayedLocalJsAutoStart || 'custom') === 'interaction' ? 'interaction' : String(typeof settings.delayedLocalJsAutoStartSeconds !== 'undefined' ? settings.delayedLocalJsAutoStartSeconds : 1),
-											onChange: (value) => {
-												if (value === 'interaction') {
-													queueSettingsPatch({ delayedLocalJsAutoStart: 'interaction' });
-													return;
-												}
-												queueSettingsPatch({ delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: Number(value) });
-											},
-											disabled: busy || settings.jsFullSiteStrategy !== 'delay_all',
-											options: [
-												{ value: 'interaction', label: __('On interaction only', 'ultracache') },
-												{ value: '0.1', label: __('0.1 seconds', 'ultracache') },
-												{ value: '0.5', label: __('0.5 seconds', 'ultracache') },
-												{ value: '1', label: __('1 second', 'ultracache') },
-												{ value: '2', label: __('2 seconds', 'ultracache') },
-												{ value: '3', label: __('3 seconds', 'ultracache') },
-												{ value: '4', label: __('4 seconds', 'ultracache') },
-												{ value: '5', label: __('5 seconds', 'ultracache') },
-												{ value: '6', label: __('6 seconds', 'ultracache') },
-												{ value: '7', label: __('7 seconds', 'ultracache') },
-												{ value: '8', label: __('8 seconds', 'ultracache') },
-												{ value: '9', label: __('9 seconds', 'ultracache') },
-											],
-											key: 'delayed-local-js-auto-start-mode',
-										}),
 					h(ToggleRow, {
 						label: __("Delay non-critical/local JS", 'ultracache'),
 						description: __("Delay selected same-host enhancement scripts such as popups, sliders, filters, consent extras, marketing helpers, and other local footer scripts unless protected or excluded here.", 'ultracache'),
@@ -8702,6 +8676,37 @@ h(SelectField, {
 										disabled: busy,
 										key: 'delay-all-third-party-js',
 									}),
+
+h('div', { className: 'mt-4 pt-4 border-t border-white/5', key: 'delayed-js-auto-start-controls' }, [
+										h('div', { className: 'text-sm font-medium text-white' }, __("Delayed JS auto-start", 'ultracache')),
+										h('div', { className: 'text-xs text-zinc-500 mt-1 mb-3' }, __("Controls when all delayed JavaScript queues are released. Applies to Delay all JS, Delay non-critical/local JS, LCP Boundary Delay, known functional third-party delay, and all third-party delay.", 'ultracache')),
+										h('div', { className: 'grid gap-2', style: { gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' } }, [
+											h(ToggleField, { label: __("After page load", 'ultracache'), description: __("Release delayed JS on the window load event.", 'ultracache'), checked: !!settings.delayedJsAutostartAfterLoadEnabled, onChange: (value) => updateSetting('delayedJsAutostartAfterLoadEnabled', value), disabled: busy, key: 'delayed-js-trigger-load' }),
+											h(ToggleField, { label: __("Mouse move", 'ultracache'), description: __("Release delayed JS on mouse movement.", 'ultracache'), checked: !!settings.delayedJsAutostartMousemoveEnabled, onChange: (value) => updateSetting('delayedJsAutostartMousemoveEnabled', value), disabled: busy, key: 'delayed-js-trigger-mousemove' }),
+											h(ToggleField, { label: __("Scroll", 'ultracache'), description: __("Release delayed JS on scroll.", 'ultracache'), checked: !!settings.delayedJsAutostartScrollEnabled, onChange: (value) => updateSetting('delayedJsAutostartScrollEnabled', value), disabled: busy, key: 'delayed-js-trigger-scroll' }),
+											h(ToggleField, { label: __("Click", 'ultracache'), description: __("Release delayed JS on click.", 'ultracache'), checked: !!settings.delayedJsAutostartClickEnabled, onChange: (value) => updateSetting('delayedJsAutostartClickEnabled', value), disabled: busy, key: 'delayed-js-trigger-click' }),
+											h(ToggleField, { label: __("Touch / pointer", 'ultracache'), description: __("Release delayed JS on touchstart or pointerdown.", 'ultracache'), checked: !!settings.delayedJsAutostartTouchPointerEnabled, onChange: (value) => updateSetting('delayedJsAutostartTouchPointerEnabled', value), disabled: busy, key: 'delayed-js-trigger-touch-pointer' }),
+											h(ToggleField, { label: __("Keyboard", 'ultracache'), description: __("Release delayed JS on keydown.", 'ultracache'), checked: !!settings.delayedJsAutostartKeyboardEnabled, onChange: (value) => updateSetting('delayedJsAutostartKeyboardEnabled', value), disabled: busy, key: 'delayed-js-trigger-keyboard' }),
+										]),
+										h(SelectField, {
+											label: __("If no event happens, autostart JS after", 'ultracache'),
+											description: __("Fallback timer for all delayed JavaScript queues.", 'ultracache'),
+											value: String(typeof settings.delayedLocalJsAutoStartSeconds !== 'undefined' ? settings.delayedLocalJsAutoStartSeconds : 1),
+											onChange: (value) => queueSettingsPatch({ delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: Number(value) }),
+											disabled: busy,
+											options: [
+												{ value: '0.05', label: __('0.05 seconds', 'ultracache') },
+												{ value: '0.1', label: __('0.1 seconds', 'ultracache') },
+												{ value: '0.5', label: __('0.5 seconds', 'ultracache') },
+												{ value: '1', label: __('1 second', 'ultracache') },
+												{ value: '2', label: __('2 seconds', 'ultracache') },
+												{ value: '3', label: __('3 seconds', 'ultracache') },
+												{ value: '4', label: __('4 seconds', 'ultracache') },
+												{ value: '5', label: __('5 seconds', 'ultracache') },
+											],
+											key: 'delayed-js-auto-start-fallback',
+										}),
+									]),
 
 					]
 				),

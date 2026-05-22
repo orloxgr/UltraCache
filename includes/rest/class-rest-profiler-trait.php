@@ -2763,7 +2763,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             if (false !== strpos($text, 'wp is not defined') || false !== strpos($text, 'wp.')) {
                 $matched = true;
-                $reason = 'Browser runtime error points to a WordPress core JS dependency/global that executed out of order. UltraCache no longer suggests broad wp-* dependency handles here; the Safe Defer tested defaults cover the WordPress foundation paths. Runtime diagnostics only show exact resolved page scripts as review-only candidates.';
+                $reason = 'Browser runtime error points to a WordPress core dependency that executed before its provider. If the recommended dependency paths are already listed, this indicates a script execution-order issue rather than a missing exclusion.';
                 $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, $reason, $exclusions, 'wp-dependent direct source');
                 $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'wp-dependent resolved source', 'review', true);
                 $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'review');
@@ -2771,7 +2771,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             if (false !== strpos($text, 'react is not defined') || false !== strpos($text, "react' is not defined") || false !== strpos($text, "can't find variable: react") || false !== strpos($text, 'reactdom is not defined')) {
                 $matched = true;
-                $reason = 'Browser runtime error points to a React/ReactDOM dependency that executed out of order. UltraCache no longer suggests broad React/wp-element handles here; diagnostics only show exact resolved page scripts as review-only candidates.';
+                $reason = 'Browser runtime error points to a React dependency that executed before its provider. Review the exact source shown by the scanner; do not add broad framework handles blindly.';
                 $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, $reason, $exclusions, 'React dependent direct source');
                 $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'React dependent resolved source', 'review', true);
                 $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'review');
@@ -3320,7 +3320,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
 
                 if (false !== strpos($text, 'jquery is not defined') || preg_match('/\$ is not defined/', $text)) {
-                    $reason = 'Browser runtime error says jQuery was not available when an inline block or script executed. UltraCache no longer suggests broad jquery/jquery-core/jquery-migrate handles from diagnostics. The Safe Defer tested defaults cover the WordPress jQuery foundation paths; if an error remains, review the exact resolved failing source shown here.';
+                    $reason = 'Browser runtime error says jQuery was not available when an inline block or script executed. If the WordPress jQuery dependency paths are already listed, this indicates an execution-order issue rather than a missing exclusion.';
                     $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, $reason, $exclusions, 'jQuery dependent direct source');
                     $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'jQuery dependent resolved source', 'review', true);
                     $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'review');
@@ -3328,7 +3328,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
 
                 if (false !== strpos($text, 'wp is not defined')) {
-                    $reason = 'Browser runtime error says the WordPress wp global was not available. UltraCache no longer suggests broad wp-* dependency handles from diagnostics. The Safe Defer tested defaults cover the WordPress foundation paths; if an error remains, review the exact resolved failing source shown here.';
+                    $reason = 'Browser runtime error says a WordPress JavaScript global was not available. If the recommended WordPress dependency paths are already listed, this indicates an execution-order issue rather than a missing exclusion.';
                     $this->runtime_js_scan_add_direct_source_review_suggestion($suggestions, $seen, $source, $message, $reason, $exclusions, 'wp-dependent direct source');
                     $this->runtime_js_scan_add_script_source_resolution_suggestions($suggestions, $seen, $scripts, $source, $message, $reason, $exclusions, 'wp-dependent resolved source', 'review', true);
                     $this->runtime_js_scan_add_inline_stack_frame_suggestions($suggestions, $seen, $scripts, (string) $detail . "\n" . (string) $message, $message, $reason, $exclusions, 'review');
@@ -3338,7 +3338,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 if (preg_match('/(?:ReferenceError:\s*)?([A-Za-z_$][A-Za-z0-9_$.-]{2,})\s+is\s+not\s+defined/i', $message . ' ' . $detail, $missing_match)) {
                     $missing_symbol = sanitize_text_field((string) $missing_match[1]);
                     if ('' !== $missing_symbol && !$this->runtime_js_scan_is_generic_token($missing_symbol)) {
-                        $reason = 'Runtime Scan found a missing global/config object. UltraCache no longer appends the raw missing symbol as an exclusion. It only suggests exact provider scripts, resolved source paths, or review-only inline handles found in the scanned page inventory.';
+                        $reason = 'Runtime Scan found a missing global/config object. Only exact provider scripts, resolved source paths, or inline handles from the scanned page inventory are shown. Raw global names are not used as exclusions.';
                         if ($this->runtime_js_scan_add_html_adjacency_suggestions($suggestions, $seen, $missing_symbol, $scripts, $source, $message, $exclusions)) {
                             continue;
                         }

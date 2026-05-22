@@ -484,6 +484,52 @@ private function get_slider_hero_markup_markers()
             return false;
         }
 
+        private function get_lcp_boundary_visible_js_exclusion_fragments(array $settings = array())
+        {
+            $fragments = array();
+
+            foreach (array('defer_js_exclude_list', 'delay_non_critical_js_exclude_list') as $key) {
+                if (isset($settings[$key]) && is_array($settings[$key])) {
+                    $fragments = array_merge($fragments, $settings[$key]);
+                }
+            }
+
+            foreach (array('deferJsExcludeList', 'delayNonCriticalJsExcludeList') as $key) {
+                if (empty($settings[$key])) {
+                    continue;
+                }
+
+                $value = $settings[$key];
+                if (is_array($value)) {
+                    $fragments = array_merge($fragments, $value);
+                    continue;
+                }
+
+                foreach (preg_split('/\r\n|\r|\n/', (string) $value) as $line) {
+                    $fragments[] = $line;
+                }
+            }
+
+            $fragments = array_values(array_unique(array_filter(array_map('strval', $fragments), static function ($item) {
+                return '' !== trim((string) $item);
+            })));
+
+            return $fragments;
+        }
+
+        private function lcp_boundary_script_matches_visible_js_exclusions($handle, $src, $tag, array $settings = array())
+        {
+            $fragments = $this->get_lcp_boundary_visible_js_exclusion_fragments($settings);
+            if (empty($fragments)) {
+                return false;
+            }
+
+            return $this->script_matches_fragment_list_from_haystacks(
+                $this->build_js_exclusion_match_haystacks($handle, $src, $tag, ''),
+                $fragments
+            );
+        }
+
 
         private function should_delay_lcp_boundary_script($handle, $src, $tag, array $settings = array())
         {
@@ -497,6 +543,10 @@ private function get_slider_hero_markup_markers()
             }
 
             if (!$this->is_same_host_public_url($src)) {
+                return false;
+            }
+
+            if ($this->lcp_boundary_script_matches_visible_js_exclusions($handle, $src, $tag, $settings)) {
                 return false;
             }
 

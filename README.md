@@ -1,6 +1,6 @@
 # UltraCache
 
-Current version: **2.58.76**
+Current version: **2.58.80**
 
 UltraCache is a WordPress performance plugin with page cache, object-cache integration, AVIF/WebP media rewrite, CSS/font optimization, warm-up tools, Varnish helpers, and diagnostics.
 
