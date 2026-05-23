@@ -213,10 +213,9 @@ trait Ultra_Cache_Engine_Media_Image_Trait
                 return '';
             }
 
-            $content_path = rtrim((string) wp_parse_url(content_url('/'), PHP_URL_PATH), '/');
             $cache_prefixes = array(
-                $content_path . '/uploads/uc-images/avif/',
-                $content_path . '/uploads/uc-images/webp/',
+                function_exists('ucwp_optimized_images_storage_url_path') ? ucwp_optimized_images_storage_url_path('avif') : '',
+                function_exists('ucwp_optimized_images_storage_url_path') ? ucwp_optimized_images_storage_url_path('webp') : '',
             );
 
             $relative = '';

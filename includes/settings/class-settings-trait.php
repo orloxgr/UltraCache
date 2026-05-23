@@ -32,6 +32,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'mediaGenerateOnUploadEnabled' => false,
                 'mediaGenerateOnDemandEnabled' => false,
                 'mediaOutputMode'            => 'auto',
+                'javascriptStrategy'         => 'off',
                 'deferJsEnabled'             => false,
                 'delayAllJsEnabled'          => false,
                 'delayedLocalJsAutoStart'  => 'custom',
@@ -324,11 +325,21 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
         private static function get_default_js_delay_defer_exclusion_patterns()
         {
             /*
-             * Append Tested Dependency Defaults must expose only the tested
-             * WordPress foundation paths. Broad tokens such as jquery,
-             * jquery.min.js, wp-util, api-fetch, or /wp-includes/js/jquery/
-             * are intentionally excluded because they can catch unrelated
-             * plugin/theme scripts and weaken the JS optimization strategy.
+             * Visible default safety exclusion only. jQuery is the WordPress
+             * core provider for window.jQuery and prevents broad cascade
+             * failures when Delay/Defer is enabled. Other core dependencies
+             * remain scanner/error driven or manual broad-preset additions.
+             */
+            return array(
+                '/wp-includes/js/jquery/jquery.min.js',
+            );
+        }
+
+        private static function get_broad_wp_dependency_preset_patterns()
+        {
+            /*
+             * Manual compatibility preset only. These are not scanner results
+             * and are not silently applied as defaults.
              */
             return array(
                 '/wp-includes/js/jquery/jquery.min.js',
@@ -345,6 +356,11 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
 
         private static function get_default_safe_third_party_delay_patterns()
         {
+            /*
+             * User-editable matching fragments for scripts already present on
+             * the page. These defaults do not load, enqueue, fetch, or contact
+             * the listed third-party providers by themselves.
+             */
             return array(
                 'googletagmanager.com',
                 'google-analytics.com',
@@ -375,6 +391,11 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
 
         private static function get_default_functional_third_party_delay_patterns()
         {
+            /*
+             * User-editable matching fragments for already-present functional
+             * third-party scripts. These defaults are used for matching only;
+             * they do not add or contact those providers.
+             */
             return array(
                 'recaptcha',
                 'hcaptcha',
@@ -1046,7 +1067,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             );
 
             foreach ($targets as $basename => $label) {
-                $path = trailingslashit(WP_CONTENT_DIR) . $basename;
+                $path = ucwp_dropin_path($basename);
                 $exists = file_exists($path);
                 $contents = $exists ? (string) ucwp_safe_file_get_contents($path, 'cache drop-in conflict detection', true) : '';
                 $managed = $exists && false !== strpos($contents, 'UltraCache');
@@ -1229,7 +1250,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                     continue;
                 }
 
-                $path = trailingslashit(WP_CONTENT_DIR) . $basename;
+                $path = ucwp_dropin_path($basename);
                 if (!file_exists($path)) {
                     continue;
                 }
@@ -1355,6 +1376,12 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             return in_array($value, array('auto', 'avif', 'webp'), true) ? $value : 'auto';
         }
 
+        public static function sanitize_javascript_strategy($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('off', 'defer', 'delay'), true) ? $value : 'off';
+        }
+
         private static function normalize_boolean_setting_value($value, $default = false)
         {
             if (is_bool($value)) {
@@ -1406,6 +1433,13 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 }
             }
 
+            // JavaScript Strategy is the canonical UI model for the two base
+            // engine booleans. The other local/third-party/LCP delay controls
+            // remain independent and are intentionally not changed here.
+            $settings['javascriptStrategy'] = self::sanitize_javascript_strategy($settings['javascriptStrategy'] ?? $defaults['javascriptStrategy']);
+            $settings['deferJsEnabled'] = ('defer' === $settings['javascriptStrategy']);
+            $settings['delayAllJsEnabled'] = ('delay' === $settings['javascriptStrategy']);
+
             $settings['cronWarmPagesPerMinute']    = max(0, min(600, absint($settings['cronWarmPagesPerMinute'])));
             $settings['warmMenuLocation']          = sanitize_key((string) $settings['warmMenuLocation']);
             $settings['warmMenuDepth']             = in_array((string) $settings['warmMenuDepth'], array('1', '2', '3', 'all'), true) ? (string) $settings['warmMenuDepth'] : '';
@@ -1443,7 +1477,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
             $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
             // Existing installs keep their saved visible JS Delay / Defer Exclusions.
-            // Fresh installs receive the safe dependency-floor defaults in the
+            // Fresh installs receive the visible jQuery safety default in the
             // visible textarea; there are still no hidden safe-stage exclusions.
             $settings['deferJsExcludeList'] = self::normalize_textarea_setting($settings['deferJsExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = '';

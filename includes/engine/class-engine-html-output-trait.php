@@ -17,17 +17,23 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             if (false !== strpos($path, '/wp-includes/') || false !== strpos($path, '/wp-admin/')) {
                 return 'core';
             }
-            if (false !== strpos($path, '/wp-content/plugins/')) {
+
+            $generated_marker = function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path() : '';
+            if ('' !== $generated_marker && function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, $generated_marker)) {
+                return 'ultracache-cache';
+            }
+            $cache_marker = function_exists('ucwp_content_cache_storage_url') ? (string) wp_parse_url(ucwp_content_cache_storage_url(), PHP_URL_PATH) : '';
+            if ('' !== $cache_marker && function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, $cache_marker)) {
+                return 'ultracache-cache';
+            }
+            if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_plugins_public_path())) {
                 return 'plugin';
             }
-            if (false !== strpos($path, '/wp-content/themes/')) {
+            if (function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($path, ucwp_themes_public_paths())) {
                 return 'theme';
             }
-            if (false !== strpos($path, '/wp-content/uploads/')) {
+            if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_uploads_public_path())) {
                 return 'uploads';
-            }
-            if (false !== strpos($path, '/wp-content/cache/ultracache/')) {
-                return 'ultracache-cache';
             }
             return 'local';
         }
@@ -448,12 +454,6 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['google_fonts_swap'])) {
-                $html = $this->apply_html_rewrite_safely($html, 'local-font-display-patches', function ($html) {
-                    return $this->apply_local_font_display_patches_to_html($html);
-                });
-            }
-
             if ((!empty($settings['self_hosted_font_css_optimization']) || !empty($settings['delay_icon_fonts']) || !empty($settings['google_fonts_swap'])) && false !== stripos((string) $html, '.ttf')) {
                 $html = $this->apply_html_rewrite_safely($html, 'final-generic-ttf-font-face-cleanup', function ($html) {
                     return $this->rewrite_inline_font_face_ttf_sources_to_linked_woff2($html);
@@ -487,21 +487,9 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                     return $this->normalize_linked_local_stylesheet_font_display_in_html($html);
                 });
             }
-            if (!empty($settings['lazy_mailerlite_nonce'])) {
-                $html = $this->apply_html_rewrite_safely($html, 'lazy-mailerlite-nonce-refresh', function ($html) {
-                    return $this->inject_mailerlite_lazy_nonce_refresh($html);
-                });
-            }
-
             if (!empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js']) || !empty($settings['delay_all_third_party_js'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'delay-third-party-pattern-scripts', function ($html) use ($settings) {
                     return $this->delay_third_party_analytics_scripts_in_html($html, $settings);
-                });
-            }
-
-            if (!empty($settings['speculation_rules_enabled'])) {
-                $html = $this->apply_html_rewrite_safely($html, 'speculation-rules-prefetch', function ($html) use ($settings) {
-                    return $this->inject_speculation_rules_prefetch($html, $settings);
                 });
             }
 
@@ -567,7 +555,10 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                     }
 
                     $href_lc = strtolower(html_entity_decode($href, ENT_QUOTES | ENT_HTML5));
-                    $is_ucwp = false !== strpos($href_lc, '/wp-content/cache/ultracache/')
+                    $generated_marker = function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path() : '';
+                    $cache_marker = function_exists('ucwp_content_cache_storage_url') ? (string) wp_parse_url(ucwp_content_cache_storage_url(), PHP_URL_PATH) : '';
+                    $is_ucwp = ('' !== $cache_marker && false !== strpos($href_lc, strtolower($cache_marker)))
+                        || ('' !== $generated_marker && false !== strpos($href_lc, strtolower($generated_marker)))
                         || null !== $processor->get_attribute('data-ucwp-async-css')
                         || null !== $processor->get_attribute('data-ucwp-delayed-icon-fonts')
                         || null !== $processor->get_attribute('data-ucwp-css-async-reason')
@@ -614,198 +605,6 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             } catch (\Throwable $e) {
                 return $html;
             }
-        }
-
-        private function inject_mailerlite_lazy_nonce_refresh($html)
-        {
-            if (!is_string($html) || '' === $html || false === stripos($html, 'ml_create_nonce') || false === stripos($html, 'mailerlite')) {
-                return $html;
-            }
-
-            if (false !== strpos($html, 'data-ucwp-mailerlite-lazy-nonce="1"')) {
-                return $html;
-            }
-
-            $script = <<<'JS'
-<script data-ucwp-mailerlite-lazy-nonce="1">
-(function(){
-  if (window.__ucwpMailerLiteLazyNonceV1) { return; }
-  window.__ucwpMailerLiteLazyNonceV1 = true;
-
-  var realFetch = window.fetch;
-  if (typeof realFetch !== 'function') { return; }
-
-  var ajaxUrl = '';
-  var refreshStarted = false;
-
-  function toBodyString(body) {
-    try {
-      if (!body) { return ''; }
-      if (typeof body === 'string') { return body; }
-      if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) { return body.toString(); }
-      if (typeof FormData !== 'undefined' && body instanceof FormData) {
-        var parts = [];
-        body.forEach(function(value, key){ parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value))); });
-        return parts.join('&');
-      }
-    } catch (e) {}
-    return '';
-  }
-
-  function getRequestUrl(input) {
-    try {
-      if (typeof input === 'string') { return input; }
-      if (input && typeof input.url === 'string') { return input.url; }
-    } catch (e) {}
-    return '';
-  }
-
-  function isMailerLiteNonceRequest(input, init) {
-    var url = getRequestUrl(input);
-    var body = toBodyString(init && init.body ? init.body : '');
-    if (url.indexOf('admin-ajax.php') === -1) { return false; }
-    return body.indexOf('ml_create_nonce') !== -1 || body.indexOf('action=ml_create_nonce') !== -1 || body.indexOf('action%3Dml_create_nonce') !== -1;
-  }
-
-  function getNonceFromBody(body) {
-    var str = toBodyString(body);
-    var match = str.match(/(?:^|&)ml_nonce=([^&]*)/);
-    if (!match) { return ''; }
-    try { return decodeURIComponent(match[1].replace(/\+/g, ' ')); } catch (e) { return match[1]; }
-  }
-
-  function fakeNonceResponse(nonce) {
-    return Promise.resolve({
-      ok: true,
-      status: 200,
-      json: function(){ return Promise.resolve({ success: true, data: { ml_nonce: nonce || '' } }); },
-      text: function(){ return Promise.resolve('{"success":true,"data":{"ml_nonce":"' + String(nonce || '').replace(/"/g, '\\"') + '"}}'); }
-    });
-  }
-
-  function formLooksLikeMailerLite(form) {
-    if (!form || !form.querySelector || !form.querySelector('input[name="ml_nonce"]')) { return false; }
-    try {
-      return !!(form.closest('[id^="mailerlite-form_"]') || form.closest('[data-temp-id]') || form.querySelector('.mailerlite-subscribe-submit') || form.querySelector('[class*="mailerlite"]'));
-    } catch (e) {
-      return true;
-    }
-  }
-
-  function findFormFromTarget(target) {
-    try {
-      if (target && target.closest) {
-        var form = target.closest('form');
-        if (form && formLooksLikeMailerLite(form)) { return form; }
-      }
-    } catch (e) {}
-    return null;
-  }
-
-  function setSubmitDisabled(form, disabled) {
-    try {
-      var buttons = form.querySelectorAll('.mailerlite-subscribe-submit, button[type="submit"], input[type="submit"]');
-      for (var i = 0; i < buttons.length; i++) { buttons[i].disabled = !!disabled; }
-    } catch (e) {}
-  }
-
-  function refreshFormNonce(form) {
-    if (!formLooksLikeMailerLite(form)) { return Promise.resolve(false); }
-    if (form.__ucwpMlNonceRefreshing) { return form.__ucwpMlNonceRefreshing; }
-
-    var input = form.querySelector('input[name="ml_nonce"]');
-    if (!input) { return Promise.resolve(false); }
-
-    var url = ajaxUrl || (window.location.origin + '/wp-admin/admin-ajax.php');
-    var body = new URLSearchParams();
-    body.append('action', 'ml_create_nonce');
-    body.append('ml_nonce', input.value || '');
-
-    form.__ucwpMlNonceRefreshing = realFetch.call(window, url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body
-    }).then(function(response){
-      return response.json();
-    }).then(function(json){
-      if (json && json.success && json.data && json.data.ml_nonce) {
-        input.value = json.data.ml_nonce;
-        form.__ucwpMlNonceReady = true;
-        setSubmitDisabled(form, false);
-        return true;
-      }
-      return false;
-    }).catch(function(){
-      return false;
-    }).then(function(ok){
-      form.__ucwpMlNonceRefreshing = null;
-      return ok;
-    });
-
-    return form.__ucwpMlNonceRefreshing;
-  }
-
-  window.fetch = function(input, init) {
-    if (isMailerLiteNonceRequest(input, init || {})) {
-      ajaxUrl = getRequestUrl(input) || ajaxUrl;
-      var oldNonce = getNonceFromBody(init && init.body ? init.body : '');
-      return fakeNonceResponse(oldNonce);
-    }
-    return realFetch.apply(this, arguments);
-  };
-
-  function maybeRefreshFromInteraction(event) {
-    var form = findFormFromTarget(event && event.target ? event.target : null);
-    if (!form || form.__ucwpMlNonceReady || refreshStarted) { return; }
-    refreshStarted = true;
-    refreshFormNonce(form).then(function(){ refreshStarted = false; });
-  }
-
-  document.addEventListener('focusin', maybeRefreshFromInteraction, true);
-  document.addEventListener('pointerdown', maybeRefreshFromInteraction, true);
-  document.addEventListener('touchstart', maybeRefreshFromInteraction, true);
-  document.addEventListener('keydown', maybeRefreshFromInteraction, true);
-
-  document.addEventListener('submit', function(event){
-    var form = event && event.target ? event.target : null;
-    if (!formLooksLikeMailerLite(form) || form.__ucwpMlNonceReady) { return; }
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    setSubmitDisabled(form, true);
-
-    refreshFormNonce(form).then(function(ok){
-      if (!ok) {
-        setSubmitDisabled(form, false);
-        return;
-      }
-      setTimeout(function(){
-        if (typeof form.requestSubmit === 'function') {
-          form.requestSubmit();
-        } else {
-          var submitEvent = document.createEvent('Event');
-          submitEvent.initEvent('submit', true, true);
-          form.dispatchEvent(submitEvent);
-        }
-      }, 0);
-    });
-  }, true);
-})();
-</script>
-JS;
-
-            if (preg_match('/<script\b[^>]*>[\s\S]*?ml_create_nonce[\s\S]*?<\/script>/i', $html, $match, PREG_OFFSET_CAPTURE)) {
-                $offset = isset($match[0][1]) ? (int) $match[0][1] : -1;
-                if ($offset >= 0) {
-                    return substr($html, 0, $offset) . $script . "\n" . substr($html, $offset);
-                }
-            }
-
-            if (false !== stripos($html, '</head')) {
-                return $this->insert_html_before_closing_head($html, $script);
-            }
-
-            return $script . "\n" . $html;
         }
 
         private function apply_critical_request_chain_relief($html, array $settings = array())
@@ -1082,38 +881,67 @@ JS;
                 || false !== strpos($haystack, 'woocommerce-account');
         }
 
-        private function inject_speculation_rules_prefetch($html, array $settings = array())
+        /**
+         * Configure WordPress Core speculative loading from the UltraCache setting.
+         *
+         * WordPress 6.8+ owns the actual speculation rules output.
+         * UltraCache only adjusts the configuration through Core filters so the
+         * reviewer-sensitive raw frontend script injection path is avoided.
+         *
+         * @param array<string, string>|null $config Core speculative loading configuration.
+         * @return array<string, string>|null
+         */
+        public function filter_speculation_rules_configuration($config)
         {
-            if (!$this->should_inject_speculation_rules_prefetch($html, $settings)) {
-                return $html;
+            $settings = $this->get_settings();
+            if (!$this->should_enable_speculation_rules_prefetch_for_request($settings)) {
+                return $config;
             }
 
-            if (false !== stripos($html, 'type="speculationrules"') || false !== stripos($html, "type='speculationrules'")) {
-                return $html;
+            // Respect Core-disabled contexts such as sites without pretty permalinks.
+            if (!is_array($config)) {
+                return $config;
             }
 
-            $rules = $this->build_speculation_rules_prefetch_config($settings);
-            if (empty($rules)) {
-                return $html;
-            }
+            $config['mode'] = 'prefetch';
+            $config['eagerness'] = 'moderate';
 
-            $json = ucwp_json_encode_for_inline_script($rules, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            if ('' === $json) {
-                return $html;
-            }
-
-            $script = '<script type="speculationrules">' . $json . '</script>';
-
-            return $this->insert_html_before_closing_head($html, $script);
+            return $config;
         }
 
-        private function should_inject_speculation_rules_prefetch($html, array $settings = array())
+        /**
+         * Add UltraCache's visible path exclusions to Core speculative loading.
+         *
+         * @param string[] $href_exclude_paths Existing additional exclude paths.
+         * @param string   $mode               Speculative loading mode.
+         * @return string[]
+         */
+        public function filter_speculation_rules_href_exclude_paths($href_exclude_paths, $mode = 'prefetch')
         {
-            if (empty($settings['speculation_rules_enabled'])) {
-                return false;
+            $settings = $this->get_settings();
+            if (!$this->should_enable_speculation_rules_prefetch_for_request($settings)) {
+                return is_array($href_exclude_paths) ? $href_exclude_paths : array();
             }
 
-            if (!is_string($html) || '' === $html || false === stripos($html, '</head>')) {
+            $paths = is_array($href_exclude_paths) ? $href_exclude_paths : array();
+            foreach ($this->get_speculation_rules_prefetch_exclude_paths($settings) as $path) {
+                $paths[] = $path;
+            }
+
+            $paths = array_filter(array_map('strval', $paths));
+
+            return array_values(array_unique($paths));
+        }
+
+        /**
+         * Determine whether UltraCache should tune Core speculative loading.
+         *
+         * @param array<string, mixed> $settings Runtime settings.
+         * @return bool
+         */
+        private function should_enable_speculation_rules_prefetch_for_request(array $settings = array())
+        {
+            if (empty($settings['speculation_rules_enabled'])) {
                 return false;
             }
 
@@ -1144,24 +972,20 @@ JS;
             return true;
         }
 
-        private function build_speculation_rules_prefetch_config(array $settings = array())
+        /**
+         * Build additional path exclusions for WordPress Core speculative loading.
+         *
+         * @param array<string, mixed> $settings Runtime settings.
+         * @return string[]
+         */
+        private function get_speculation_rules_prefetch_exclude_paths(array $settings = array())
         {
-            $conditions = array(
-                array('href_matches' => '/*'),
-                array('not' => array('href_matches' => '/wp-admin/*')),
-                array('not' => array('href_matches' => '/wp-login.php*')),
-                array('not' => array('href_matches' => '/cart/*')),
-                array('not' => array('href_matches' => '/checkout/*')),
-                array('not' => array('href_matches' => '/my-account/*')),
-                array('not' => array('href_matches' => '/wc-api/*')),
-                array('not' => array('href_matches' => '/logout*')),
-                array('not' => array('href_matches' => '/*\?*')),
-                array('not' => array('selector_matches' => '[rel~=nofollow]')),
-                array('not' => array('selector_matches' => '[target]')),
-                array('not' => array('selector_matches' => '[download]')),
-                array('not' => array('selector_matches' => '.no-speculate')),
-                array('not' => array('selector_matches' => '.no-prerender')),
-                array('not' => array('selector_matches' => '.ajax_add_to_cart')),
+            $paths = array(
+                '/cart/*',
+                '/checkout/*',
+                '/my-account/*',
+                '/wc-api/*',
+                '/logout*',
             );
 
             $excluded_paths = array();
@@ -1170,25 +994,13 @@ JS;
             }
 
             foreach ($excluded_paths as $path) {
-                $path = trim((string) $path);
-                if ('' === $path || '/' === $path) {
-                    continue;
-                }
-
                 $pattern = $this->convert_path_to_speculation_href_pattern($path);
                 if ('' !== $pattern) {
-                    $conditions[] = array('not' => array('href_matches' => $pattern));
+                    $paths[] = $pattern;
                 }
             }
 
-            return array(
-                'prefetch' => array(
-                    array(
-                        'where'     => array('and' => $conditions),
-                        'eagerness' => 'moderate',
-                    ),
-                ),
-            );
+            return array_values(array_unique($paths));
         }
 
         private function convert_path_to_speculation_href_pattern($path)
@@ -1445,33 +1257,7 @@ private function html_tag_processor_available()
 
         private function normalize_public_resource_url($url)
         {
-            $url = trim(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
-            if ('' === $url) {
-                return '';
-            }
-
-            $home_url = home_url('/');
-            $preferred_scheme = (string) wp_parse_url($home_url, PHP_URL_SCHEME);
-            if ('' === $preferred_scheme) {
-                $preferred_scheme = is_ssl() ? 'https' : 'http';
-            }
-            $preferred_host = strtolower((string) wp_parse_url($home_url, PHP_URL_HOST));
-
-            if (0 === strpos($url, '//')) {
-                return $preferred_scheme . ':' . $url;
-            }
-
-            if (preg_match('#^https?://#i', $url)) {
-                $url_host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
-                $url_scheme = (string) wp_parse_url($url, PHP_URL_SCHEME);
-                if ('' !== $preferred_host && '' !== $url_host && $preferred_host === $url_host && strtolower($url_scheme) !== strtolower($preferred_scheme)) {
-                    if (function_exists('set_url_scheme')) {
-                        return set_url_scheme($url, $preferred_scheme);
-                    }
-                }
-            }
-
-            return $url;
+            return function_exists('ucwp_normalize_public_url') ? ucwp_normalize_public_url($url) : trim(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
         }
 
         private function normalize_protocol_relative_urls_in_html($html)
@@ -1591,78 +1377,9 @@ private function html_tag_processor_available()
             }
         }
 
-        private function normalize_local_path_for_compare($path)
-        {
-            return rtrim(str_replace('\\', '/', (string) $path), '/');
-        }
-
-        private function path_is_within_root($path, $root)
-        {
-            $path = $this->normalize_local_path_for_compare($path);
-            $root = $this->normalize_local_path_for_compare($root);
-
-            if ('' === $path || '' === $root) {
-                return false;
-            }
-
-            return $path === $root || 0 === strpos($path, $root . '/');
-        }
-
-        private function build_canonical_local_path_from_relative($root, $relative)
-        {
-            $root_real = realpath($root);
-            if (!is_string($root_real) || '' === $root_real) {
-                return '';
-            }
-
-            $relative = rawurldecode(str_replace('\\', '/', (string) $relative));
-            $relative = ltrim($relative, '/');
-            if ('' === $relative) {
-                return '';
-            }
-
-            foreach (explode('/', $relative) as $segment) {
-                if ('' === $segment || '.' === $segment || '..' === $segment) {
-                    return '';
-                }
-            }
-
-            $candidate = trailingslashit($root_real) . $relative;
-            $candidate_real = realpath($candidate);
-            if (!is_string($candidate_real) || '' === $candidate_real) {
-                return '';
-            }
-
-            return $this->path_is_within_root($candidate_real, $root_real) ? str_replace('\\', '/', $candidate_real) : '';
-        }
-
         private function resolve_local_path_from_public_url($url)
         {
-            $url = $this->normalize_public_resource_url($url);
-            $host = (string) wp_parse_url($url, PHP_URL_HOST);
-            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-            if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
-                return '';
-            }
-
-            $path = (string) wp_parse_url($url, PHP_URL_PATH);
-            if ('' === $path) {
-                return '';
-            }
-
-            $content_path = (string) wp_parse_url(content_url('/'), PHP_URL_PATH);
-            if ('' !== $content_path && 0 === strpos($path, $content_path)) {
-                $relative = ltrim(substr($path, strlen($content_path)), '/');
-                return $this->build_canonical_local_path_from_relative(WP_CONTENT_DIR, $relative);
-            }
-
-            $site_path = (string) wp_parse_url(site_url('/'), PHP_URL_PATH);
-            if ('' !== $site_path && 0 === strpos($path, $site_path)) {
-                $relative = ltrim(substr($path, strlen($site_path)), '/');
-                return $this->build_canonical_local_path_from_relative(ABSPATH, $relative);
-            }
-
-            return $this->build_canonical_local_path_from_relative(ABSPATH, ltrim($path, '/'));
+            return function_exists('ucwp_local_path_from_public_url') ? ucwp_local_path_from_public_url($url) : '';
         }
 
         private function absolutize_public_resource_url($url, $base_url = '')
@@ -1828,7 +1545,14 @@ private function html_tag_processor_available()
             }
 
             $location_haystack = $url . ' ' . $tag_html;
-            if (false === strpos($location_haystack, '/wp-content/plugins/') && false === strpos($location_haystack, '/wp-content/themes/')) {
+            $is_plugin_or_theme = false;
+            if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($location_haystack, ucwp_plugins_public_path())) {
+                $is_plugin_or_theme = true;
+            }
+            if (!$is_plugin_or_theme && function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($location_haystack, ucwp_themes_public_paths())) {
+                $is_plugin_or_theme = true;
+            }
+            if (!$is_plugin_or_theme) {
                 return false;
             }
 
@@ -1839,7 +1563,7 @@ private function html_tag_processor_available()
             }
 
             if ((false !== strpos($location_haystack, 'preview') || false !== strpos($location_haystack, 'backend'))
-                && (false !== strpos($location_haystack, '/wp-content/plugins/') || false !== strpos($location_haystack, '/wp-content/themes/'))) {
+                && $is_plugin_or_theme) {
                 return true;
             }
 

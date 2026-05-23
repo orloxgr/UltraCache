@@ -16,6 +16,7 @@ require_once __DIR__ . '/engine/class-engine-profiling-metrics-trait.php';
 require_once __DIR__ . '/engine/class-engine-dropin-lifecycle-trait.php';
 require_once __DIR__ . '/engine/class-engine-analytics-trait.php';
 require_once __DIR__ . '/engine/class-engine-async-css-trait.php';
+require_once __DIR__ . '/engine/class-engine-frontend-assets-trait.php';
 
 if (!class_exists('Ultra_Cache_Engine')) {
     class Ultra_Cache_Engine
@@ -33,6 +34,7 @@ if (!class_exists('Ultra_Cache_Engine')) {
         use Ultra_Cache_Engine_Dropin_Lifecycle_Trait;
         use Ultra_Cache_Engine_Analytics_Trait;
         use Ultra_Cache_Engine_Async_CSS_Trait;
+        use Ultra_Cache_Engine_Frontend_Assets_Trait;
 
         /** @var Ultra_Cache_Engine|null */
         private static $instance = null;
@@ -57,6 +59,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         /** @var bool */
         private $google_fonts_sync_build_mode = false;
+
+        /** @var array<string, string> */
+        private $google_fonts_last_build_failure = array();
 
         /** @var array<string, string>|null */
         private $runtime_font_css_url_map = null;
@@ -126,10 +131,17 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('update_option_posts_per_page', array($this, 'handle_front_page_option_change'), 20, 2);
             add_action('update_option_permalink_structure', array($this, 'handle_global_frontend_change'), 20, 2);
             add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_live_google_fonts_output_cleanup'), 90);
-            add_filter('wp_template_enhancement_output_buffer', array($this, 'inject_runtime_js_scan_collector_into_output'), PHP_INT_MAX);
-            add_action('wp_head', array($this, 'print_runtime_js_scan_collector'), 0);
-            add_action('wp_head', array($this, 'print_delayed_script_loader'), 1);
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_delayed_script_loader'), -998);
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_runtime_font_helpers'), -997);
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_sr7_lcp_priority_runtime_helper'), -996);
             add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_start_checkpoint'), -1000);
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_runtime_js_scan_collector'), -999);
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_mailerlite_lazy_nonce_helper'), 0);
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_page_css_bundle_stylesheet'), 9999);
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_delayed_icon_font_stylesheets'), 10000);
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_local_font_display_patch_stylesheet'), 10001);
+            add_filter('wp_speculation_rules_configuration', array($this, 'filter_speculation_rules_configuration'), 20);
+            add_filter('wp_speculation_rules_href_exclude_paths', array($this, 'filter_speculation_rules_href_exclude_paths'), 20, 2);
             add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_end_checkpoint'), PHP_INT_MAX);
             add_action('wp_enqueue_scripts', array($this, 'cleanup_asset_chain_enqueue_assets'), 9999);
             add_action('shutdown', array($this, 'run_deferred_store_post_response_actions'), PHP_INT_MAX - 2);
@@ -137,6 +149,9 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_action('shutdown', array($this, 'update_store_profile_after_shutdown'), PHP_INT_MAX);
             add_filter('script_loader_tag', array($this, 'defer_scripts'), 10, 3);
             add_filter('style_loader_src', array($this, 'add_display_swap_to_google_fonts'), 20, 2);
+            add_filter('style_loader_tag', array($this, 'add_local_font_display_patch_style_attributes'), 20, 4);
+            add_filter('style_loader_tag', array($this, 'add_page_css_bundle_style_attributes'), 20, 4);
+            add_filter('style_loader_tag', array($this, 'add_delayed_icon_font_style_attributes'), 20, 4);
             add_filter('wp_resource_hints', array($this, 'filter_google_fonts_resource_hints'), 20, 2);
         }
 
@@ -679,10 +694,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
             }
 
             $roots = array(
-                (string) wp_parse_url(content_url('cache/ultracache/'), PHP_URL_PATH),
-                (string) wp_parse_url(content_url('uploads/uc-images/'), PHP_URL_PATH),
-                '/wp-content/cache/ultracache/',
-                '/wp-content/uploads/uc-images/',
+                ucwp_generated_asset_public_path(),
+                ucwp_optimized_images_storage_url_path(),
             );
             $roots = array_values(array_unique(array_filter(array_map(static function ($root) {
                 $root = '/' . ltrim((string) $root, '/');

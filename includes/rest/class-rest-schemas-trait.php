@@ -231,6 +231,7 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'mediaGenerateOnUploadEnabled'        => array('type' => 'boolean', 'required' => false),
                 'mediaGenerateOnDemandEnabled'        => array('type' => 'boolean', 'required' => false),
                 'mediaOutputMode'                     => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_media_output_mode_param'), 'validate_callback' => array($this, 'validate_media_output_mode_param')),
+                'javascriptStrategy'                   => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_javascript_strategy_param'), 'validate_callback' => array($this, 'validate_javascript_strategy_param')),
                 'deferJsEnabled'                       => array('type' => 'boolean', 'required' => false),
                 'delayAllJsEnabled'                    => array('type' => 'boolean', 'required' => false),
                 'delayedLocalJsAutoStart'            => array('type' => 'string', 'required' => false),
@@ -328,6 +329,19 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'unsafeCacheCookieList'                => array('type' => 'string', 'required' => false),
                 'uninstallCleanupPolicy'             => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_uninstall_cleanup_policy_param'), 'validate_callback' => array($this, 'validate_uninstall_cleanup_policy_param')),
             );
+        }
+
+        public function sanitize_javascript_strategy_param($value)
+        {
+            return class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'sanitize_javascript_strategy')
+                ? Ultra_Cache_WP::sanitize_javascript_strategy($value)
+                : 'off';
+        }
+
+        public function validate_javascript_strategy_param($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('off', 'defer', 'delay'), true);
         }
 
         public function sanitize_uninstall_cleanup_policy_param($value)

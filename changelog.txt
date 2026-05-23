@@ -1,3 +1,80 @@
+= 2.59.06.11 =
+- Cleans UltraCache-owned runtime options and transient prefixes during uninstall/Delete all data, including ucwp_* and ultracache_* transient rows.
+- Removes generated runtime CSS/font directories under uploads/ultracache during full cleanup: css-bundles, font-css, google-fonts, and optimized-css.
+- Keeps persistent optimized image derivatives under uploads/ultracache/images by design.
+- Keeps the Media Optimization Image Output Format dropdown from 2.59.06.09 and the exact-file warm verification from 2.59.06.10.
+
+= 2.59.06.07 =
+- Matches CSS bundle sources using canonical URL variants so source URLs with ?ver= can match css_rewrite_map rows stored without query args.
+- Allows optimized-css/font-css generated links to be recognized as aliases of their original manifest sources during page CSS bundle replacement.
+- Keeps the change limited to CSS bundle source matching; no generated path, profile, JS, or font-build behavior changes.
+
+= 2.59.06.04 =
+- Builds page CSS bundle markup from the existing manifest when the WordPress-enqueued bundle tag is absent from the final cache rewrite buffer.
+- Fixes warm-up results where a CSS bundle was built but the cached HTML still had no css-bundles reference.
+- Keeps the fix limited to page CSS bundle insertion/replacement; no CSS profile, generated path, or JS/font behavior changes.
+
+= 2.59.06.02 =
+- Writes runtime generated font-css/optimized-css assets to uploads/ultracache so generated URLs match generated files.
+- Prunes runtime font CSS map entries whose generated target CSS file is missing before printing frontend config.
+- Saves the cleaned runtime font CSS map after stale targets are removed so frontend JS does not request missing CSS files.
+
+= 2.59.06.01 =
+- Removes the hidden Google Fonts manual-rebuild backoff bypass added in 2.59.06.
+- Changes the Google Fonts write-failure retry guard to a visible short 10-15 second window.
+- Persists Google Fonts failure details so diagnostics can show the actual failure reason instead of only failed counts.
+
+= 2.59.06 =
+- Restores uploads/ultracache generated-asset write/delete permissions in the guarded filesystem layer.
+- Fixes Google Fonts/local font CSS generation paths that were blocked after generated assets moved under uploads/ultracache.
+- Changes Speed Diagnostics loopback requests from profile-bypass to internal revalidate/force-refresh so timing breakdowns can be saved.
+- Adds Google Fonts rebuild failure details to the diagnostics status when a stylesheet still cannot be generated.
+
+= 2.59.04 =
+- Replaces remaining page-cache storage writable checks with the WordPress-native UltraCache filesystem wrapper.
+- Removes root-only review helper markdown files from the production package while keeping required source/build notes in readme.txt.
+- Updates CSS rewrite map SQL table identifiers to use WordPress database identifier placeholders and updates tested metadata.
+
+= 2.58.90.04 =
+- Moves the Delayed JS loader from raw wp_head inline output to assets/js/delayed-js-loader.js.
+- Enqueues the loader through wp_enqueue_scripts with WordPress-native script APIs.
+- Passes the unified delayed-JS auto-start configuration through wp_add_inline_script() before the helper.
+
+= 2.58.90.03.04 =
+- Fixes Runtime/Console Scanner explicit `_ is not defined` handling so underscore can be suggested from actual page inventory.
+- Deduplicates scanner suggestions that point to the same script by preferring exact path fragments over duplicate WordPress handles.
+- Keeps provider/source suggestions in the same pass for both Browser Runtime Scanner and Extract Console Error Suggestions.
+
+= 2.58.90.03.01 =
+- Fixed Runtime/Console JS suggestion resolver for explicit missing globals such as "jQuery is not defined".
+- Uses error source + active plugin/theme source-file evidence + final page script inventory to suggest the matching provider script only.
+- Does not infer unrelated WordPress core dependencies; already protected failing sources remain marked separately from missing provider additions.
+
+= 2.58.90.03 =
+- Moved the Runtime JS Scan collector into assets/js/runtime-js-scan-collector.js.
+- Enqueues the collector only for verified runtime scan requests through wp_enqueue_scripts.
+- Passes scan configuration with wp_add_inline_script() before the helper and removes the old raw inline/wp_head/output-buffer scanner paths.
+
+= 2.58.90.02.02 =
+- Replaced the MailerLite helper loading path with a clean wp_enqueue_scripts implementation.
+- Removed the MailerLite HTML rewrite insertion path and wp_print_scripts() usage.
+- Keeps admin_url('admin-ajax.php') configuration through wp_add_inline_script() before the helper.
+
+= 2.58.90.02.01 =
+- Broadened MailerLite lazy nonce helper detection to include official plugin assets and MailerLite Universal markers.
+- Preserves WordPress script API loading and admin_url('admin-ajax.php') endpoint handling.
+- No changes to other frontend JavaScript helper migrations.
+
+= 2.58.90.02 =
+- Moved the MailerLite lazy nonce frontend helper into assets/js/mailerlite-lazy-nonce.js.
+- Loads the helper through WordPress script registration/printing APIs with dynamic Ajax endpoint data.
+- Kept the existing lazy nonce runtime behavior and admin_url('admin-ajax.php') endpoint handling.
+
+= 2.58.90.01 =
+- Added staged frontend JavaScript helper enqueue infrastructure and migration inventory.
+- Added assets/js documentation placeholders for upcoming WordPress-registered helper files.
+- No frontend helper runtime behavior changed in this stage.
+
 = 2.58.83 =
 - Evidence-based JS error scanner: source/stack/code-search findings are appendable, review-only scanner output removed, and hardcoded resolver flow disabled.
 

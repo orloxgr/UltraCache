@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.58.87
+ * Version: 2.59.06.11
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.58.87');
+    define('UCWP_VERSION', '2.59.06.11');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -32,6 +32,8 @@ if (!defined('UCWP_PATH')) {
 if (!defined('UCWP_URL')) {
     define('UCWP_URL', plugin_dir_url(__FILE__));
 }
+
+require_once UCWP_PATH . 'includes/core/functions.php';
 if (!defined('UCWP_SETTINGS_KEY')) {
     define('UCWP_SETTINGS_KEY', 'ultracache_settings');
 }
@@ -51,35 +53,31 @@ if (!defined('UCWP_WP_CONFIG_BACKUP_REGISTRY_KEY')) {
     define('UCWP_WP_CONFIG_BACKUP_REGISTRY_KEY', 'ultracache_wp_config_backup_registry');
 }
 if (!defined('UCWP_CACHE_DIR')) {
-    define('UCWP_CACHE_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/');
+    define('UCWP_CACHE_DIR', ucwp_content_cache_storage_dir());
 }
 if (!defined('UCWP_OPTIMIZED_IMAGES_DIR')) {
-    define('UCWP_OPTIMIZED_IMAGES_DIR', trailingslashit(WP_CONTENT_DIR) . 'uploads/uc-images/');
+    define('UCWP_OPTIMIZED_IMAGES_DIR', ucwp_optimized_images_storage_dir());
 }
 if (!defined('UCWP_OPTIMIZED_IMAGES_URL')) {
-    $ucwp_optimized_images_url_path = (string) wp_parse_url(content_url('uploads/uc-images'), PHP_URL_PATH);
-    if ('' === $ucwp_optimized_images_url_path) {
-        $ucwp_optimized_images_url_path = '/wp-content/uploads/uc-images';
-    }
-    define('UCWP_OPTIMIZED_IMAGES_URL', trailingslashit('/' . ltrim(str_replace('\\', '/', $ucwp_optimized_images_url_path), '/')));
+    define('UCWP_OPTIMIZED_IMAGES_URL', ucwp_optimized_images_storage_url_path());
 }
 if (!defined('UCWP_AVIF_DIR')) {
-    define('UCWP_AVIF_DIR', trailingslashit(UCWP_OPTIMIZED_IMAGES_DIR) . 'avif/');
+    define('UCWP_AVIF_DIR', ucwp_optimized_images_storage_dir('avif'));
 }
 if (!defined('UCWP_AVIF_URL')) {
-    define('UCWP_AVIF_URL', trailingslashit(UCWP_OPTIMIZED_IMAGES_URL) . 'avif/');
+    define('UCWP_AVIF_URL', ucwp_optimized_images_storage_url_path('avif'));
 }
 if (!defined('UCWP_WEBP_DIR')) {
-    define('UCWP_WEBP_DIR', trailingslashit(UCWP_OPTIMIZED_IMAGES_DIR) . 'webp/');
+    define('UCWP_WEBP_DIR', ucwp_optimized_images_storage_dir('webp'));
 }
 if (!defined('UCWP_WEBP_URL')) {
-    define('UCWP_WEBP_URL', trailingslashit(UCWP_OPTIMIZED_IMAGES_URL) . 'webp/');
+    define('UCWP_WEBP_URL', ucwp_optimized_images_storage_url_path('webp'));
 }
 if (!defined('UCWP_OBJECT_CACHE_DIR')) {
-    define('UCWP_OBJECT_CACHE_DIR', trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/');
+    define('UCWP_OBJECT_CACHE_DIR', ucwp_object_cache_storage_dir());
 }
 
-require_once UCWP_PATH . 'includes/core/functions.php';
+
 require_once UCWP_PATH . 'includes/fonts/functions.php';
 require_once UCWP_PATH . 'includes/settings/class-settings-trait.php';
 require_once UCWP_PATH . 'includes/admin/class-admin-trait.php';
@@ -933,6 +931,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             }
             self::ensure_cron_warm_queue_table();
             self::ensure_cache_asset_refs_table();
+            self::ensure_css_rewrite_map_table();
             if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_analytics_table')) {
                 Ultra_Cache_Engine::ensure_analytics_table();
             }
@@ -980,7 +979,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 UCWP_AVIF_DIR,
                 UCWP_WEBP_DIR,
                 UCWP_OBJECT_CACHE_DIR,
-                trailingslashit(UCWP_CACHE_DIR) . 'google-fonts/',
+                ucwp_generated_asset_dir('google-fonts'),
             );
 
             foreach ($dirs as $dir) {
@@ -1664,6 +1663,258 @@ if (!class_exists('Ultra_Cache_WP')) {
             return false;
         }
 
+        public static function get_css_rewrite_map_table_name()
+        {
+            global $wpdb;
+            $table = $wpdb->prefix . 'ultracache_css_rewrite_map';
+            return function_exists('ucwp_validate_custom_table_name') ? ucwp_validate_custom_table_name($table, 'css_rewrite_map') : $table;
+        }
+
+        private static function get_css_rewrite_map_db_version()
+        {
+            return '1.0.0';
+        }
+
+        private static function get_css_rewrite_map_db_version_option_key()
+        {
+            return 'ultracache_css_rewrite_map_db_version';
+        }
+
+        public static function ensure_css_rewrite_map_table()
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb)) {
+                return false;
+            }
+
+            $table = self::get_css_rewrite_map_table_name();
+            if ('' === $table) {
+                return false;
+            }
+
+            $version = (string) get_option(self::get_css_rewrite_map_db_version_option_key(), '');
+            if (self::get_css_rewrite_map_db_version() === $version && self::plugin_custom_table_exists($table)) {
+                return true;
+            }
+
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            $charset_collate = $wpdb->get_charset_collate();
+            $sql = "CREATE TABLE {$table} (
+                id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                source_url_hash char(40) NOT NULL DEFAULT '',
+                generated_url_hash char(40) NOT NULL DEFAULT '',
+                source_url text NOT NULL,
+                source_path varchar(512) NOT NULL DEFAULT '',
+                source_handle varchar(191) NOT NULL DEFAULT '',
+                generated_url text NOT NULL,
+                generated_path varchar(512) NOT NULL DEFAULT '',
+                generated_basename varchar(191) NOT NULL DEFAULT '',
+                optimization_type varchar(32) NOT NULL DEFAULT '',
+                content_hash char(32) NOT NULL DEFAULT '',
+                active tinyint(1) NOT NULL DEFAULT 1,
+                created_at datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+                updated_at datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+                last_seen datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+                PRIMARY KEY  (id),
+                UNIQUE KEY source_type (source_url_hash, optimization_type),
+                KEY generated_url_hash (generated_url_hash),
+                KEY generated_basename (generated_basename),
+                KEY active_last_seen (active, last_seen),
+                KEY optimization_type (optimization_type)
+            ) {$charset_collate};";
+
+            dbDelta($sql);
+            if (self::plugin_custom_table_exists($table)) {
+                update_option(self::get_css_rewrite_map_db_version_option_key(), self::get_css_rewrite_map_db_version(), false);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static function normalize_css_rewrite_map_url($url)
+        {
+            $url = trim((string) $url);
+            if ('' === $url) {
+                return '';
+            }
+
+            if (0 === strpos($url, '//')) {
+                $url = (is_ssl() ? 'https:' : 'http:') . $url;
+            } elseif (0 === strpos($url, '/')) {
+                $url = home_url($url);
+            }
+
+            return esc_url_raw($url);
+        }
+
+        private static function get_css_rewrite_map_cache_group()
+        {
+            return 'ultracache_css_rewrite_map';
+        }
+
+        private static function get_css_rewrite_map_cache_key($kind, $url)
+        {
+            return sanitize_key((string) $kind) . '_' . sha1(self::normalize_css_rewrite_map_url($url));
+        }
+
+        private static function clear_css_rewrite_map_cache_for_urls($source_url, $generated_url, $optimization_type = '')
+        {
+            wp_cache_delete(self::get_css_rewrite_map_cache_key('source', $source_url), self::get_css_rewrite_map_cache_group());
+            $optimization_type = sanitize_key((string) $optimization_type);
+            if ('' !== $optimization_type) {
+                wp_cache_delete(self::get_css_rewrite_map_cache_key('source_' . $optimization_type, $source_url), self::get_css_rewrite_map_cache_group());
+            }
+            wp_cache_delete(self::get_css_rewrite_map_cache_key('generated', $generated_url), self::get_css_rewrite_map_cache_group());
+        }
+
+        public static function record_css_rewrite_map($source_url, $generated_url, array $args = array())
+        {
+            global $wpdb;
+
+            $source_url = self::normalize_css_rewrite_map_url($source_url);
+            $generated_url = self::normalize_css_rewrite_map_url($generated_url);
+            if ('' === $source_url || '' === $generated_url || $source_url === $generated_url || !($wpdb instanceof wpdb) || !self::ensure_css_rewrite_map_table()) {
+                return false;
+            }
+
+            $table = self::get_css_rewrite_map_table_name();
+            if ('' === $table) {
+                return false;
+            }
+
+            $generated_path = isset($args['generated_path']) ? wp_normalize_path((string) $args['generated_path']) : '';
+            $source_path = isset($args['source_path']) ? wp_normalize_path((string) $args['source_path']) : '';
+            $generated_url_path = (string) wp_parse_url($generated_url, PHP_URL_PATH);
+            $generated_basename = sanitize_file_name((string) wp_basename(rawurldecode($generated_url_path)));
+            $optimization_type = sanitize_key((string) ($args['optimization_type'] ?? 'css-font-mix'));
+            if ('' === $optimization_type) {
+                $optimization_type = 'css-font-mix';
+            }
+            $content_hash = preg_replace('/[^a-f0-9]/i', '', (string) ($args['content_hash'] ?? ''));
+            $content_hash = substr(strtolower((string) $content_hash), 0, 32);
+            $source_handle = sanitize_key((string) ($args['source_handle'] ?? ''));
+            $now = current_time('mysql', true);
+
+            $row = array(
+                'source_url_hash'    => sha1($source_url),
+                'generated_url_hash' => sha1($generated_url),
+                'source_url'         => $source_url,
+                'source_path'        => substr($source_path, 0, 512),
+                'source_handle'      => substr($source_handle, 0, 191),
+                'generated_url'      => $generated_url,
+                'generated_path'     => substr($generated_path, 0, 512),
+                'generated_basename' => substr($generated_basename, 0, 191),
+                'optimization_type'  => substr($optimization_type, 0, 32),
+                'content_hash'       => $content_hash,
+                'active'             => 1,
+                'created_at'         => $now,
+                'updated_at'         => $now,
+                'last_seen'          => $now,
+            );
+
+            $sql = $wpdb->prepare(
+                'INSERT INTO %i
+                    (source_url_hash, generated_url_hash, source_url, source_path, source_handle, generated_url, generated_path, generated_basename, optimization_type, content_hash, active, created_at, updated_at, last_seen)
+                 VALUES
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s)
+                 ON DUPLICATE KEY UPDATE
+                    generated_url_hash = VALUES(generated_url_hash),
+                    source_url = VALUES(source_url),
+                    source_path = VALUES(source_path),
+                    source_handle = VALUES(source_handle),
+                    generated_url = VALUES(generated_url),
+                    generated_path = VALUES(generated_path),
+                    generated_basename = VALUES(generated_basename),
+                    content_hash = VALUES(content_hash),
+                    active = VALUES(active),
+                    updated_at = VALUES(updated_at),
+                    last_seen = VALUES(last_seen)',
+                $table,
+                $row['source_url_hash'],
+                $row['generated_url_hash'],
+                $row['source_url'],
+                $row['source_path'],
+                $row['source_handle'],
+                $row['generated_url'],
+                $row['generated_path'],
+                $row['generated_basename'],
+                $row['optimization_type'],
+                $row['content_hash'],
+                $row['active'],
+                $row['created_at'],
+                $row['updated_at'],
+                $row['last_seen']
+            );
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache-owned CSS rewrite-map upsert. The table has a plugin-owned unique key on source_url_hash + optimization_type; cache keys are cleared immediately after the atomic write.
+            $result = $wpdb->query($sql);
+            self::clear_css_rewrite_map_cache_for_urls($source_url, $generated_url, $row['optimization_type']);
+            return false !== $result;
+        }
+
+        public static function get_css_rewrite_map_by_generated_url($generated_url)
+        {
+            global $wpdb;
+
+            $generated_url = self::normalize_css_rewrite_map_url($generated_url);
+            if ('' === $generated_url || !($wpdb instanceof wpdb) || !self::ensure_css_rewrite_map_table()) {
+                return array();
+            }
+
+            $cache_key = self::get_css_rewrite_map_cache_key('generated', $generated_url);
+            $cached = wp_cache_get($cache_key, self::get_css_rewrite_map_cache_group());
+            if (is_array($cached)) {
+                return $cached;
+            }
+
+            $table = self::get_css_rewrite_map_table_name();
+            if ('' === $table) {
+                return array();
+            }
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned CSS rewrite map lookup with wp_cache result cache; table name is passed through the WP 6.2+ identifier placeholder.
+            $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE generated_url_hash = %s AND active = 1 ORDER BY last_seen DESC LIMIT 1', $table, sha1($generated_url)), ARRAY_A);
+            $row = is_array($row) ? $row : array();
+            wp_cache_set($cache_key, $row, self::get_css_rewrite_map_cache_group(), HOUR_IN_SECONDS);
+            return $row;
+        }
+
+        public static function get_css_rewrite_map_by_source_url($source_url, $optimization_type = '')
+        {
+            global $wpdb;
+
+            $source_url = self::normalize_css_rewrite_map_url($source_url);
+            if ('' === $source_url || !($wpdb instanceof wpdb) || !self::ensure_css_rewrite_map_table()) {
+                return array();
+            }
+
+            $optimization_type = sanitize_key((string) $optimization_type);
+            $cache_key = self::get_css_rewrite_map_cache_key('source' . ('' !== $optimization_type ? '_' . $optimization_type : ''), $source_url);
+            $cached = wp_cache_get($cache_key, self::get_css_rewrite_map_cache_group());
+            if (is_array($cached)) {
+                return $cached;
+            }
+
+            $table = self::get_css_rewrite_map_table_name();
+            if ('' === $table) {
+                return array();
+            }
+
+            if ('' !== $optimization_type) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned CSS rewrite map lookup with wp_cache result cache; table name is passed through the WP 6.2+ identifier placeholder.
+                $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE source_url_hash = %s AND optimization_type = %s AND active = 1 ORDER BY last_seen DESC LIMIT 1', $table, sha1($source_url), $optimization_type), ARRAY_A);
+            } else {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- UltraCache-owned CSS rewrite map lookup with wp_cache result cache; table name is passed through the WP 6.2+ identifier placeholder.
+                $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE source_url_hash = %s AND active = 1 ORDER BY last_seen DESC LIMIT 1', $table, sha1($source_url)), ARRAY_A);
+            }
+
+            $row = is_array($row) ? $row : array();
+            wp_cache_set($cache_key, $row, self::get_css_rewrite_map_cache_group(), HOUR_IN_SECONDS);
+            return $row;
+        }
+
         private static function get_cache_asset_refs_protection_seconds()
         {
             $settings = self::get_settings();
@@ -1701,14 +1952,17 @@ if (!class_exists('Ultra_Cache_WP')) {
         {
             $html = (string) $html;
             $refs = array();
-            if ('' === $html || false === stripos($html, '/cache/ultracache/')) {
+            $generated_base_path = function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path() : '';
+            if ('' === $html || '' === $generated_base_path || false === stripos($html, trim($generated_base_path, '/'))) {
                 return $refs;
             }
 
+            $generated_base_pattern = preg_quote(trailingslashit($generated_base_path), '~');
             $patterns = array(
-                '~(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s"\'<>?#)]+\.css~i',
-                '~/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s"\'<>?#)]+\.css~i',
+                '~(?:https?:)?//[^\s"\'<>]+' . $generated_base_pattern . '(?:css-bundles|font-css|optimized-css)/[^\s"\'<>?#)]+\.css~i',
+                '~' . $generated_base_pattern . '(?:css-bundles|font-css|optimized-css)/[^\s"\'<>?#)]+\.css~i',
             );
+
 
             foreach ($patterns as $pattern) {
                 $matches = array();
@@ -1724,7 +1978,8 @@ if (!class_exists('Ultra_Cache_WP')) {
                     }
 
                     $path = rawurldecode((string) $path);
-                    if (!preg_match('#/wp-content/cache/ultracache/(css-bundles|font-css|optimized-css)/([^/]+\.css)$#i', $path, $match)) {
+                    $generated_ref_pattern = '#^' . preg_quote(trailingslashit($generated_base_path), '#') . '(css-bundles|font-css|optimized-css)/([^/]+\.css)$#i';
+                    if (!preg_match($generated_ref_pattern, $path, $match)) {
                         continue;
                     }
 
@@ -1999,6 +2254,7 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'mediaQueue' => $wpdb->prefix . 'ultracache_media_queue',
                 'analytics' => $wpdb->prefix . 'ultracache_analytics',
                 'cacheAssetRefs' => self::get_cache_asset_refs_table_name(),
+                'cssRewriteMap' => self::get_css_rewrite_map_table_name(),
             );
 
             if (self::plugin_custom_table_exists($tables['actionJobs'])) {
@@ -3279,12 +3535,60 @@ private static function drop_plugin_custom_tables()
         $wpdb->prefix . 'ultracache_cron_warm_queue',
         $wpdb->prefix . 'ultracache_analytics',
         $wpdb->prefix . 'ultracache_cache_asset_refs',
+        $wpdb->prefix . 'ultracache_css_rewrite_map',
     );
 
     foreach ($tables as $table) {
         if (preg_match('/^[A-Za-z0-9_]+$/', $table)) {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Explicit UltraCache cleanup drops only UltraCache-owned custom tables.
             $wpdb->query($wpdb->prepare('DROP TABLE IF EXISTS %i', $table));
+        }
+    }
+}
+
+
+private static function delete_option_rows_by_like_patterns(array $patterns)
+{
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    foreach ($patterns as $pattern) {
+        $pattern = (string) $pattern;
+        if ('' === $pattern) {
+            continue;
+        }
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Explicit Delete All cleanup removes only UltraCache-owned option/transient prefixes.
+        $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE option_name LIKE %s', $wpdb->options, $pattern));
+    }
+
+    if (is_multisite()) {
+        foreach ($patterns as $pattern) {
+            $pattern = (string) $pattern;
+            if ('' === $pattern) {
+                continue;
+            }
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Explicit Delete All cleanup removes only UltraCache-owned site option/transient prefixes.
+            $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE meta_key LIKE %s', $wpdb->sitemeta, $pattern));
+        }
+    }
+}
+
+private static function delete_generated_runtime_asset_directories()
+{
+    if (!function_exists('ucwp_generated_asset_dir') || !function_exists('ucwp_safe_rmdir')) {
+        return;
+    }
+
+    // Persistent optimized media under uploads/ultracache/images is intentionally kept.
+    foreach (array('css-bundles', 'font-css', 'google-fonts', 'optimized-css') as $bucket) {
+        $dir = ucwp_generated_asset_dir($bucket);
+        if (is_string($dir) && '' !== $dir && is_dir($dir)) {
+            ucwp_safe_rmdir($dir, 'delete_all_plugin_data generated runtime asset dir');
         }
     }
 }
@@ -3306,6 +3610,12 @@ private static function delete_plugin_options_and_transients($keep_settings = fa
         'ultracache_media_diagnostics_v1',
         'ultracache_object_cache_last_flush_report',
         'ultracache_last_css_bundle_summary',
+        'ultracache_settings_google_fonts_last_scan',
+        'ultracache_opcache_last_flush_at',
+        'ultracache_external_cache_detection',
+        'ucwp_external_cache_detection',
+        'ultracache_warmup_generation',
+        'ultracache_wp_config_backup_registry',
     );
 
     if (!$keep_settings) {
@@ -3320,6 +3630,7 @@ private static function delete_plugin_options_and_transients($keep_settings = fa
         $option_names[] = 'ultracache_cron_warm_queue_db_version';
         $option_names[] = 'ultracache_analytics_db_version';
         $option_names[] = self::get_cache_asset_refs_db_version_option_key();
+        $option_names[] = self::get_css_rewrite_map_db_version_option_key();
         $option_names[] = 'ultracache_media_queue_build_state_v1';
     }
 
@@ -3333,8 +3644,22 @@ private static function delete_plugin_options_and_transients($keep_settings = fa
     delete_transient('ultracache_frontend_compression_probe_v1');
     delete_transient('ultracache_media_conversion_queue_lock');
     delete_transient('ultracache_media_queue_process_lock_v1');
+    delete_transient('ucwp_runtime_font_css_url_map_v3');
     delete_transient('ultracache_media_work_summary_v1');
     delete_transient('ultracache_media_page_refs_cleanup_lock');
+    delete_transient('ultracache_dashboard_cache_activity_v1');
+    delete_transient('ultracache_reverse_proxy_status_v2');
+
+    self::delete_option_rows_by_like_patterns(array(
+        '_transient_ucwp_%',
+        '_transient_timeout_ucwp_%',
+        '_site_transient_ucwp_%',
+        '_site_transient_timeout_ucwp_%',
+        '_transient_ultracache_%',
+        '_transient_timeout_ultracache_%',
+        '_site_transient_ultracache_%',
+        '_site_transient_timeout_ultracache_%',
+    ));
 
     if (!$keep_tables) {
         self::drop_plugin_custom_tables();
@@ -3406,6 +3731,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
         if (defined('UCWP_OBJECT_CACHE_DIR') && is_dir(UCWP_OBJECT_CACHE_DIR)) {
             ucwp_safe_rmdir(UCWP_OBJECT_CACHE_DIR, 'delete_all_plugin_data object cache dir');
         }
+        self::delete_generated_runtime_asset_directories();
     }
 
     // Keep converted media files by design. UCWP_AVIF_DIR and UCWP_WEBP_DIR

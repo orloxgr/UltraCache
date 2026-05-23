@@ -17,6 +17,100 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
             });
         }
 
+
+        private function get_uploads_public_path_marker()
+        {
+            return function_exists('ucwp_uploads_public_path') ? ucwp_uploads_public_path() : '';
+        }
+
+        private function get_revslider_uploads_public_path_marker()
+        {
+            return function_exists('ucwp_revslider_uploads_public_path') ? ucwp_revslider_uploads_public_path() : trailingslashit($this->get_uploads_public_path_marker() . 'revslider/');
+        }
+
+        private function get_revslider_optimized_uploads_public_path_marker()
+        {
+            return function_exists('ucwp_revslider_optimized_uploads_public_path') ? ucwp_revslider_optimized_uploads_public_path() : trailingslashit($this->get_uploads_public_path_marker() . 'revslider/o/');
+        }
+
+        private function get_ultracache_optimized_images_public_path_marker($format)
+        {
+            if (function_exists('ucwp_optimized_images_storage_url_path')) {
+                return ucwp_optimized_images_storage_url_path($format);
+            }
+
+            $format = strtolower(trim((string) $format));
+            return trailingslashit($this->get_uploads_public_path_marker() . 'ultracache/images/' . (in_array($format, array('avif', 'webp'), true) ? $format . '/' : ''));
+        }
+
+        private function html_has_revslider_upload_reference($html)
+        {
+            return false !== stripos((string) $html, $this->get_revslider_uploads_public_path_marker());
+        }
+
+        private function get_sr7_generated_image_public_path_markers()
+        {
+            return array(
+                $this->get_revslider_optimized_uploads_public_path_marker(),
+                trailingslashit($this->get_ultracache_optimized_images_public_path_marker('avif')) . 'revslider/o/',
+                trailingslashit($this->get_ultracache_optimized_images_public_path_marker('webp')) . 'revslider/o/',
+            );
+        }
+
+        private function extract_sr7_generated_image_relative_no_ext_from_path($path)
+        {
+            $path = '/' . ltrim(str_replace('\\', '/', rawurldecode((string) $path)), '/');
+            if ('' === trim($path, '/')) {
+                return '';
+            }
+
+            $relative = '';
+            foreach ($this->get_sr7_generated_image_public_path_markers() as $marker) {
+                $marker = '/' . ltrim(str_replace('\\', '/', (string) $marker), '/');
+                $marker = trailingslashit($marker);
+                if (0 === stripos($path, $marker)) {
+                    $relative = ltrim(substr($path, strlen($marker)), '/');
+                    break;
+                }
+            }
+
+            if ('' === $relative || false !== strpos($relative, '..')) {
+                return '';
+            }
+
+            if (!preg_match('/^(.+?)\.(?:avif|webp|png|jpe?g|gif)(?:$|\?)/i', $relative, $match)) {
+                return '';
+            }
+
+            $relative_no_ext = isset($match[1]) ? trim((string) $match[1], '/') : '';
+            return '' !== $relative_no_ext ? $relative_no_ext : '';
+        }
+
+        private function find_revslider_upload_urls_in_html($html)
+        {
+            $html = (string) $html;
+            if ('' === $html) {
+                return array();
+            }
+
+            $marker = preg_quote($this->get_revslider_uploads_public_path_marker(), '#');
+            if ('' === $marker) {
+                return array();
+            }
+
+            $urls = array();
+            if (preg_match_all('#https?://[^"\'\s<>()]+' . $marker . '[^"\'\s<>()]+#i', $html, $matches, PREG_OFFSET_CAPTURE)) {
+                foreach ($matches[0] as $match) {
+                    $urls[] = array(
+                        'url' => (string) $match[0],
+                        'offset' => isset($match[1]) ? (int) $match[1] : 0,
+                    );
+                }
+            }
+
+            return $urls;
+        }
+
         private function get_slider_hero_protected_fragments()
         {
             $fragments = array(
@@ -31,7 +125,7 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                 'tp-tools',
                 '/plugins/revslider/',
                 '/plugins/slider-revolution/',
-                '/wp-content/uploads/revslider/',
+                $this->get_revslider_uploads_public_path_marker(),
                 'wp-block-themepunch-revslider',
                 'swiper',
                 'swiper-bundle',
@@ -687,7 +781,7 @@ private function get_slider_hero_markup_markers()
 
             return false !== stripos((string) $html, '<sr7-')
                 || false !== stripos((string) $html, 'sr7-module')
-                || false !== stripos((string) $html, '/wp-content/uploads/revslider/');
+                || false !== stripos((string) $html, $this->get_revslider_uploads_public_path_marker());
         }
 
         private function parse_critical_preload_line($line, $forced_as = '')
@@ -833,7 +927,7 @@ private function get_slider_hero_markup_markers()
             foreach (array(
                 'image_lists',
                 'data-dbsrc=',
-                '/wp-content/uploads/revslider/',
+                $this->get_revslider_uploads_public_path_marker(),
                 '<sr7-img',
                 '<img data-src=',
             ) as $marker) {
@@ -881,7 +975,7 @@ private function get_slider_hero_markup_markers()
             }
 
             $has_standard_images = false !== stripos($html, '<img');
-            $has_sr7_markup = false !== stripos($html, '<sr7-') || false !== stripos($html, 'sr7-module') || false !== stripos($html, '/wp-content/uploads/revslider/');
+            $has_sr7_markup = false !== stripos($html, '<sr7-') || false !== stripos($html, 'sr7-module') || false !== stripos($html, $this->get_revslider_uploads_public_path_marker());
             $has_manual_lcp_override = !empty($this->get_settings()['lcp_image_priority_override_list']);
             if (!$has_standard_images && !$has_sr7_markup && !$has_manual_lcp_override) {
                 return $html;
@@ -1710,17 +1804,18 @@ private function set_lcp_marker_on_start_tag($tag, $is_sr7 = false)
 
 
 
-private function inject_sr7_lcp_priority_runtime_script($html)
-        {
-            if (!is_string($html) || '' === $html || false === stripos($html, '</head>')) {
-                return $html;
-            }
 
-            if (false !== stripos($html, 'id="ucwp-sr7-lcp-priority"') || false !== stripos($html, "id='ucwp-sr7-lcp-priority'")) {
-                return $html;
+public function enqueue_sr7_lcp_priority_runtime_helper()
+        {
+            if (is_admin()) {
+                return;
             }
 
             $settings = $this->get_settings();
+            if (empty($settings['lcp_image_priority'])) {
+                return;
+            }
+
             $selectors = array();
             if (!empty($settings['manual_lcp_hero_selector_list']) && is_array($settings['manual_lcp_hero_selector_list'])) {
                 foreach ($settings['manual_lcp_hero_selector_list'] as $selector) {
@@ -1730,19 +1825,25 @@ private function inject_sr7_lcp_priority_runtime_script($html)
                     }
                 }
             }
+
             $selectors = array_values(array_unique($selectors));
-            $selectors_json = ucwp_json_encode_for_inline_script($selectors);
-            if ('' === $selectors_json) {
-                $selectors_json = '[]';
+            $handle = 'ucwp-sr7-lcp-priority';
+            if (!$this->ucwp_enqueue_frontend_js_helper($handle, 'sr7-lcp-priority.js', array(), false)) {
+                return;
             }
 
-            $script = <<<'HTML'
-<script id="ucwp-sr7-lcp-priority">(function(){"use strict";if(window.__ucwpSr7LcpPriorityV107){return;}window.__ucwpSr7LcpPriorityV107=1;var manualSelectors=__UCWP_MANUAL_SELECTORS__;function tag(n){return n&&n.tagName?String(n.tagName).toLowerCase():"";}function abs(u){try{return new URL(String(u||""),document.baseURI).href;}catch(e){return String(u||"");}}function clean(u){u=abs(u).split("#")[0].split("?")[0];return u.replace(/^https?:\/\/[^/]+/i,"");}function imageUrl(n){try{if(!n){return"";}var v=(n.currentSrc||n.src||"");if(!v&&n.getAttribute){v=n.getAttribute("src")||n.getAttribute("data-src")||n.getAttribute("data-bg")||n.getAttribute("data-background")||n.getAttribute("data-bg-image")||"";}if(!v&&n.style&&n.style.backgroundImage){var m=String(n.style.backgroundImage).match(/url\(["']?([^"')]+)["']?\)/i);v=m&&m[1]?m[1]:"";}return v;}catch(e){return"";}}function getPreloadUrl(){try{var l=document.querySelector('link[rel="preload"][as="image"][data-ucwp-lcp-preload="1"]');return l?(l.href||l.getAttribute("href")||""):"";}catch(e){return"";}}function addScope(out,n){if(!n||n.nodeType!==1){return;}for(var i=0;i<out.length;i++){if(out[i]===n){return;}}out.push(n);}function getScopes(){var out=[];if(manualSelectors&&manualSelectors.length){for(var i=0;i<manualSelectors.length;i++){try{document.querySelectorAll(manualSelectors[i]).forEach(function(n){addScope(out,n);});}catch(e){}}}try{document.querySelectorAll("sr7-module,rs-module").forEach(function(n){addScope(out,n);});}catch(e){}return out;}function collect(scope){var nodes=[];try{if(/^(sr7-module-bg|sr7-img|img)$/i.test(tag(scope))){nodes.push(scope);}if(scope&&scope.querySelectorAll){scope.querySelectorAll("sr7-module-bg,sr7-img,img").forEach(function(n){nodes.push(n);});}}catch(e){}return nodes;}function matchesPreload(n,pre){var u=imageUrl(n);if(!u||!pre){return false;}return clean(u)===clean(pre)||abs(u)===abs(pre);}function scoreNoLayout(n,pre){var t=tag(n),u=imageUrl(n).toLowerCase(),score=0;if(matchesPreload(n,pre)){score+=1000000;}if(t==="sr7-module-bg"){score+=250000;}else if(t==="sr7-img"){score+=50000;}if(u.indexOf("revslider/o/")!==-1){score-=180000;}if(/book|cover|product|thumb|thumbnail|logo|icon|avatar/.test(u)){score-=120000;}if(/lcp|hero|background|bg|banner/.test(u)){score+=90000;}return score;}function findBest(pre){var scopes=getScopes(),best=null,bestScore=-999999999;for(var i=0;i<scopes.length;i++){var nodes=collect(scopes[i]);for(var j=0;j<nodes.length;j++){var u=imageUrl(nodes[j]);if(!/\.(avif|webp|png|jpe?g|gif)(\?|#|$)/i.test(u)){continue;}var sc=scoreNoLayout(nodes[j],pre);if(sc>bestScore){best=nodes[j];bestScore=sc;}}}return best;}function mark(n,pre){try{if(!n||n.nodeType!==1){return false;}if(!n.hasAttribute("fetchpriority")){n.setAttribute("fetchpriority","high");n.setAttribute("data-ucwp-added-fetchpriority","1");}else if(n.getAttribute("fetchpriority")!=="high"){n.setAttribute("fetchpriority","high");}n.setAttribute("data-ucwp-sr7-lcp","1");n.setAttribute("data-ucwp-sr7-role",matchesPreload(n,pre)?"preload-matched":"preload-scoped");n.setAttribute("data-ucwp-lcp-runtime-winner","1");n.setAttribute("data-ucwp-lcp-reason",matchesPreload(n,pre)?"sr7-preload-matched-runtime":"sr7-preload-scoped-runtime");if((tag(n)==="img"||tag(n)==="sr7-img")&&(!n.hasAttribute("loading")||n.getAttribute("loading")==="lazy")){n.setAttribute("loading","eager");}if(!n.hasAttribute("decoding")){n.setAttribute("decoding","sync");}window.__ucwpLcpDiscovery=window.__ucwpLcpDiscovery||{};window.__ucwpLcpDiscovery.runtimeWinner={url:imageUrl(n),preload:pre||"",tag:tag(n),id:n.id||"",role:n.getAttribute("data-ucwp-sr7-role")||"",reason:n.getAttribute("data-ucwp-lcp-reason")||""};return true;}catch(e){return false;}}function run(){var pre=getPreloadUrl();var n=findBest(pre);if(n){mark(n,pre);return true;}return false;}function schedule(){try{run();}catch(e){}}document.addEventListener("sr.module.ready",schedule,true);document.addEventListener("SR7_MODULE_READY",schedule,true);document.addEventListener("DOMContentLoaded",schedule,{once:true});if(document.readyState!=="loading"){schedule();}var tries=[100,400,1000,2200];for(var x=0;x<tries.length;x++){setTimeout(schedule,tries[x]);}}());</script>
-HTML;
+            $this->ucwp_add_frontend_js_helper_data($handle, 'ucwpSr7LcpPriorityConfig', array(
+                'manualSelectors' => $selectors,
+            ));
+        }
 
-            $script = str_replace('__UCWP_MANUAL_SELECTORS__', $selectors_json, $script);
-
-            return $this->insert_html_before_closing_head($html, $script);
+private function inject_sr7_lcp_priority_runtime_script($html)
+        {
+            // SR7/LCP runtime priority is now printed through wp_enqueue_scripts
+            // as assets/js/sr7-lcp-priority.js with wp_add_inline_script()
+            // configuration. Keep this HTML rewrite hook as a no-op so the LCP
+            // priority markup pipeline does not output raw script tags.
+            return $html;
         }
 
         private function find_manual_lcp_candidate($html)
@@ -2144,7 +2245,7 @@ HTML;
                 }
             }
 
-            if (false !== strpos($meta_haystack, '/wp-content/uploads/revslider/')) {
+            if (false !== strpos($meta_haystack, $this->get_revslider_uploads_public_path_marker())) {
                 $score += 160;
             }
             if (false !== strpos($meta_haystack, 'sr7_') || false !== strpos($meta_haystack, 'sr7-')) {
@@ -2278,7 +2379,8 @@ HTML;
                     }
 
                     $url = stripcslashes(str_replace('\\/', '/', $url));
-                    if (false === stripos($url, '/wp-content/uploads/') && false === stripos($url, 'wp-content/uploads')) {
+                    $uploads_marker = $this->get_uploads_public_path_marker();
+                    if (false === stripos($url, $uploads_marker) && false === stripos($url, ltrim($uploads_marker, '/'))) {
                         continue;
                     }
 
@@ -2371,7 +2473,7 @@ HTML;
                 return null;
             }
 
-            if (false !== stripos($html, '<sr7-') || false !== stripos($html, 'sr7-module') || false !== stripos($html, '/wp-content/uploads/revslider/')) {
+            if (false !== stripos($html, '<sr7-') || false !== stripos($html, 'sr7-module') || false !== stripos($html, $this->get_revslider_uploads_public_path_marker())) {
                 return null;
             }
 
@@ -3237,11 +3339,12 @@ HTML;
             }
 
             $path = (string) wp_parse_url($url, PHP_URL_PATH);
-            if ('' === $path || false === strpos($path, '/wp-content/uploads/')) {
+            $uploads_marker = $this->get_uploads_public_path_marker();
+            if ('' === $path || false === strpos($path, $uploads_marker)) {
                 return $url;
             }
 
-            $relative = ltrim((string) substr($path, strpos($path, '/wp-content/uploads/') + strlen('/wp-content/uploads/')), '/');
+            $relative = ltrim((string) substr($path, strpos($path, $uploads_marker) + strlen($uploads_marker)), '/');
             if ('' === $relative || !preg_match('/\.(png|jpe?g|webp|avif)$/i', $relative)) {
                 return $url;
             }
@@ -3512,12 +3615,8 @@ private function prefer_existing_nextgen_revslider_url($url)
             }
 
             $path = (string) wp_parse_url($url, PHP_URL_PATH);
-            if ('' === $path || !preg_match('#/wp-content/(?:uploads|cache/ultracache-(?:avif|webp))/revslider/o/(.+?)\.(avif|webp|png|jpe?g)(?:$|\?)#i', $path, $match)) {
-                return $url;
-            }
-
-            $relative_no_ext = isset($match[1]) ? ltrim((string) $match[1], '/') : '';
-            if ('' === $relative_no_ext) {
+            $relative_no_ext = $this->extract_sr7_generated_image_relative_no_ext_from_path($path);
+            if ('' === $path || '' === $relative_no_ext) {
                 return $url;
             }
 
@@ -3578,7 +3677,7 @@ private function prefer_existing_nextgen_revslider_url($url)
                 return null;
             }
 
-            if (false === stripos($html, 'sr7') && false === stripos($html, '/wp-content/uploads/revslider/')) {
+            if (false === stripos($html, 'sr7') && false === stripos($html, $this->get_revslider_uploads_public_path_marker())) {
                 return null;
             }
 
@@ -3644,26 +3743,27 @@ private function prefer_existing_nextgen_revslider_url($url)
                 }
             }
 
-            if (preg_match_all("#https?://[^\"'\\s<>()]+/wp-content/uploads/revslider/[^\"'\\s<>()]+#i", $html, $matches, PREG_OFFSET_CAPTURE)) {
-                foreach ($matches[0] as $match) {
-                    $raw_url = (string) $match[0];
-                    $offset = isset($match[1]) ? (int) $match[1] : 0;
-                    $context_slice = strtolower((string) substr($html, max(0, $offset - 240), 480));
-                    $candidate = $this->build_lcp_candidate_from_values($raw_url, array(
-                        'tag' => false !== strpos($context_slice, 'sr7') ? 'SR7-IMG' : 'SCRIPT',
-                        'attribute' => false !== strpos($context_slice, 'sr7') ? 'data-lazyload' : 'script',
-                        'class' => $context_slice,
-                        'id' => $context_slice,
-                        'style' => $context_slice,
-                    ));
-                    if (null !== $candidate) {
-                        $candidate['is_sr7'] = true;
-                        $candidate['score'] += max(0, 160 - min(120, (int) floor($offset / 4000)));
-                        if (false !== strpos($context_slice, 'sr7_1') || false !== strpos($context_slice, '-1-')) {
-                            $candidate['score'] += 80;
-                        }
-                        $candidates[] = $candidate;
+            foreach ($this->find_revslider_upload_urls_in_html($html) as $match) {
+                $raw_url = isset($match['url']) ? (string) $match['url'] : '';
+                $offset = isset($match['offset']) ? (int) $match['offset'] : 0;
+                if ('' === $raw_url) {
+                    continue;
+                }
+                $context_slice = strtolower((string) substr($html, max(0, $offset - 240), 480));
+                $candidate = $this->build_lcp_candidate_from_values($raw_url, array(
+                    'tag' => false !== strpos($context_slice, 'sr7') ? 'SR7-IMG' : 'SCRIPT',
+                    'attribute' => false !== strpos($context_slice, 'sr7') ? 'data-lazyload' : 'script',
+                    'class' => $context_slice,
+                    'id' => $context_slice,
+                    'style' => $context_slice,
+                ));
+                if (null !== $candidate) {
+                    $candidate['is_sr7'] = true;
+                    $candidate['score'] += max(0, 160 - min(120, (int) floor($offset / 4000)));
+                    if (false !== strpos($context_slice, 'sr7_1') || false !== strpos($context_slice, '-1-')) {
+                        $candidate['score'] += 80;
                     }
+                    $candidates[] = $candidate;
                 }
             }
 
@@ -3868,11 +3968,7 @@ private function prefer_existing_nextgen_revslider_url($url)
                 return '';
             }
 
-            if (!preg_match('#/wp-content/(?:uploads|cache/ultracache-(?:avif|webp))/revslider/o/(.+?)\.(?:avif|webp|png|jpe?g|gif)(?:$|\?)#i', $path, $match)) {
-                return '';
-            }
-
-            $relative_no_ext = isset($match[1]) ? trim((string) $match[1], '/') : '';
+            $relative_no_ext = $this->extract_sr7_generated_image_relative_no_ext_from_path($path);
             if ('' === $relative_no_ext) {
                 return '';
             }
@@ -3970,9 +4066,8 @@ private function prefer_existing_nextgen_revslider_url($url)
                 return false;
             }
 
-            return false !== stripos($url, '/wp-content/uploads/revslider/o/')
-                || false !== stripos($url, '/wp-content/uploads/uc-images/avif/revslider/o/')
-                || false !== stripos($url, '/wp-content/uploads/uc-images/webp/revslider/o/');
+            $path = (string) wp_parse_url($url, PHP_URL_PATH);
+            return '' !== $this->extract_sr7_generated_image_relative_no_ext_from_path($path);
         }
 
         private function is_lcp_candidate_image_url($src)
@@ -4069,6 +4164,8 @@ private function prefer_existing_nextgen_revslider_url($url)
                 return $html;
             }
 
+            // Intentional final HTML optimization output: LCP image preloads are inserted after analyzing the rendered hero/slider markup.
+            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
             $link = '<link rel="preload" as="image" href="' . $preload_href . '"';
             if ('' !== $mime_type) {
                 $link .= ' type="' . esc_attr($mime_type) . '"';
@@ -4330,21 +4427,15 @@ private function prefer_existing_nextgen_revslider_url($url)
                 return $url;
             }
 
-            $uploads_marker = '/wp-content/uploads/';
-            $avif_marker = '/wp-content/uploads/uc-images/avif/';
-            $webp_marker = '/wp-content/uploads/uc-images/webp/';
-            $legacy_avif_marker = '/wp-content/cache/ultracache-avif/';
-            $legacy_webp_marker = '/wp-content/cache/ultracache-webp/';
+            $uploads_marker = $this->get_uploads_public_path_marker();
+            $avif_marker = $this->get_ultracache_optimized_images_public_path_marker('avif');
+            $webp_marker = $this->get_ultracache_optimized_images_public_path_marker('webp');
             $original_relative = false !== strpos($original_base, $uploads_marker) ? substr($original_base, strpos($original_base, $uploads_marker) + strlen($uploads_marker)) : '';
             $preferred_relative = '';
             if (false !== strpos($preferred_base, $avif_marker)) {
                 $preferred_relative = substr($preferred_base, strpos($preferred_base, $avif_marker) + strlen($avif_marker));
             } elseif (false !== strpos($preferred_base, $webp_marker)) {
                 $preferred_relative = substr($preferred_base, strpos($preferred_base, $webp_marker) + strlen($webp_marker));
-            } elseif (false !== strpos($preferred_base, $legacy_avif_marker)) {
-                $preferred_relative = substr($preferred_base, strpos($preferred_base, $legacy_avif_marker) + strlen($legacy_avif_marker));
-            } elseif (false !== strpos($preferred_base, $legacy_webp_marker)) {
-                $preferred_relative = substr($preferred_base, strpos($preferred_base, $legacy_webp_marker) + strlen($legacy_webp_marker));
             }
 
             if ('' === $original_relative || '' === $preferred_relative || $original_relative !== $preferred_relative) {

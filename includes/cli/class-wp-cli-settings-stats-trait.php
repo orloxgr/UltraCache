@@ -311,7 +311,7 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 'warning'
             );
 
-            $cache_dir = defined('UCWP_CACHE_DIR') ? UCWP_CACHE_DIR : WP_CONTENT_DIR . '/cache/ultracache';
+            $cache_dir = ucwp_content_cache_storage_dir();
             $this->self_test_add_check(
                 $checks,
                 'Cache directory writable',
@@ -321,7 +321,7 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 $this->get_file_owner_summary($cache_dir)
             );
 
-            $advanced_cache = WP_CONTENT_DIR . '/advanced-cache.php';
+            $advanced_cache = ucwp_dropin_path('advanced-cache.php');
             $page_cache_expected = !empty($settings['pageCacheEnabled']);
             $advanced_exists = file_exists($advanced_cache);
             $advanced_dropin_ok = $page_cache_expected ? $advanced_exists : !$advanced_exists;
@@ -334,7 +334,7 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 $this->get_file_owner_summary($advanced_cache)
             );
 
-            $object_cache = WP_CONTENT_DIR . '/object-cache.php';
+            $object_cache = ucwp_dropin_path('object-cache.php');
             $object_expected = !empty($settings['objectCacheEnabled']);
             $object_exists = file_exists($object_cache);
             $object_status = !empty($diagnostics['objectCache']) && is_array($diagnostics['objectCache']) ? $diagnostics['objectCache'] : array();

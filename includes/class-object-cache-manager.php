@@ -175,7 +175,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		public static function is_dropin_active() {
-			$dropin = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+			$dropin = ucwp_dropin_path('object-cache.php');
 
 			return (bool) (
 				function_exists('wp_using_ext_object_cache')
@@ -197,7 +197,7 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 
 
 		private static function get_dropin_path() {
-			return trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+			return ucwp_dropin_path('object-cache.php');
 		}
 
 		public static function get_dropin_status_fast() {

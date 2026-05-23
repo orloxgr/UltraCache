@@ -133,7 +133,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 
 			$relative_path = rawurldecode($relative_path);
 			$relative_path = ltrim(str_replace('\\', '/', $relative_path), '/');
-			if ('' === $relative_path || false !== strpos($relative_path, '/uc-images/')) {
+			if ('' === $relative_path || false !== strpos($relative_path, '/ultracache/images/')) {
 				return false;
 			}
 
@@ -255,7 +255,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			$base_url = ('avif' === $format && defined('UCWP_AVIF_URL')) ? UCWP_AVIF_URL : (defined('UCWP_WEBP_URL') ? UCWP_WEBP_URL : '');
 			$base_path = (string) wp_parse_url((string) $base_url, PHP_URL_PATH);
 			if ('' === $base_path) {
-				$base_path = (string) wp_parse_url(content_url('uploads/uc-images/' . $format . '/'), PHP_URL_PATH);
+				$base_path = ucwp_optimized_images_storage_url_path($format);
 			}
 
 			$base_path = '/' . ltrim(str_replace('\\', '/', (string) $base_path), '/');
@@ -398,10 +398,10 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return false;
 			}
 
-			// 2.56.178: optimized AVIF/WebP files live under uploads/uc-images.
+			// 2.56.178: optimized AVIF/WebP files live under uploads/ultracache/images.
 			// They are generated targets, not source uploads, so never feed them back
-			// into the converter and create nested uc-images/avif/uc-images paths.
-			$optimized_images_prefix = $base_path . '/uc-images/';
+			// into the converter and create nested ultracache/images/avif/ultracache/images paths.
+			$optimized_images_prefix = $base_path . '/ultracache/images/';
 			if (0 === strpos($public_path, $optimized_images_prefix)) {
 				return false;
 			}
@@ -443,48 +443,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		}
 
 		private function normalize_public_url($public_url) {
-			$public_url = trim((string) $public_url);
-			if ('' === $public_url) {
-				return '';
-			}
-
-			$public_url = preg_replace('/[#?].*$/', '', $public_url);
-			if (!is_string($public_url) || '' === $public_url) {
-				return '';
-			}
-
-			$parts = wp_parse_url($public_url);
-			if (!is_array($parts) || empty($parts['path'])) {
-				return $public_url;
-			}
-
-			$decoded_path = rawurldecode((string) $parts['path']);
-			if ('' === $decoded_path) {
-				return $public_url;
-			}
-
-			$normalized = '';
-			if (!empty($parts['scheme'])) {
-				$normalized .= $parts['scheme'] . '://';
-			} elseif (0 === strpos($public_url, '//')) {
-				$normalized .= '//';
-			}
-			if (!empty($parts['user'])) {
-				$normalized .= $parts['user'];
-				if (isset($parts['pass'])) {
-					$normalized .= ':' . $parts['pass'];
-				}
-				$normalized .= '@';
-			}
-			if (!empty($parts['host'])) {
-				$normalized .= $parts['host'];
-			}
-			if (!empty($parts['port'])) {
-				$normalized .= ':' . $parts['port'];
-			}
-			$normalized .= $decoded_path;
-
-			return $normalized ?: $public_url;
+			return function_exists('ucwp_normalize_public_url') ? ucwp_normalize_public_url($public_url) : trim((string) $public_url);
 		}
 
 		private function get_best_url_from_attachment_context($attachment, $size) {

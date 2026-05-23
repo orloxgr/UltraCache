@@ -179,13 +179,13 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
         private function validate_cached_html_css_bundle_refs($html, $cache_file = '')
         {
             $html = (string) $html;
-            if ('' === $html || false === stripos($html, '/cache/ultracache/')) {
+            if ('' === $html || false === stripos($html, '/uploads/ultracache/')) {
                 return true;
             }
 
-            $has_generated_css = (false !== stripos($html, '/cache/ultracache/css-bundles/'))
-                || (false !== stripos($html, '/cache/ultracache/font-css/'))
-                || (false !== stripos($html, '/cache/ultracache/optimized-css/'));
+            $has_generated_css = (false !== stripos($html, '/uploads/ultracache/css-bundles/'))
+                || (false !== stripos($html, '/uploads/ultracache/font-css/'))
+                || (false !== stripos($html, '/uploads/ultracache/optimized-css/'));
             if (!$has_generated_css) {
                 return true;
             }
@@ -221,19 +221,22 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
         {
             $html = (string) $html;
             $missing = array();
-            if ('' === $html || false === stripos($html, '/cache/ultracache/')) {
+            $generated_base_path = function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path() : '';
+            if ('' === $html || '' === $generated_base_path || false === stripos($html, trim($generated_base_path, '/'))) {
                 return $missing;
             }
 
+            $generated_base_pattern = preg_quote(trailingslashit($generated_base_path), '~');
             $generated_asset_patterns = array(
-                '~(?:https?:)?//[^\s\"\'<>]+/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css~i',
-                '~/wp-content/cache/ultracache/(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css~i',
+                '~(?:https?:)?//[^\s\"\'<>]+' . $generated_base_pattern . '(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css~i',
+                '~' . $generated_base_pattern . '(?:css-bundles|font-css|optimized-css)/[^\s\"\'<>?#)]+\.css~i',
             );
+
 
             $refs = array();
             $collect_generated_refs = function ($value) use (&$refs, $generated_asset_patterns) {
                 $value = html_entity_decode((string) $value, ENT_QUOTES, 'UTF-8');
-                if ('' === $value || false === stripos($value, '/cache/ultracache/')) {
+                if ('' === $value || false === stripos($value, '/uploads/ultracache/')) {
                     return;
                 }
 
@@ -310,9 +313,9 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
 
             $refs = array_values(array_unique(array_map('strval', $refs)));
             $allowed_dirs = array(
-                'css-bundles' => wp_normalize_path($this->get_frontpage_css_dir()),
-                'font-css' => wp_normalize_path(trailingslashit(UCWP_CACHE_DIR) . 'font-css/'),
-                'optimized-css' => wp_normalize_path(trailingslashit(UCWP_CACHE_DIR) . 'optimized-css/'),
+                'css-bundles' => wp_normalize_path(ucwp_generated_asset_dir('css-bundles')),
+                'font-css' => wp_normalize_path(ucwp_generated_asset_dir('font-css')),
+                'optimized-css' => wp_normalize_path(ucwp_generated_asset_dir('optimized-css')),
             );
             foreach ($refs as $ref) {
                 $path = (string) wp_parse_url($ref, PHP_URL_PATH);
@@ -320,7 +323,9 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                     $path = $ref;
                 }
 
-                if (!preg_match('#/wp-content/cache/ultracache/(css-bundles|font-css|optimized-css)/([^/]+\.css)$#i', rawurldecode($path), $match)) {
+                $generated_base_path = function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path() : '';
+                $generated_ref_pattern = '' !== $generated_base_path ? '#^' . preg_quote(trailingslashit($generated_base_path), '#') . '(css-bundles|font-css|optimized-css)/([^/]+\.css)$#i' : '';
+                if ('' === $generated_ref_pattern || !preg_match($generated_ref_pattern, rawurldecode($path), $match)) {
                     continue;
                 }
 
@@ -365,7 +370,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                 return false;
             }
 
-            if (!is_writable($dir)) {
+            if (!ucwp_path_is_writable($dir)) {
                 $this->set_cache_write_error('dir_not_writable', 'Cache directory is not writable.', array('file' => $file_path, 'dir' => $dir));
                 $this->record_cache_event('store-dir-not-writable', array('file' => $file_path, 'dir' => $dir));
                 return false;
@@ -487,7 +492,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                 return false;
             }
 
-            if (!is_writable($dir)) {
+            if (!ucwp_path_is_writable($dir)) {
                 $this->set_atomic_write_error('atomic_dir_not_writable', 'Cache directory is not writable for atomic write.', array('path' => $path, 'dir' => $dir));
                 return false;
             }

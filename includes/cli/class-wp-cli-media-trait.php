@@ -370,7 +370,7 @@ if (!trait_exists('UCWP_CLI_Media_Trait')) {
             WP_CLI::line('  wp ultracache media process');
             WP_CLI::line('      Process the current media queue until complete. If the queue is empty, it is rebuilt first.');
             WP_CLI::line('  wp ultracache media status');
-            WP_CLI::line('      Show media queue and uploads/uc-images storage status.');
+            WP_CLI::line('      Show media queue and uploads/ultracache/images storage status.');
             WP_CLI::line('');
             WP_CLI::line('Formats:');
             WP_CLI::line('  --media-format=both   Default. Generate/check both AVIF and WebP variants.');

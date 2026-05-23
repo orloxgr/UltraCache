@@ -41,7 +41,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 }
             }
 
-            $dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) . 'google-fonts/' : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/google-fonts/';
+            $dir = ucwp_generated_asset_dir('google-fonts');
             $fallback['path'] = $dir;
             if (is_dir($dir)) {
                 $items = function_exists('ucwp_safe_scandir') ? ucwp_safe_scandir($dir, 'google_fonts_dashboard_fallback scandir') : scandir($dir);
@@ -85,7 +85,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
         private static function get_font_pipeline_diagnostics($settings = array())
         {
             $settings = is_array($settings) ? $settings : array();
-            $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
+            $cache_dir = ucwp_content_cache_storage_dir();
             $font_css_dir = trailingslashit($cache_dir) . 'font-css/';
             $optimized_css_dir = trailingslashit($cache_dir) . 'optimized-css/';
             $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
@@ -602,12 +602,14 @@ trait Ultra_Cache_WP_Diagnostics_Trait
         {
             $html = (string) $html;
             $refs = array();
-            if ('' === $html || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+            $marker = function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path('css-bundles') : '';
+            if ('' === $html || '' === $marker || false === stripos($html, trim($marker, '/'))) {
                 return $refs;
             }
 
-            preg_match_all('~(?:https?:)?//[^\s"\'<>]+/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css~i', $html, $absolute_matches);
-            preg_match_all('~/wp-content/cache/ultracache/css-bundles/[^\s"\'<>?#)]+\.css~i', $html, $path_matches);
+            $marker_pattern = preg_quote(trailingslashit($marker), '~');
+            preg_match_all('~(?:https?:)?//[^\s"\'<>]+' . $marker_pattern . '[^\s"\'<>?#)]+\.css~i', $html, $absolute_matches);
+            preg_match_all('~' . $marker_pattern . '[^\s"\'<>?#)]+\.css~i', $html, $path_matches);
 
             $matches = array_merge(
                 isset($absolute_matches[0]) && is_array($absolute_matches[0]) ? $absolute_matches[0] : array(),
@@ -698,7 +700,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     }
 
                     $html = ucwp_safe_file_get_contents($path, 'css bundle cached html ref diagnostics scan');
-                    if (!is_string($html) || false === stripos($html, '/cache/ultracache/css-bundles/')) {
+                    if (!is_string($html) || false === stripos($html, '/uploads/ultracache/css-bundles/')) {
                         if ($summary['filesScanned'] >= $max_files) {
                             $summary['truncated'] = true;
                             break;
@@ -937,11 +939,11 @@ trait Ultra_Cache_WP_Diagnostics_Trait
 
         private static function get_cache_storage_diagnostics($settings = array(), $css_summary = null, $force_refresh = false)
         {
-            $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
+            $cache_dir = ucwp_content_cache_storage_dir();
             $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
-            $object_dir = defined('UCWP_OBJECT_CACHE_DIR') ? trailingslashit(UCWP_OBJECT_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/';
-            $avif_dir = defined('UCWP_AVIF_DIR') ? trailingslashit(UCWP_AVIF_DIR) : trailingslashit(WP_CONTENT_DIR) . 'uploads/uc-images/avif/';
-            $webp_dir = defined('UCWP_WEBP_DIR') ? trailingslashit(UCWP_WEBP_DIR) : trailingslashit(WP_CONTENT_DIR) . 'uploads/uc-images/webp/';
+            $object_dir = ucwp_object_cache_storage_dir();
+            $avif_dir = ucwp_optimized_images_storage_dir('avif');
+            $webp_dir = ucwp_optimized_images_storage_dir('webp');
             $storage_cache_key = 'ucwp_cache_storage_diagnostics_v2';
 
             if (!$force_refresh) {
@@ -969,7 +971,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'cssBundles' => array('files' => 0, 'bytes' => 0, 'recognizedBundleFiles' => 0, 'warningLevel' => 'notice', 'message' => self::maybe_translate('CSS bundle storage has not been scanned yet.')),
                     'objectCacheDisk' => array('files' => 0, 'bytes' => 0, 'truncated' => false, 'exists' => is_dir($object_dir)),
                     'mediaCache' => array(
-                        'storageRoot' => 'uploads/uc-images',
+                        'storageRoot' => 'uploads/ultracache/images',
                         'persistent' => true,
                         'message' => self::maybe_translate('Generated media storage has not been scanned yet. Use Refresh storage diagnostics.'),
                         'files' => 0,
@@ -1070,9 +1072,9 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'exists' => !empty($object_cache['exists']),
                 ),
                 'mediaCache' => array(
-                    'storageRoot' => 'uploads/uc-images',
+                    'storageRoot' => 'uploads/ultracache/images',
                     'persistent' => true,
-                    'message' => self::maybe_translate('Optimized AVIF/WebP media is stored under uploads/uc-images so normal cache cleanup does not remove persistent generated image assets.'),
+                    'message' => self::maybe_translate('Optimized AVIF/WebP media is stored under uploads/ultracache/images so normal cache cleanup does not remove persistent generated image assets.'),
                     'files' => (int) $avif['files'] + (int) $webp['files'],
                     'bytes' => (int) $avif['bytes'] + (int) $webp['bytes'],
                     'avifFiles' => (int) $avif['files'],
@@ -1092,7 +1094,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
         private static function get_css_bundle_summary_diagnostics($settings = array())
         {
             $settings = is_array($settings) ? $settings : array();
-            $cache_dir = defined('UCWP_CACHE_DIR') ? trailingslashit(UCWP_CACHE_DIR) : trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/';
+            $cache_dir = ucwp_content_cache_storage_dir();
             $css_bundle_dir = trailingslashit($cache_dir) . 'css-bundles/';
             $manifest_file = $css_bundle_dir . 'manifest.json';
             $last = get_option('ultracache_last_css_bundle_summary', array());
@@ -1447,7 +1449,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
         private static function get_object_cache_status_diagnostic_lite()
         {
             $settings = self::get_dashboard_settings();
-            $object_cache_path = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+            $object_cache_path = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('object-cache.php') : '';
             $support = self::get_object_cache_support_status(false);
             $backend_status = array();
 
@@ -1553,8 +1555,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $support              = self::get_media_support_status();
             $compression          = self::get_compression_support_status();
             $last                 = get_transient('ultracache_last_cache_event');
-            $advanced_cache_path  = trailingslashit(WP_CONTENT_DIR) . 'advanced-cache.php';
-            $object_cache_path    = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
+            $advanced_cache_path  = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('advanced-cache.php') : '';
+            $object_cache_path    = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('object-cache.php') : '';
             $runtime_config_path  = self::get_runtime_config_path();
             $browser_cache_path   = self::get_browser_cache_htaccess_path();
             $object_cache_support  = self::get_object_cache_support_status(false);

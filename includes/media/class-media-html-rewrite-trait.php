@@ -145,7 +145,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			}
 
 			// 2.56.180: do not require the full uploads base URL to be present. Many optimized
-			// cached pages use root-relative /wp-content/uploads/... image URLs, especially behind
+			// cached pages use root-relative uploads image URLs, especially behind
 			// HTTPS offload or reverse proxies. The per-URL resolver below validates same-site
 			// uploads paths safely, so the final HTML pass can scan the current page HTML without
 			// doing a global media-library walk.
@@ -202,9 +202,8 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			if ('' !== $baseurl) {
 				$base_path = (string) wp_parse_url($baseurl, PHP_URL_PATH);
 			}
-			if ('' === $base_path) {
-				$content_path = (string) wp_parse_url(content_url('uploads/'), PHP_URL_PATH);
-				$base_path = rtrim($content_path, '/');
+			if ('' === $base_path && function_exists('ucwp_uploads_public_path')) {
+				$base_path = rtrim(ucwp_uploads_public_path(), '/');
 			}
 
 			$base_path = '/' . ltrim(str_replace('\\', '/', (string) $base_path), '/');
@@ -213,7 +212,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				return true;
 			}
 
-			return false !== strpos($html, '/wp-content/uploads/');
+			return function_exists('ucwp_uploads_public_path') ? false !== strpos($html, ucwp_uploads_public_path()) : false;
 		}
 
 		private function rewrite_html_upload_image_urls_with_single_pass_map($html, array $uploads) {
@@ -242,8 +241,8 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 		private function get_uploads_public_base_path_for_html_rewrite(array $uploads) {
 			$baseurl = !empty($uploads['baseurl']) ? untrailingslashit($this->normalize_public_url($uploads['baseurl'])) : '';
 			$base_path = '' !== $baseurl ? (string) wp_parse_url($baseurl, PHP_URL_PATH) : '';
-			if ('' === $base_path) {
-				$base_path = (string) wp_parse_url(content_url('uploads/'), PHP_URL_PATH);
+			if ('' === $base_path && function_exists('ucwp_uploads_public_path')) {
+				$base_path = ucwp_uploads_public_path();
 			}
 
 			$base_path = '/' . ltrim(str_replace('\\', '/', (string) $base_path), '/');
@@ -262,7 +261,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			if (preg_match_all($unescaped, $html, $matches)) {
 				foreach ((array) $matches[1] as $match) {
 					$match = trim((string) $match);
-					if ('' !== $match && false === strpos($match, '/uc-images/')) {
+					if ('' !== $match && false === strpos($match, '/ultracache/images/')) {
 						$tokens[$match] = false;
 					}
 				}
@@ -273,7 +272,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				if (preg_match_all($unescaped, $decoded_html, $matches)) {
 					foreach ((array) $matches[1] as $match) {
 						$match = trim((string) $match);
-						if ('' === $match || false !== strpos($match, '/uc-images/')) {
+						if ('' === $match || false !== strpos($match, '/ultracache/images/')) {
 							continue;
 						}
 
@@ -374,12 +373,12 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 
 			$url = html_entity_decode(str_replace('\/', '/', $url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 			$url = trim($url);
-			if ('' === $url || false === strpos($url, '/uc-images/')) {
+			if ('' === $url || false === strpos($url, '/ultracache/images/')) {
 				return '';
 			}
 
 			$url = esc_url_raw($url);
-			if ('' === $url || false === strpos($url, '/uc-images/')) {
+			if ('' === $url || false === strpos($url, '/ultracache/images/')) {
 				return '';
 			}
 
@@ -562,7 +561,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 
 			$candidate = html_entity_decode(str_replace('\/', '/', $raw), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 			$candidate = trim($candidate);
-			if ('' === $candidate || false !== strpos($candidate, '/uc-images/')) {
+			if ('' === $candidate || false !== strpos($candidate, '/ultracache/images/')) {
 				return '';
 			}
 
@@ -681,7 +680,7 @@ private function rewrite_single_css_url_function_match($original_match, $inner) 
 			$candidate = str_replace('\/', '/', $candidate);
 			$candidate = trim($candidate);
 
-			if ('' === $candidate || false !== strpos($candidate, '/uc-images/')) {
+			if ('' === $candidate || false !== strpos($candidate, '/ultracache/images/')) {
 				return $original_match;
 			}
 
@@ -741,7 +740,7 @@ private function rewrite_single_css_url_function_match($original_match, $inner) 
 			$source_url = trim($source_url);
 			$optimized_url = html_entity_decode(str_replace('\/', '/', $optimized_url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 			$optimized_url = $this->sanitize_rewritten_public_url_raw($optimized_url);
-			if ('' === $source_url || '' === $optimized_url || false === strpos($optimized_url, '/uc-images/')) {
+			if ('' === $source_url || '' === $optimized_url || false === strpos($optimized_url, '/ultracache/images/')) {
 				return;
 			}
 
@@ -779,7 +778,8 @@ private function rewrite_single_css_url_function_match($original_match, $inner) 
 
 			$parts = wp_parse_url($normalized ?: $url);
 			$path = is_array($parts) && !empty($parts['path']) ? '/' . ltrim(rawurldecode((string) $parts['path']), '/') : '';
-			if ('' !== $path && preg_match('~/wp-content/uploads/.+\.(?:jpe?g|png|webp)(?:$|\?)~i', $path)) {
+			$uploads_marker = function_exists('ucwp_uploads_public_path') ? ucwp_uploads_public_path() : '';
+			if ('' !== $path && '' !== $uploads_marker && 0 === strpos($path, $uploads_marker) && preg_match('~\.(?:jpe?g|png|webp)(?:$|\?)~i', $path)) {
 				$variants[] = $path;
 
 				$hosts = array();
@@ -801,7 +801,7 @@ private function rewrite_single_css_url_function_match($original_match, $inner) 
 			$clean = array();
 			foreach ($variants as $variant) {
 				$variant = trim((string) $variant);
-				if ('' === $variant || false !== strpos($variant, '/uc-images/')) {
+				if ('' === $variant || false !== strpos($variant, '/ultracache/images/')) {
 					continue;
 				}
 				$clean[$variant] = $variant;
@@ -849,8 +849,8 @@ private function rewrite_single_upload_image_url_token($current, $slash_escaped 
             }
 
             $already_optimized = $slash_escaped
-                ? (false !== strpos($current, '\\/uc-images\\/'))
-                : (false !== strpos($current, '/uc-images/'));
+                ? (false !== strpos($current, '\\/ultracache/images\\/'))
+                : (false !== strpos($current, '/ultracache/images/'));
             if ($already_optimized) {
                 return $current;
             }

@@ -2,7 +2,7 @@
 # This file is distributed under the GPLv2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: UltraCache 2.58.46\n"
+"Project-Id-Version: UltraCache 2.59.02\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-05-18 01:04+0000\n"
 "MIME-Version: 1.0\n"
@@ -1436,7 +1436,7 @@ msgid "Generated CSS bundle file failed verification."
 msgstr ""
 
 #: includes/admin-dashboard.js:9113
-msgid "Generated images under uploads/uc-images are never deleted automatically."
+msgid "Generated images under uploads/ultracache/images are never deleted automatically."
 msgstr ""
 
 #: includes/admin-dashboard.js:4684
@@ -2836,7 +2836,7 @@ msgid "Run UltraCache self-test checks."
 msgstr ""
 
 #: includes/admin-dashboard.js:8146
-msgid "Runs a capped manual scan of uploads/uc-images. Normal dashboard/status refreshes stay passive and do not crawl media directories."
+msgid "Runs a capped manual scan of uploads/ultracache/images. Normal dashboard/status refreshes stay passive and do not crawl media directories."
 msgstr ""
 
 #: includes/diagnostics/class-diagnostics-trait.php:1397
@@ -3100,7 +3100,7 @@ msgid "should_bypass_cache breakdown"
 msgstr ""
 
 #: includes/class-wp-cli.php:330
-msgid "Show AVIF/WebP media queue and persistent uploads/uc-images storage status."
+msgid "Show AVIF/WebP media queue and persistent uploads/ultracache/images storage status."
 msgstr ""
 
 #: includes/admin-dashboard.js:3806
@@ -3536,11 +3536,11 @@ msgid "Visible / editable safeguard lists"
 msgstr ""
 
 #: includes/admin-dashboard.js:8726
-msgid "Visible/default patterns used by Delay known functional third-party JS. Matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded."
+msgid "User-editable matching fragments for scripts already printed by the site, theme, or another plugin. UltraCache does not add or contact these providers; matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded."
 msgstr ""
 
 #: includes/admin-dashboard.js:8713
-msgid "Visible/default patterns used by Delay safe third-party JS. Matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded. Safe third-party scripts use a later automatic fallback than functional/local delayed scripts."
+msgid "User-editable matching fragments for scripts already printed by the site, theme, or another plugin. UltraCache does not add or contact these providers; matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded."
 msgstr ""
 
 #: includes/settings/class-settings-trait.php:1064

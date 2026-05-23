@@ -342,19 +342,126 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         return $context;
     }
 
+    private function is_ultracache_generated_css_output_url($url)
+    {
+        $path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
+        if ('' === $path) {
+            return false;
+        }
+
+        return false !== strpos($path, '/uploads/ultracache/css-bundles/')
+            || false !== strpos($path, '/uploads/ultracache/font-css/')
+            || false !== strpos($path, '/uploads/ultracache/optimized-css/');
+    }
+
+    private function normalize_css_rewrite_map_lookup_url($url)
+    {
+        $url = trim((string) $url);
+        if ('' === $url) {
+            return '';
+        }
+        if (0 === strpos($url, '//')) {
+            $url = (is_ssl() ? 'https:' : 'http:') . $url;
+        } elseif (0 === strpos($url, '/')) {
+            $url = home_url($url);
+        }
+        if (method_exists($this, 'normalize_public_resource_url')) {
+            $normalized = $this->normalize_public_resource_url($url);
+            if ('' !== $normalized) {
+                return esc_url_raw((string) $normalized);
+            }
+        }
+        return esc_url_raw($url);
+    }
+
+    private function get_css_rewrite_source_url_from_transient_map($generated_url)
+    {
+        $generated_url = $this->normalize_css_rewrite_map_lookup_url($generated_url);
+        if ('' === $generated_url) {
+            return '';
+        }
+
+        $map = get_transient('ucwp_runtime_font_css_url_map_v3');
+        if (!is_array($map)) {
+            return '';
+        }
+
+        foreach ($map as $source_url => $mapped_url) {
+            $source_url = $this->normalize_css_rewrite_map_lookup_url((string) $source_url);
+            $mapped_url = $this->normalize_css_rewrite_map_lookup_url((string) $mapped_url);
+            if ('' !== $source_url && '' !== $mapped_url && $mapped_url === $generated_url) {
+                return $source_url;
+            }
+        }
+
+        return '';
+    }
+
+    private function map_generated_css_detail_to_original_source(array $detail)
+    {
+        $url = isset($detail['url']) ? $this->normalize_css_rewrite_map_lookup_url((string) $detail['url']) : '';
+        if ('' === $url || !$this->is_ultracache_generated_css_output_url($url)) {
+            return $detail;
+        }
+
+        $source_url = '';
+        $source_path = '';
+        $generated_url = $url;
+        $generated_path = $this->resolve_local_path_from_public_url($generated_url);
+        $generated_bytes = ('' !== $generated_path && is_readable($generated_path)) ? (int) filesize($generated_path) : max(0, (int) ($detail['bytes'] ?? 0));
+        $optimization_type = 'ultracache-generated-css';
+
+        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_css_rewrite_map_by_generated_url')) {
+            $row = Ultra_Cache_WP::get_css_rewrite_map_by_generated_url($generated_url);
+            if (is_array($row) && !empty($row['source_url'])) {
+                $source_url = $this->normalize_css_rewrite_map_lookup_url((string) $row['source_url']);
+                $source_path = isset($row['source_path']) ? wp_normalize_path((string) $row['source_path']) : '';
+                $optimization_type = isset($row['optimization_type']) ? sanitize_key((string) $row['optimization_type']) : $optimization_type;
+            }
+        }
+
+        if ('' === $source_url) {
+            $source_url = $this->get_css_rewrite_source_url_from_transient_map($generated_url);
+            if ('' !== $source_url) {
+                $source_path = $this->resolve_local_path_from_public_url($source_url);
+                $optimization_type = 'css-font-mix';
+            }
+        }
+
+        if ('' === $source_url) {
+            $detail['generatedUrl'] = $generated_url;
+            $detail['generatedBytes'] = $generated_bytes;
+            $detail['generatedOutputOnly'] = true;
+            $detail['suggestedExclusion'] = '';
+            return $detail;
+        }
+
+        $source_bytes = ('' !== $source_path && is_readable($source_path)) ? (int) filesize($source_path) : max(0, (int) ($detail['sourceBytes'] ?? $detail['bytes'] ?? 0));
+        $detail['url'] = $source_url;
+        $detail['bytes'] = $source_bytes;
+        $detail['generatedUrl'] = $generated_url;
+        $detail['generatedBytes'] = $generated_bytes;
+        $detail['generatedOptimizationType'] = $optimization_type;
+        $detail['rewrittenByUltraCache'] = true;
+        return $detail;
+    }
+
     private function get_css_bundle_source_type($url)
     {
         $path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
-        if (false !== strpos($path, '/wp-content/plugins/')) {
+        if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_plugins_public_path())) {
             return 'plugin';
         }
-        if (false !== strpos($path, '/wp-content/themes/')) {
+        if (function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($path, ucwp_themes_public_paths())) {
             return 'theme';
         }
-        if (false !== strpos($path, '/wp-content/uploads/')) {
+        if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_generated_asset_public_path())) {
+            return 'ultracache-generated';
+        }
+        if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_uploads_public_path())) {
             return 'uploads';
         }
-        if (false !== strpos($path, '/wp-content/cache/ultracache/')) {
+        if (function_exists('ucwp_public_path_contains') && function_exists('ucwp_content_cache_public_path') && ucwp_public_path_contains($path, ucwp_content_cache_public_path())) {
             return 'ultracache-cache';
         }
         return 'local';
@@ -402,6 +509,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             if (!is_array($detail)) {
                 continue;
             }
+            $detail = $this->map_generated_css_detail_to_original_source($detail);
             $url = isset($detail['url']) ? trim((string) $detail['url']) : '';
             if ('' === $url) {
                 continue;
@@ -427,8 +535,13 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
                 'bytes' => $bytes,
                 'preparedBytes' => $prepared_bytes,
                 'type' => isset($detail['type']) ? sanitize_key((string) $detail['type']) : $this->get_css_bundle_source_type($url),
-                'suggestedExclusion' => $this->get_css_bundle_source_exclusion_suggestion($url),
+                'suggestedExclusion' => !empty($detail['generatedOutputOnly']) ? '' : $this->get_css_bundle_source_exclusion_suggestion($url),
                 'largeSourceWarning' => ($bytes > 51200),
+                'generatedUrl' => isset($detail['generatedUrl']) ? (string) $detail['generatedUrl'] : '',
+                'generatedBytes' => isset($detail['generatedBytes']) ? max(0, (int) $detail['generatedBytes']) : 0,
+                'generatedOptimizationType' => isset($detail['generatedOptimizationType']) ? sanitize_key((string) $detail['generatedOptimizationType']) : '',
+                'rewrittenByUltraCache' => !empty($detail['rewrittenByUltraCache']),
+                'generatedOutputOnly' => !empty($detail['generatedOutputOnly']),
                 'cssImageUrlsScanned' => $css_image_urls_scanned,
                 'cssImageUrlsRewritten' => $css_image_urls_rewritten,
                 'cssImageUrlsImageSet' => $css_image_urls_image_set,
@@ -784,7 +897,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $render_blocking = (!$is_print && !$async_marker);
         $origin = $this->get_public_resource_origin_type($href);
         $path = $this->get_public_resource_path_fragment($href);
-        $is_bundle = false !== stripos($href, '/cache/ultracache/css-bundles/');
+        $is_bundle = false !== stripos($href, '/uploads/ultracache/css-bundles/');
         $slider_fragment = !empty($settings['slider_safe_mode']) ? $this->get_matching_fragment('', $href, $tag, $this->get_slider_hero_protected_fragments()) : '';
         $bytes = 0;
         $local_path = $this->resolve_local_path_from_public_url($href);
@@ -955,7 +1068,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
                 $result['render_blocking_stylesheet_hrefs'][] = $href;
             }
 
-            if (false !== stripos($href, '/cache/ultracache/css-bundles/')) {
+            if (false !== stripos($href, '/uploads/ultracache/css-bundles/')) {
                 $result['render_blocking_css_bundle_links']++;
             } else {
                 $result['render_blocking_non_bundle_stylesheet_links']++;
@@ -979,8 +1092,8 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'script_tags' => $this->count_store_profile_regex('/<script\b/i', $html),
             'noscript_tags' => $this->count_store_profile_regex('/<noscript\b/i', $html),
             'fonts_googleapis_refs' => $this->count_store_profile_regex('/fonts\.googleapis\.com/i', $html),
-            'local_google_fonts_refs' => $this->count_store_profile_regex('#cache/ultracache/google-fonts#i', $html),
-            'css_bundle_refs' => $this->count_store_profile_regex('#cache/ultracache/css-bundles#i', $html),
+            'local_google_fonts_refs' => $this->count_store_profile_regex('#uploads/ultracache/google-fonts#i', $html),
+            'css_bundle_refs' => $this->count_store_profile_regex('#uploads/ultracache/css-bundles#i', $html),
             'page_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ucwp-page-css-bundle\s*=/i', $html),
             'page_css_bundle_external_links' => $this->count_store_profile_regex('/<link\b(?=[^>]*\bdata-ucwp-page-css-bundle\s*=)[^>]*>/i', $html),
             'page_css_bundle_inline_style_tags' => $this->count_store_profile_regex('/<style\b(?=[^>]*\bdata-ucwp-page-css-bundle\s*=)[^>]*>/i', $html),
@@ -988,7 +1101,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'page_css_bundle_fallback_markers' => $this->count_store_profile_regex('/\bdata-ucwp-page-css-bundle-fallback\s*=/i', $html),
             'page_css_bundle_fallback_blocks' => $this->count_store_profile_regex('/\bdata-ucwp-page-css-bundle-fallback-block\s*=/i', $html),
             'page_css_bundle_fallback_links' => $this->count_store_profile_regex('/<link\b(?=[^>]*\bdata-ucwp-page-css-bundle-fallback\s*=)[^>]*>/i', $html),
-            'leftover_css_bundle_refs' => $this->count_store_profile_regex('#cache/ultracache/css-bundles#i', $html),
+            'leftover_css_bundle_refs' => $this->count_store_profile_regex('#uploads/ultracache/css-bundles#i', $html),
             'leftover_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ucwp-leftover-css-bundle\s*=/i', $html),
             'frontpage_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ucwp-frontpage-css\s*=/i', $html),
             'async_css_markers' => $this->count_store_profile_regex('/\bdata-ucwp-async-css\s*=/i', $html),

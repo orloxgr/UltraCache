@@ -22,6 +22,1021 @@ if (!function_exists('ucwp_json_encode_for_inline_script')) {
     }
 }
 
+
+if (!function_exists('ucwp_storage_clean_relative_path')) {
+    /**
+     * Normalize a relative UltraCache storage path without allowing traversal.
+     *
+     * @param string $relative Relative path or filename.
+     * @return string
+     */
+    function ucwp_storage_clean_relative_path($relative)
+    {
+        $relative = str_replace('\\', '/', (string) $relative);
+        $relative = ltrim($relative, '/');
+        $parts = array();
+        foreach (explode('/', $relative) as $part) {
+            $part = trim((string) $part);
+            if ('' === $part || '.' === $part || '..' === $part) {
+                continue;
+            }
+            // Do not use sanitize_file_name() for directory path segments: WordPress treats
+            // extension-only folder names like "avif"/"webp" as filenames and rewrites
+            // them to "unnamed-file.avif"/"unnamed-file.webp". Keep this as a
+            // conservative storage path segment sanitizer instead.
+            $part = preg_replace('/[^A-Za-z0-9._-]+/', '-', $part);
+            $part = is_string($part) ? trim($part, '-') : '';
+            if ('' === $part || '.' === $part || '..' === $part) {
+                continue;
+            }
+            $parts[] = $part;
+        }
+
+        return implode('/', array_filter($parts, static function ($part) {
+            return '' !== (string) $part;
+        }));
+    }
+}
+
+if (!function_exists('ucwp_storage_join_path')) {
+    /**
+     * Join an absolute base path with a sanitized relative path.
+     *
+     * @param string $base     Absolute base path.
+     * @param string $relative Relative path.
+     * @return string
+     */
+    function ucwp_storage_join_path($base, $relative = '')
+    {
+        $base = trailingslashit((string) $base);
+        $relative = ucwp_storage_clean_relative_path($relative);
+        $path = '' === $relative ? $base : $base . $relative;
+
+        return function_exists('wp_normalize_path') ? wp_normalize_path($path) : str_replace('\\', '/', $path);
+    }
+}
+
+if (!function_exists('ucwp_storage_join_url')) {
+    /**
+     * Join a base URL with a sanitized relative path, URL-encoding path segments.
+     *
+     * @param string $base     Base URL.
+     * @param string $relative Relative path.
+     * @return string
+     */
+    function ucwp_storage_join_url($base, $relative = '')
+    {
+        $base = trailingslashit((string) $base);
+        $relative = ucwp_storage_clean_relative_path($relative);
+        if ('' === $relative) {
+            return $base;
+        }
+
+        $segments = array_map('rawurlencode', explode('/', $relative));
+        return $base . implode('/', $segments);
+    }
+}
+
+if (!function_exists('ucwp_content_cache_storage_dir')) {
+    /**
+     * Return the current internal UltraCache cache root under wp-content/cache.
+     *
+     * This is intentionally separate from public generated asset storage so the
+     * later uploads move can be limited to browser-loaded assets only.
+     *
+     * @param string $relative Optional relative path under the cache root.
+     * @return string
+     */
+    function ucwp_content_cache_storage_dir($relative = '')
+    {
+        $base = defined('WP_CONTENT_DIR') ? trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache/' : '';
+        return '' === $base ? '' : trailingslashit(ucwp_storage_join_path($base, $relative));
+    }
+}
+
+if (!function_exists('ucwp_content_cache_storage_url')) {
+    /**
+     * Return the public URL for the current the internal UltraCache cache root storage root.
+     *
+     * @param string $relative Optional relative path under the cache root.
+     * @return string
+     */
+    function ucwp_content_cache_storage_url($relative = '')
+    {
+        return ucwp_storage_join_url(content_url('cache/ultracache/'), $relative);
+    }
+}
+
+if (!function_exists('ucwp_object_cache_storage_dir')) {
+    /**
+     * Return the internal UltraCache object cache root.
+     *
+     * @param string $relative Optional relative path under the object cache root.
+     * @return string
+     */
+    function ucwp_object_cache_storage_dir($relative = '')
+    {
+        $base = defined('WP_CONTENT_DIR') ? trailingslashit(WP_CONTENT_DIR) . 'cache/ultracache-objects/' : '';
+        return '' === $base ? '' : trailingslashit(ucwp_storage_join_path($base, $relative));
+    }
+}
+
+if (!function_exists('ucwp_generated_asset_bucket_slug')) {
+    /**
+     * Map public generated asset buckets to their current storage directories.
+     *
+     * @param string $bucket Storage bucket.
+     * @return string
+     */
+    function ucwp_generated_asset_bucket_slug($bucket)
+    {
+        $bucket = strtolower(trim((string) $bucket));
+        $map = array(
+            'css-bundles'        => 'css-bundles',
+            'font-css'           => 'font-css',
+            'optimized-css'      => 'optimized-css',
+            'google-fonts'       => 'google-fonts',
+            'deferred-inline-js' => 'deferred-inline-js',
+        );
+
+        return isset($map[$bucket]) ? $map[$bucket] : '';
+    }
+}
+
+if (!function_exists('ucwp_generated_asset_dir')) {
+    /**
+     * Return the filesystem path for a public generated asset bucket under uploads/ultracache.
+     *
+     * @param string $bucket   Storage bucket.
+     * @param string $relative Optional relative filename/path inside the bucket.
+     * @return string
+     */
+    function ucwp_generated_asset_dir($bucket, $relative = '')
+    {
+        $slug = ucwp_generated_asset_bucket_slug($bucket);
+        if ('' === $slug) {
+            return '';
+        }
+
+        $uploads = ucwp_uploads_base_info();
+        $base = ucwp_storage_join_path($uploads['basedir'], 'ultracache/' . $slug . '/');
+        if ('' === $base) {
+            return '';
+        }
+
+        $relative = ucwp_storage_clean_relative_path($relative);
+        if ('' === $relative) {
+            return trailingslashit($base);
+        }
+
+        return ucwp_storage_join_path($base, $relative);
+    }
+}
+
+if (!function_exists('ucwp_generated_asset_url')) {
+    /**
+     * Return the URL for a public generated asset bucket under uploads/ultracache.
+     *
+     * @param string $bucket   Storage bucket.
+     * @param string $relative Optional relative filename/path inside the bucket.
+     * @return string
+     */
+    function ucwp_generated_asset_url($bucket, $relative = '')
+    {
+        $slug = ucwp_generated_asset_bucket_slug($bucket);
+        if ('' === $slug) {
+            return '';
+        }
+
+        $uploads = ucwp_uploads_base_info();
+        return ucwp_storage_join_url($uploads['baseurl'], 'ultracache/' . $slug . '/' . ucwp_storage_clean_relative_path($relative));
+    }
+}
+
+if (!function_exists('ucwp_generated_asset_public_path')) {
+    /**
+     * Return a root-relative public URL path for a generated asset bucket.
+     *
+     * @param string $bucket Storage bucket.
+     * @return string
+     */
+    function ucwp_generated_asset_public_path($bucket = '')
+    {
+        $relative = '' !== (string) $bucket ? ucwp_generated_asset_bucket_slug($bucket) . '/' : '';
+        $path = (string) wp_parse_url(ucwp_generated_asset_url($bucket, ''), PHP_URL_PATH);
+        if ('' === (string) $bucket) {
+            $uploads = ucwp_uploads_base_info();
+            $path = (string) wp_parse_url(ucwp_storage_join_url($uploads['baseurl'], 'ultracache/'), PHP_URL_PATH);
+        }
+        if ('' === $path) {
+            return '';
+        }
+
+        return trailingslashit('/' . ltrim(str_replace('\\', '/', $path), '/'));
+    }
+}
+
+if (!function_exists('ucwp_uploads_base_info')) {
+    /**
+     * Return WordPress uploads base directory and URL using WordPress APIs.
+     *
+     * @return array{basedir:string,baseurl:string}
+     */
+    function ucwp_uploads_base_info()
+    {
+        $uploads = function_exists('wp_get_upload_dir') ? wp_get_upload_dir() : (function_exists('wp_upload_dir') ? wp_upload_dir(null, false) : array());
+        $basedir = isset($uploads['basedir']) ? (string) $uploads['basedir'] : '';
+        $baseurl = isset($uploads['baseurl']) ? (string) $uploads['baseurl'] : '';
+
+        return array(
+            'basedir' => untrailingslashit($basedir),
+            'baseurl' => untrailingslashit($baseurl),
+        );
+    }
+}
+
+
+
+if (!function_exists('ucwp_uploads_public_path')) {
+    /**
+     * Return the current root-relative public uploads path using WordPress upload APIs.
+     *
+     * @param string $relative Optional relative path under uploads.
+     * @return string
+     */
+    function ucwp_uploads_public_path($relative = '')
+    {
+        $uploads = ucwp_uploads_base_info();
+        $url = ucwp_storage_join_url($uploads['baseurl'], ucwp_storage_clean_relative_path($relative));
+        $path = (string) wp_parse_url($url, PHP_URL_PATH);
+        if ('' === $path) {
+            return '';
+        }
+
+        return trailingslashit('/' . ltrim(str_replace('\\', '/', $path), '/'));
+    }
+}
+
+
+if (!function_exists('ucwp_public_path_from_url')) {
+    /**
+     * Return a normalized root-relative public path from a URL.
+     *
+     * @param string $url Public URL.
+     * @return string
+     */
+    function ucwp_public_path_from_url($url)
+    {
+        $path = (string) wp_parse_url((string) $url, PHP_URL_PATH);
+        if ('' === $path) {
+            return '';
+        }
+
+        return trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode($path)), '/'));
+    }
+}
+
+if (!function_exists('ucwp_plugins_public_path')) {
+    /**
+     * Return the root-relative public plugins path using WordPress APIs.
+     *
+     * @param string $relative Optional relative path under plugins.
+     * @return string
+     */
+    function ucwp_plugins_public_path($relative = '')
+    {
+        $relative = ucwp_storage_clean_relative_path($relative);
+        $url = function_exists('plugins_url') ? plugins_url($relative) : '';
+
+        return ucwp_public_path_from_url($url);
+    }
+}
+
+if (!function_exists('ucwp_mu_plugins_public_path')) {
+    /**
+     * Return the root-relative public mu-plugins path when available.
+     *
+     * @param string $relative Optional relative path under mu-plugins.
+     * @return string
+     */
+    function ucwp_mu_plugins_public_path($relative = '')
+    {
+        if (!defined('WPMU_PLUGIN_URL')) {
+            return '';
+        }
+
+        return ucwp_public_path_from_url(ucwp_storage_join_url(WPMU_PLUGIN_URL, $relative));
+    }
+}
+
+if (!function_exists('ucwp_themes_public_paths')) {
+    /**
+     * Return root-relative public theme root paths using WordPress APIs.
+     *
+     * @param string $relative Optional relative path under each theme root.
+     * @return string[]
+     */
+    function ucwp_themes_public_paths($relative = '')
+    {
+        $paths = array();
+        $relative = ucwp_storage_clean_relative_path($relative);
+
+        if (function_exists('get_theme_root_uri')) {
+            $path = ucwp_public_path_from_url(ucwp_storage_join_url(get_theme_root_uri(), $relative));
+            if ('' !== $path) {
+                $paths[] = $path;
+            }
+        }
+
+        if (function_exists('wp_get_themes')) {
+            foreach ((array) wp_get_themes() as $theme) {
+                if (!is_object($theme) || !method_exists($theme, 'get_stylesheet_directory_uri')) {
+                    continue;
+                }
+                $uri = (string) $theme->get_stylesheet_directory_uri();
+                if ('' === $uri) {
+                    continue;
+                }
+                $path = ucwp_public_path_from_url(ucwp_storage_join_url(dirname($uri), $relative));
+                if ('' !== $path) {
+                    $paths[] = $path;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($paths, static function ($path) {
+            return '' !== (string) $path;
+        })));
+    }
+}
+
+if (!function_exists('ucwp_public_path_contains')) {
+    /**
+     * Check whether a public URL/path contains a normalized root-relative marker.
+     *
+     * @param string $path   URL path or URL.
+     * @param string $marker Root-relative public marker.
+     * @return bool
+     */
+    function ucwp_public_path_contains($path, $marker)
+    {
+        $path = (string) $path;
+        $path = (string) wp_parse_url($path, PHP_URL_PATH) ?: $path;
+        $path = strtolower('/' . ltrim(str_replace('\\', '/', rawurldecode($path)), '/'));
+
+        $marker = strtolower('/' . ltrim(str_replace('\\', '/', rawurldecode((string) $marker)), '/'));
+        if ('' === trim($marker, '/')) {
+            return false;
+        }
+
+        return false !== strpos($path, $marker);
+    }
+}
+
+if (!function_exists('ucwp_public_path_contains_any')) {
+    /**
+     * Check whether a public URL/path contains any normalized root-relative marker.
+     *
+     * @param string $path    URL path or URL.
+     * @param array  $markers Root-relative public markers.
+     * @return bool
+     */
+    function ucwp_public_path_contains_any($path, array $markers)
+    {
+        foreach ($markers as $marker) {
+            if (ucwp_public_path_contains($path, (string) $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+
+if (!function_exists('ucwp_public_path_relative_to_marker')) {
+    /**
+     * Return the path segment relative to a normalized root-relative public marker.
+     *
+     * @param string $source URL or root-relative public path.
+     * @param string $marker Root-relative public marker ending at the desired root.
+     * @return string|false
+     */
+    function ucwp_public_path_relative_to_marker($source, $marker)
+    {
+        $path = (string) wp_parse_url((string) $source, PHP_URL_PATH);
+        if ('' === $path) {
+            $path = (string) preg_replace('/[?#].*$/', '', (string) $source);
+        }
+        $path = '/' . ltrim(str_replace('\\', '/', rawurldecode($path)), '/');
+
+        $marker = '/' . ltrim(str_replace('\\', '/', rawurldecode((string) $marker)), '/');
+        $marker = trailingslashit($marker);
+        if ('' === trim($path, '/') || '' === trim($marker, '/')) {
+            return false;
+        }
+
+        $path_lc = strtolower($path);
+        $marker_lc = strtolower($marker);
+        if (0 !== strpos($path_lc, $marker_lc)) {
+            return false;
+        }
+
+        return ltrim(substr($path, strlen($marker)), '/');
+    }
+}
+
+if (!function_exists('ucwp_plugin_theme_owner_from_public_source')) {
+    /**
+     * Resolve plugin/theme owner metadata from a public URL/path using dynamic root markers.
+     *
+     * @param string $source Public URL or path.
+     * @return array{kind:string,slug:string,group:string,relative:string}|array{}
+     */
+    function ucwp_plugin_theme_owner_from_public_source($source)
+    {
+        $candidates = array();
+        if (function_exists('ucwp_plugins_public_path')) {
+            $candidates[] = array('plugin', ucwp_plugins_public_path());
+        }
+        if (function_exists('ucwp_themes_public_paths')) {
+            foreach (ucwp_themes_public_paths() as $theme_path) {
+                $candidates[] = array('theme', $theme_path);
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            $kind = (string) $candidate[0];
+            $marker = (string) $candidate[1];
+            $relative = ucwp_public_path_relative_to_marker($source, $marker);
+            if (false === $relative || '' === $relative) {
+                continue;
+            }
+
+            $parts = explode('/', str_replace('\\', '/', $relative), 2);
+            $slug = sanitize_key((string) $parts[0]);
+            if ('' === $slug) {
+                continue;
+            }
+            $child = isset($parts[1]) ? trim((string) $parts[1], '/') : '';
+
+            return array(
+                'kind'     => $kind,
+                'slug'     => $slug,
+                'group'    => sanitize_text_field($slug . '/'),
+                'relative' => sanitize_text_field(substr($child, 0, 220)),
+            );
+        }
+
+        return array();
+    }
+}
+
+if (!function_exists('ucwp_plugin_root_dir')) {
+    /**
+     * Return an active plugin root directory by slug using WordPress plugin constants.
+     *
+     * @param string $slug Plugin slug.
+     * @return string
+     */
+    function ucwp_plugin_root_dir($slug)
+    {
+        $slug = sanitize_key((string) $slug);
+        if ('' === $slug || !defined('WP_PLUGIN_DIR')) {
+            return '';
+        }
+
+        return untrailingslashit(wp_normalize_path(trailingslashit(WP_PLUGIN_DIR) . $slug));
+    }
+}
+
+if (!function_exists('ucwp_plugin_root_uri')) {
+    /**
+     * Return an active plugin root URI by slug using WordPress plugin APIs.
+     *
+     * @param string $slug Plugin slug.
+     * @return string
+     */
+    function ucwp_plugin_root_uri($slug)
+    {
+        $slug = sanitize_key((string) $slug);
+        if ('' === $slug || !function_exists('plugins_url')) {
+            return '';
+        }
+
+        $base_url = plugins_url();
+        if ('' === (string) $base_url) {
+            return '';
+        }
+
+        return untrailingslashit(esc_url_raw(ucwp_storage_join_url($base_url, $slug)));
+    }
+}
+
+if (!function_exists('ucwp_local_font_css_scan_roots')) {
+    /**
+     * Return local roots to scan for CSS font sources without hardcoded wp-content paths.
+     *
+     * @return string[]
+     */
+    function ucwp_local_font_css_scan_roots()
+    {
+        $roots = array();
+        $candidates = array();
+
+        if (defined('WP_PLUGIN_DIR')) {
+            $candidates[] = WP_PLUGIN_DIR;
+        }
+        if (defined('WPMU_PLUGIN_DIR')) {
+            $candidates[] = WPMU_PLUGIN_DIR;
+        }
+        if (function_exists('get_theme_root')) {
+            $candidates[] = get_theme_root();
+        }
+        $uploads = ucwp_uploads_base_info();
+        if (!empty($uploads['basedir'])) {
+            $candidates[] = $uploads['basedir'];
+        }
+
+        foreach ($candidates as $root) {
+            $root = function_exists('wp_normalize_path') ? wp_normalize_path((string) $root) : str_replace('\\', '/', (string) $root);
+            $root = untrailingslashit($root);
+            if ('' !== $root && is_dir($root) && !in_array($root, $roots, true)) {
+                $roots[] = $root;
+            }
+        }
+
+        return $roots;
+    }
+}
+
+if (!function_exists('ucwp_revslider_uploads_public_path')) {
+    /**
+     * Return Slider Revolution's public uploads path marker.
+     *
+     * Slider Revolution stores imported slider assets relative to wp_upload_dir(),
+     * normally uploads/revslider/, so this must use wp_upload_dir() as its base.
+     *
+     * @param string $relative Optional relative path under uploads/revslider.
+     * @return string
+     */
+    function ucwp_revslider_uploads_public_path($relative = '')
+    {
+        return ucwp_uploads_public_path('revslider/' . ucwp_storage_clean_relative_path($relative));
+    }
+}
+
+if (!function_exists('ucwp_revslider_optimized_uploads_public_path')) {
+    /**
+     * Return Slider Revolution's optimized-image public uploads path marker.
+     *
+     * Slider Revolution stores generated optimized slider images under
+     * uploads/revslider/o/ using wp_upload_dir() as its base.
+     *
+     * @param string $relative Optional relative path under uploads/revslider/o.
+     * @return string
+     */
+    function ucwp_revslider_optimized_uploads_public_path($relative = '')
+    {
+        return ucwp_uploads_public_path('revslider/o/' . ucwp_storage_clean_relative_path($relative));
+    }
+}
+
+
+if (!function_exists('ucwp_normalize_public_url')) {
+    /**
+     * Normalize a public URL for local comparisons without changing its resource identity.
+     *
+     * Query strings are preserved by default because WordPress-enqueued assets often use
+     * versioned URLs, and CSS bundle source matching needs the same URL identity that was
+     * present in the rendered HTML/manifest. Callers that resolve filesystem paths may pass
+     * array('strip_query' => true).
+     *
+     * @param string $url  Public URL or root-relative URL.
+     * @param array  $args Optional flags. Supported: strip_query, strip_fragment.
+     * @return string
+     */
+    function ucwp_normalize_public_url($url, array $args = array())
+    {
+        $url = trim(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
+        if ('' === $url) {
+            return '';
+        }
+
+        $strip_query = !empty($args['strip_query']);
+        $strip_fragment = array_key_exists('strip_fragment', $args) ? (bool) $args['strip_fragment'] : true;
+
+        $home = function_exists('home_url') ? home_url('/') : '';
+        $preferred_scheme = (string) wp_parse_url($home, PHP_URL_SCHEME);
+        if ('' === $preferred_scheme && function_exists('is_ssl')) {
+            $preferred_scheme = is_ssl() ? 'https' : 'http';
+        }
+        if ('' === $preferred_scheme) {
+            $preferred_scheme = 'http';
+        }
+
+        if (0 === strpos($url, '//')) {
+            $url = $preferred_scheme . ':' . $url;
+        }
+
+        $parts = wp_parse_url($url);
+        if (!is_array($parts)) {
+            return $url;
+        }
+
+        $path = isset($parts['path']) ? rawurldecode((string) $parts['path']) : '';
+        if ('' !== $path) {
+            $path = '/' . ltrim(str_replace('\\', '/', $path), '/');
+        }
+
+        $normalized = '';
+        if (!empty($parts['scheme'])) {
+            $scheme = strtolower((string) $parts['scheme']);
+            $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+            $home_host = strtolower((string) wp_parse_url($home, PHP_URL_HOST));
+            if ('' !== $home_host && $home_host === $host && '' !== $preferred_scheme) {
+                $scheme = strtolower($preferred_scheme);
+            }
+            $normalized .= $scheme . '://';
+        }
+        if (!empty($parts['user'])) {
+            $normalized .= $parts['user'];
+            if (isset($parts['pass'])) {
+                $normalized .= ':' . $parts['pass'];
+            }
+            $normalized .= '@';
+        }
+        if (!empty($parts['host'])) {
+            $normalized .= strtolower((string) $parts['host']);
+        }
+        if (!empty($parts['port'])) {
+            $normalized .= ':' . $parts['port'];
+        }
+        $normalized .= $path;
+
+        if (!$strip_query && isset($parts['query']) && '' !== (string) $parts['query']) {
+            $normalized .= '?' . (string) $parts['query'];
+        }
+        if (!$strip_fragment && isset($parts['fragment']) && '' !== (string) $parts['fragment']) {
+            $normalized .= '#' . (string) $parts['fragment'];
+        }
+
+        return '' !== $normalized ? $normalized : $url;
+    }
+}
+
+if (!function_exists('ucwp_is_local_site_url')) {
+    /**
+     * Check whether a URL belongs to this WordPress site's home/site host.
+     *
+     * @param string $url Public URL.
+     * @return bool
+     */
+    function ucwp_is_local_site_url($url)
+    {
+        $url = ucwp_normalize_public_url($url);
+        $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+        if ('' === $host && 0 === strpos($url, '/')) {
+            return true;
+        }
+        if ('' === $host) {
+            return false;
+        }
+
+        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+        $site_host = strtolower((string) wp_parse_url(site_url('/'), PHP_URL_HOST));
+        $allowed = array_filter(array_unique(array($home_host, $site_host)));
+        $host = preg_replace('/^www\./', '', $host);
+        $allowed = array_map(static function ($candidate) {
+            return preg_replace('/^www\./', '', (string) $candidate);
+        }, $allowed);
+
+        return in_array($host, $allowed, true);
+    }
+}
+
+if (!function_exists('ucwp_path_is_within_root')) {
+    /**
+     * Check whether a filesystem path is inside a root directory.
+     *
+     * @param string $path Filesystem path.
+     * @param string $root Filesystem root.
+     * @return bool
+     */
+    function ucwp_path_is_within_root($path, $root)
+    {
+        $normalize = static function ($value) {
+            $value = function_exists('wp_normalize_path') ? wp_normalize_path((string) $value) : str_replace('\\', '/', (string) $value);
+            return rtrim($value, '/');
+        };
+        $path = $normalize($path);
+        $root = $normalize($root);
+        if ('' === $path || '' === $root) {
+            return false;
+        }
+
+        return $path === $root || 0 === strpos($path, $root . '/');
+    }
+}
+
+if (!function_exists('ucwp_canonical_local_path_from_relative')) {
+    /**
+     * Resolve a local path from a trusted root and sanitized relative path.
+     *
+     * @param string $root     Root directory.
+     * @param string $relative Relative public path.
+     * @return string
+     */
+    function ucwp_canonical_local_path_from_relative($root, $relative)
+    {
+        $root_real = realpath($root);
+        if (!is_string($root_real) || '' === $root_real) {
+            return '';
+        }
+
+        $relative = rawurldecode(str_replace('\\', '/', (string) $relative));
+        $relative = ltrim($relative, '/');
+        if ('' === $relative) {
+            return '';
+        }
+
+        foreach (explode('/', $relative) as $segment) {
+            if ('' === $segment || '.' === $segment || '..' === $segment) {
+                return '';
+            }
+        }
+
+        $candidate = trailingslashit($root_real) . $relative;
+        $candidate_real = realpath($candidate);
+        if (!is_string($candidate_real) || '' === $candidate_real) {
+            return '';
+        }
+
+        return ucwp_path_is_within_root($candidate_real, $root_real) ? wp_normalize_path($candidate_real) : '';
+    }
+}
+
+if (!function_exists('ucwp_content_public_path')) {
+    /**
+     * Return the root-relative public wp-content path.
+     *
+     * @param string $relative Optional relative path under wp-content.
+     * @return string
+     */
+    function ucwp_content_public_path($relative = '')
+    {
+        $url = ucwp_storage_join_url(content_url('/'), ucwp_storage_clean_relative_path($relative));
+        $path = (string) wp_parse_url($url, PHP_URL_PATH);
+        if ('' === $path) {
+            return '';
+        }
+
+        return trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode($path)), '/'));
+    }
+}
+
+if (!function_exists('ucwp_content_cache_public_path')) {
+    /**
+     * Return the root-relative public internal cache path.
+     *
+     * @param string $relative Optional relative path under the internal UltraCache cache root.
+     * @return string
+     */
+    function ucwp_content_cache_public_path($relative = '')
+    {
+        $path = (string) wp_parse_url(ucwp_content_cache_storage_url($relative), PHP_URL_PATH);
+        if ('' === $path) {
+            return '';
+        }
+
+        return trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode($path)), '/'));
+    }
+}
+
+if (!function_exists('ucwp_public_path_to_local_path')) {
+    /**
+     * Resolve a root-relative public URL path to a readable local file path.
+     *
+     * @param string $path         Root-relative URL path.
+     * @param array  $allowed_exts Optional extension allow-list without dots.
+     * @return string
+     */
+    function ucwp_public_path_to_local_path($path, array $allowed_exts = array())
+    {
+        $path = '/' . ltrim(str_replace('\\', '/', rawurldecode((string) $path)), '/');
+        if ('' === trim($path, '/')) {
+            return '';
+        }
+
+        if (!empty($allowed_exts)) {
+            $ext = strtolower(pathinfo((string) wp_parse_url($path, PHP_URL_PATH), PATHINFO_EXTENSION));
+            $allowed_exts = array_map('strtolower', array_map('strval', $allowed_exts));
+            if ('' === $ext || !in_array($ext, $allowed_exts, true)) {
+                return '';
+            }
+        }
+
+        $candidates = array();
+        $content_path = ucwp_content_public_path();
+        if ('' !== $content_path && 0 === strpos($path, $content_path)) {
+            $relative = ltrim(substr($path, strlen($content_path)), '/');
+            if (defined('WP_CONTENT_DIR')) {
+                $candidates[] = array(WP_CONTENT_DIR, $relative);
+            }
+        }
+
+        $includes_path = (string) wp_parse_url(includes_url('/'), PHP_URL_PATH);
+        $includes_path = trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode($includes_path)), '/'));
+        if ('' !== trim($includes_path, '/') && 0 === strpos($path, $includes_path) && defined('ABSPATH') && defined('WPINC')) {
+            $relative = ltrim(substr($path, strlen($includes_path)), '/');
+            $candidates[] = array(trailingslashit(ABSPATH) . WPINC, $relative);
+        }
+
+        $site_path = (string) wp_parse_url(site_url('/'), PHP_URL_PATH);
+        $site_path = trailingslashit('/' . trim(str_replace('\\', '/', rawurldecode($site_path)), '/'));
+        if ('//' !== $site_path && '/' !== $site_path && 0 === strpos($path, $site_path)) {
+            $relative = ltrim(substr($path, strlen($site_path)), '/');
+            $candidates[] = array(ABSPATH, $relative);
+        }
+
+        $home_path = (string) wp_parse_url(home_url('/'), PHP_URL_PATH);
+        $home_path = trailingslashit('/' . trim(str_replace('\\', '/', rawurldecode($home_path)), '/'));
+        if ('//' !== $home_path && '/' !== $home_path && 0 === strpos($path, $home_path)) {
+            $relative = ltrim(substr($path, strlen($home_path)), '/');
+            $candidates[] = array(ABSPATH, $relative);
+        }
+
+        $candidates[] = array(ABSPATH, ltrim($path, '/'));
+
+        foreach ($candidates as $candidate) {
+            $root = isset($candidate[0]) ? (string) $candidate[0] : '';
+            $relative = isset($candidate[1]) ? (string) $candidate[1] : '';
+            if ('' === $root || '' === $relative) {
+                continue;
+            }
+            $resolved = ucwp_canonical_local_path_from_relative($root, $relative);
+            if ('' !== $resolved && is_file($resolved) && is_readable($resolved)) {
+                return $resolved;
+            }
+        }
+
+        return '';
+    }
+}
+
+if (!function_exists('ucwp_local_path_from_public_url')) {
+    /**
+     * Resolve a local readable file path from a local public URL.
+     *
+     * @param string $url          Public URL or root-relative URL.
+     * @param array  $allowed_exts Optional extension allow-list without dots.
+     * @return string
+     */
+    function ucwp_local_path_from_public_url($url, array $allowed_exts = array())
+    {
+        $url = ucwp_normalize_public_url($url, array('strip_query' => true));
+        if ('' === $url || !ucwp_is_local_site_url($url)) {
+            return '';
+        }
+
+        $path = (string) wp_parse_url($url, PHP_URL_PATH);
+        if ('' === $path && 0 === strpos($url, '/')) {
+            $path = $url;
+        }
+        if ('' === $path) {
+            return '';
+        }
+
+        return ucwp_public_path_to_local_path($path, $allowed_exts);
+    }
+}
+
+if (!function_exists('ucwp_public_url_from_local_path')) {
+    /**
+     * Convert a local path under known WordPress public roots to a public URL.
+     *
+     * @param string $path Local filesystem path.
+     * @return string
+     */
+    function ucwp_public_url_from_local_path($path)
+    {
+        $path = function_exists('wp_normalize_path') ? wp_normalize_path((string) $path) : str_replace('\\', '/', (string) $path);
+        if ('' === $path) {
+            return '';
+        }
+
+        $roots = array();
+        if (defined('WP_CONTENT_DIR')) {
+            $roots[] = array(wp_normalize_path(WP_CONTENT_DIR), content_url('/'));
+        }
+        if (defined('ABSPATH')) {
+            $roots[] = array(wp_normalize_path(ABSPATH), home_url('/'));
+        }
+
+        foreach ($roots as $root) {
+            $root_path = untrailingslashit((string) $root[0]);
+            $root_url = trailingslashit((string) $root[1]);
+            if ('' === $root_path || !ucwp_path_is_within_root($path, $root_path)) {
+                continue;
+            }
+            $relative = ltrim(substr($path, strlen($root_path)), '/');
+            if ('' === $relative) {
+                continue;
+            }
+            return ucwp_normalize_public_url(ucwp_storage_join_url($root_url, $relative));
+        }
+
+        return '';
+    }
+}
+
+if (!function_exists('ucwp_optimized_images_storage_dir')) {
+    /**
+     * Return the current optimized media derivative directory.
+     *
+     * Optimized image derivatives are public generated media assets under uploads/ultracache/images.
+     *
+     * @param string $format Optional image format such as avif or webp.
+     * @return string
+     */
+    function ucwp_optimized_images_storage_dir($format = '')
+    {
+        $uploads = ucwp_uploads_base_info();
+        $relative = 'ultracache/images';
+        $format = strtolower(trim((string) $format));
+        if (in_array($format, array('avif', 'webp'), true)) {
+            $relative .= '/' . $format;
+        }
+
+        return trailingslashit(ucwp_storage_join_path($uploads['basedir'], $relative . '/'));
+    }
+}
+
+if (!function_exists('ucwp_optimized_images_storage_url')) {
+    /**
+     * Return the current full URL for optimized media derivatives.
+     *
+     * @param string $format Optional image format such as avif or webp.
+     * @return string
+     */
+    function ucwp_optimized_images_storage_url($format = '')
+    {
+        $uploads = ucwp_uploads_base_info();
+        $relative = 'ultracache/images';
+        $format = strtolower(trim((string) $format));
+        if (in_array($format, array('avif', 'webp'), true)) {
+            $relative .= '/' . $format;
+        }
+
+        return ucwp_storage_join_url($uploads['baseurl'], $relative . '/');
+    }
+}
+
+if (!function_exists('ucwp_optimized_images_storage_url_path')) {
+    /**
+     * Return the current root-relative public path for optimized media derivatives.
+     *
+     * @param string $format Optional image format such as avif or webp.
+     * @return string
+     */
+    function ucwp_optimized_images_storage_url_path($format = '')
+    {
+        $path = (string) wp_parse_url(ucwp_optimized_images_storage_url($format), PHP_URL_PATH);
+        if ('' === $path) {
+            $path = ucwp_uploads_public_path('ultracache/images');
+            $format = strtolower(trim((string) $format));
+            if (in_array($format, array('avif', 'webp'), true)) {
+                $path = ucwp_uploads_public_path('ultracache/images/' . $format);
+            }
+        }
+
+        return trailingslashit('/' . ltrim(str_replace('\\', '/', $path), '/'));
+    }
+}
+
+if (!function_exists('ucwp_dropin_path')) {
+    /**
+     * Return the WordPress-required path for supported drop-in files.
+     *
+     * Drop-ins are intentionally kept directly under WP_CONTENT_DIR because WordPress
+     * itself only discovers advanced-cache.php and object-cache.php from that directory.
+     * This helper centralizes that required exception so generated public assets can
+     * still use uploads-based storage without treating drop-ins as movable assets.
+     *
+     * @param string $basename Drop-in basename.
+     * @return string
+     */
+    function ucwp_dropin_path($basename)
+    {
+        $basename = sanitize_file_name((string) $basename);
+        if (!in_array($basename, array('advanced-cache.php', 'object-cache.php'), true) || !defined('WP_CONTENT_DIR')) {
+            return '';
+        }
+
+        return ucwp_storage_join_path(WP_CONTENT_DIR, $basename);
+    }
+}
+
 if (!function_exists('ucwp_is_sensitive_debug_key')) {
     function ucwp_is_sensitive_debug_key($key)
     {
@@ -1360,6 +2375,7 @@ if (!function_exists('ucwp_get_allowed_custom_table_basenames')) {
             'ultracache_cron_warm_queue',
             'ultracache_analytics',
             'ultracache_cache_asset_refs',
+            'ultracache_css_rewrite_map',
         );
     }
 }
@@ -1760,17 +2776,22 @@ if (!function_exists('ucwp_is_allowed_destructive_path')) {
             }
         }
 
+        $uploads = function_exists('ucwp_uploads_base_info') ? ucwp_uploads_base_info() : array();
+        $uploads_base = isset($uploads['basedir']) ? (string) $uploads['basedir'] : '';
+        if ('' !== $uploads_base && function_exists('ucwp_storage_join_path')) {
+            $allowed_dirs[] = ucwp_storage_join_path($uploads_base, 'ultracache');
+        }
+
         foreach ($allowed_dirs as $dir) {
             if (ucwp_path_has_dir_prefix($normalized, $dir)) {
                 return true;
             }
         }
 
-        $allowed_files = array();
-        if (defined('WP_CONTENT_DIR')) {
-            $allowed_files[] = trailingslashit(WP_CONTENT_DIR) . 'advanced-cache.php';
-            $allowed_files[] = trailingslashit(WP_CONTENT_DIR) . 'object-cache.php';
-        }
+        $allowed_files = array_filter(array(
+            function_exists('ucwp_dropin_path') ? ucwp_dropin_path('advanced-cache.php') : '',
+            function_exists('ucwp_dropin_path') ? ucwp_dropin_path('object-cache.php') : '',
+        ));
 
         foreach ($allowed_files as $file) {
             if ($normalized === ucwp_normalize_filesystem_path_for_guard($file)) {
@@ -1813,6 +2834,12 @@ if (!function_exists('ucwp_is_allowed_writable_path')) {
             }
         }
 
+        $uploads = function_exists('ucwp_uploads_base_info') ? ucwp_uploads_base_info() : array();
+        $uploads_base = isset($uploads['basedir']) ? (string) $uploads['basedir'] : '';
+        if ('' !== $uploads_base && function_exists('ucwp_storage_join_path')) {
+            $allowed_dirs[] = ucwp_storage_join_path($uploads_base, 'ultracache');
+        }
+
         foreach ($allowed_dirs as $dir) {
             if (ucwp_path_has_dir_prefix($normalized, $dir)) {
                 return true;
@@ -1822,16 +2849,17 @@ if (!function_exists('ucwp_is_allowed_writable_path')) {
         $base = basename($normalized);
         $dir = dirname($normalized);
 
-        if (defined('WP_CONTENT_DIR')) {
-            $content_dir = wp_normalize_path(WP_CONTENT_DIR);
-            foreach (array('advanced-cache.php', 'object-cache.php') as $managed_file) {
-                $target = trailingslashit($content_dir) . $managed_file;
-                if ($normalized === ucwp_normalize_filesystem_path_for_guard($target)) {
-                    return true;
-                }
-                if (0 === strpos($base, $managed_file . '.tmp-') && ucwp_path_has_dir_prefix($normalized, $content_dir)) {
-                    return true;
-                }
+        foreach (array('advanced-cache.php', 'object-cache.php') as $managed_file) {
+            $target = function_exists('ucwp_dropin_path') ? ucwp_dropin_path($managed_file) : '';
+            if ('' === $target) {
+                continue;
+            }
+            $dropin_dir = dirname(wp_normalize_path($target));
+            if ($normalized === ucwp_normalize_filesystem_path_for_guard($target)) {
+                return true;
+            }
+            if (0 === strpos($base, $managed_file . '.tmp-') && ucwp_path_has_dir_prefix($normalized, $dropin_dir)) {
+                return true;
             }
         }
 

@@ -142,7 +142,7 @@ trait Ultra_Cache_Media_Queue_Trait
 				$avif_scan = $this->optimized_output_dir_has_file($avif_dir, 'avif');
 				$webp_scan = $this->optimized_output_dir_has_file($webp_dir, 'webp');
 				$health = array(
-					'storageRoot' => 'uploads/uc-images',
+					'storageRoot' => 'uploads/ultracache/images',
 					'persistentStorage' => true,
 					'avifDir' => (string) $avif_dir,
 					'webpDir' => (string) $webp_dir,
@@ -159,7 +159,7 @@ trait Ultra_Cache_Media_Queue_Trait
 				set_transient($cache_key, $health, 10 * MINUTE_IN_SECONDS);
 			} else {
 				$health = array(
-					'storageRoot' => 'uploads/uc-images',
+					'storageRoot' => 'uploads/ultracache/images',
 					'persistentStorage' => true,
 					'avifDir' => (string) $avif_dir,
 					'webpDir' => (string) $webp_dir,
@@ -198,7 +198,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$health['targetHasFiles'] = $target_has_files;
 			$health['targetMissing'] = $target_missing;
 			$health['needsRepair'] = $needs_repair;
-			$health['message'] = $needs_repair ? 'Optimized image files appear to be missing from persistent uploads/uc-images storage. Start/Resume or warm-up regeneration can repair missing variants without relying on the old cache directory.' : '';
+			$health['message'] = $needs_repair ? 'Optimized image files appear to be missing from persistent uploads/ultracache/images storage. Start/Resume or warm-up regeneration can repair missing variants without relying on the old cache directory.' : '';
 			return $health;
 		}
 

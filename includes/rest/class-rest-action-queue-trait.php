@@ -56,9 +56,9 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             return 180;
         }
 
-        private function get_action_queue_lock_option_key()
+        private function get_action_queue_heavy_lock_option_name()
         {
-            return defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_queue_heavy_lock' : 'ultracache_settings_action_queue_heavy_lock';
+            return 'ultracache_action_queue_heavy_lock_v1';
         }
 
 
@@ -406,7 +406,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function get_action_queue_lock_payload()
         {
-            $lock = get_option($this->get_action_queue_lock_option_key(), array());
+            $lock = get_option($this->get_action_queue_heavy_lock_option_name(), array());
             return is_array($lock) ? $lock : array();
         }
 
@@ -433,22 +433,22 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             $action = sanitize_key((string) $action);
             $job_id = sanitize_text_field((string) $job_id);
             $now = time();
-            $key = $this->get_action_queue_lock_option_key();
+            $option_name = $this->get_action_queue_heavy_lock_option_name();
             $payload = array(
                 'action' => $action,
                 'jobId'  => $job_id,
                 'time'   => $now,
             );
 
-            if (add_option($key, $payload, '', false)) {
+            if (add_option($option_name, $payload, '', false)) {
                 return true;
             }
 
-            $existing = get_option($key, array());
+            $existing = get_option($option_name, array());
             $existing_time = is_array($existing) ? (int) ($existing['time'] ?? 0) : 0;
             if ($existing_time > 0 && ($now - $existing_time) > $this->get_action_queue_stale_seconds()) {
-                delete_option($key);
-                return add_option($key, $payload, '', false);
+                delete_option($option_name);
+                return add_option($option_name, $payload, '', false);
             }
 
             return false;
@@ -456,10 +456,10 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function release_action_queue_heavy_lock($job_id)
         {
-            $key = $this->get_action_queue_lock_option_key();
-            $existing = get_option($key, array());
+            $option_name = $this->get_action_queue_heavy_lock_option_name();
+            $existing = get_option($option_name, array());
             if (is_array($existing) && (string) ($existing['jobId'] ?? '') === (string) $job_id) {
-                delete_option($key);
+                delete_option($option_name);
             }
         }
 
@@ -475,7 +475,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function get_action_queue_lock_age()
         {
-            $existing = get_option($this->get_action_queue_lock_option_key(), array());
+            $existing = get_option($this->get_action_queue_heavy_lock_option_name(), array());
             if (!is_array($existing)) {
                 return 0;
             }
@@ -486,8 +486,8 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function reconcile_action_queue_heavy_lock(array $jobs)
         {
-            $key = $this->get_action_queue_lock_option_key();
-            $lock = get_option($key, array());
+            $option_name = $this->get_action_queue_heavy_lock_option_name();
+            $lock = get_option($option_name, array());
             if (!is_array($lock) || empty($lock)) {
                 return $jobs;
             }
@@ -519,7 +519,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             }
 
             if ($delete_lock) {
-                delete_option($key);
+                delete_option($option_name);
             }
 
             return $jobs;

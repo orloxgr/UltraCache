@@ -25,7 +25,7 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 UCWP_CACHE_DIR,
                 UCWP_AVIF_DIR,
                 UCWP_WEBP_DIR,
-                trailingslashit(UCWP_CACHE_DIR) . 'google-fonts/',
+                ucwp_generated_asset_dir('google-fonts'),
             );
 
             foreach ($dirs as $dir) {
@@ -49,12 +49,11 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 }
             };
 
-            if (!defined('WP_CONTENT_DIR')) {
+            $target = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('advanced-cache.php') : '';
+            if ('' === $target) {
                 $checkpoint('skipped', array('reason' => 'wp_content_dir_missing'));
                 return;
             }
-
-            $target = trailingslashit(WP_CONTENT_DIR) . 'advanced-cache.php';
             $marker = 'UltraCache advanced-cache drop-in';
 
             $checkpoint('template_read_start');
@@ -110,12 +109,11 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 'reason' => '',
             );
 
-            if (!defined('WP_CONTENT_DIR')) {
+            $target = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('advanced-cache.php') : '';
+            if ('' === $target) {
                 $status['reason'] = 'wp_content_dir_missing';
                 return $status;
             }
-
-            $target = trailingslashit(WP_CONTENT_DIR) . 'advanced-cache.php';
             $status['exists'] = file_exists($target);
             $status['readable'] = $status['exists'] && is_readable($target) && is_file($target);
 
@@ -184,11 +182,10 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
 
         public static function maybe_remove_advanced_cache()
         {
-            if (!defined('WP_CONTENT_DIR')) {
+            $target = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('advanced-cache.php') : '';
+            if ('' === $target) {
                 return;
             }
-
-            $target = trailingslashit(WP_CONTENT_DIR) . 'advanced-cache.php';
             if (!file_exists($target)) {
                 return;
             }

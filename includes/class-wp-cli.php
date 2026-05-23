@@ -327,7 +327,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
                         ),
                         array(
                             'command' => 'wp ultracache media status [--media-format=both|best|avif|webp] [--format=table|json|yaml]',
-                            'description' => __('Show AVIF/WebP media queue and persistent uploads/uc-images storage status.', 'ultracache'),
+                            'description' => __('Show AVIF/WebP media queue and persistent uploads/ultracache/images storage status.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache media retry-failed',

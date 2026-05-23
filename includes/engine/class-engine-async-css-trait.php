@@ -116,8 +116,7 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                         continue;
                     }
 
-                    if (null !== $processor->get_attribute('data-ucwp-async-css-fallback')
-                        || null !== $processor->get_attribute('data-ucwp-delayed-icon-fonts-noscript')) {
+                    if (null !== $processor->get_attribute('data-ucwp-async-css-fallback')) {
                         $stats['skipped']++;
                         $this->add_safe_async_css_diagnostic_item($stats, $href_for_diag, 'skipped', 'noscript_fallback');
                         continue;
@@ -258,6 +257,8 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 $attrs .= ' media="' . esc_attr($media) . '"';
             }
 
+            // Intentional final HTML optimization output: noscript fallback for an already-present stylesheet made asynchronous by the optimizer.
+            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
             return '<noscript><link ' . $attrs . ' data-ucwp-async-css-fallback="1" /></noscript>';
         }
 
@@ -454,9 +455,13 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 return false;
             }
 
-            return false !== strpos($path, '/wp-content/cache/ultracache/css-bundles/')
-                || false !== strpos($path, '/wp-content/cache/ultracache/optimized-css/')
-                || false !== strpos($path, '/wp-content/cache/ultracache/font-css/');
+            $markers = array_filter(array(
+                function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path('css-bundles') : '',
+                function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path('optimized-css') : '',
+                function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path('font-css') : '',
+            ));
+
+            return function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($path, $markers);
         }
 
         private function get_generated_css_bundle_role_from_mode($mode)
@@ -487,11 +492,11 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 return 'leftover-bundle';
             }
 
-            if (false !== strpos($path, '/wp-content/cache/ultracache/optimized-css/') || false !== strpos($tag, 'data-ucwp-css-role="optimized-css"')) {
+            if ((function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_generated_asset_public_path('optimized-css'))) || false !== strpos($tag, 'data-ucwp-css-role="optimized-css"')) {
                 return 'optimized-css';
             }
 
-            if (false !== strpos($path, '/wp-content/cache/ultracache/font-css/') || false !== strpos($tag, 'data-ucwp-css-role="font-css"')) {
+            if ((function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_generated_asset_public_path('font-css'))) || false !== strpos($tag, 'data-ucwp-css-role="font-css"')) {
                 return 'font-css';
             }
 
