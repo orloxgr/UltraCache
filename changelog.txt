@@ -1,3 +1,6 @@
+= 2.59.06.12 =
+- Preserve already-enqueued page CSS bundle markup when source-link replacement makes no changes, preventing the temporary extraction step from dropping the bundle from warm-generated HTML.
+
 = 2.59.06.11 =
 - Cleans UltraCache-owned runtime options and transient prefixes during uninstall/Delete all data, including ucwp_* and ultracache_* transient rows.
 - Removes generated runtime CSS/font directories under uploads/ultracache during full cleanup: css-bundles, font-css, google-fonts, and optimized-css.

@@ -2588,7 +2588,9 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
 
             $mode = isset($entry['mode']) && 'aggressive' === strtolower((string) $entry['mode']) ? 'aggressive' : (isset($entry['mode']) && 'full' === strtolower((string) $entry['mode']) ? 'full' : 'safe');
             $page_bundle_role = $this->get_generated_css_bundle_role_from_mode($mode);
+            $html_before_bundle_extraction = $html;
             $bundle_markup = $this->extract_wp_enqueued_page_css_bundle_markup_from_html($html, $page_bundle_role);
+            $extracted_enqueued_bundle = ($html !== $html_before_bundle_extraction);
             if ('' === $bundle_markup) {
                 $bundle_markup = $this->build_page_css_bundle_markup_from_manifest_entry($entry, $page_bundle_role);
             }
@@ -2598,13 +2600,21 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
 
             $replacement = $bundle_markup;
 
-            return $this->replace_cached_css_bundle_links_with_html_api(
+            $updated_html = $this->replace_cached_css_bundle_links_with_html_api(
                 $html,
                 $source_urls,
                 $replacement,
                 '' !== $current_url ? $current_url : home_url('/'),
                 'data-ucwp-page-css-bundle-source'
             );
+
+            // Preserve an already WordPress-enqueued CSS bundle if no source links were replaced.
+            // The extraction step is temporary; returning the intermediate HTML would drop the bundle.
+            if ($extracted_enqueued_bundle && $updated_html === $html) {
+                return $html_before_bundle_extraction;
+            }
+
+            return $updated_html;
         }
 
 
