@@ -5260,6 +5260,7 @@
 		const settingsRef = useRef(initialSettings);
 		const committedSettingsRef = useRef(initialSettings);
 		const lastSettingsSavePromiseRef = useRef(Promise.resolve());
+		const googleFontsAutoRebuildQueuedRef = useRef(false);
 		const queuedActionKeysRef = useRef({});
 		const uiActionQueueRef = useRef(Promise.resolve());
 		const uiActionQueueDepthRef = useRef(0);
@@ -6803,18 +6804,81 @@
 			queueSettingsPatch({ [key]: value });
 		}
 
+		function scheduleGoogleFontsAutoRebuildAfterSave() {
+			if (googleFontsAutoRebuildQueuedRef.current) {
+				return;
+			}
+			googleFontsAutoRebuildQueuedRef.current = true;
+			const toastId = 'ucwp-google-fonts-auto-rebuild';
+			pushToast({
+				id: toastId,
+				type: 'info',
+				title: 'Local Google Fonts',
+				text: 'Google Fonts rebuild will start automatically after settings save.',
+				persistent: true,
+			});
+			window.setTimeout(async () => {
+				try {
+					const saveSettled = await waitForSettingsSaveToSettle();
+					if (!saveSettled) {
+						throw new Error('Settings are still saving. Google Fonts rebuild was not queued yet.');
+					}
+					const queued = await apiRequest('queue_action', {
+						action: 'google_fonts_rebuild_cache',
+						params: { clear: false },
+					});
+					const job = queued && queued.job ? queued.job : null;
+					if (!job || !job.id) {
+						throw new Error('Google Fonts rebuild job was not created.');
+					}
+					if (job.direct && ['done', 'failed'].indexOf(job.status) !== -1) {
+						if (job.result) {
+							applyDashboardPayload(job.result);
+						}
+						if (job.status !== 'done') {
+							throw new Error(job.message || 'Google Fonts rebuild failed.');
+						}
+						pushToast({
+							id: toastId,
+							type: 'success',
+							title: 'Local Google Fonts',
+							text: 'Google Fonts rebuild completed.',
+						});
+						return;
+					}
+					apiRequest('queue_run', { id: job.id }).catch((error) => {
+						pushToast({
+							id: toastId,
+							type: 'error',
+							title: 'Local Google Fonts',
+							text: error && error.message ? error.message : 'Google Fonts background rebuild failed to start.',
+						});
+					});
+					pushToast({
+						id: toastId,
+					type: 'success',
+					title: 'Local Google Fonts',
+					text: 'Google Fonts rebuild queued and started in the background.',
+					});
+				} catch (error) {
+					pushToast({
+						id: toastId,
+						type: 'error',
+						title: 'Local Google Fonts',
+						text: error && error.message ? error.message : 'Google Fonts rebuild could not be queued.',
+					});
+				} finally {
+					window.setTimeout(() => {
+						googleFontsAutoRebuildQueuedRef.current = false;
+					}, 10000);
+				}
+			}, 250);
+		}
+
 		function updateGoogleFontsLocalOptimization(value) {
 			queueSettingsPatch({ googleFontsLocalOptimizationEnabled: !!value });
 			if (!!value) {
-				window.setTimeout(() => {
-					queueDashboardAction('google_fonts_rebuild_cache', { clear: false }, {
-						queued: 'Google Fonts homepage scan started…',
-						runningLabel: 'Scanning Google Fonts…',
-						success: 'Google Fonts homepage scan finished.',
-						failed: 'Google Fonts homepage scan failed.',
-						alreadyQueued: 'Google Fonts scan is already processing.',
-					}, 'google_fonts_rebuild_cache');
-				}, 0);
+				scheduleGoogleFontsAutoRebuildAfterSave();
 			}
 		}
 

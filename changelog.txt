@@ -1,5 +1,5 @@
-= 2.59.06.12 =
-- Preserve already-enqueued page CSS bundle markup when source-link replacement makes no changes, preventing the temporary extraction step from dropping the bundle from warm-generated HTML.
+= 2.59.06.13 =
+- Defers the automatic Local Google Fonts rebuild triggered by the toggle so settings save can finish first and the rebuild starts as a background dashboard queue job without blocking the UI flow.
 
 = 2.59.06.11 =
 - Cleans UltraCache-owned runtime options and transient prefixes during uninstall/Delete all data, including ucwp_* and ultracache_* transient rows.
