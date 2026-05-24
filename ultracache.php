@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.59.06.13
+ * Version: 2.59.06.14
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.59.06.13');
+    define('UCWP_VERSION', '2.59.06.14');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1814,42 +1814,42 @@ if (!class_exists('Ultra_Cache_WP')) {
                 'last_seen'          => $now,
             );
 
-            $sql = $wpdb->prepare(
-                'INSERT INTO %i
-                    (source_url_hash, generated_url_hash, source_url, source_path, source_handle, generated_url, generated_path, generated_basename, optimization_type, content_hash, active, created_at, updated_at, last_seen)
-                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s)
-                 ON DUPLICATE KEY UPDATE
-                    generated_url_hash = VALUES(generated_url_hash),
-                    source_url = VALUES(source_url),
-                    source_path = VALUES(source_path),
-                    source_handle = VALUES(source_handle),
-                    generated_url = VALUES(generated_url),
-                    generated_path = VALUES(generated_path),
-                    generated_basename = VALUES(generated_basename),
-                    content_hash = VALUES(content_hash),
-                    active = VALUES(active),
-                    updated_at = VALUES(updated_at),
-                    last_seen = VALUES(last_seen)',
-                $table,
-                $row['source_url_hash'],
-                $row['generated_url_hash'],
-                $row['source_url'],
-                $row['source_path'],
-                $row['source_handle'],
-                $row['generated_url'],
-                $row['generated_path'],
-                $row['generated_basename'],
-                $row['optimization_type'],
-                $row['content_hash'],
-                $row['active'],
-                $row['created_at'],
-                $row['updated_at'],
-                $row['last_seen']
-            );
-
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache-owned CSS rewrite-map upsert. The table has a plugin-owned unique key on source_url_hash + optimization_type; cache keys are cleared immediately after the atomic write.
-            $result = $wpdb->query($sql);
+            $result = $wpdb->query(
+                $wpdb->prepare(
+                    'INSERT INTO %i
+                        (source_url_hash, generated_url_hash, source_url, source_path, source_handle, generated_url, generated_path, generated_basename, optimization_type, content_hash, active, created_at, updated_at, last_seen)
+                     VALUES
+                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s)
+                     ON DUPLICATE KEY UPDATE
+                        generated_url_hash = VALUES(generated_url_hash),
+                        source_url = VALUES(source_url),
+                        source_path = VALUES(source_path),
+                        source_handle = VALUES(source_handle),
+                        generated_url = VALUES(generated_url),
+                        generated_path = VALUES(generated_path),
+                        generated_basename = VALUES(generated_basename),
+                        content_hash = VALUES(content_hash),
+                        active = VALUES(active),
+                        updated_at = VALUES(updated_at),
+                        last_seen = VALUES(last_seen)',
+                    $table,
+                    $row['source_url_hash'],
+                    $row['generated_url_hash'],
+                    $row['source_url'],
+                    $row['source_path'],
+                    $row['source_handle'],
+                    $row['generated_url'],
+                    $row['generated_path'],
+                    $row['generated_basename'],
+                    $row['optimization_type'],
+                    $row['content_hash'],
+                    $row['active'],
+                    $row['created_at'],
+                    $row['updated_at'],
+                    $row['last_seen']
+                )
+            );
             self::clear_css_rewrite_map_cache_for_urls($source_url, $generated_url, $row['optimization_type']);
             return false !== $result;
         }

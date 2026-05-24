@@ -1,3 +1,6 @@
+= 2.59.06.14 =
+* Plugin Check: write the CSS rewrite-map atomic upsert with inline `$wpdb->prepare()` inside `$wpdb->query()` so the prepared-SQL sniff can verify it directly.
+
 = 2.59.06.13 =
 - Defers the automatic Local Google Fonts rebuild triggered by the toggle so settings save can finish first and the rebuild starts as a background dashboard queue job without blocking the UI flow.
 
