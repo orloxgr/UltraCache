@@ -67,7 +67,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'sliderSafeModeEnabled'       => false,
                 'clsDimensionsEnabled'       => false,
                 'asyncCssEnabled'            => false,
+                'asyncExternalCssEnabled'    => false,
                 'asyncCssExcludeList'        => '',
+                'asyncExternalCssExcludeList' => '',
                 'aggressiveAsyncCssEnabled'  => false,
                 'delayNonCriticalJsEnabled'  => false,
                 'delayNonCriticalJsExcludeList' => '',
@@ -1028,11 +1030,31 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             );
         }
 
-        private static function detect_cache_dropin_owner($contents)
+        private static function is_ultracache_managed_cache_dropin($basename, $contents)
+        {
+            $basename = basename((string) $basename);
+            $contents = (string) $contents;
+            if ('' === $basename || '' === $contents) {
+                return false;
+            }
+
+            $markers = array(
+                'advanced-cache.php' => 'UltraCache advanced-cache drop-in',
+                'object-cache.php' => 'UltraCache generated object-cache drop-in',
+            );
+
+            return isset($markers[$basename]) && false !== strpos($contents, $markers[$basename]);
+        }
+
+        private static function detect_cache_dropin_owner($contents, $basename = '')
         {
             $contents = (string) $contents;
             if ('' === $contents) {
                 return 'Unknown';
+            }
+
+            if (self::is_ultracache_managed_cache_dropin($basename, $contents)) {
+                return 'UltraCache';
             }
 
             foreach (self::get_known_cache_plugin_signatures() as $signature) {
@@ -1070,8 +1092,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 $path = ucwp_dropin_path($basename);
                 $exists = file_exists($path);
                 $contents = $exists ? (string) ucwp_safe_file_get_contents($path, 'cache drop-in conflict detection', true) : '';
-                $managed = $exists && false !== strpos($contents, 'UltraCache');
-                $owner = $exists ? self::detect_cache_dropin_owner($contents) : '';
+                $managed = $exists && self::is_ultracache_managed_cache_dropin($basename, $contents);
+                $owner = $exists ? self::detect_cache_dropin_owner($contents, $basename) : '';
                 $is_conflict = $exists && !$managed;
 
                 if ($is_conflict) {
@@ -1256,7 +1278,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 }
 
                 $contents = (string) ucwp_safe_file_get_contents($path, 'remove conflicting cache drop-in verify', true);
-                if (false !== strpos($contents, 'UltraCache')) {
+                if (self::is_ultracache_managed_cache_dropin($basename, $contents)) {
                     $failed[] = array(
                         'file' => $basename,
                         'owner' => 'UltraCache',
@@ -1268,7 +1290,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 if (!ucwp_safe_mkdir($backup_dir, 0755, true, 'cache drop-in conflict backup mkdir')) {
                     $failed[] = array(
                         'file' => $basename,
-                        'owner' => self::detect_cache_dropin_owner($contents),
+                        'owner' => self::detect_cache_dropin_owner($contents, $basename),
                         'message' => self::maybe_translate('Could not create backup directory.'),
                     );
                     continue;
@@ -1278,7 +1300,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 if (!ucwp_safe_copy($path, $backup_file, 'cache drop-in conflict backup copy')) {
                     $failed[] = array(
                         'file' => $basename,
-                        'owner' => self::detect_cache_dropin_owner($contents),
+                        'owner' => self::detect_cache_dropin_owner($contents, $basename),
                         'message' => self::maybe_translate('Could not back up drop-in.'),
                     );
                     continue;
@@ -1287,7 +1309,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 if (!ucwp_safe_unlink($path, 'cache drop-in conflict remove')) {
                     $failed[] = array(
                         'file' => $basename,
-                        'owner' => self::detect_cache_dropin_owner($contents),
+                        'owner' => self::detect_cache_dropin_owner($contents, $basename),
                         'backup' => $backup_file,
                         'message' => self::maybe_translate('Backup created, but removal failed.'),
                     );
@@ -1296,7 +1318,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
 
                 $removed[] = array(
                     'file' => $basename,
-                    'owner' => self::detect_cache_dropin_owner($contents),
+                    'owner' => self::detect_cache_dropin_owner($contents, $basename),
                     'backup' => $backup_file,
                 );
                 $backups[] = $backup_file;
@@ -1433,6 +1455,12 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 }
             }
 
+            // Delay icon fonts is the only visible UI control for both icon-font
+            // delaying and broad icon-font auto-detection. Keep the internal legacy
+            // auto-detect flag synchronized so profiles/imports/direct saves cannot
+            // enable one half of the feature without the other.
+            $settings['delayIconFontsAutoDetectEnabled'] = !empty($settings['delayIconFontsEnabled']);
+
             // JavaScript Strategy is the canonical UI model for the two base
             // engine booleans. The other local/third-party/LCP delay controls
             // remain independent and are intentionally not changed here.
@@ -1492,6 +1520,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 $settings['pageCssBundleOnEntryEnabled'] = false;
             }
             $settings['asyncCssExcludeList']       = self::normalize_textarea_setting($settings['asyncCssExcludeList']);
+            $settings['asyncExternalCssExcludeList'] = self::normalize_textarea_setting($settings['asyncExternalCssExcludeList'] ?? '');
             $settings['delayNonCriticalJsExcludeList'] = self::normalize_textarea_setting($settings['delayNonCriticalJsExcludeList']);
             $settings['assetCleanupExcludeList'] = self::normalize_textarea_setting($settings['assetCleanupExcludeList']);
             $settings['googleFontsAdditionalScanUrls'] = self::normalize_textarea_setting($settings['googleFontsAdditionalScanUrls']);
@@ -1547,27 +1576,28 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
 
         private static function validate_critical_settings_support_before_persist(array $current, array $previous)
         {
-            if (self::setting_was_enabled_by_patch($current, $previous, 'brotliEnabled')) {
+            $brotli_enabled_by_patch = self::setting_was_enabled_by_patch($current, $previous, 'brotliEnabled');
+            $gzip_enabled_by_patch = self::setting_was_enabled_by_patch($current, $previous, 'gzipEnabled');
+
+            if ($brotli_enabled_by_patch || $gzip_enabled_by_patch) {
                 $compression_support = self::get_compression_support_status();
-                if (empty($compression_support['brotli'])) {
-                    return new WP_Error('ucwp_brotli_unavailable', self::maybe_translate('Brotli compression is not available on this server, so Brotli Cache Compression was not enabled.'));
+
+                if ($brotli_enabled_by_patch && empty($compression_support['brotli'])) {
+                    return new WP_Error('ucwp_brotli_unavailable', self::maybe_translate('Brotli compression is not available on this server, so UltraCache HTML Compression was not enabled.'));
                 }
 
-                $frontend_compression = self::get_frontend_compression_probe_status(false);
-                if (!empty($frontend_compression['brotli']) || !empty($frontend_compression['brokenBrotli'])) {
-                    return new WP_Error('ucwp_brotli_frontend_conflict', self::maybe_translate('Brotli compression appears to be handled or conflicted before WordPress, so Brotli Cache Compression was not enabled.'));
-                }
-            }
-
-            if (self::setting_was_enabled_by_patch($current, $previous, 'gzipEnabled')) {
-                $compression_support = self::get_compression_support_status();
-                if (empty($compression_support['gzip'])) {
-                    return new WP_Error('ucwp_gzip_unavailable', self::maybe_translate('Gzip compression is not available on this server, so Gzip Cache Compression was not enabled.'));
+                if ($gzip_enabled_by_patch && empty($compression_support['gzip'])) {
+                    return new WP_Error('ucwp_gzip_unavailable', self::maybe_translate('Gzip compression is not available on this server, so UltraCache HTML Compression was not enabled.'));
                 }
 
-                $frontend_compression = self::get_frontend_compression_probe_status(false);
-                if (!empty($frontend_compression['gzip']) || !empty($frontend_compression['brokenGzip'])) {
-                    return new WP_Error('ucwp_gzip_frontend_conflict', self::maybe_translate('Gzip compression appears to be handled or conflicted before WordPress, so Gzip Cache Compression was not enabled.'));
+                $frontend_compression = self::get_frontend_compression_probe_status(true);
+                if (
+                    !empty($frontend_compression['brotli'])
+                    || !empty($frontend_compression['gzip'])
+                    || !empty($frontend_compression['brokenBrotli'])
+                    || !empty($frontend_compression['brokenGzip'])
+                ) {
+                    return new WP_Error('ucwp_html_compression_frontend_conflict', self::maybe_translate('Server-side compression is already active. UltraCache compression was not enabled.'));
                 }
             }
 
@@ -1859,7 +1889,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'leftover_css_bundle'       => !empty($ui['leftoverCssBundleEnabled']),
                 'homepage_css_bundle_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['homepageCssBundleExcludeList'])),
                 'delay_icon_fonts'            => !empty($ui['delayIconFontsEnabled']),
-                'delay_icon_fonts_auto_detect' => !empty($ui['delayIconFontsAutoDetectEnabled']),
+                'delay_icon_fonts_auto_detect' => !empty($ui['delayIconFontsEnabled']),
                 'delay_icon_fonts_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsList'])),
                 'delay_icon_fonts_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsExcludeList'])),
                 'homepage_css_bundle_mode'    => self::sanitize_homepage_css_bundle_mode($ui['homepageCssBundleMode']),
@@ -1869,7 +1899,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'slider_safe_mode'            => !empty($ui['sliderSafeModeEnabled']),
                 'cls_dimensions'               => !empty($ui['clsDimensionsEnabled']),
                 'async_css'                    => !empty($ui['asyncCssEnabled']),
+                'async_external_css'           => !empty($ui['asyncExternalCssEnabled']),
                 'async_css_exclude_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['asyncCssExcludeList'])),
+                'async_external_css_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['asyncExternalCssExcludeList'] ?? '')),
                 'aggressive_async_css'         => !empty($ui['aggressiveAsyncCssEnabled']),
                 'delay_non_critical_js'        => $delay_non_critical_js_enabled,
                 'delay_non_critical_js_aggressive' => $defer_stage_aggressive,

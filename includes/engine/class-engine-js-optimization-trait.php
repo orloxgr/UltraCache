@@ -1613,7 +1613,11 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $compiled[] = esc_attr($name) . '="' . esc_attr((string) $value) . '"';
             }
 
+            // This restores a script tag from an UltraCache delayed-script placeholder in final rendered HTML.
+            // The original script was already printed by WordPress/theme/plugin output, so wp_enqueue_script() is not applicable here.
+            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedScript
             $open_restored = '<script' . (!empty($compiled) ? ' ' . implode(' ', $compiled) : '') . '>';
+            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedScript
             return $open_restored . ($is_inline ? $content : '') . '</script>';
         }
 

@@ -142,6 +142,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $add('Page generation lock acquire', 'page_generation_lock_acquire_start', 'page_generation_lock_acquired', 'Acquires page generation/stampede lock.');
             $add('Page generation lock wait', 'page_generation_lock_wait_start', 'page_generation_lock_wait_timeout', 'Waits for another worker to finish generating the cache file.');
             $add('Cache output callback total', 'cache_output_callback_start', 'cache_output_callback_end', 'HTML rewrite and cache store work inside the output buffer callback.');
+            $add('Diagnostic fallback output buffer', 'diagnostic_fallback_output_buffer_started', 'diagnostic_fallback_output_buffer_callback', 'Captures final HTML for profiled diagnostic requests when the WordPress template output-buffer filter does not finish.');
+            $add('Output buffer callback missing', 'buffer_start', 'output_buffer_callback_missing', 'UltraCache requested template output buffering, but the final STORE callback did not run before shutdown.');
 
             usort($items, function ($a, $b) {
                 return (int) ($b['durationMs'] ?? 0) <=> (int) ($a['durationMs'] ?? 0);
@@ -153,7 +155,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
                 $stage = (string) $checkpoint['stage'];
-                if (!preg_match('/^(maybe_start_buffering|should_bypass|early_hit|page_generation|record_analytics_miss|send_debug_headers|buffer_start|cache_output_callback|css_bundle_ref_validation)/', $stage)) {
+                if (!preg_match('/^(maybe_start_buffering|should_bypass|early_hit|page_generation|record_analytics_miss|send_debug_headers|buffer_start|diagnostic_fallback_output_buffer|cache_output_callback|output_buffer_callback_missing|css_bundle_ref_validation)/', $stage)) {
                     continue;
                 }
                 $delta = isset($checkpoint['since_previous_ms']) ? (int) $checkpoint['since_previous_ms'] : 0;
@@ -578,6 +580,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         'available'          => !empty($async_css_diagnostics['available']),
                         'enabled'            => !empty($async_css_diagnostics['enabled']),
                         'aggressiveEnabled'  => !empty($async_css_diagnostics['aggressive_enabled']),
+                        'externalEnabled'    => !empty($async_css_diagnostics['external_enabled']),
                         'safe'               => !isset($async_css_diagnostics['safe']) || !empty($async_css_diagnostics['safe']),
                         'scanned'            => isset($async_css_diagnostics['scanned']) ? (int) $async_css_diagnostics['scanned'] : 0,
                         'rewritten'          => isset($async_css_diagnostics['rewritten']) ? (int) $async_css_diagnostics['rewritten'] : 0,
@@ -753,6 +756,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $cache_status = (string) wp_remote_retrieve_header($response, 'x-ultra-cache');
             $cache_source = (string) wp_remote_retrieve_header($response, 'x-ultra-cache-source');
             $profile_header = (string) wp_remote_retrieve_header($response, 'x-ultra-cache-store-profile');
+            $profile_status_header = (string) wp_remote_retrieve_header($response, 'x-ultra-cache-store-profile-status');
+            $profile_reason_header = (string) wp_remote_retrieve_header($response, 'x-ultra-cache-store-profile-reason');
             $body = wp_remote_retrieve_body($response);
 
             $profile = $this->wait_for_performance_profile_for_run($engine, $run_id, 8, 250000);
@@ -761,9 +766,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 return array(
                     'success' => false,
                     'message' => sprintf(
-                        /* translators: %s: cache status returned during the speed diagnostic request. */
-                        __('The page was generated and cached, but the timing breakdown was not saved. This is a Speed Diagnostics issue, not necessarily a site speed issue. Cache status: %s.', 'ultracache'),
-                        ($cache_status ?: 'unknown')
+                        /* translators: 1: cache status returned by the diagnostic request, 2: profile response header, 3: profile reason header. */
+                        __('The diagnostic request reached cache status %1$s, but no STORE profile JSON was saved. Profile header: %2$s. Reason: %3$s.', 'ultracache'),
+                        ($cache_status ?: 'unknown'),
+                        ($profile_header ?: 'missing'),
+                        ($profile_reason_header ?: 'missing-profile-json')
                     ),
                     'performanceProfile' => array(
                         'available' => false,
@@ -773,6 +780,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         'cacheStatus' => $cache_status,
                         'cacheSource' => $cache_source,
                         'profileHeader' => $profile_header,
+                        'profileStatusHeader' => $profile_status_header,
+                        'profileReasonHeader' => $profile_reason_header,
                         'profileRunId' => $run_id,
                         'bodyBytes' => is_string($body) ? strlen($body) : 0,
                     ),
@@ -788,9 +797,21 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $summary['cacheStatus'] = $cache_status;
             $summary['cacheSource'] = $cache_source;
             $summary['profileHeader'] = $profile_header;
+            $summary['profileStatusHeader'] = $profile_status_header;
+            $summary['profileReasonHeader'] = $profile_reason_header;
             $summary['profileRunId'] = $run_id;
             $summary['bodyBytes'] = is_string($body) ? strlen($body) : 0;
             $summary['cacheBypassedForDiagnostic'] = true;
+
+            $profile_status = strtoupper((string) ($summary['status'] ?? ''));
+            $profile_reason = sanitize_key((string) ($summary['reason'] ?? ''));
+            if ('SKIP' === $profile_status && 'output-buffer-callback-not-run' === $profile_reason) {
+                return array(
+                    'success' => false,
+                    'message' => __('The diagnostic request reached MISS, but UltraCache did not receive the final STORE output-buffer callback. A diagnostic profile was saved with reason: output-buffer-callback-not-run.', 'ultracache'),
+                    'performanceProfile' => $summary,
+                );
+            }
 
             return array(
                 'success' => true,

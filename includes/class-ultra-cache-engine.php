@@ -48,6 +48,18 @@ if (!class_exists('Ultra_Cache_Engine')) {
         /** @var bool */
         private $template_enhancement_buffer_started = false;
 
+        /** @var bool */
+        private $diagnostic_fallback_output_buffer_active = false;
+
+        /** @var int */
+        private $diagnostic_fallback_output_buffer_level = 0;
+
+        /** @var bool */
+        private $diagnostic_fallback_output_buffer_used = false;
+
+        /** @var bool */
+        private $cache_output_callback_ran = false;
+
         /** @var string */
         private $last_bypass_reason = '';
 
@@ -144,6 +156,8 @@ if (!class_exists('Ultra_Cache_Engine')) {
             add_filter('wp_speculation_rules_href_exclude_paths', array($this, 'filter_speculation_rules_href_exclude_paths'), 20, 2);
             add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_end_checkpoint'), PHP_INT_MAX);
             add_action('wp_enqueue_scripts', array($this, 'cleanup_asset_chain_enqueue_assets'), 9999);
+            add_action('shutdown', array($this, 'flush_diagnostic_fallback_output_buffer_on_shutdown'), PHP_INT_MAX - 4);
+            add_action('shutdown', array($this, 'finalize_missing_output_buffer_store_profile'), PHP_INT_MAX - 3);
             add_action('shutdown', array($this, 'run_deferred_store_post_response_actions'), PHP_INT_MAX - 2);
             add_action('shutdown', array($this, 'release_page_generation_lock_on_shutdown'), PHP_INT_MAX - 1);
             add_action('shutdown', array($this, 'update_store_profile_after_shutdown'), PHP_INT_MAX);
@@ -209,6 +223,121 @@ if (!class_exists('Ultra_Cache_Engine')) {
             $this->template_enhancement_buffer_required = true;
             $this->profile_request_checkpoint('buffer_start');
             add_filter('wp_template_enhancement_output_buffer', array($this, 'cache_output_callback'), 100);
+            $this->maybe_start_diagnostic_fallback_output_buffer();
+        }
+
+        private function should_start_diagnostic_fallback_output_buffer()
+        {
+            if (!$this->is_store_profiler_enabled()) {
+                return false;
+            }
+
+            if ($this->diagnostic_fallback_output_buffer_active || $this->diagnostic_fallback_output_buffer_level > 0) {
+                return false;
+            }
+
+            if (!$this->buffering || !$this->template_enhancement_buffer_required) {
+                return false;
+            }
+
+            if (is_admin() || wp_doing_ajax()) {
+                return false;
+            }
+
+            return true;
+        }
+
+        private function maybe_start_diagnostic_fallback_output_buffer()
+        {
+            if (!$this->should_start_diagnostic_fallback_output_buffer()) {
+                return;
+            }
+
+            $this->diagnostic_fallback_output_buffer_active = true;
+            $this->diagnostic_fallback_output_buffer_used = false;
+            ob_start(array($this, 'diagnostic_fallback_output_buffer_callback'));
+            $this->diagnostic_fallback_output_buffer_level = (int) ob_get_level();
+            $this->profile_request_checkpoint('diagnostic_fallback_output_buffer_started', array(
+                'level' => (string) $this->diagnostic_fallback_output_buffer_level,
+            ));
+        }
+
+        public function diagnostic_fallback_output_buffer_callback($html)
+        {
+            $this->diagnostic_fallback_output_buffer_active = false;
+            $this->diagnostic_fallback_output_buffer_used = true;
+            $this->profile_request_checkpoint('diagnostic_fallback_output_buffer_callback', array(
+                'html_bytes' => is_string($html) ? strlen($html) : 0,
+                'buffering' => $this->buffering ? 'yes' : 'no',
+                'template_buffer_required' => $this->template_enhancement_buffer_required ? 'yes' : 'no',
+                'cache_output_callback_ran' => $this->cache_output_callback_ran ? 'yes' : 'no',
+            ));
+
+            if ($this->cache_output_callback_ran || !$this->buffering || !$this->template_enhancement_buffer_required) {
+                return $html;
+            }
+
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            $this->profile_request_checkpoint('diagnostic_fallback_output_buffer_store_start');
+            return $this->cache_output_callback($html);
+        }
+
+        public function flush_diagnostic_fallback_output_buffer_on_shutdown()
+        {
+            if (!$this->diagnostic_fallback_output_buffer_active || $this->diagnostic_fallback_output_buffer_level <= 0) {
+                return;
+            }
+
+            if (!$this->is_store_profiler_enabled() || !$this->buffering || !$this->template_enhancement_buffer_required) {
+                return;
+            }
+
+            $current_level = (int) ob_get_level();
+            if ($current_level < $this->diagnostic_fallback_output_buffer_level) {
+                $this->diagnostic_fallback_output_buffer_active = false;
+                $this->profile_request_checkpoint('diagnostic_fallback_output_buffer_missing_on_shutdown', array(
+                    'current_level' => (string) $current_level,
+                    'expected_level' => (string) $this->diagnostic_fallback_output_buffer_level,
+                ));
+                return;
+            }
+
+            $this->profile_request_checkpoint('diagnostic_fallback_output_buffer_flush_start', array(
+                'current_level' => (string) $current_level,
+                'target_level' => (string) $this->diagnostic_fallback_output_buffer_level,
+            ));
+
+            while ((int) ob_get_level() >= $this->diagnostic_fallback_output_buffer_level) {
+                $level_before = (int) ob_get_level();
+                $status = ob_get_status(false);
+                $removable = true;
+                if (is_array($status) && isset($status['flags']) && defined('PHP_OUTPUT_HANDLER_REMOVABLE')) {
+                    $removable = (bool) ((int) $status['flags'] & PHP_OUTPUT_HANDLER_REMOVABLE);
+                }
+
+                if (!$removable) {
+                    $this->profile_request_checkpoint('diagnostic_fallback_output_buffer_flush_step', array(
+                        'level_before' => (string) $level_before,
+                        'flushed' => 'no',
+                        'reason' => 'buffer-not-removable',
+                    ));
+                    break;
+                }
+
+                $flushed = ob_end_flush();
+                $this->profile_request_checkpoint('diagnostic_fallback_output_buffer_flush_step', array(
+                    'level_before' => (string) $level_before,
+                    'flushed' => $flushed ? 'yes' : 'no',
+                    'buffering' => $this->buffering ? 'yes' : 'no',
+                ));
+
+                if (!$flushed || !$this->diagnostic_fallback_output_buffer_active || !$this->buffering) {
+                    break;
+                }
+            }
         }
 
         public function should_force_template_enhancement_output_buffer($should_buffer)
@@ -457,14 +586,20 @@ if (!class_exists('Ultra_Cache_Engine')) {
 
         public function cache_output_callback($html)
         {
+            $this->cache_output_callback_ran = true;
             $this->profile_request_checkpoint('cache_output_callback_start', array(
                 'html_bytes' => is_string($html) ? strlen($html) : 0,
                 'buffer_started' => $this->template_enhancement_buffer_started ? 'yes' : 'no',
+                'diagnostic_fallback_used' => $this->diagnostic_fallback_output_buffer_used ? 'yes' : 'no',
             ));
             $this->buffering = false;
             $this->template_enhancement_buffer_required = false;
 
             if (!is_string($html) || '' === $html) {
+                if ($this->is_store_profiler_enabled()) {
+                    $this->start_store_profile_diagnostic_skip('empty-output');
+                    $this->finalize_store_profile('SKIP', 'empty-output', '');
+                }
                 $this->release_page_generation_lock();
                 return $html;
             }

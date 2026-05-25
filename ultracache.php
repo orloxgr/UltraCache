@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.59.06.14
+ * Version: 2.59.06.25
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.59.06.14');
+    define('UCWP_VERSION', '2.59.06.25');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -272,6 +272,7 @@ if (!class_exists('Ultra_Cache_WP')) {
             add_action('admin_menu', array($this, 'register_admin_menu'));
             add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
             add_action('admin_enqueue_scripts', array($this, 'suppress_conflicting_admin_assets'), 999);
+            // These late admin hooks do not print scripts; they only dequeue conflicting third-party admin assets after registration.
             add_action('admin_print_scripts-toplevel_page_ultracache', array($this, 'suppress_conflicting_admin_assets'), 1);
             add_action('admin_print_footer_scripts-toplevel_page_ultracache', array($this, 'suppress_conflicting_admin_assets'), 1);
             add_action('admin_notices', array($this, 'render_admin_notice'));
@@ -314,6 +315,9 @@ if (!class_exists('Ultra_Cache_WP')) {
 
                 case 'Brotli is not available on this server. UltraCache will use gzip compression instead.':
                     return __('Brotli is not available on this server. UltraCache will use gzip compression instead.', 'ultracache');
+
+                case 'Server-side compression is already active. UltraCache compression was not enabled.':
+                    return __('Server-side compression is already active. UltraCache compression was not enabled.', 'ultracache');
 
                 case 'wp-config.php could not be located.':
                     return __('wp-config.php could not be located.', 'ultracache');

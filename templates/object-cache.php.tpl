@@ -1,6 +1,7 @@
 <?php
 /**
  * UltraCache generated object-cache drop-in.
+ * Marker: UltraCache generated object-cache drop-in
  * Drop-in Build: __UCWP_DROPIN_BUILD__
  * Safe to overwrite.
  * Storage format: redis-apcu-runtime-v4 with explicit disk-only mode and signed-payload-v1 metrics.

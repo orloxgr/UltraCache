@@ -195,8 +195,13 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'send_debug_headers_start',
             'send_debug_headers_end',
             'buffer_start',
+            'diagnostic_fallback_output_buffer_started',
+            'diagnostic_fallback_output_buffer_flush_start',
+            'diagnostic_fallback_output_buffer_callback',
+            'diagnostic_fallback_output_buffer_store_start',
             'cache_output_callback_start',
             'cache_output_callback_end',
+            'output_buffer_callback_missing',
             'shutdown_start',
             'shutdown_end',
         );
@@ -349,9 +354,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             return false;
         }
 
-        return false !== strpos($path, '/uploads/ultracache/css-bundles/')
-            || false !== strpos($path, '/uploads/ultracache/font-css/')
-            || false !== strpos($path, '/uploads/ultracache/optimized-css/');
+        return ucwp_generated_asset_reference_matches($path, array('css-bundles', 'font-css', 'optimized-css'));
     }
 
     private function normalize_css_rewrite_map_lookup_url($url)
@@ -751,13 +754,22 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         return !file_exists($file);
     }
 
-    private function start_store_profile($html)
+    private function initialize_store_profile($html, $initial_stage = 'original_wordpress_html')
     {
         if (!$this->is_store_profiler_enabled()) {
             return;
         }
 
-        $this->profile_request_checkpoint('store_profile_start', array('html_bytes' => is_string($html) ? strlen($html) : 0));
+        if (!empty($this->store_profile)) {
+            return;
+        }
+
+        $html = is_string($html) ? $html : (string) $html;
+        $initial_stage = sanitize_key((string) $initial_stage);
+        if ('' === $initial_stage) {
+            $initial_stage = 'original_wordpress_html';
+        }
+
         $this->store_profile_started_at = microtime(true);
         $request_id = gmdate('Ymd-His') . '-' . substr(md5(uniqid('', true)), 0, 10);
         $this->store_profile = array(
@@ -780,12 +792,33 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
         $counts = $this->collect_store_profile_html_counts($html);
         $this->store_profile['stages'][] = array_merge(array(
-            'stage' => 'original_wordpress_html',
-            'bytes_in' => (int) strlen((string) $html),
-            'bytes_out' => (int) strlen((string) $html),
+            'stage' => $initial_stage,
+            'bytes_in' => (int) strlen($html),
+            'bytes_out' => (int) strlen($html),
             'delta_bytes' => 0,
             'duration_ms' => 0,
         ), $counts);
+    }
+
+    private function start_store_profile($html)
+    {
+        if (!$this->is_store_profiler_enabled()) {
+            return;
+        }
+
+        $this->profile_request_checkpoint('store_profile_start', array('html_bytes' => is_string($html) ? strlen($html) : 0));
+        $this->initialize_store_profile($html, 'original_wordpress_html');
+    }
+
+    private function start_store_profile_diagnostic_skip($reason)
+    {
+        if (!$this->is_store_profiler_enabled()) {
+            return;
+        }
+
+        $reason = sanitize_key((string) $reason);
+        $this->profile_request_checkpoint('store_profile_diagnostic_skip_start', array('reason' => $reason));
+        $this->initialize_store_profile('', 'diagnostic_skip_' . ('' !== $reason ? $reason : 'unknown'));
     }
 
     private function profile_store_stage($stage, $html, callable $callback)
@@ -897,7 +930,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $render_blocking = (!$is_print && !$async_marker);
         $origin = $this->get_public_resource_origin_type($href);
         $path = $this->get_public_resource_path_fragment($href);
-        $is_bundle = false !== stripos($href, '/uploads/ultracache/css-bundles/');
+        $is_bundle = ucwp_generated_asset_reference_matches($href, array('css-bundles'));
         $slider_fragment = !empty($settings['slider_safe_mode']) ? $this->get_matching_fragment('', $href, $tag, $this->get_slider_hero_protected_fragments()) : '';
         $bytes = 0;
         $local_path = $this->resolve_local_path_from_public_url($href);
@@ -1068,7 +1101,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
                 $result['render_blocking_stylesheet_hrefs'][] = $href;
             }
 
-            if (false !== stripos($href, '/uploads/ultracache/css-bundles/')) {
+            if (ucwp_generated_asset_reference_matches($href, array('css-bundles'))) {
                 $result['render_blocking_css_bundle_links']++;
             } else {
                 $result['render_blocking_non_bundle_stylesheet_links']++;
@@ -1146,6 +1179,32 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
                 $this->finalize_store_profile('STORE', '', $file_path);
             }
         }
+    }
+
+    public function finalize_missing_output_buffer_store_profile()
+    {
+        if (!$this->is_store_profiler_enabled()) {
+            return;
+        }
+
+        if (!$this->buffering || !$this->template_enhancement_buffer_required) {
+            return;
+        }
+
+        if (!empty($this->store_profile)) {
+            return;
+        }
+
+        $reason = 'output-buffer-callback-not-run';
+        $this->profile_request_checkpoint('output_buffer_callback_missing', array(
+            'buffering' => $this->buffering ? 'yes' : 'no',
+            'template_buffer_required' => $this->template_enhancement_buffer_required ? 'yes' : 'no',
+            'template_buffer_started' => $this->template_enhancement_buffer_started ? 'yes' : 'no',
+        ));
+        $this->start_store_profile_diagnostic_skip($reason);
+        $this->finalize_store_profile('SKIP', $reason, '');
+        $this->buffering = false;
+        $this->template_enhancement_buffer_required = false;
     }
 
     public function update_store_profile_after_shutdown()
@@ -1233,10 +1292,16 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $this->store_profile['largest_positive_delta'] = $largest_delta;
         $this->store_profile['slowest_stage'] = $slowest;
 
-        $this->write_store_profile_json('store_profile_write');
+        $write_ok = $this->write_store_profile_json('store_profile_write');
 
         if (!headers_sent()) {
-            header('X-Ultra-Cache-Store-Profile: saved');
+            $status = strtoupper((string) $status);
+            $reason_header = sanitize_key((string) $reason);
+            header('X-Ultra-Cache-Store-Profile: ' . ($write_ok ? 'saved' : 'skipped'));
+            header('X-Ultra-Cache-Store-Profile-Status: ' . $status);
+            if ('' !== $reason_header || !$write_ok) {
+                header('X-Ultra-Cache-Store-Profile-Reason: ' . ('' !== $reason_header ? $reason_header : 'profile-write-failed'));
+            }
             header('X-Ultra-Cache-Store-Profile-Id: ' . substr((string) ($this->store_profile['request_id'] ?? ''), 0, 40));
             if (!empty($this->store_profile['profile_run_id'])) {
                 header('X-Ultra-Cache-Store-Profile-Run: ' . substr((string) $this->store_profile['profile_run_id'], 0, 64));

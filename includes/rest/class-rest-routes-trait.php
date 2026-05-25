@@ -755,25 +755,8 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                 return '';
             }
 
-            $path = (string) wp_parse_url($absolute, PHP_URL_PATH);
-            if ('' === $path) {
-                return '';
-            }
-
-            $home_path = (string) wp_parse_url(home_url('/'), PHP_URL_PATH);
-            $home_path = '/' . trim($home_path, '/');
-            if ('/' !== $home_path && 0 === strpos($path, $home_path . '/')) {
-                $path = substr($path, strlen($home_path));
-            }
-
-            $relative = ltrim($path, '/');
-            if ('' === $relative || false !== strpos($relative, '..')) {
-                return '';
-            }
-
-            $candidate = wp_normalize_path(ABSPATH . $relative);
-            $abspath = wp_normalize_path(ABSPATH);
-            if (0 !== strpos($candidate, $abspath) || !is_readable($candidate) || !is_file($candidate)) {
+            $candidate = function_exists('ucwp_local_path_from_public_url') ? ucwp_local_path_from_public_url($absolute, array('css')) : '';
+            if ('' === $candidate || !is_readable($candidate) || !is_file($candidate)) {
                 return '';
             }
 

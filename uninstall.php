@@ -4,7 +4,7 @@
  *
  * Conservative policy: remove plugin settings, runtime/cache files, generated cache files,
  * scheduled events, UltraCache-managed drop-ins, runtime secret files, and UltraCache queue tables.
- * Do not delete optimized uploads under wp-content/uploads/ultracache/images/ automatically.
+ * Do not delete public optimized image derivatives from uploads automatically.
  */
 
 if (!defined('WP_UNINSTALL_PLUGIN')) {

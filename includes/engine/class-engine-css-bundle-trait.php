@@ -856,6 +856,9 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 'data-ucwp-async-css',
             );
 
+            // This rebuilds an existing stylesheet tag from final rendered HTML for diagnostics/manifest comparison.
+            // wp_enqueue_style() cannot be used here because the original stylesheet has already been printed.
+            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
             $tag = '<link';
             foreach ($attributes as $attribute) {
                 $value = $processor->get_attribute($attribute);
@@ -1104,6 +1107,10 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
 
             $absolute_url = $this->absolutize_public_resource_url($href, '' !== (string) $page_url ? (string) $page_url : home_url('/'));
             if ('' === $absolute_url) {
+                return array();
+            }
+
+            if ($this->should_async_external_css_win_bundle_for_url($absolute_url)) {
                 return array();
             }
 
@@ -2459,7 +2466,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
          * Expand bundle source URL matches with generated CSS rewrite aliases.
          *
          * Font-display normalization can rewrite original local stylesheet links to
-         * /uploads/ultracache/optimized-css/ URLs before the page CSS bundle replacer
+         * generated optimized CSS URLs before the page CSS bundle replacer
          * runs on the final HTML buffer. The bundle manifest still correctly stores
          * the original source URLs. Use UltraCache's existing rewrite maps so the
          * replacer can treat generated optimized-css/font-css links as aliases of
@@ -2681,6 +2688,10 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return array('asset' => array(), 'skip' => 'unresolved');
             }
 
+            if ($this->should_async_external_css_win_bundle_for_url($absolute_url)) {
+                return array('asset' => array(), 'skip' => 'external-css-async-wins-bundle', 'url' => $absolute_url, 'reason' => 'external_css_async_wins_bundle');
+            }
+
             if ($this->should_exclude_stylesheet_url_by_fragments($absolute_url, $this->get_homepage_css_bundle_exclude_fragments())) {
                 return array('asset' => array(), 'skip' => 'protected', 'url' => $absolute_url, 'reason' => __('CSS Bundle Exclusions matched', 'ultracache'));
             }
@@ -2790,6 +2801,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                                 $stats['skipped_unreadable_count']++;
                                 break;
                             case 'async':
+                            case 'external-css-async-wins-bundle':
                                 $stats['skipped_async_count']++;
                                 break;
                             case 'media':
@@ -2899,6 +2911,10 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             $absolute_url = $this->absolutize_public_resource_url($href, '' !== (string) $page_url ? (string) $page_url : home_url('/'));
             if ('' === $absolute_url) {
                 return array('asset' => array(), 'skip' => 'unresolved');
+            }
+
+            if ($this->should_async_external_css_win_bundle_for_url($absolute_url)) {
+                return array('asset' => array(), 'skip' => 'external-css-async-wins-bundle', 'url' => $absolute_url, 'reason' => 'external_css_async_wins_bundle');
             }
 
             if ($this->should_exclude_stylesheet_url_by_fragments($absolute_url, $this->get_homepage_css_bundle_exclude_fragments())) {

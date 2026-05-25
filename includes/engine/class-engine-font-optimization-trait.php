@@ -990,7 +990,7 @@ private function decode_google_fonts_html_url($url)
                     continue;
                 }
 
-                if (false !== strpos($path, '/cache/ultracache/') || false !== strpos($path, '/uploads/ultracache/')) {
+                if (ucwp_internal_cache_local_path_matches($path) || ucwp_generated_asset_local_path_matches($path)) {
                     continue;
                 }
 
@@ -1583,10 +1583,10 @@ private function decode_google_fonts_html_url($url)
         private function get_generated_font_css_asset_role(array $asset)
         {
             $css_url = isset($asset['css_url']) ? strtolower((string) $asset['css_url']) : '';
-            if (!empty($asset['activeCssIsMixed']) || false !== strpos($css_url, '/uploads/ultracache/optimized-css/')) {
+            if (!empty($asset['activeCssIsMixed']) || ucwp_generated_asset_reference_matches($css_url, array('optimized-css'))) {
                 return 'optimized-css';
             }
-            if (false !== strpos($css_url, '/uploads/ultracache/font-css/')) {
+            if (ucwp_generated_asset_reference_matches($css_url, array('font-css'))) {
                 return 'font-css';
             }
             return '';
@@ -1680,7 +1680,7 @@ private function decode_google_fonts_html_url($url)
             }
 
             $normalized_path = strtolower((string) wp_parse_url($source_url, PHP_URL_PATH));
-            if (false !== strpos($normalized_path, '/uploads/ultracache/css-bundles/') || false !== strpos($normalized_path, '/uploads/ultracache/font-css/') || false !== strpos($normalized_path, '/uploads/ultracache/optimized-css/')) {
+            if (ucwp_generated_asset_reference_matches($normalized_path, array('css-bundles', 'font-css', 'optimized-css'))) {
                 $request_assets[$source_url] = array();
                 return array();
             }
@@ -1697,7 +1697,7 @@ private function decode_google_fonts_html_url($url)
             }
 
             $source_path_lc = strtolower(str_replace('\\', '/', $source_path));
-            if (false !== strpos($source_path_lc, '/cache/ultracache/') || false !== strpos($source_path_lc, '/uploads/ultracache/')) {
+            if (ucwp_internal_cache_local_path_matches($source_path_lc) || ucwp_generated_asset_local_path_matches($source_path_lc)) {
                 $request_assets[$source_url] = array();
                 return array();
             }
@@ -1818,7 +1818,7 @@ private function decode_google_fonts_html_url($url)
                     $normalized_href = $this->normalize_public_resource_url($href);
                     if ('' !== $normalized_href) {
                         $normalized_path = strtolower((string) wp_parse_url($normalized_href, PHP_URL_PATH));
-                        if (false !== strpos($normalized_path, '/uploads/ultracache/css-bundles/')) {
+                        if (ucwp_generated_asset_reference_matches($normalized_path, array('css-bundles'))) {
                             continue;
                         }
                     }
@@ -1895,7 +1895,7 @@ private function decode_google_fonts_html_url($url)
             }
 
             $normalized_path = strtolower((string) wp_parse_url($source_url, PHP_URL_PATH));
-            if (false !== strpos($normalized_path, '/uploads/ultracache/css-bundles/') || false !== strpos($normalized_path, '/uploads/ultracache/font-css/') || false !== strpos($normalized_path, '/uploads/ultracache/optimized-css/')) {
+            if (ucwp_generated_asset_reference_matches($normalized_path, array('css-bundles', 'font-css', 'optimized-css'))) {
                 $request_assets[$source_url] = array();
                 return array();
             }
@@ -1955,7 +1955,7 @@ private function decode_google_fonts_html_url($url)
             }
 
             $source_path_lc = strtolower(str_replace('\\', '/', $source_path));
-            if (false !== strpos($source_path_lc, '/uploads/ultracache/css-bundles/') || false !== strpos($source_path_lc, '/uploads/ultracache/font-css/') || false !== strpos($source_path_lc, '/uploads/ultracache/optimized-css/')) {
+            if (ucwp_generated_asset_local_path_matches($source_path_lc, array('css-bundles', 'font-css', 'optimized-css'))) {
                 return array();
             }
 
@@ -2893,7 +2893,7 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
                 }
 
                 $path = strtolower((string) wp_parse_url($source_url, PHP_URL_PATH));
-                if (false !== strpos($path, '/uploads/ultracache/css-bundles/') || false !== strpos($path, '/uploads/ultracache/font-css/') || false !== strpos($path, '/uploads/ultracache/optimized-css/')) {
+                if (ucwp_generated_asset_reference_matches($path, array('css-bundles', 'font-css', 'optimized-css'))) {
                     continue;
                 }
 
@@ -3161,10 +3161,10 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
             }
 
             $path = strtolower((string) wp_parse_url($css_url, PHP_URL_PATH));
-            if (false !== strpos($path, '/uploads/ultracache/font-css/')) {
+            if (ucwp_generated_asset_reference_matches($path, array('font-css'))) {
                 return 'font-css';
             }
-            if (false !== strpos($path, '/uploads/ultracache/optimized-css/')) {
+            if (ucwp_generated_asset_reference_matches($path, array('optimized-css'))) {
                 return 'optimized-css';
             }
 
@@ -3227,7 +3227,7 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
                 $generated_path = $this->resolve_local_path_from_public_url($css_url);
                 $source_path = $this->resolve_local_path_from_public_url($source_url);
                 $generated_path_lc = strtolower(str_replace('\\', '/', (string) $generated_path));
-                if (false !== strpos($generated_path_lc, '/uploads/ultracache/optimized-css/')) {
+                if (ucwp_generated_asset_local_path_matches($generated_path_lc, array('optimized-css'))) {
                     Ultra_Cache_WP::record_css_rewrite_map($source_url, $css_url, array(
                         'source_path'       => $source_path,
                         'generated_path'    => $generated_path,
@@ -3264,7 +3264,7 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
                     $generated_path = $this->resolve_local_path_from_public_url($css_url);
                     $source_path = $this->resolve_local_path_from_public_url($source_url);
                     $generated_path_lc = strtolower(str_replace('\\', '/', (string) $generated_path));
-                    if (false !== strpos($generated_path_lc, '/uploads/ultracache/optimized-css/')) {
+                    if (ucwp_generated_asset_local_path_matches($generated_path_lc, array('optimized-css'))) {
                         Ultra_Cache_WP::record_css_rewrite_map($source_url, $css_url, array(
                             'source_path'       => $source_path,
                             'generated_path'    => $generated_path,
@@ -3305,7 +3305,7 @@ private function get_local_font_css_scan_roots()
                         continue;
                     }
 
-                    if (false !== strpos($path, '/cache/ultracache/') || false !== strpos($path, '/uploads/ultracache/')) {
+                    if (ucwp_internal_cache_local_path_matches($path) || ucwp_generated_asset_local_path_matches($path)) {
                         continue;
                     }
 
@@ -3464,7 +3464,7 @@ private function get_local_font_css_scan_roots()
                     continue;
                 }
 
-                if (false !== strpos($path, '/uploads/ultracache/font-css/') || false !== strpos($path, '/uploads/ultracache/css-bundles/') || false !== strpos($path, '/uploads/ultracache/optimized-css/')) {
+                if (ucwp_generated_asset_reference_matches($path, array('font-css', 'css-bundles', 'optimized-css'))) {
                     continue;
                 }
 
@@ -3566,7 +3566,7 @@ private function get_local_font_css_scan_roots()
                 }
 
                 $source_path_lc = strtolower(str_replace('\\', '/', $source_path));
-                if (false !== strpos($source_path_lc, '/cache/ultracache/') || false !== strpos($source_path_lc, '/uploads/ultracache/')) {
+                if (ucwp_internal_cache_local_path_matches($source_path_lc) || ucwp_generated_asset_local_path_matches($source_path_lc)) {
                     continue;
                 }
 

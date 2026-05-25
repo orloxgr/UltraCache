@@ -1,3 +1,56 @@
+= 2.59.06.25 =
+* Renames per-result scanner Append buttons to Append to exclusions.
+* Adds per-result Append to Safe Third-Party Delay Patterns buttons for Browser Runtime Error scans and Console Error Suggestions.
+* Uses 5px button margins and appends to the existing delaySafeThirdPartyJsPatterns setting without changing scanner logic.
+
+= 2.59.06.24 =
+* Hardens DB diagnostics so optional database probes suppress visible WordPress database errors and return Unavailable when unsupported.
+* Removes the unsafe SELECT @@query_cache_size fallback for MySQL 8 compatibility.
+* Keeps the change limited to DB diagnostics; no cache/runtime behavior changes.
+
+= 2.59.06.23 =
+* Renames the UI setting from Delay icon font-face blocks to Delay icon fonts.
+* Merges Auto-detect likely icon fonts into Delay icon fonts so the single visible switch enables both the delayed icon-font feature and its broad icon-font detection.
+* Keeps the existing internal settings synchronized for profiles and saves: enabling Delay icon fonts also enables delayIconFontsAutoDetectEnabled; disabling it turns both off.
+
+= 2.59.06.22 =
+* Removes the Populate Defaults and Download CSS JSON buttons from CSS Bundle Exclusions & Diagnostics.
+* Keeps Run CSS Diagnostics, Clear CSS Result, and Save Exclusions available; no runtime behavior changes.
+
+= 2.59.06.21 =
+* Replaces the separate Gzip and Brotli cache compression switches with a single HTML Compression dropdown while keeping the same internal settings.
+* Runs server-compression detection only when an admin selects UltraCache gzip or Brotli compression, and keeps compression off when server-side gzip or Brotli is already active.
+
+= 2.59.06.20 =
+* Updates changelog.txt with the reviewer-hardening changes from the 2.59.06.15 through 2.59.06.20 cycle.
+* Keeps readme.txt and README.md free of changelog sections; changelog history remains in changelog.txt only.
+* No runtime behavior changes.
+
+= 2.59.06.19 =
+* Fixes fresh-install drop-in conflict detection so current UltraCache advanced-cache.php and object-cache.php markers are recognized as UltraCache-managed.
+* Limits guarded drop-in owner reads to the exact WordPress drop-in paths instead of broad wp-content access.
+* Adds the current object-cache drop-in marker used by the owner detector; no legacy marker compatibility was added.
+
+= 2.59.06.18 =
+* Adds reviewer-facing comments for unavoidable final rendered HTML rewrites where wp_enqueue_style() or wp_enqueue_script() cannot apply after resources have already been printed.
+* Clarifies that late admin print hooks only dequeue conflicting third-party admin assets and do not print scripts.
+* No runtime behavior changes.
+
+= 2.59.06.17 =
+* Replaces hardcoded generated upload URL/path checks with helpers based on WordPress upload directory data and UltraCache generated-asset helpers.
+* Replaces broad wp-content readable-root logic with explicit plugin, mu-plugin, theme, uploads, cache, and core include roots.
+* Replaces direct ABSPATH-relative URL-to-file mapping with the central local URL resolver.
+
+= 2.59.06.16 =
+* Adds Async external CSS for stylesheet links whose host is different from the current site host.
+* Places the Async external CSS switch in CSS Delivery above Aggressive Async CSS and adds a visible exclusion field in CSS Bundle Exclusions & Diagnostics.
+* Ensures async external CSS wins over CSS bundling so external stylesheets are not bundled when converted to async CSS.
+
+= 2.59.06.15 =
+* Adds a diagnostic-only fallback output buffer for valid store-profile requests when the WordPress template enhancement output-buffer callback does not run.
+* Saves a skipped diagnostic profile with output-buffer-callback-not-run when neither the normal callback nor the fallback can produce a profile.
+* Improves diagnostic profile headers and dashboard messaging for missing STORE profile JSON cases.
+
 = 2.59.06.14 =
 * Plugin Check: write the CSS rewrite-map atomic upsert with inline `$wpdb->prepare()` inside `$wpdb->query()` so the prepared-SQL sniff can verify it directly.
 

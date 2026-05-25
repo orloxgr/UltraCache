@@ -179,13 +179,11 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
         private function validate_cached_html_css_bundle_refs($html, $cache_file = '')
         {
             $html = (string) $html;
-            if ('' === $html || false === stripos($html, '/uploads/ultracache/')) {
+            if ('' === $html || !ucwp_generated_asset_reference_matches($html)) {
                 return true;
             }
 
-            $has_generated_css = (false !== stripos($html, '/uploads/ultracache/css-bundles/'))
-                || (false !== stripos($html, '/uploads/ultracache/font-css/'))
-                || (false !== stripos($html, '/uploads/ultracache/optimized-css/'));
+            $has_generated_css = ucwp_generated_asset_reference_matches($html, array('css-bundles', 'font-css', 'optimized-css'));
             if (!$has_generated_css) {
                 return true;
             }
@@ -236,7 +234,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
             $refs = array();
             $collect_generated_refs = function ($value) use (&$refs, $generated_asset_patterns) {
                 $value = html_entity_decode((string) $value, ENT_QUOTES, 'UTF-8');
-                if ('' === $value || false === stripos($value, '/uploads/ultracache/')) {
+                if ('' === $value || !ucwp_generated_asset_reference_matches($value)) {
                     return;
                 }
 

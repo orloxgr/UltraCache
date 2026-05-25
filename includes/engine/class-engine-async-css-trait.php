@@ -133,11 +133,6 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                     }
 
                     $media = strtolower(trim((string) $processor->get_attribute('media')));
-                    if ('' !== $media && 'all' !== $media) {
-                        $stats['skipped']++;
-                        $this->add_safe_async_css_diagnostic_item($stats, $href_for_diag, 'skipped', 'non_all_media', $media);
-                        continue;
-                    }
 
                     if (null !== $processor->get_attribute('disabled') || null !== $processor->get_attribute('onload')) {
                         $stats['skipped']++;
@@ -146,7 +141,14 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                     }
 
                     $absolute_url = $this->absolutize_public_resource_url($href, home_url('/'));
-                    if ('' === $absolute_url || !$this->is_safe_local_public_stylesheet_url($absolute_url)) {
+                    if ('' === $absolute_url) {
+                        $stats['unresolved']++;
+                        $this->add_safe_async_css_diagnostic_item($stats, '', 'unresolved', 'not_local_css');
+                        continue;
+                    }
+
+                    $is_external_css = $this->is_external_public_stylesheet_url($absolute_url);
+                    if (!$is_external_css && !$this->is_safe_local_public_stylesheet_url($absolute_url)) {
                         $stats['unresolved']++;
                         $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'unresolved', 'not_local_css');
                         continue;
@@ -154,6 +156,12 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
 
                     $tag_context = $this->build_async_css_processor_tag_context($processor);
                     $decision = $this->get_async_css_stylesheet_decision($absolute_url, $tag_context);
+
+                    if ('' !== $media && 'all' !== $media && (empty($decision['eligible']) || !$is_external_css)) {
+                        $stats['skipped']++;
+                        $this->add_safe_async_css_diagnostic_item($stats, $href_for_diag, 'skipped', 'non_all_media', $media);
+                        continue;
+                    }
                     $role = isset($decision['role']) ? (string) $decision['role'] : $this->get_ultracache_generated_stylesheet_role($absolute_url, $tag_context);
                     if ('' !== $role) {
                         $processor->set_attribute('data-ucwp-css-role', $role);
@@ -171,8 +179,13 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
 
                     $fallbacks[] = $this->build_async_css_noscript_fallback_link($href, $processor->get_attribute('media'));
 
+                    $target_media = ('' !== $media && 'all' !== $media) ? preg_replace('/[^a-z0-9,\-\s\(\):\.]+/i', '', $media) : 'all';
+                    if (!is_string($target_media) || '' === trim($target_media)) {
+                        $target_media = 'all';
+                    }
+
                     $processor->set_attribute('media', 'print');
-                    $processor->set_attribute('onload', "this.media='all'");
+                    $processor->set_attribute('onload', 'this.media=' . wp_json_encode($target_media));
                     $processor->set_attribute('data-ucwp-async-css', '1');
                     if (!empty($is_ucwp_generated_css_link) || '' !== $role) {
                         $processor->set_attribute('data-ucwp-generated-css-async', '1');
@@ -210,6 +223,7 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             return array(
                 'enabled' => !empty($settings['async_css']),
                 'aggressive_enabled' => !empty($settings['aggressive_async_css']),
+                'external_enabled' => !empty($settings['async_external_css']),
                 'safe' => true,
                 'scanned' => 0,
                 'rewritten' => 0,
@@ -385,6 +399,47 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             return $this->get_async_css_exclude_fragments();
         }
 
+        private function get_async_external_css_exclude_fragments()
+        {
+            $settings = $this->get_settings();
+            $list = isset($settings['async_external_css_exclude_list']) && is_array($settings['async_external_css_exclude_list']) ? $settings['async_external_css_exclude_list'] : array();
+            return array_values(array_filter(array_map('strval', $list), static function ($item) {
+                return '' !== trim((string) $item);
+            }));
+        }
+
+        private function get_css_same_site_compare_host($url)
+        {
+            $host = strtolower((string) wp_parse_url((string) $url, PHP_URL_HOST));
+            if (0 === strpos($host, 'www.')) {
+                $host = substr($host, 4);
+            }
+            return $host;
+        }
+
+        private function is_external_public_stylesheet_url($url)
+        {
+            $absolute = $this->absolutize_public_resource_url((string) $url, home_url('/'));
+            if ('' === $absolute || 0 === strpos($absolute, 'data:') || 0 === strpos($absolute, 'blob:')) {
+                return false;
+            }
+
+            $host = $this->get_css_same_site_compare_host($absolute);
+            $home_host = $this->get_css_same_site_compare_host(home_url('/'));
+            return '' !== $host && '' !== $home_host && $host !== $home_host;
+        }
+
+        private function should_async_external_css_win_bundle_for_url($url)
+        {
+            $settings = $this->get_settings();
+            if (empty($settings['async_external_css']) || !$this->is_external_public_stylesheet_url($url)) {
+                return false;
+            }
+
+            return !$this->should_exclude_stylesheet_url_by_fragments($url, $this->get_async_external_css_exclude_fragments());
+        }
+
+
 
         private function get_builtin_homepage_css_bundle_exclude_fragments()
         {
@@ -433,9 +488,9 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             }
 
             $absolute = $this->absolutize_public_resource_url($url, home_url('/'));
-            $host = (string) wp_parse_url($absolute, PHP_URL_HOST);
-            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-            if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
+            $host = $this->get_css_same_site_compare_host($absolute);
+            $home_host = $this->get_css_same_site_compare_host(home_url('/'));
+            if ('' === $host || '' === $home_host || $host !== $home_host) {
                 return false;
             }
 
@@ -555,6 +610,24 @@ private function get_async_css_stylesheet_decision($url, $tag = '')
             $path = strtolower((string) wp_parse_url($url, PHP_URL_PATH));
             if ('' === $path) {
                 return array('eligible' => false, 'reason' => 'missing_path');
+            }
+
+            if ($this->is_external_public_stylesheet_url($url)) {
+                if (empty($settings['async_external_css'])) {
+                    return array('eligible' => false, 'reason' => 'async_external_css_disabled');
+                }
+
+                $external_exclude_fragments = $this->get_async_external_css_exclude_fragments();
+                if ($this->should_exclude_stylesheet_url_by_fragments($url, $external_exclude_fragments)) {
+                    return array('eligible' => false, 'reason' => 'async_external_css_excluded');
+                }
+
+                /*
+                 * External stylesheets may be emitted by themes/plugins after the
+                 * enqueue phase, so this final HTML pass is the only reliable place
+                 * to make them non-render-blocking without adding synthetic enqueues.
+                 */
+                return array('eligible' => true, 'reason' => 'async_external_css_applied');
             }
 
             $async_exclude_fragments = $this->get_async_css_exclude_fragments();

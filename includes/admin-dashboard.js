@@ -98,7 +98,9 @@
 		'sliderSafeModeEnabled',
 		'clsDimensionsEnabled',
 		'asyncCssEnabled',
+		'asyncExternalCssEnabled',
 		'asyncCssExcludeList',
+		'asyncExternalCssExcludeList',
 		'aggressiveAsyncCssEnabled',
 		'delayNonCriticalJsEnabled',
 		'delayNonCriticalJsExcludeList',
@@ -238,6 +240,7 @@
 		'delayNonCriticalJsExcludeList',
 		'homepageCssBundleExcludeList',
 		'asyncCssExcludeList',
+		'asyncExternalCssExcludeList',
 		'criticalResourcePreloadList',
 		'criticalRequestChainDelayList',
 		'assetCleanupExcludeList',
@@ -256,7 +259,7 @@
 		off: { label: __("All Off", 'ultracache'), description: __("Disable optimization modules managed by profiles. Diagnostic counters, Automation & Scheduling, and Varnish settings are preserved.", 'ultracache'), patch: {
 			pageCacheEnabled: false, objectCacheEnabled: false, brotliEnabled: false, gzipEnabled: false, cacheStatsEnabled: false, debugHeadersEnabled: false, mediaOptimizationEnabled: false, mediaGenerateOnUploadEnabled: false, mediaGenerateOnDemandEnabled: false,
 			javascriptStrategy: 'off', deferJsEnabled: false, delayAllJsEnabled: false, delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: 0.05, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: false, delayedJsAutostartScrollEnabled: false, delayedJsAutostartClickEnabled: false, delayedJsAutostartTouchPointerEnabled: false, delayedJsAutostartKeyboardEnabled: false, delaySafeThirdPartyJsEnabled: false, delayAllThirdPartyJsEnabled: false, lazyMailerliteNonceEnabled: false, delayFunctionalThirdPartyJsEnabled: false, asyncExternalScriptsEnabled: false, homepageCssBundleEnabled: false, homepageCssBundleInlineEnabled: false, leftoverCssBundleEnabled: false, pageCssBundleOnEntryEnabled: false, pageAsyncBundleOnEntryEnabled: false,
-			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
+			frontendSafeModeEnabled: false, sliderSafeModeEnabled: false, clsDimensionsEnabled: false, asyncCssEnabled: false, asyncExternalCssEnabled: false, aggressiveAsyncCssEnabled: false, delayNonCriticalJsEnabled: false, lcpImagePriorityEnabled: false, lazyLoadImagesEnabled: false, lcpBoundaryDeferEnabled: false, manualLcpHeroSelector: '', mainThreadReliefEnabled: false, criticalRequestChainReliefEnabled: false,
 			assetChainCleanupEnabled: false, assetCleanupWooProductAssetsEnabled: false, assetCleanupProductFilterAssetsEnabled: false, assetCleanupWooBlocksCssEnabled: false, googleFontsSwapEnabled: false, googleFontsLocalOptimizationEnabled: false, selfHostedFontCssOptimizationEnabled: false, selfHostedFontRuntimeRewriteEnabled: false,
 			speculationRulesEnabled: false, browserCacheRulesEnabled: false, preRenderOnSave: false, woocommerceSafeModeEnabled: false, cacheCleanupEnabled: false, apcuFlushOnScheduledCleanup: false, cronWarmEnabled: false, cronWarmStartAfterCleanup: false, cronWarmStartAfterManualPurge: false, staleWhileRevalidateEnabled: false, cacheQueryStringsEnabled: false, cacheSafeTrackingCookiesEnabled: false, varnishCliEnabled: false,
 			homepageCssBundleMode: 'safe', delayIconFontsEnabled: false, delayIconFontsAutoDetectEnabled: false, cssBundleScope: 'homepage', mediaOutputMode: 'auto',
@@ -306,7 +309,9 @@
 			sliderSafeModeEnabled: false,
 			clsDimensionsEnabled: true,
 			asyncCssEnabled: false,
+			asyncExternalCssEnabled: false,
 			asyncCssExcludeList: "",
+			asyncExternalCssExcludeList: "",
 			aggressiveAsyncCssEnabled: false,
 			delayNonCriticalJsEnabled: false,
 			delayNonCriticalJsExcludeList: "",
@@ -403,7 +408,9 @@
 			sliderSafeModeEnabled: false,
 			clsDimensionsEnabled: true,
 			asyncCssEnabled: false,
+			asyncExternalCssEnabled: false,
 			asyncCssExcludeList: "",
+			asyncExternalCssExcludeList: "",
 			aggressiveAsyncCssEnabled: false,
 			delayNonCriticalJsEnabled: true,
 			delayNonCriticalJsExcludeList: "",
@@ -500,7 +507,9 @@
 			sliderSafeModeEnabled: true,
 			clsDimensionsEnabled: true,
 			asyncCssEnabled: true,
+			asyncExternalCssEnabled: false,
 			asyncCssExcludeList: "",
+			asyncExternalCssExcludeList: "",
 			aggressiveAsyncCssEnabled: false,
 			delayNonCriticalJsEnabled: true,
 			delayNonCriticalJsExcludeList: "",
@@ -573,6 +582,9 @@
 		const merged = profileKey === 'off'
 			? Object.assign({}, profile.patch)
 			: Object.assign({}, PERFORMANCE_PROFILES.off.patch, profile.patch);
+		if (Object.prototype.hasOwnProperty.call(merged, 'delayIconFontsEnabled')) {
+			merged.delayIconFontsAutoDetectEnabled = !!merged.delayIconFontsEnabled;
+		}
 		return stripPerformanceProfilePreservedSettings(merged);
 	}
 
@@ -622,6 +634,38 @@
 			return __('Delay: safer for dependency order because UltraCache runs eligible scripts through the ordered delayed loader. Exclusions still win.', 'ultracache');
 		}
 		return __('Off: disables only the base Defer JS and Delay all JS modes. The independent third-party, local, and LCP delay switches below can still be used.', 'ultracache');
+	}
+
+
+	function normalizeHtmlCompressionDelivery(value) {
+		const normalized = String(value || '').toLowerCase();
+		return ['off', 'gzip', 'brotli'].indexOf(normalized) !== -1 ? normalized : 'off';
+	}
+
+	function getHtmlCompressionDeliveryValue(sourceSettings) {
+		const current = sourceSettings && typeof sourceSettings === 'object' ? sourceSettings : {};
+		if (current.brotliEnabled) {
+			return 'brotli';
+		}
+		if (current.gzipEnabled) {
+			return 'gzip';
+		}
+		return 'off';
+	}
+
+	function getHtmlCompressionDeliveryPatch(value) {
+		const mode = normalizeHtmlCompressionDelivery(value);
+		return {
+			gzipEnabled: mode === 'gzip',
+			brotliEnabled: mode === 'brotli',
+		};
+	}
+
+	function getHtmlCompressionDeliveryDescription(browserProbe) {
+		if (browserProbe && browserProbe.message) {
+			return browserProbe.message;
+		}
+		return __('Choose whether UltraCache should serve compressed HTML cache files. If your server already serves gzip or Brotli, UltraCache keeps this off.', 'ultracache');
 	}
 
 	function normalizeLineListItems(value) {
@@ -719,20 +763,20 @@
 			if (result.serverCompression) {
 				result.gzip = true;
 				result.brotli = true;
-				result.message = 'Your server or proxy is already using frontend compression by default. UltraCache compression has been disabled to avoid conflicts.';
+				result.message = 'Server-side compression is already active. UltraCache compression was not enabled.';
 			}
 			return result;
 		}
 
 		if ('gzip' === ultraCacheEncoding && !responseHasEncoding(contentEncoding, 'gzip')) {
 			result.brokenGzip = true;
-			result.message = 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. Gzip has been disabled as a safety measure.';
+			result.message = 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. UltraCache compression was not enabled.';
 			return result;
 		}
 
 		if ('brotli' === ultraCacheEncoding && !responseHasEncoding(contentEncoding, 'br')) {
 			result.brokenBrotli = true;
-			result.message = 'UltraCache detected Brotli-compressed output without a matching Content-Encoding header. Brotli has been disabled as a safety measure.';
+			result.message = 'UltraCache detected Brotli-compressed output without a matching Content-Encoding header. UltraCache compression was not enabled.';
 			return result;
 		}
 
@@ -2289,7 +2333,7 @@
 		]);
 	}
 
-	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onRuntimeScan, onLoadLatestProfileScan }) {
+	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onRuntimeScan, onLoadLatestProfileScan, safeThirdPartyPatternsValue, onAppendSafeThirdPartyPatterns }) {
 		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
 		const [draft, setDraft] = useState(value || "");
 		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
@@ -2307,10 +2351,15 @@
 		const [consoleErrorBusy, setConsoleErrorBusy] = useState(false);
 		const [jsDiagnosticQueue, setJsDiagnosticQueue] = useState(null);
 		const [jsDiagnosticQueueBusy, setJsDiagnosticQueueBusy] = useState(false);
+		const [safeThirdPartyPatternsDraft, setSafeThirdPartyPatternsDraft] = useState(safeThirdPartyPatternsValue || '');
 
 		useEffect(() => {
 			setDraft(value || '');
 		}, [value]);
+
+		useEffect(() => {
+			setSafeThirdPartyPatternsDraft(safeThirdPartyPatternsValue || '');
+		}, [safeThirdPartyPatternsValue]);
 
 		const currentValue = String(value || '');
 		const draftValue = String(draft || '');
@@ -2359,6 +2408,42 @@
 		}
 
 
+		function appendSafeThirdPartyDelayPatternLine(line) {
+			const suggestion = String(line || '').trim();
+			if (!suggestion || typeof onAppendSafeThirdPartyPatterns !== 'function') {
+				return;
+			}
+			const merged = mergeUniqueSettingLines(safeThirdPartyPatternsDraft, suggestion);
+			setSafeThirdPartyPatternsDraft(merged.value);
+			onAppendSafeThirdPartyPatterns(merged.value);
+		}
+
+		function renderAppendButtons(line, exclusionsPresent, safePatternsPresent, allowAppend) {
+			const canAppend = !!allowAppend && !!line;
+			const canAppendSafe = !!line && typeof onAppendSafeThirdPartyPatterns === 'function';
+			if (!canAppend && !canAppendSafe) {
+				return null;
+			}
+
+			return h('span', { className: 'inline-flex flex-wrap items-center' }, [
+				canAppend ? h('button', {
+					type: 'button',
+					className: 'uc-btn text-[11px] px-2 py-1',
+					style: { margin: '5px' },
+					disabled: !!disabled || !!exclusionsPresent,
+					onClick: () => appendJsExclusionLine(line),
+				}, exclusionsPresent ? 'Already in exclusions' : 'Append to exclusions') : null,
+				canAppendSafe ? h('button', {
+					type: 'button',
+					className: 'uc-btn text-[11px] px-2 py-1',
+					style: { margin: '5px' },
+					disabled: !!disabled || !!safePatternsPresent,
+					onClick: () => appendSafeThirdPartyDelayPatternLine(line),
+				}, safePatternsPresent ? 'Already in Safe Third-Party Delay Patterns' : 'Append to Safe Third-Party Delay Patterns') : null,
+			]);
+		}
+
+
 		function renderSuggestionItem(item, keyPrefix, index) {
 			const line = item && item.suggestedExclusion ? String(item.suggestedExclusion) : '';
 			const present = isSuggestionPresentInDraft(draftValue, line);
@@ -2375,7 +2460,7 @@
 					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Suggested exclusion", 'ultracache')),
 					h('div', { className: 'flex flex-wrap items-center gap-2' }, [
 						h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
-						line ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled || present, onClick: () => appendJsExclusionLine(line) }, present ? 'Already in exclusions' : 'Append') : null,
+						renderAppendButtons(line, present, isSuggestionPresentInDraft(safeThirdPartyPatternsDraft, line), !!line),
 					]),
 				]),
 				h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-2' }, metaRows.map((row, rowIndex) => h('div', { className: 'rounded bg-black/15 px-2 py-1', key: keyPrefix + '-meta-' + index + '-' + rowIndex }, [
@@ -2400,7 +2485,7 @@
 			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-3 space-y-2', key: keyPrefix + '-' + index + '-' + line }, [
 				h('div', { className: 'flex flex-wrap items-center gap-2' }, [
 					h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
-					canAppend ? h('button', { type: 'button', className: 'uc-btn text-[11px] px-2 py-1', disabled: !!disabled, onClick: () => appendJsExclusionLine(line) }, 'Append') : null,
+					renderAppendButtons(line, present, isSuggestionPresentInDraft(safeThirdPartyPatternsDraft, line), canAppend),
 				]),
 				h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-2' }, [
 					h('div', { className: 'rounded bg-black/15 px-2 py-1' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Status'), h('div', { className: present ? 'text-[11px] font-semibold text-emerald-300' : 'text-[11px] font-semibold text-zinc-300' }, status)]),
@@ -3113,9 +3198,7 @@
 				h('div', { className: 'text-[11px] text-zinc-500 mt-1' }, __("Run a profile-bypass diagnostic for this same-site URL. Nothing is changed automatically.", 'ultracache')),
 			]),
 			h('div', { className: 'mt-3 mb-3 flex flex-wrap items-center gap-2', style: { justifyContent: 'space-evenly', padding: '5px 0' } }, [
-				h(Button, { key: 'defaults', onClick: handlePopulateDefaults, disabled: !!disabled || populateBusy }, populateBusy ? 'Populating…' : 'Populate Defaults'),
 				h(Button, { key: 'run-css', onClick: handleRunDiagnostics, disabled: !!disabled || scanBusy }, scanBusy ? 'Running…' : 'Run CSS Diagnostics'),
-				h(Button, { key: 'download-css', onClick: onDownloadJson, disabled: !!disabled || !current }, __("Download CSS JSON", 'ultracache')),
 				h(Button, { key: 'clear-css', onClick: onClearResult, disabled: !!disabled || !current }, __("Clear CSS Result", 'ultracache')),
 				h(Button, { key: 'save-css', onClick: () => onSave(draftValue), disabled: !!disabled || !hasChanges, variant: 'primary' }, __("Save Exclusions", 'ultracache')),
 			]),
@@ -5198,7 +5281,8 @@
 		const [stats, setStats] = useState(initialStats);
 		const [diagnostics, setDiagnostics] = useState(initialDiagnostics);
 		const [, setCrawlScopeVersion] = useState(0);
-		const [browserCompressionProbe, setBrowserCompressionProbe] = useState({ ready: true, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: 'Browser compression probe is manual-only and does not run on dashboard load.' });
+		const [browserCompressionProbe, setBrowserCompressionProbe] = useState({ ready: true, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: '' });
+		const [compressionProbeBusy, setCompressionProbeBusy] = useState(false);
 		const [busy, setBusy] = useState(false);
 		const [asyncActions, setAsyncActions] = useState({});
 		const [toasts, setToasts] = useState([]);
@@ -5270,7 +5354,6 @@
 		const [uiActionQueueCount, setUiActionQueueCount] = useState(0);
 		const compressionSyncRef = useRef('');
 		const manualObjectCacheTestRef = useRef(null);
-		const compressionLocks = useMemo(() => getCompressionLockState(diagnostics, browserCompressionProbe), [diagnostics, browserCompressionProbe]);
 		const initialMediaQueue = initialDiagnostics && initialDiagnostics.mediaRuntime && initialDiagnostics.mediaRuntime.queue
 			? initialDiagnostics.mediaRuntime.queue
 			: null;
@@ -5552,54 +5635,6 @@
 			settings.redisPasswordConfigured,
 		]);
 
-		useEffect(() => {
-			if (browserCompressionProbe && browserCompressionProbe.ready === false) {
-				return;
-			}
-
-			const patch = {};
-
-			if (compressionLocks.gzipLocked && settings.gzipEnabled) {
-				patch.gzipEnabled = false;
-			}
-			if (compressionLocks.brotliLocked && settings.brotliEnabled) {
-				patch.brotliEnabled = false;
-			}
-
-			const patchKeys = Object.keys(patch).sort();
-			if (!patchKeys.length) {
-				compressionSyncRef.current = '';
-				return;
-			}
-
-			const signature = patchKeys.join('|');
-			if (busy || compressionSyncRef.current === signature) {
-				return;
-			}
-
-			compressionSyncRef.current = signature;
-			setSettings((current) => Object.assign({}, current, patch));
-
-			(async () => {
-				setBusy(true);
-				try {
-					const response = await saveSettingsPatch(patch);
-					if (response && response.stats) {
-						setStats(response.stats);
-					}
-					if (response && response.diagnostics) {
-						setDiagnostics(mergeManualObjectCacheTestIntoDiagnostics(response.diagnostics));
-					}
-					pushToast({ type: 'warning', text: __("UltraCache automatically turned off compression that is already handled by your server or proxy.", 'ultracache') });
-				} catch (error) {
-					compressionSyncRef.current = '';
-					pushToast({ type: 'error', text: error && error.message ? error.message : 'Failed to synchronize compression safety settings.' });
-				} finally {
-					setBusy(false);
-				}
-			})();
-		}, [busy, browserCompressionProbe.ready, compressionLocks.gzipLocked, compressionLocks.brotliLocked, settings.gzipEnabled, settings.brotliEnabled, pushToast]);
-
 
 		const etaText = useMemo(() => {
 			if (process.active && process.queueBuilding) {
@@ -5680,41 +5715,6 @@
 			}
 		}
 
-		function getCompressionLockState(sourceDiagnostics, browserProbe) {
-			const serverDefault = sourceDiagnostics && sourceDiagnostics.compression && sourceDiagnostics.compression.serverDefault
-				? sourceDiagnostics.compression.serverDefault
-				: {};
-			const browser = browserProbe || {};
-
-			if (browser.serverCompression) {
-				return {
-					gzipLocked: true,
-					brotliLocked: true,
-					gzipDescription: browser.message || 'Your server or proxy is already using frontend compression by default. UltraCache compression has been disabled to avoid conflicts.',
-					brotliDescription: browser.message || 'Your server or proxy is already using frontend compression by default. UltraCache compression has been disabled to avoid conflicts.',
-				};
-			}
-
-			const gzipLocked = !!(browser.brokenGzip || serverDefault.brokenGzip || serverDefault.gzip);
-			const brotliLocked = !!(browser.brokenBrotli || serverDefault.brokenBrotli || serverDefault.brotli);
-			const gzipDescription = browser.brokenGzip
-				? (browser.message || 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. Gzip has been disabled as a safety measure.')
-				: (serverDefault.brokenGzip
-					? 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. Gzip has been disabled as a safety measure.'
-					: (serverDefault.gzip ? 'Your server is already using gzip compression by default.' : 'Serve gzip sidecar cache files when supported.'));
-			const brotliDescription = browser.brokenBrotli
-				? (browser.message || 'UltraCache detected Brotli-compressed output without a matching Content-Encoding header. Brotli has been disabled as a safety measure.')
-				: (serverDefault.brokenBrotli
-					? 'UltraCache detected Brotli-compressed output without a matching Content-Encoding header. Brotli has been disabled as a safety measure.'
-					: (serverDefault.brotli ? 'Your server is already using Brotli compression by default.' : 'Serve Brotli sidecar cache files when available.'));
-
-			return {
-				gzipLocked,
-				brotliLocked,
-				gzipDescription,
-				brotliDescription,
-			};
-		}
 
 		async function saveRedisSettings() {
 			return enqueueUiOperation('object_cache_settings_save', 'Save object-cache settings', async () => {
@@ -6788,6 +6788,46 @@
 			}
 		}
 
+
+		async function updateHtmlCompressionDelivery(value) {
+			const mode = normalizeHtmlCompressionDelivery(value);
+			if ('off' === mode) {
+				setBrowserCompressionProbe({ ready: true, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: '' });
+				return queueSettingsPatch(getHtmlCompressionDeliveryPatch('off'));
+			}
+
+			setCompressionProbeBusy(true);
+			setBrowserCompressionProbe({ ready: false, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: __('Checking server compression before enabling UltraCache HTML compression…', 'ultracache') });
+
+			try {
+				const result = await probeFrontendCompressionViaBrowser();
+				const serverCompressionDetected = !!(result && (result.serverCompression || result.gzip || result.brotli || result.brokenGzip || result.brokenBrotli));
+				if (serverCompressionDetected) {
+					const blocked = Object.assign({}, result, {
+						ready: true,
+						serverCompression: true,
+						message: (result && result.message) ? result.message : __('Server-side compression is already active. UltraCache compression was not enabled.', 'ultracache'),
+					});
+					setBrowserCompressionProbe(blocked);
+					pushToast({ type: 'warning', text: blocked.message });
+					return queueSettingsPatch(getHtmlCompressionDeliveryPatch('off'));
+				}
+
+				setBrowserCompressionProbe(Object.assign({}, result || {}, {
+					ready: true,
+					message: __('UltraCache HTML compression enabled.', 'ultracache'),
+				}));
+				return queueSettingsPatch(getHtmlCompressionDeliveryPatch(mode));
+			} catch (error) {
+				const message = error && error.message ? error.message : __('Unable to check server compression. UltraCache compression was not enabled.', 'ultracache');
+				setBrowserCompressionProbe({ ready: true, serverCompression: false, gzip: false, brotli: false, brokenGzip: false, brokenBrotli: false, message: message });
+				pushToast({ type: 'error', text: message });
+				return queueSettingsPatch(getHtmlCompressionDeliveryPatch('off'));
+			} finally {
+				setCompressionProbeBusy(false);
+			}
+		}
+
 		function updateSetting(key, value) {
 			if (key === 'objectCacheEnabled') {
 				const currentForm = redisForm || {};
@@ -6927,16 +6967,19 @@
 			}, 0);
 		}
 
-		async function updateDelayIconFontsAutoDetect(value) {
+		async function updateDelayIconFonts(value) {
 			const enabled = !!value;
-			queueSettingsPatch({ delayIconFontsAutoDetectEnabled: enabled });
+			queueSettingsPatch({
+				delayIconFontsEnabled: enabled,
+				delayIconFontsAutoDetectEnabled: enabled,
+			});
 			if (!enabled) {
 				return;
 			}
 
 			const response = await scanFrontpageFontPatterns();
 			if (!response || !Array.isArray(response.delayIconFontsList) || !response.delayIconFontsList.length) {
-				pushToast({ type: 'warning', text: __("Auto-detect is enabled, but no likely icon fonts were detected on the front page.", 'ultracache') });
+				pushToast({ type: 'warning', text: __("Delay icon fonts is enabled, but no likely icon fonts were detected on the front page. Broad icon-font detection still runs during CSS optimization.", 'ultracache') });
 				return;
 			}
 
@@ -6944,7 +6987,7 @@
 			const merged = mergeUniqueSettingLines(currentDraft, response.delayIconFontsList.join('\n'));
 			if (merged.added) {
 				queueSettingsPatch({ delayIconFontsList: merged.value });
-				pushToast({ type: 'success', text: 'Auto-detect added ' + merged.added + ' front-page icon font pattern(s).' });
+				pushToast({ type: 'success', text: 'Delay icon fonts added ' + merged.added + ' front-page icon font pattern(s).' });
 			} else {
 				pushToast({ type: 'info', text: __("Detected icon font patterns are already listed.", 'ultracache') });
 			}
@@ -8637,22 +8680,20 @@ h(ToggleRow, {
 							disabled: busy,
 							key: 'browser-cache-rules',
 						}),
-							h(ToggleRow, {
-								label: 'Gzip',
-								description: compressionLocks.gzipDescription,
-								checked: settings.gzipEnabled,
-								onChange: (value) => updateSetting('gzipEnabled', value),
-								disabled: busy || compressionLocks.gzipLocked,
-								key: 'gzip',
-							}),
-							h(ToggleRow, {
-								label: 'Brotli',
-								description: compressionLocks.brotliDescription,
-								checked: settings.brotliEnabled,
-								onChange: (value) => updateSetting('brotliEnabled', value),
-								disabled: busy || compressionLocks.brotliLocked,
-								key: 'brotli',
-							}),
+							h('div', { className: 'py-4', key: 'html-compression-delivery' }, [
+								h(SelectField, {
+									label: __('HTML Compression', 'ultracache'),
+									description: getHtmlCompressionDeliveryDescription(browserCompressionProbe),
+									value: getHtmlCompressionDeliveryValue(settings),
+									onChange: (value) => updateHtmlCompressionDelivery(value),
+									disabled: busy || compressionProbeBusy,
+									options: [
+										{ value: 'off', label: __('Server managed / Off', 'ultracache') },
+										{ value: 'gzip', label: __('Gzip compression', 'ultracache') },
+										{ value: 'brotli', label: __('Brotli compression', 'ultracache') },
+									],
+								}),
+							]),
 							h(ToggleRow, {
 								label: __("Speculation Rules Prefetch", 'ultracache'),
 								description: __("Enable safe prefetch-only speculative loading for likely next-page internal navigations through WordPress Core. Logged-in users, query-string links, WooCommerce flows, admin-like paths, nofollow links, and visible excluded paths stay excluded.", 'ultracache'),
@@ -8937,6 +8978,14 @@ h(ToggleRow, {
 							key: 'async-css',
 						}),
 h(ToggleRow, {
+							label: __("Async external CSS", 'ultracache'),
+							description: __("Converts stylesheet links from other domains to non-render-blocking async CSS. Same-site stylesheets continue through the normal CSS optimization/bundling flow.", 'ultracache'),
+							checked: !!settings.asyncExternalCssEnabled,
+							onChange: (value) => updateSetting('asyncExternalCssEnabled', value),
+							disabled: busy,
+							key: 'async-external-css',
+						}),
+h(ToggleRow, {
 											label: __("Aggressive Async CSS", 'ultracache'),
 											description: __("Optional advanced mode. Rewrite almost all remaining local stylesheet links, including late footer output, to non-blocking print+onload loading with a noscript fallback. Use the exclude list for styles that must stay blocking.", 'ultracache'),
 											checked: settings.aggressiveAsyncCssEnabled,
@@ -8983,20 +9032,12 @@ h(ToggleRow, {
 							key: 'self-hosted-fonts',
 						}),
 h(ToggleRow, {
-							label: __("Delay icon font-face blocks", 'ultracache'),
-							description: __("Detect matching icon-font @font-face blocks in bundled or standalone CSS and load them through a non-render-blocking delayed font stylesheet. This can reduce critical font loading, but icons may appear slightly later.", 'ultracache'),
+							label: __("Delay icon fonts", 'ultracache'),
+							description: __("Detect likely icon-font @font-face blocks, including common icon font families such as Font Awesome, eicons, dashicons, icomoon, flaticon, theme icon fonts, private unicode glyph usage, and matching entries from the visible include list. Matching icon fonts load through a non-render-blocking delayed font stylesheet. The visible exclude list always wins.", 'ultracache'),
 							checked: !!settings.delayIconFontsEnabled,
-							onChange: (value) => updateSetting('delayIconFontsEnabled', value),
+							onChange: updateDelayIconFonts,
 							disabled: busy,
 							key: 'delay-icon-fonts',
-						}),
-h(ToggleRow, {
-							label: __("Auto-detect likely icon fonts", 'ultracache'),
-							description: __("Use broad icon-font heuristics such as Font Awesome, eicons, dashicons, icomoon, flaticon, theme icon fonts, private unicode glyph usage, and /icons/ or /webfonts/ paths. The visible include/exclude lists below still win.", 'ultracache'),
-							checked: !!settings.delayIconFontsAutoDetectEnabled,
-							onChange: updateDelayIconFontsAutoDetect,
-							disabled: busy || !settings.delayIconFontsEnabled,
-							key: 'delay-icon-fonts-auto-detect',
 						}),
 h(ToggleRow, {
 							label: __("Advanced Runtime Font CSS Rewrite", 'ultracache'),
@@ -9265,6 +9306,16 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																										key: 'delay-icon-fonts-list',
 																									}),
 															h(SaveableTextAreaField, {
+																		label: __("Never async these external CSS URLs / patterns", 'ultracache'),
+																		description: __("One URL, domain, filename, or pattern per line. Matching external stylesheets stay render-blocking and are also allowed to continue through the normal CSS flow.", 'ultracache'),
+																		value: settings.asyncExternalCssExcludeList || '',
+																		onSave: (value) => updateSetting('asyncExternalCssExcludeList', value),
+																		disabled: busy || !settings.asyncExternalCssEnabled,
+																		placeholder: 'cdn.example.com\nexternal-library.css\n/css/vendor/',
+																		saveLabel: 'Save External CSS Exclusions',
+																		key: 'async-external-css-exclude-list',
+															}),
+															h(SaveableTextAreaField, {
 																										label: __("Never Delay These Fonts / Patterns", 'ultracache'),
 																										description: __("Newline-separated font-family, filename, or URL fragments that must stay inside the normal CSS flow. Scan the front page to append detected non-icon text/brand fonts, then add manual safeguards if needed.", 'ultracache'),
 																										value: settings.delayIconFontsExcludeList || '',
@@ -9295,6 +9346,8 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																		onScan: runJsDelaySafetyScanForUrl,
 																		onRuntimeScan: runBrowserRuntimeJsScanForUrl,
 																		onLoadLatestProfileScan: loadLatestJsDelaySafetyScan,
+																		safeThirdPartyPatternsValue: settings.delaySafeThirdPartyJsPatterns || '',
+																		onAppendSafeThirdPartyPatterns: (value) => updateSetting('delaySafeThirdPartyJsPatterns', value),
 																		key: 'defer-stages-exclude-list-final',
 																	}),
 							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'js-exclusions-grid' }, [

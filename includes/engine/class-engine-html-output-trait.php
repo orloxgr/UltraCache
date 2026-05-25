@@ -478,7 +478,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['async_css']) || !empty($settings['aggressive_async_css'])) {
+            if (!empty($settings['async_css']) || !empty($settings['async_external_css']) || !empty($settings['aggressive_async_css'])) {
                 $html = $this->apply_async_css_links_to_html($html);
             }
 

@@ -236,6 +236,119 @@ if (!function_exists('ucwp_generated_asset_public_path')) {
     }
 }
 
+
+if (!function_exists('ucwp_generated_asset_public_path_markers')) {
+    /**
+     * Return dynamic public URL path markers for UltraCache uploads assets.
+     *
+     * These markers are derived from wp_get_upload_dir()/wp_upload_dir() via
+     * ucwp_generated_asset_public_path(). They intentionally replace brittle
+     * hardcoded generated-uploads checks for customized upload paths.
+     *
+     * @param string[] $buckets Optional generated asset buckets.
+     * @return string[]
+     */
+    function ucwp_generated_asset_public_path_markers(array $buckets = array())
+    {
+        $markers = array();
+        if (empty($buckets)) {
+            $markers[] = ucwp_generated_asset_public_path();
+        } else {
+            foreach ($buckets as $bucket) {
+                $marker = ucwp_generated_asset_public_path((string) $bucket);
+                if ('' !== $marker) {
+                    $markers[] = $marker;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($markers, static function ($marker) {
+            return '' !== (string) $marker;
+        })));
+    }
+}
+
+if (!function_exists('ucwp_generated_asset_reference_matches')) {
+    /**
+     * Check whether a URL/path/HTML fragment references generated uploads assets.
+     *
+     * @param string   $source  URL, path, or HTML fragment.
+     * @param string[] $buckets Optional generated asset buckets.
+     * @return bool
+     */
+    function ucwp_generated_asset_reference_matches($source, array $buckets = array())
+    {
+        $markers = ucwp_generated_asset_public_path_markers($buckets);
+        return !empty($markers) && function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any((string) $source, $markers);
+    }
+}
+
+if (!function_exists('ucwp_content_cache_reference_matches')) {
+    /**
+     * Check whether a URL/path/HTML fragment references UltraCache wp-content cache assets.
+     *
+     * This cache root is intentionally under wp-content/cache because the files are
+     * internal page-cache/runtime files, not public generated uploads assets.
+     *
+     * @param string $source URL, path, or HTML fragment.
+     * @return bool
+     */
+    function ucwp_content_cache_reference_matches($source)
+    {
+        $marker = ucwp_content_cache_public_path();
+        return '' !== $marker && function_exists('ucwp_public_path_contains') && ucwp_public_path_contains((string) $source, $marker);
+    }
+}
+
+if (!function_exists('ucwp_generated_asset_local_path_matches')) {
+    /**
+     * Check whether a filesystem path is inside generated uploads asset storage.
+     *
+     * @param string   $path    Filesystem path.
+     * @param string[] $buckets Optional generated asset buckets.
+     * @return bool
+     */
+    function ucwp_generated_asset_local_path_matches($path, array $buckets = array())
+    {
+        $roots = array();
+        if (empty($buckets)) {
+            $uploads = ucwp_uploads_base_info();
+            if (!empty($uploads['basedir'])) {
+                $roots[] = ucwp_storage_join_path($uploads['basedir'], 'ultracache/');
+            }
+        } else {
+            foreach ($buckets as $bucket) {
+                $root = ucwp_generated_asset_dir((string) $bucket);
+                if ('' !== $root) {
+                    $roots[] = $root;
+                }
+            }
+        }
+
+        foreach ($roots as $root) {
+            if ('' !== (string) $root && function_exists('ucwp_path_is_within_root') && ucwp_path_is_within_root((string) $path, (string) $root)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('ucwp_internal_cache_local_path_matches')) {
+    /**
+     * Check whether a filesystem path is inside UltraCache internal wp-content cache storage.
+     *
+     * @param string $path Filesystem path.
+     * @return bool
+     */
+    function ucwp_internal_cache_local_path_matches($path)
+    {
+        $root = ucwp_content_cache_storage_dir();
+        return '' !== $root && function_exists('ucwp_path_is_within_root') && ucwp_path_is_within_root((string) $path, $root);
+    }
+}
+
 if (!function_exists('ucwp_uploads_base_info')) {
     /**
      * Return WordPress uploads base directory and URL using WordPress APIs.
@@ -837,11 +950,44 @@ if (!function_exists('ucwp_public_path_to_local_path')) {
         }
 
         $candidates = array();
-        $content_path = ucwp_content_public_path();
-        if ('' !== $content_path && 0 === strpos($path, $content_path)) {
-            $relative = ltrim(substr($path, strlen($content_path)), '/');
-            if (defined('WP_CONTENT_DIR')) {
-                $candidates[] = array(WP_CONTENT_DIR, $relative);
+
+        $cache_path = ucwp_content_cache_public_path();
+        if ('' !== $cache_path && 0 === strpos($path, $cache_path)) {
+            $relative = ltrim(substr($path, strlen($cache_path)), '/');
+            $cache_root = ucwp_content_cache_storage_dir();
+            if ('' !== $cache_root) {
+                $candidates[] = array($cache_root, $relative);
+            }
+        }
+
+        $uploads_path = ucwp_uploads_public_path();
+        if ('' !== $uploads_path && 0 === strpos($path, $uploads_path)) {
+            $relative = ltrim(substr($path, strlen($uploads_path)), '/');
+            $uploads = ucwp_uploads_base_info();
+            if (!empty($uploads['basedir'])) {
+                $candidates[] = array($uploads['basedir'], $relative);
+            }
+        }
+
+        $plugins_path = ucwp_plugins_public_path();
+        if ('' !== $plugins_path && 0 === strpos($path, $plugins_path) && defined('WP_PLUGIN_DIR')) {
+            $relative = ltrim(substr($path, strlen($plugins_path)), '/');
+            $candidates[] = array(WP_PLUGIN_DIR, $relative);
+        }
+
+        $mu_plugins_path = ucwp_mu_plugins_public_path();
+        if ('' !== $mu_plugins_path && 0 === strpos($path, $mu_plugins_path) && defined('WPMU_PLUGIN_DIR')) {
+            $relative = ltrim(substr($path, strlen($mu_plugins_path)), '/');
+            $candidates[] = array(WPMU_PLUGIN_DIR, $relative);
+        }
+
+        if (function_exists('get_theme_root')) {
+            foreach (ucwp_themes_public_paths() as $theme_path) {
+                if ('' === $theme_path || 0 !== strpos($path, $theme_path)) {
+                    continue;
+                }
+                $relative = ltrim(substr($path, strlen($theme_path)), '/');
+                $candidates[] = array(get_theme_root(), $relative);
             }
         }
 
@@ -849,24 +995,9 @@ if (!function_exists('ucwp_public_path_to_local_path')) {
         $includes_path = trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode($includes_path)), '/'));
         if ('' !== trim($includes_path, '/') && 0 === strpos($path, $includes_path) && defined('ABSPATH') && defined('WPINC')) {
             $relative = ltrim(substr($path, strlen($includes_path)), '/');
+            // WordPress core include URLs map to the required ABSPATH . WPINC directory.
             $candidates[] = array(trailingslashit(ABSPATH) . WPINC, $relative);
         }
-
-        $site_path = (string) wp_parse_url(site_url('/'), PHP_URL_PATH);
-        $site_path = trailingslashit('/' . trim(str_replace('\\', '/', rawurldecode($site_path)), '/'));
-        if ('//' !== $site_path && '/' !== $site_path && 0 === strpos($path, $site_path)) {
-            $relative = ltrim(substr($path, strlen($site_path)), '/');
-            $candidates[] = array(ABSPATH, $relative);
-        }
-
-        $home_path = (string) wp_parse_url(home_url('/'), PHP_URL_PATH);
-        $home_path = trailingslashit('/' . trim(str_replace('\\', '/', rawurldecode($home_path)), '/'));
-        if ('//' !== $home_path && '/' !== $home_path && 0 === strpos($path, $home_path)) {
-            $relative = ltrim(substr($path, strlen($home_path)), '/');
-            $candidates[] = array(ABSPATH, $relative);
-        }
-
-        $candidates[] = array(ABSPATH, ltrim($path, '/'));
 
         foreach ($candidates as $candidate) {
             $root = isset($candidate[0]) ? (string) $candidate[0] : '';
@@ -926,11 +1057,26 @@ if (!function_exists('ucwp_public_url_from_local_path')) {
         }
 
         $roots = array();
-        if (defined('WP_CONTENT_DIR')) {
-            $roots[] = array(wp_normalize_path(WP_CONTENT_DIR), content_url('/'));
+        $cache_root = ucwp_content_cache_storage_dir();
+        if ('' !== $cache_root) {
+            $roots[] = array(wp_normalize_path($cache_root), ucwp_content_cache_storage_url());
         }
-        if (defined('ABSPATH')) {
-            $roots[] = array(wp_normalize_path(ABSPATH), home_url('/'));
+        $uploads = ucwp_uploads_base_info();
+        if (!empty($uploads['basedir']) && !empty($uploads['baseurl'])) {
+            $roots[] = array(wp_normalize_path($uploads['basedir']), $uploads['baseurl']);
+        }
+        if (defined('WP_PLUGIN_DIR')) {
+            $roots[] = array(wp_normalize_path(WP_PLUGIN_DIR), plugins_url());
+        }
+        if (defined('WPMU_PLUGIN_DIR') && defined('WPMU_PLUGIN_URL')) {
+            $roots[] = array(wp_normalize_path(WPMU_PLUGIN_DIR), WPMU_PLUGIN_URL);
+        }
+        if (function_exists('get_theme_root') && function_exists('get_theme_root_uri')) {
+            $roots[] = array(wp_normalize_path(get_theme_root()), get_theme_root_uri());
+        }
+        if (defined('ABSPATH') && defined('WPINC')) {
+            // WordPress core include files intentionally resolve from ABSPATH . WPINC.
+            $roots[] = array(wp_normalize_path(trailingslashit(ABSPATH) . WPINC), includes_url('/'));
         }
 
         foreach ($roots as $root) {
@@ -1682,6 +1828,12 @@ if (!function_exists('ucwp_request_profile_compact_stages')) {
             'send_debug_headers_start' => true,
             'send_debug_headers_end' => true,
             'buffer_start' => true,
+            'diagnostic_fallback_output_buffer_started' => true,
+            'diagnostic_fallback_output_buffer_flush_start' => true,
+            'diagnostic_fallback_output_buffer_flush_step' => true,
+            'diagnostic_fallback_output_buffer_missing_on_shutdown' => true,
+            'diagnostic_fallback_output_buffer_callback' => true,
+            'diagnostic_fallback_output_buffer_store_start' => true,
             'template_redirect_global_end' => true,
             'wp_head_start' => true,
             'wp_enqueue_scripts_start' => true,
@@ -1690,8 +1842,10 @@ if (!function_exists('ucwp_request_profile_compact_stages')) {
             'shutdown_start' => true,
             'cache_output_callback_start' => true,
             'store_profile_start' => true,
+            'store_profile_diagnostic_skip_start' => true,
             'cache_output_callback_end' => true,
             'store_profile_finalize_start' => true,
+            'output_buffer_callback_missing' => true,
             'shutdown_end' => true,
             'engine_shutdown_profile_update' => true,
             'callback_slow' => true,
@@ -2281,24 +2435,38 @@ if (!function_exists('ucwp_get_asset_readable_roots')) {
         $type = strtolower(trim((string) $type));
         $roots = array();
 
-        if (defined('WP_CONTENT_DIR')) {
-            $roots[] = WP_CONTENT_DIR;
-        }
-
-        if (defined('ABSPATH') && defined('WPINC')) {
-            $roots[] = rtrim((string) ABSPATH, '/\\') . '/' . WPINC;
-        }
-
-        if (in_array($type, array('generated-css', 'cached-html', 'font-css', 'css', 'js'), true) && defined('UCWP_CACHE_DIR')) {
-            $roots[] = UCWP_CACHE_DIR;
-        }
-
         if ('generated-css' === $type && defined('UCWP_CACHE_DIR')) {
             $roots = array(UCWP_CACHE_DIR);
+        } elseif ('cached-html' === $type && defined('UCWP_CACHE_DIR')) {
+            $roots = array(UCWP_CACHE_DIR);
+        } else {
+            foreach (array('UCWP_CACHE_DIR', 'UCWP_OPTIMIZED_IMAGES_DIR', 'UCWP_AVIF_DIR', 'UCWP_WEBP_DIR') as $constant) {
+                if (defined($constant)) {
+                    $roots[] = constant($constant);
+                }
+            }
+            if (defined('WP_PLUGIN_DIR')) {
+                $roots[] = WP_PLUGIN_DIR;
+            }
+            if (defined('WPMU_PLUGIN_DIR')) {
+                $roots[] = WPMU_PLUGIN_DIR;
+            }
+            if (function_exists('get_theme_root')) {
+                $roots[] = get_theme_root();
+            }
+            $uploads = ucwp_uploads_base_info();
+            if (!empty($uploads['basedir'])) {
+                $roots[] = $uploads['basedir'];
+            }
+            if (defined('ABSPATH') && defined('WPINC')) {
+                // WordPress core assets are resolved through ABSPATH . WPINC because includes_url() maps to this required core directory.
+                $roots[] = rtrim((string) ABSPATH, '/\\') . '/' . WPINC;
+            }
         }
 
-        if ('cached-html' === $type && defined('UCWP_CACHE_DIR')) {
-            $roots = array(UCWP_CACHE_DIR);
+        $plugin_root = dirname(dirname(__DIR__));
+        if (is_string($plugin_root) && '' !== $plugin_root) {
+            $roots[] = $plugin_root;
         }
 
         $normalized = array();
@@ -2588,12 +2756,21 @@ if (!function_exists('ucwp_get_default_readable_roots')) {
                 $roots[] = constant($constant);
             }
         }
-
-        if (defined('WP_CONTENT_DIR')) {
-            $roots[] = WP_CONTENT_DIR;
+        if (defined('WP_PLUGIN_DIR')) {
+            $roots[] = WP_PLUGIN_DIR;
         }
-
+        if (defined('WPMU_PLUGIN_DIR')) {
+            $roots[] = WPMU_PLUGIN_DIR;
+        }
+        if (function_exists('get_theme_root')) {
+            $roots[] = get_theme_root();
+        }
+        $uploads = ucwp_uploads_base_info();
+        if (!empty($uploads['basedir'])) {
+            $roots[] = $uploads['basedir'];
+        }
         if (defined('ABSPATH') && defined('WPINC')) {
+            // WordPress core includes are intentionally readable for core CSS/JS diagnostics.
             $roots[] = rtrim((string) ABSPATH, '/\\') . '/' . WPINC;
         }
 
@@ -2687,6 +2864,14 @@ if (!function_exists('ucwp_is_allowed_readable_path')) {
         if (defined('ABSPATH') && ucwp_read_context_allows_root_server_config($context) && in_array($base, array('.htaccess', 'web.config'), true)) {
             $root = ucwp_normalize_filesystem_path_for_guard(ABSPATH);
             if ('' !== $root && ucwp_path_has_dir_prefix($normalized, $root)) {
+                return true;
+            }
+        }
+
+        foreach (array('advanced-cache.php', 'object-cache.php') as $dropin_file) {
+            $dropin_path = function_exists('ucwp_dropin_path') ? ucwp_dropin_path($dropin_file) : '';
+            if ('' !== $dropin_path && $normalized === ucwp_normalize_filesystem_path_for_guard($dropin_path)) {
+                // WordPress requires these two drop-ins directly under WP_CONTENT_DIR; allow read access only to these exact managed file paths for owner/conflict detection.
                 return true;
             }
         }

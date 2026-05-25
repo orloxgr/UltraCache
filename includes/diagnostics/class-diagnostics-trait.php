@@ -288,7 +288,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'selfHostedFontCssOptimizationEnabled' => !empty($settings['selfHostedFontCssOptimizationEnabled']),
                     'selfHostedFontRuntimeRewriteEnabled' => !empty($settings['selfHostedFontRuntimeRewriteEnabled']),
                     'delayIconFontsEnabled' => !empty($settings['delayIconFontsEnabled']),
-                    'delayIconFontsAutoDetectEnabled' => !empty($settings['delayIconFontsAutoDetectEnabled']),
+                    'delayIconFontsAutoDetectEnabled' => !empty($settings['delayIconFontsEnabled']),
                     'cssBundlingEnabled' => !empty($settings['homepageCssBundleEnabled']),
                     'cssBundleScope' => (string) ($settings['cssBundleScope'] ?? ($settings['css_bundle_scope'] ?? 'homepage')),
                 ),
@@ -378,6 +378,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 array('key' => 'criticalResourcePreloadList', 'label' => __('Priority Preloads', 'ultracache'), 'area' => __('Critical chain', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => true),
                 array('key' => 'homepageCssBundleExcludeList', 'label' => __('CSS Bundle Exclusions', 'ultracache'), 'area' => __('CSS bundles', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
                 array('key' => 'asyncCssExcludeList', 'label' => __('Async CSS Exclude List', 'ultracache'), 'area' => __('CSS async', 'ultracache'), 'kind' => __('Shared final override', 'ultracache'), 'shared' => true),
+                array('key' => 'asyncExternalCssExcludeList', 'label' => __('Never async these external CSS URLs / patterns', 'ultracache'), 'area' => __('External CSS async', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
                 array('key' => 'assetCleanupExcludeList', 'label' => __('Asset Cleanup Exclusions', 'ultracache'), 'area' => __('Asset cleanup', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
                 array('key' => 'delayIconFontsList', 'label' => __('Delay These Fonts / Patterns', 'ultracache'), 'area' => __('Fonts', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
                 array('key' => 'delayIconFontsExcludeList', 'label' => __('Never Delay These Fonts / Patterns', 'ultracache'), 'area' => __('Fonts', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
@@ -700,7 +701,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     }
 
                     $html = ucwp_safe_file_get_contents($path, 'css bundle cached html ref diagnostics scan');
-                    if (!is_string($html) || false === stripos($html, '/uploads/ultracache/css-bundles/')) {
+                    if (!is_string($html) || !ucwp_generated_asset_reference_matches($html, array('css-bundles'))) {
                         if ($summary['filesScanned'] >= $max_files) {
                             $summary['truncated'] = true;
                             break;
@@ -1857,18 +1858,16 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $table = method_exists('Ultra_Cache_Engine', 'get_analytics_table_name') ? Ultra_Cache_Engine::get_analytics_table_name() : $wpdb->prefix . 'ultracache_analytics';
             $diag['table'] = $table;
 
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Diagnostics check only UltraCache-owned analytics table metadata.
-            $exists = ((string) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === (string) $table);
+            $exists = ((string) self::diagnostic_db_get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === (string) $table);
             $diag['exists'] = (bool) $exists;
             if (!$exists) {
                 $diag['message'] = self::maybe_translate('Analytics DB table is missing.');
                 return $diag;
             }
 
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Diagnostics count only UltraCache-owned analytics rows.
-            $diag['rows'] = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $table));
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Diagnostics preview only UltraCache-owned analytics metric keys.
-            $keys = $wpdb->get_col($wpdb->prepare('SELECT metric_key FROM %i ORDER BY metric_type ASC, metric_key ASC LIMIT 12', $table));
+            $row_count = self::diagnostic_db_get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $table));
+            $diag['rows'] = null === $row_count ? 0 : (int) $row_count;
+            $keys = self::diagnostic_db_get_col($wpdb->prepare('SELECT metric_key FROM %i ORDER BY metric_type ASC, metric_key ASC LIMIT 12', $table));
             $diag['keys'] = is_array($keys) ? array_values(array_map('strval', $keys)) : array();
             $diag['valid'] = true;
             $diag['message'] = self::maybe_translate('Analytics DB table is ready.');
@@ -2182,7 +2181,43 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             return $last;
         }
 
-        private static function get_mysql_query_cache_size()
+        private static function diagnostic_db_get_var($query, $x = 0, $y = 0)
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb) || !is_string($query) || '' === trim($query)) {
+                return null;
+            }
+
+            $previous_suppress = $wpdb->suppress_errors(true);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Optional read-only diagnostics must return unavailable instead of showing database errors.
+            $result = $wpdb->get_var($query, (int) $x, (int) $y);
+            $wpdb->suppress_errors($previous_suppress);
+
+            if (null === $result || false === $result || '' === $result) {
+                return null;
+            }
+
+            return $result;
+        }
+
+        private static function diagnostic_db_get_col($query, $x = 0)
+        {
+            global $wpdb;
+
+            if (!($wpdb instanceof wpdb) || !is_string($query) || '' === trim($query)) {
+                return array();
+            }
+
+            $previous_suppress = $wpdb->suppress_errors(true);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Optional read-only diagnostics must return unavailable instead of showing database errors.
+            $result = $wpdb->get_col($query, (int) $x);
+            $wpdb->suppress_errors($previous_suppress);
+
+            return is_array($result) ? $result : array();
+        }
+
+        private static function get_mysql_variable_value($variable_name, $fallback_query = '')
         {
             global $wpdb;
 
@@ -2190,36 +2225,27 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 return '';
             }
 
-            $value = '';
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only server diagnostic shown only to administrators.
-            $result = $wpdb->get_var("SHOW VARIABLES LIKE 'query_cache_size'", 1);
-            if (null === $result || false === $result || '' === $result) {
-                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only server diagnostic shown only to administrators.
-                $result = $wpdb->get_var("SELECT @@query_cache_size");
-            }
-            if (null === $result || false === $result) {
+            $variable_name = sanitize_key((string) $variable_name);
+            if ('' === $variable_name) {
                 return '';
             }
-            return (string) $result;
+
+            $result = self::diagnostic_db_get_var($wpdb->prepare('SHOW VARIABLES LIKE %s', $variable_name), 1);
+            if (null === $result && '' !== $fallback_query) {
+                $result = self::diagnostic_db_get_var($fallback_query);
+            }
+
+            return null === $result ? '' : (string) $result;
+        }
+
+        private static function get_mysql_query_cache_size()
+        {
+            return self::get_mysql_variable_value('query_cache_size');
         }
 
         private static function get_mysql_max_allowed_packet_size()
         {
-            global $wpdb;
-            if (!($wpdb instanceof wpdb)) {
-                return '';
-            }
-
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only server diagnostic shown only to administrators.
-            $result = $wpdb->get_var("SHOW VARIABLES LIKE 'max_allowed_packet'", 1);
-            if (null === $result || false === $result || '' === $result) {
-                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only server diagnostic shown only to administrators.
-                $result = $wpdb->get_var("SELECT @@max_allowed_packet");
-            }
-            if (null === $result || false === $result) {
-                return '';
-            }
-            return (string) $result;
+            return self::get_mysql_variable_value('max_allowed_packet', 'SELECT @@max_allowed_packet');
         }
 
         private static function get_advanced_environment_diagnostic()
@@ -2263,6 +2289,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 $query_cache_size = size_format((int) $query_cache_raw);
             } elseif ('' !== $query_cache_raw) {
                 $query_cache_size = (string) $query_cache_raw;
+            } else {
+                $query_cache_size = self::maybe_translate('Unavailable');
             }
 
             $max_packet_raw = self::get_mysql_max_allowed_packet_size();
@@ -2271,6 +2299,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 $max_packet_size = size_format((int) $max_packet_raw);
             } elseif ('' !== $max_packet_raw) {
                 $max_packet_size = (string) $max_packet_raw;
+            } else {
+                $max_packet_size = self::maybe_translate('Unavailable');
             }
 
             return array(

@@ -862,6 +862,9 @@ private function get_slider_hero_markup_markers()
                     $attrs .= ' crossorigin';
                 }
 
+                // This injects a final-HTML preload discovered after LCP/critical-chain analysis.
+                // It is not an enqueued stylesheet/script, so wp_enqueue_style() / wp_enqueue_script() is not applicable.
+                // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
                 $tags[] = '<link ' . $attrs . ' data-ucwp-critical-chain="1">';
             }
 
