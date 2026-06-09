@@ -1,3 +1,8 @@
+= 2.59.06.29 =
+* Removes same-request manual CSS bundle tag generation when a page bundle is built too late for WordPress enqueue.
+* Applies page CSS bundle replacement only when the WordPress-enqueued bundle markup is present in the rendered HTML.
+* Preserves the original stylesheet links unchanged when the enqueued bundle markup is missing; the generated bundle is used on a later request through normal enqueue.
+
 = 2.59.06.25 =
 * Renames per-result scanner Append buttons to Append to exclusions.
 * Adds per-result Append to Safe Third-Party Delay Patterns buttons for Browser Runtime Error scans and Console Error Suggestions.

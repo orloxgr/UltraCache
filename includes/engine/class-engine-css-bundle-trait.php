@@ -2362,53 +2362,6 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
         }
 
         /**
-         * Build page CSS bundle markup from an existing manifest entry.
-         *
-         * During CLI/admin warm-up the generated bundle can exist in the manifest
-         * while the WordPress-enqueued bundle tag is not present in the final HTML
-         * buffer being rewritten. This is still final HTML cache transformation, so
-         * the replacer may use the already-built manifest entry instead of leaving
-         * the bundle unused.
-         *
-         * @param array<string,mixed> $entry Manifest entry.
-         * @param string              $role  CSS bundle role metadata.
-         * @return string
-         */
-        private function build_page_css_bundle_markup_from_manifest_entry(array $entry, $role)
-        {
-            $role = '' !== (string) $role ? (string) $role : 'generated-css-bundle';
-            $settings = $this->get_settings();
-            $bundle_file = isset($entry['bundleFile']) ? (string) $entry['bundleFile'] : '';
-
-            if (!empty($settings['homepage_css_bundle_inline'])) {
-                if ('' === $bundle_file) {
-                    return '';
-                }
-
-                $maybe_css = ucwp_guarded_asset_file_get_contents($bundle_file, 'generated-css', 'page_css_bundle_inline_manifest_markup', false);
-                $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($maybe_css);
-                if ('' === $bundle_css) {
-                    return '';
-                }
-
-                // Intentional final HTML optimization output: uses an already-built CSS bundle from the manifest when the WP-enqueued tag is absent from the cache rewrite buffer.
-                // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
-                $markup = '<style id="ucwp-page-css-bundle-inline-css">' . $bundle_css . '</style>';
-                return $this->add_page_css_bundle_inline_style_attributes_to_markup($markup, $role);
-            }
-
-            $bundle_url = isset($entry['bundleUrl']) ? (string) $entry['bundleUrl'] : '';
-            $href = esc_url($bundle_url);
-            if ('' === $href) {
-                return '';
-            }
-
-            // Intentional final HTML optimization output: uses an already-built CSS bundle from the manifest when the WP-enqueued tag is absent from the cache rewrite buffer.
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
-            return '<link rel="stylesheet" id="ucwp-page-css-bundle-css" href="' . $href . '" media="all" data-ucwp-page-css-bundle="1" data-ucwp-css-role="' . esc_attr($role) . '" data-ucwp-css-blocking-reason="main-layout-risk" />';
-        }
-
-        /**
          * Build canonical URL variants used when matching stylesheet sources.
          *
          * Bundle manifests keep the rendered stylesheet URL, often including
@@ -2599,10 +2552,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             $bundle_markup = $this->extract_wp_enqueued_page_css_bundle_markup_from_html($html, $page_bundle_role);
             $extracted_enqueued_bundle = ($html !== $html_before_bundle_extraction);
             if ('' === $bundle_markup) {
-                $bundle_markup = $this->build_page_css_bundle_markup_from_manifest_entry($entry, $page_bundle_role);
-            }
-            if ('' === $bundle_markup) {
-                return $html;
+                return $html_before_bundle_extraction;
             }
 
             $replacement = $bundle_markup;
