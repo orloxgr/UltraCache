@@ -1202,11 +1202,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             }
 
             $found_plugins = array();
-            if (defined('WP_PLUGIN_DIR')) {
-                foreach (array('w3-total-cache', 'w3tc-varnish-cli-helper') as $plugin_dir) {
-                    if (file_exists(trailingslashit(WP_PLUGIN_DIR) . $plugin_dir)) {
-                        $found_plugins[] = $plugin_dir;
-                    }
+            foreach (array('w3-total-cache', 'w3tc-varnish-cli-helper') as $plugin_dir) {
+                if (function_exists('ucwp_plugin_main_file') && '' !== ucwp_plugin_main_file($plugin_dir)) {
+                    $found_plugins[] = $plugin_dir;
                 }
             }
 

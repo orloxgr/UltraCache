@@ -2272,13 +2272,20 @@
 		]);
 	}
 
-	function SaveableTextAreaField({ label, description, value, onSave, disabled, placeholder, saveLabel, populateLabel, populateBusyLabel, onPopulate, populateWarning }) {
+	function SaveableTextAreaField({ label, description, value, onSave, disabled, placeholder, saveLabel, populateLabel, populateBusyLabel, onPopulate, populateWarning, appendRequest }) {
 		const [draft, setDraft] = useState(value || '');
 		const [populateBusy, setPopulateBusy] = useState(false);
 
 		useEffect(() => {
 			setDraft(value || '');
 		}, [value]);
+
+		useEffect(() => {
+			if (!appendRequest || !appendRequest.id || !appendRequest.value) {
+				return;
+			}
+			setDraft((current) => mergeUniqueSettingLines(String(current || ''), String(appendRequest.value || '')).value);
+		}, [appendRequest]);
 
 		const currentValue = String(value || '');
 		const draftValue = String(draft || '');
@@ -2333,7 +2340,7 @@
 		]);
 	}
 
-	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onRuntimeScan, onLoadLatestProfileScan, safeThirdPartyPatternsValue, onAppendSafeThirdPartyPatterns }) {
+	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onRuntimeScan, onLoadLatestProfileScan, onAppendDelayPattern }) {
 		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
 		const [draft, setDraft] = useState(value || "");
 		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
@@ -2351,15 +2358,12 @@
 		const [consoleErrorBusy, setConsoleErrorBusy] = useState(false);
 		const [jsDiagnosticQueue, setJsDiagnosticQueue] = useState(null);
 		const [jsDiagnosticQueueBusy, setJsDiagnosticQueueBusy] = useState(false);
-		const [safeThirdPartyPatternsDraft, setSafeThirdPartyPatternsDraft] = useState(safeThirdPartyPatternsValue || '');
+		const [selectedSuggestionActions, setSelectedSuggestionActions] = useState({});
 
 		useEffect(() => {
 			setDraft(value || '');
 		}, [value]);
 
-		useEffect(() => {
-			setSafeThirdPartyPatternsDraft(safeThirdPartyPatternsValue || '');
-		}, [safeThirdPartyPatternsValue]);
 
 		const currentValue = String(value || '');
 		const draftValue = String(draft || '');
@@ -2398,49 +2402,121 @@
 		const jsDiagnosticQueueProgressPercent = jsDiagnosticQueue ? Math.round((jsDiagnosticQueueProgressCurrent / jsDiagnosticQueueProgressTotal) * 100) : 0;
 
 
-		function appendJsExclusionLine(line) {
-			const suggestion = String(line || '').trim();
-			if (!suggestion) {
-				return;
-			}
-			const merged = mergeUniqueSettingLines(draftValue, suggestion);
-			setDraft(merged.value);
+
+		function normalizeSuggestionActionPattern(pattern) {
+			return String(pattern || '').trim().replace(/^\/+/, '');
 		}
 
-
-		function appendSafeThirdPartyDelayPatternLine(line) {
-			const suggestion = String(line || '').trim();
-			if (!suggestion || typeof onAppendSafeThirdPartyPatterns !== 'function') {
-				return;
+		function getSuggestionSourcePath(item) {
+			const source = item && (item.definingScriptUrl || item.sourceUrl || item.url) ? String(item.definingScriptUrl || item.sourceUrl || item.url) : '';
+			if (!source) {
+				return '';
 			}
-			const merged = mergeUniqueSettingLines(safeThirdPartyPatternsDraft, suggestion);
-			setSafeThirdPartyPatternsDraft(merged.value);
-			onAppendSafeThirdPartyPatterns(merged.value);
+			try {
+				const parsed = new URL(source, window.location.origin);
+				return decodeURIComponent(String(parsed.pathname || '')).replace(/\\/g, '/').replace(/\/+/g, '/');
+			} catch (error) {
+				return String(source).split(/[?#]/)[0].replace(/\\/g, '/').replace(/\/+/g, '/');
+			}
 		}
 
-		function renderAppendButtons(line, exclusionsPresent, safePatternsPresent, allowAppend) {
-			const canAppend = !!allowAppend && !!line;
-			const canAppendSafe = !!line && typeof onAppendSafeThirdPartyPatterns === 'function';
-			if (!canAppend && !canAppendSafe) {
+		function getSuggestionActionPatterns(item) {
+			const suggested = normalizeSuggestionActionPattern(item && item.suggestedExclusion ? item.suggestedExclusion : '');
+			const sourcePath = getSuggestionSourcePath(item).replace(/^\/+/, '');
+			let ownerSlug = '';
+			let exactPattern = suggested;
+
+			const sourceOwnerMatch = sourcePath.match(/(?:^|\/)(?:plugins|themes)\/([^/]+)\/(.+)$/i);
+			const suggestedOwnerMatch = suggested.match(/(?:^|\/)(?:plugins|themes)\/([^/]+)\/(.+)$/i);
+			const ownerMatch = sourceOwnerMatch || suggestedOwnerMatch;
+			if (ownerMatch) {
+				ownerSlug = String(ownerMatch[1] || '').trim();
+				exactPattern = normalizeSuggestionActionPattern(ownerSlug + '/' + String(ownerMatch[2] || ''));
+			} else if (suggested && sourcePath) {
+				const sourceLower = sourcePath.toLowerCase();
+				const suggestedLower = suggested.toLowerCase();
+				const suffixIndex = sourceLower.lastIndexOf('/' + suggestedLower);
+				if (suffixIndex > 0) {
+					const prefix = sourcePath.slice(0, suffixIndex).replace(/\/+$/, '');
+					const prefixParts = prefix.split('/').filter(Boolean);
+					ownerSlug = prefixParts.length ? String(prefixParts[prefixParts.length - 1] || '') : '';
+					if (ownerSlug) {
+						exactPattern = normalizeSuggestionActionPattern(ownerSlug + '/' + suggested);
+					}
+				}
+			}
+
+			if (!ownerSlug && suggested) {
+				const suggestedParts = suggested.split('/').filter(Boolean);
+				if (suggestedParts.length > 1 && ['wp-includes', 'wp-admin', 'wp-content'].indexOf(suggestedParts[0]) === -1) {
+					ownerSlug = suggestedParts[0];
+				}
+			}
+
+			const chainPattern = ownerSlug ? normalizeSuggestionActionPattern(ownerSlug + '/') : '';
+			if (chainPattern && exactPattern === chainPattern && sourcePath) {
+				const chainIndex = sourcePath.toLowerCase().lastIndexOf('/' + chainPattern.toLowerCase());
+				if (chainIndex >= 0) {
+					exactPattern = normalizeSuggestionActionPattern(sourcePath.slice(chainIndex + 1));
+				}
+			}
+
+			return {
+				exact: exactPattern || suggested,
+				chain: chainPattern,
+			};
+		}
+
+		function getSuggestionActionKey(item, keyPrefix, index) {
+			return [
+				String(keyPrefix || 'suggestion'),
+				String(index || 0),
+				String(item && item.suggestedExclusion ? item.suggestedExclusion : ''),
+				String(item && item.definingScriptUrl ? item.definingScriptUrl : ''),
+				String(item && item.symbol ? item.symbol : ''),
+			].join('|');
+		}
+
+		function applySuggestionAction(actionKey, actionId, target, pattern) {
+			const line = normalizeSuggestionActionPattern(pattern);
+			if (!line) {
+				return;
+			}
+			if (target === 'exclusion') {
+				setDraft((current) => mergeUniqueSettingLines(String(current || ''), line).value);
+			} else {
+				if (typeof onAppendDelayPattern !== 'function') {
+					return;
+				}
+				onAppendDelayPattern(line);
+			}
+			setSelectedSuggestionActions((current) => Object.assign({}, current || {}, { [actionKey]: actionId }));
+		}
+
+		function renderSuggestionActionButtons(item, keyPrefix, index, allowAppend) {
+			if (!allowAppend || !item) {
 				return null;
 			}
+			const patterns = getSuggestionActionPatterns(item);
+			const actionKey = getSuggestionActionKey(item, keyPrefix, index);
+			const selected = String(selectedSuggestionActions[actionKey] || '');
+			const actions = [
+				{ id: 'exclude-exact', target: 'exclusion', pattern: patterns.exact, label: __('Add This Script Exclusions', 'ultracache') },
+				{ id: 'exclude-chain', target: 'exclusion', pattern: patterns.chain, label: __('Add Full Dependency Chain to Exclusions', 'ultracache') },
+				{ id: 'delay-exact', target: 'delay', pattern: patterns.exact, label: __('Delay This Script', 'ultracache') },
+				{ id: 'delay-chain', target: 'delay', pattern: patterns.chain, label: __('Delay Full Dependency Chain', 'ultracache') },
+			];
+			const visibleActions = selected ? actions.filter((action) => action.id === selected) : actions;
 
-			return h('span', { className: 'inline-flex flex-wrap items-center' }, [
-				canAppend ? h('button', {
-					type: 'button',
-					className: 'uc-btn text-[11px] px-2 py-1',
-					style: { margin: '5px' },
-					disabled: !!disabled || !!exclusionsPresent,
-					onClick: () => appendJsExclusionLine(line),
-				}, exclusionsPresent ? 'Already in exclusions' : 'Append to exclusions') : null,
-				canAppendSafe ? h('button', {
-					type: 'button',
-					className: 'uc-btn text-[11px] px-2 py-1',
-					style: { margin: '5px' },
-					disabled: !!disabled || !!safePatternsPresent,
-					onClick: () => appendSafeThirdPartyDelayPatternLine(line),
-				}, safePatternsPresent ? 'Already in Safe Third-Party Delay Patterns' : 'Append to Safe Third-Party Delay Patterns') : null,
-			]);
+			return h('span', { className: 'inline-flex flex-wrap items-center' }, visibleActions.map((action) => h('button', {
+				type: 'button',
+				key: actionKey + '-' + action.id,
+				className: 'uc-btn text-[11px] px-2 py-1',
+				style: { margin: '5px' },
+				disabled: !!disabled || !action.pattern || !!selected,
+				title: action.pattern ? String(action.pattern) : __('Dependency chain unavailable for this finding', 'ultracache'),
+				onClick: () => applySuggestionAction(actionKey, action.id, action.target, action.pattern),
+			}, action.label)));
 		}
 
 
@@ -2460,7 +2536,7 @@
 					h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Suggested exclusion", 'ultracache')),
 					h('div', { className: 'flex flex-wrap items-center gap-2' }, [
 						h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
-						renderAppendButtons(line, present, isSuggestionPresentInDraft(safeThirdPartyPatternsDraft, line), !!line),
+						renderSuggestionActionButtons(item, keyPrefix, index, !!line),
 					]),
 				]),
 				h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-2' }, metaRows.map((row, rowIndex) => h('div', { className: 'rounded bg-black/15 px-2 py-1', key: keyPrefix + '-meta-' + index + '-' + rowIndex }, [
@@ -2485,7 +2561,7 @@
 			return h('div', { className: 'rounded-lg bg-black/20 px-3 py-3 space-y-2', key: keyPrefix + '-' + index + '-' + line }, [
 				h('div', { className: 'flex flex-wrap items-center gap-2' }, [
 					h('code', { className: 'font-mono text-[11px] text-emerald-300 break-all bg-black/25 rounded px-2 py-1.5' }, line || 'unknown'),
-					renderAppendButtons(line, present, isSuggestionPresentInDraft(safeThirdPartyPatternsDraft, line), canAppend),
+					renderSuggestionActionButtons(item, keyPrefix, index, canAppend),
 				]),
 				h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-2' }, [
 					h('div', { className: 'rounded bg-black/15 px-2 py-1' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Status'), h('div', { className: present ? 'text-[11px] font-semibold text-emerald-300' : 'text-[11px] font-semibold text-zinc-300' }, status)]),
@@ -2732,6 +2808,7 @@
 				setConsoleErrorStatus('Paste one or more browser console errors first.');
 				return;
 			}
+			setSelectedSuggestionActions({});
 			setConsoleErrorBusy(true);
 			setConsoleErrorStatus('Parsing console errors with the DB-backed Runtime Scan suggestion engine…');
 			try {
@@ -2774,6 +2851,7 @@
 			setConsoleErrorSuggestions([]);
 			setConsoleErrorScan(null);
 			setConsoleErrorStatus('');
+			setSelectedSuggestionActions({});
 		}
 
 		async function handlePopulateDefaults() {
@@ -2795,6 +2873,7 @@
 			if (disabled || scanBusy || typeof onScan !== 'function') {
 				return;
 			}
+			setSelectedSuggestionActions({});
 			setScanBusy(true);
 			try {
 				const result = await onScan(scanUrl);
@@ -2811,6 +2890,7 @@
 			if (disabled || runtimeScanBusy || typeof onRuntimeScan !== 'function') {
 				return;
 			}
+			setSelectedSuggestionActions({});
 			setRuntimeScanBusy(true);
 			setRuntimeScanStatus('Creating DB-backed JS diagnostic queue job…');
 			try {
@@ -5289,6 +5369,8 @@
 		const [isMobile, setIsMobile] = useState(isMobileViewport());
 		const [supportModalOpen, setSupportModalOpen] = useState(false);
 		const [infoAccordionsOpen, setInfoAccordionsOpen] = useState(false);
+		const [safeDelayAppendRequest, setSafeDelayAppendRequest] = useState(null);
+		const scannerAppendSequenceRef = useRef(0);
 		const [advancedForm, setAdvancedForm] = useState({
 			cacheExceptionPaths: initialSettings.cacheExceptionPaths || '',
 			cacheExceptionQueryArgs: initialSettings.cacheExceptionQueryArgs || '',
@@ -6826,6 +6908,16 @@
 			} finally {
 				setCompressionProbeBusy(false);
 			}
+		}
+
+
+		function appendScannerPatternToSafeDelayDraft(value) {
+			const pattern = String(value || '').trim();
+			if (!pattern) {
+				return;
+			}
+			scannerAppendSequenceRef.current += 1;
+			setSafeDelayAppendRequest({ id: scannerAppendSequenceRef.current, value: pattern });
 		}
 
 		function updateSetting(key, value) {
@@ -9346,8 +9438,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																		onScan: runJsDelaySafetyScanForUrl,
 																		onRuntimeScan: runBrowserRuntimeJsScanForUrl,
 																		onLoadLatestProfileScan: loadLatestJsDelaySafetyScan,
-																		safeThirdPartyPatternsValue: settings.delaySafeThirdPartyJsPatterns || '',
-																		onAppendSafeThirdPartyPatterns: (value) => updateSetting('delaySafeThirdPartyJsPatterns', value),
+																		onAppendDelayPattern: (value) => appendScannerPatternToSafeDelayDraft(value),
 																		key: 'defer-stages-exclude-list-final',
 																	}),
 							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'js-exclusions-grid' }, [
@@ -9359,16 +9450,17 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																											disabled: busy,
 																											placeholder: 'my-theme-script\n/custom-plugin/assets/app.js',
 																											saveLabel: 'Save Force Defer List',
-																											key: 'defer-those-scripts-list',
+																																	key: 'defer-those-scripts-list',
 																										}),
 															h(SaveableTextAreaField, {
 																											label: __("Safe Third-Party Delay Patterns", 'ultracache'),
-																											description: __("User-editable matching fragments for scripts already printed by the site, theme, or another plugin. UltraCache does not add or contact these providers; matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded.", 'ultracache'),
+																											description: __("User-editable matching fragments for scripts already printed by the site, theme, or another plugin.", 'ultracache'),
 																											value: settings.delaySafeThirdPartyJsPatterns || '',
 																											onSave: (value) => updateSetting('delaySafeThirdPartyJsPatterns', value),
 																											disabled: busy || !settings.delaySafeThirdPartyJsEnabled,
 																											placeholder: 'googletagmanager.com\ngoogle-analytics.com\nconnect.facebook.net\nclarity.ms',
 																											saveLabel: 'Save Safe Third-Party Patterns',
+																											appendRequest: safeDelayAppendRequest,
 																											populateLabel: __("Populate Defaults", 'ultracache'),
 																											populateWarning: 'Your current safe third-party delay patterns will be replaced with the recommended defaults.',
 																											onPopulate: () => populateDefaultSettingList('delaySafeThirdPartyJsPatterns', 'safe third-party delay patterns'),
@@ -9376,7 +9468,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																										}),
 															h(SaveableTextAreaField, {
 																											label: __("Known Functional Third-Party Delay Patterns", 'ultracache'),
-																											description: __("User-editable matching fragments for scripts already printed by the site, theme, or another plugin. UltraCache does not add or contact these providers; matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded.", 'ultracache'),
+																											description: __("User-editable matching fragments for scripts already printed by the site, theme, or another plugin. Matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded.", 'ultracache'),
 																											value: settings.delayFunctionalThirdPartyJsPatterns || '',
 																											onSave: (value) => updateSetting('delayFunctionalThirdPartyJsPatterns', value),
 																											disabled: busy || !settings.delayFunctionalThirdPartyJsEnabled,

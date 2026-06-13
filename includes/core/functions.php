@@ -605,44 +605,173 @@ if (!function_exists('ucwp_plugin_theme_owner_from_public_source')) {
     }
 }
 
-if (!function_exists('ucwp_plugin_root_dir')) {
+if (!function_exists('ucwp_get_wordpress_home_path')) {
     /**
-     * Return an active plugin root directory by slug using WordPress plugin constants.
+     * Return the filesystem path that serves the WordPress home URL.
      *
-     * @param string $slug Plugin slug.
+     * get_home_path() correctly handles WordPress installed in a subdirectory while
+     * the public site is served from its parent directory.
+     *
      * @return string
      */
-    function ucwp_plugin_root_dir($slug)
+    function ucwp_get_wordpress_home_path()
+    {
+        if (!function_exists('get_home_path') && defined('ABSPATH')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+
+        $home_path = function_exists('get_home_path') ? get_home_path() : (defined('ABSPATH') ? ABSPATH : '');
+        $home_path = function_exists('wp_normalize_path') ? wp_normalize_path((string) $home_path) : str_replace('\\', '/', (string) $home_path);
+
+        return untrailingslashit($home_path);
+    }
+}
+
+if (!function_exists('ucwp_get_server_document_root_path')) {
+    /**
+     * Return the effective public document root for path/security diagnostics.
+     *
+     * @return string
+     */
+    function ucwp_get_server_document_root_path()
+    {
+        $document_root = function_exists('ucwp_server_value') ? (string) ucwp_server_value('DOCUMENT_ROOT') : '';
+        $document_root = function_exists('wp_normalize_path') ? wp_normalize_path($document_root) : str_replace('\\', '/', $document_root);
+        $document_root = untrailingslashit($document_root);
+
+        if ('' === $document_root) {
+            $document_root = ucwp_get_wordpress_home_path();
+        }
+
+        return untrailingslashit((string) $document_root);
+    }
+}
+
+if (!function_exists('ucwp_get_runtime_secret_site_token')) {
+    /**
+     * Return the stable site token used in the runtime-secret filename.
+     *
+     * @return string
+     */
+    function ucwp_get_runtime_secret_site_token()
+    {
+        $site_root = defined('ABSPATH') ? wp_normalize_path(untrailingslashit(ABSPATH)) : ucwp_get_wordpress_home_path();
+        $token = wp_basename($site_root);
+        $token = is_string($token) ? strtolower($token) : '';
+        $token = preg_replace('/[^a-z0-9._-]+/', '-', $token);
+        $token = trim((string) $token, '.-_');
+
+        return '' !== $token ? $token : 'site';
+    }
+}
+
+if (!function_exists('ucwp_get_runtime_secret_path')) {
+    /**
+     * Return the canonical runtime-secret path outside the effective document root.
+     *
+     * @return string
+     */
+    function ucwp_get_runtime_secret_path()
+    {
+        $roots = array(
+            ucwp_get_server_document_root_path(),
+            ucwp_get_wordpress_home_path(),
+            defined('ABSPATH') ? untrailingslashit((string) ABSPATH) : '',
+            defined('WP_CONTENT_DIR') ? untrailingslashit((string) WP_CONTENT_DIR) : '',
+        );
+
+        $base = '';
+        foreach ($roots as $root) {
+            $root = function_exists('wp_normalize_path') ? wp_normalize_path((string) $root) : str_replace('\\', '/', (string) $root);
+            $root = untrailingslashit($root);
+            if ('' === $root) {
+                continue;
+            }
+
+            $candidate = dirname($root);
+            if (is_string($candidate) && '' !== trim($candidate) && '.' !== $candidate && '/' !== $candidate) {
+                $base = $candidate;
+                break;
+            }
+        }
+
+        if ('' === $base) {
+            return '';
+        }
+
+        return rtrim($base, '/\\') . '/.' . ucwp_get_runtime_secret_site_token() . '-ultracache-runtime-secrets.php';
+    }
+}
+
+if (!function_exists('ucwp_plugin_main_file')) {
+    /**
+     * Resolve an installed plugin's real main file from the WordPress plugin inventory.
+     *
+     * @param string $slug Plugin directory slug.
+     * @return string
+     */
+    function ucwp_plugin_main_file($slug)
     {
         $slug = sanitize_key((string) $slug);
         if ('' === $slug || !defined('WP_PLUGIN_DIR')) {
             return '';
         }
 
-        return untrailingslashit(wp_normalize_path(trailingslashit(WP_PLUGIN_DIR) . $slug));
+        if (!function_exists('get_plugins') && defined('ABSPATH')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+        if (!function_exists('get_plugins')) {
+            return '';
+        }
+
+        static $installed_plugins = null;
+        if (null === $installed_plugins) {
+            $installed_plugins = (array) get_plugins();
+        }
+
+        foreach (array_keys($installed_plugins) as $plugin_basename) {
+            $plugin_basename = str_replace('\\', '/', (string) $plugin_basename);
+            $plugin_parts = explode('/', $plugin_basename);
+            $plugin_slug = count($plugin_parts) > 1
+                ? sanitize_key((string) reset($plugin_parts))
+                : sanitize_key(pathinfo($plugin_basename, PATHINFO_FILENAME));
+            if ($slug !== $plugin_slug) {
+                continue;
+            }
+
+            // WP_PLUGIN_DIR is required here only to turn WordPress' verified plugin basename into a full main-file path.
+            return wp_normalize_path(trailingslashit(WP_PLUGIN_DIR) . $plugin_basename);
+        }
+
+        return '';
+    }
+}
+
+if (!function_exists('ucwp_plugin_root_dir')) {
+    /**
+     * Return an installed plugin root directory from its real main file.
+     *
+     * @param string $slug Plugin slug.
+     * @return string
+     */
+    function ucwp_plugin_root_dir($slug)
+    {
+        $plugin_file = ucwp_plugin_main_file($slug);
+        return '' !== $plugin_file ? untrailingslashit(wp_normalize_path(plugin_dir_path($plugin_file))) : '';
     }
 }
 
 if (!function_exists('ucwp_plugin_root_uri')) {
     /**
-     * Return an active plugin root URI by slug using WordPress plugin APIs.
+     * Return an installed plugin root URI from its real main file.
      *
      * @param string $slug Plugin slug.
      * @return string
      */
     function ucwp_plugin_root_uri($slug)
     {
-        $slug = sanitize_key((string) $slug);
-        if ('' === $slug || !function_exists('plugins_url')) {
-            return '';
-        }
-
-        $base_url = plugins_url();
-        if ('' === (string) $base_url) {
-            return '';
-        }
-
-        return untrailingslashit(esc_url_raw(ucwp_storage_join_url($base_url, $slug)));
+        $plugin_file = ucwp_plugin_main_file($slug);
+        return '' !== $plugin_file ? untrailingslashit(esc_url_raw(plugin_dir_url($plugin_file))) : '';
     }
 }
 
@@ -2464,7 +2593,7 @@ if (!function_exists('ucwp_get_asset_readable_roots')) {
             }
         }
 
-        $plugin_root = dirname(dirname(__DIR__));
+        $plugin_root = defined('UCWP_PATH') ? UCWP_PATH : '';
         if (is_string($plugin_root) && '' !== $plugin_root) {
             $roots[] = $plugin_root;
         }
@@ -2774,7 +2903,7 @@ if (!function_exists('ucwp_get_default_readable_roots')) {
             $roots[] = rtrim((string) ABSPATH, '/\\') . '/' . WPINC;
         }
 
-        $plugin_root = dirname(dirname(__DIR__));
+        $plugin_root = defined('UCWP_PATH') ? UCWP_PATH : '';
         if (is_string($plugin_root) && '' !== $plugin_root) {
             $roots[] = $plugin_root;
         }
@@ -2861,8 +2990,8 @@ if (!function_exists('ucwp_is_allowed_readable_path')) {
             return true;
         }
 
-        if (defined('ABSPATH') && ucwp_read_context_allows_root_server_config($context) && in_array($base, array('.htaccess', 'web.config'), true)) {
-            $root = ucwp_normalize_filesystem_path_for_guard(ABSPATH);
+        if (ucwp_read_context_allows_root_server_config($context) && in_array($base, array('.htaccess', 'web.config'), true)) {
+            $root = ucwp_normalize_filesystem_path_for_guard(ucwp_get_wordpress_home_path());
             if ('' !== $root && ucwp_path_has_dir_prefix($normalized, $root)) {
                 return true;
             }
@@ -2884,28 +3013,7 @@ if (!function_exists('ucwp_is_allowed_readable_path')) {
 if (!function_exists('ucwp_get_canonical_runtime_secret_path_for_guard')) {
     function ucwp_get_canonical_runtime_secret_path_for_guard()
     {
-        if (!defined('ABSPATH')) {
-            return '';
-        }
-
-        $root = rtrim(str_replace('\\', '/', (string) ABSPATH), '/');
-        $base = dirname($root);
-        if (!is_string($base) || '' === trim($base) || '.' === $base || '/' === $base) {
-            $base = defined('WP_CONTENT_DIR') ? dirname(rtrim(str_replace('\\', '/', (string) WP_CONTENT_DIR), '/')) : '';
-        }
-
-        if (!is_string($base) || '' === trim($base)) {
-            return '';
-        }
-
-        $token = basename($root);
-        $token = strtolower((string) preg_replace('/[^a-z0-9._-]+/', '-', (string) $token));
-        $token = trim($token, '.-_');
-        if ('' === $token) {
-            $token = 'site';
-        }
-
-        return rtrim((string) $base, '/\\') . '/.' . $token . '-ultracache-runtime-secrets.php';
+        return function_exists('ucwp_get_runtime_secret_path') ? ucwp_get_runtime_secret_path() : '';
     }
 }
 
@@ -3064,8 +3172,8 @@ if (!function_exists('ucwp_is_allowed_writable_path')) {
             }
         }
 
-        if (false !== strpos($context, 'sync_browser_cache_rules') && defined('ABSPATH')) {
-            $root = wp_normalize_path(ABSPATH);
+        if (false !== strpos($context, 'sync_browser_cache_rules')) {
+            $root = wp_normalize_path(ucwp_get_wordpress_home_path());
             if (ucwp_path_has_dir_prefix($normalized, $root) && ('.htaccess' === $base || preg_match('/^\.htaccess\.tmp-[A-Za-z0-9_.]+$/', $base))) {
                 return true;
             }

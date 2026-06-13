@@ -29,6 +29,56 @@ if (!function_exists('ucwp_uninstall_path_is_under')) {
     }
 }
 
+
+if (!function_exists('ucwp_uninstall_home_path')) {
+    function ucwp_uninstall_home_path()
+    {
+        if (!function_exists('get_home_path') && defined('ABSPATH')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+
+        $home_path = function_exists('get_home_path') ? get_home_path() : (defined('ABSPATH') ? ABSPATH : '');
+        return untrailingslashit(wp_normalize_path((string) $home_path));
+    }
+}
+
+if (!function_exists('ucwp_uninstall_runtime_secret_path')) {
+    function ucwp_uninstall_runtime_secret_path()
+    {
+        $document_root = isset($_SERVER['DOCUMENT_ROOT']) ? sanitize_text_field(wp_unslash((string) $_SERVER['DOCUMENT_ROOT'])) : '';
+        $roots = array(
+            untrailingslashit(wp_normalize_path($document_root)),
+            ucwp_uninstall_home_path(),
+            defined('ABSPATH') ? untrailingslashit(wp_normalize_path((string) ABSPATH)) : '',
+            defined('WP_CONTENT_DIR') ? untrailingslashit(wp_normalize_path((string) WP_CONTENT_DIR)) : '',
+        );
+
+        $base = '';
+        foreach ($roots as $root) {
+            if ('' === $root) {
+                continue;
+            }
+            $candidate = dirname($root);
+            if (is_string($candidate) && '' !== trim($candidate) && '.' !== $candidate && '/' !== $candidate) {
+                $base = $candidate;
+                break;
+            }
+        }
+        if ('' === $base) {
+            return '';
+        }
+
+        $site_root = defined('ABSPATH') ? wp_basename(untrailingslashit(ABSPATH)) : wp_basename(ucwp_uninstall_home_path());
+        $site_root = strtolower((string) preg_replace('/[^a-z0-9._-]+/', '-', (string) $site_root));
+        $site_root = trim($site_root, '.-_');
+        if ('' === $site_root) {
+            $site_root = 'site';
+        }
+
+        return rtrim($base, '/\\') . '/.' . $site_root . '-ultracache-runtime-secrets.php';
+    }
+}
+
 if (!function_exists('ucwp_uninstall_dropin_path')) {
     /**
      * Return the WordPress-required drop-in path during uninstall cleanup.
@@ -399,14 +449,11 @@ function ucwp_run_uninstall_cleanup()
 
     $ucwp_runtime_secret_candidates = array();
 
-    if (defined('ABSPATH') && $ucwp_remove_secrets) {
-        $ucwp_site_root = wp_basename(untrailingslashit(ABSPATH));
-        $ucwp_site_root = strtolower(preg_replace('/[^a-z0-9._-]+/', '-', (string) $ucwp_site_root));
-        $ucwp_site_root = trim($ucwp_site_root, '.-_');
-        if ('' === $ucwp_site_root) {
-            $ucwp_site_root = 'site';
+    if ($ucwp_remove_secrets) {
+        $ucwp_runtime_secret_path = ucwp_uninstall_runtime_secret_path();
+        if ('' !== $ucwp_runtime_secret_path) {
+            $ucwp_runtime_secret_candidates[] = $ucwp_runtime_secret_path;
         }
-        $ucwp_runtime_secret_candidates[] = dirname(untrailingslashit(ABSPATH)) . '/.' . $ucwp_site_root . '-ultracache-runtime-secrets.php';
     }
 
     if ('' !== $ucwp_cache_root && $ucwp_delete_cache_files) {

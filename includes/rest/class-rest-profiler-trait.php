@@ -3622,7 +3622,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
         private function runtime_js_scan_plugin_stage_roots($source, $message, $detail)
         {
-            if (!defined('WP_PLUGIN_DIR')) {
+            if (!function_exists('ucwp_plugin_root_dir')) {
                 return array();
             }
 
@@ -3650,7 +3650,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
 
-                $dir = function_exists('ucwp_plugin_root_dir') ? ucwp_plugin_root_dir($slug) : (function_exists('wp_normalize_path') ? wp_normalize_path(trailingslashit(WP_PLUGIN_DIR) . $slug) : str_replace('\\', '/', trailingslashit(WP_PLUGIN_DIR) . $slug));
+                $dir = ucwp_plugin_root_dir($slug);
                 if (!$filesystem->is_dir($dir)) {
                     continue;
                 }
@@ -3966,8 +3966,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if ('' === $kind || '' === $slug) {
                 return array();
             }
-            if ('plugin' === $kind && defined('WP_PLUGIN_DIR')) {
-                $dir = function_exists('ucwp_plugin_root_dir') ? ucwp_plugin_root_dir($slug) : (function_exists('wp_normalize_path') ? wp_normalize_path(trailingslashit(WP_PLUGIN_DIR) . $slug) : str_replace('\\', '/', trailingslashit(WP_PLUGIN_DIR) . $slug));
+            if ('plugin' === $kind && function_exists('ucwp_plugin_root_dir')) {
+                $dir = ucwp_plugin_root_dir($slug);
                 if (is_dir($dir)) {
                     return array('kind' => 'plugin', 'slug' => $slug, 'dir' => untrailingslashit($dir), 'uri' => function_exists('ucwp_plugin_root_uri') ? ucwp_plugin_root_uri($slug) : '');
                 }

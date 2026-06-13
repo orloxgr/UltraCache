@@ -2,7 +2,7 @@
 # This file is distributed under the GPLv2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: UltraCache 2.59.02\n"
+"Project-Id-Version: UltraCache 2.59.06.31\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-05-18 01:04+0000\n"
 "MIME-Version: 1.0\n"
@@ -3536,11 +3536,11 @@ msgid "Visible / editable safeguard lists"
 msgstr ""
 
 #: includes/admin-dashboard.js:8726
-msgid "User-editable matching fragments for scripts already printed by the site, theme, or another plugin. UltraCache does not add or contact these providers; matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded."
+msgid "User-editable matching fragments for scripts already printed by the site, theme, or another plugin. Matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded."
 msgstr ""
 
 #: includes/admin-dashboard.js:8713
-msgid "User-editable matching fragments for scripts already printed by the site, theme, or another plugin. UltraCache does not add or contact these providers; matching analytics, pixels, ads, tracking, and marketing script tags are delayed unless excluded."
+msgid "User-editable matching fragments for scripts already printed by the site, theme, or another plugin."
 msgstr ""
 
 #: includes/settings/class-settings-trait.php:1064
@@ -3710,3 +3710,24 @@ msgstr ""
 #: includes/admin-dashboard.js:3040
 msgid "Write skips"
 msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Add This Script Exclusions"
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Add Full Dependency Chain to Exclusions"
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Delay This Script"
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Delay Full Dependency Chain"
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Dependency chain unavailable for this finding"
+msgstr ""
+

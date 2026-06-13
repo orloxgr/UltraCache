@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.59.06.29
+ * Version: 2.59.06.33
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('UCWP_VERSION')) {
-    define('UCWP_VERSION', '2.59.06.29');
+    define('UCWP_VERSION', '2.59.06.33');
 }
 if (!defined('UCWP_FILE')) {
     define('UCWP_FILE', __FILE__);
@@ -1014,27 +1014,12 @@ if (!class_exists('Ultra_Cache_WP')) {
 
         private static function get_runtime_secret_site_token()
         {
-            $site_root = wp_normalize_path(untrailingslashit(ABSPATH));
-            $token = wp_basename($site_root);
-            $token = is_string($token) ? strtolower($token) : '';
-            $token = preg_replace('/[^a-z0-9._-]+/', '-', $token);
-            $token = trim((string) $token, '.-_');
-
-            if ('' === $token) {
-                $token = 'site';
-            }
-
-            return $token;
+            return ucwp_get_runtime_secret_site_token();
         }
 
         private static function get_runtime_secret_path()
         {
-            $base = dirname(untrailingslashit(ABSPATH));
-            if (!is_string($base) || '' === trim($base) || '.' === $base || '/' === $base) {
-                $base = dirname(untrailingslashit(WP_CONTENT_DIR));
-            }
-
-            return rtrim($base, '/\\') . '/.' . self::get_runtime_secret_site_token() . '-ultracache-runtime-secrets.php';
+            return ucwp_get_runtime_secret_path();
         }
 
         private static function normalize_runtime_secret_array(array $loaded)
@@ -3929,7 +3914,7 @@ public static function delete_all_plugin_data_and_deactivate($cleanup_policy = n
         }
         private static function get_browser_cache_htaccess_path()
         {
-            return trailingslashit(ABSPATH) . '.htaccess';
+            return trailingslashit(ucwp_get_wordpress_home_path()) . '.htaccess';
         }
 
         private static function get_browser_cache_htaccess_block()

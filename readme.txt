@@ -5,7 +5,7 @@ Donate link: https://iniotakis.com/
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 2.59.06.29
+Stable tag: 2.59.06.33
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 

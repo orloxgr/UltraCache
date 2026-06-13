@@ -250,21 +250,11 @@ if (!class_exists('Ultra_Cache_Object_Cache_Manager')) {
 		}
 
 		private static function get_runtime_secret_site_token() {
-			$site_root = defined('ABSPATH') ? wp_normalize_path(untrailingslashit(ABSPATH)) : '';
-			$token = '' !== $site_root ? wp_basename($site_root) : 'site';
-			$token = is_string($token) ? strtolower($token) : '';
-			$token = preg_replace('/[^a-z0-9._-]+/', '-', $token);
-			$token = trim((string) $token, '.-_');
-			return '' !== $token ? $token : 'site';
+			return ucwp_get_runtime_secret_site_token();
 		}
 
 		private static function get_runtime_secret_path() {
-			$base = defined('ABSPATH') ? dirname(untrailingslashit(ABSPATH)) : '';
-			if (!is_string($base) || '' === trim($base) || '.' === $base || '/' === $base) {
-				$base = defined('WP_CONTENT_DIR') ? dirname(untrailingslashit(WP_CONTENT_DIR)) : '';
-			}
-
-			return rtrim((string) $base, '/\\') . '/.' . self::get_runtime_secret_site_token() . '-ultracache-runtime-secrets.php';
+			return ucwp_get_runtime_secret_path();
 		}
 
 		private static function get_redis_secret_config_path() {

@@ -1329,6 +1329,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $object_secret_path = $runtime_secret_path;
             $legacy_object_secret_path = trailingslashit(UCWP_OBJECT_CACHE_DIR) . '.redis-auth.php';
             $runtime_secret_values = self::load_runtime_secret_file();
+            $document_root = function_exists('ucwp_get_server_document_root_path') ? ucwp_get_server_document_root_path() : untrailingslashit((string) ABSPATH);
             $settings_option_raw = get_option(UCWP_SETTINGS_KEY, array());
             $redis_secret_in_settings = is_array($settings_option_raw) && isset($settings_option_raw['redisPassword']) && '' !== trim((string) $settings_option_raw['redisPassword']);
             $varnish_secret_in_settings = is_array($settings_option_raw) && isset($settings_option_raw['varnishCliKey']) && '' !== trim((string) $settings_option_raw['varnishCliKey']);
@@ -1356,7 +1357,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 $secret_files[$key] = array(
                     'exists' => file_exists($path),
                     'readable' => is_readable($path),
-                    'insideDocumentRoot' => (0 === strpos(wp_normalize_path($path), wp_normalize_path(ABSPATH))),
+                    'insideDocumentRoot' => ('' !== $document_root && ucwp_path_is_within_root($path, $document_root)),
                     'displayPath' => self::redact_path_for_diagnostics($path),
                     'basename' => wp_basename($path),
                 );
@@ -1388,7 +1389,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                     'varnishSecretConfigured' => !empty($runtime_secret_values['varnish_admin_secret']),
                     'varnishSecretLocation' => 'runtime-secrets-file',
                     'varnishSecretInSettingsOption' => $varnish_secret_in_settings,
-                    'runtimeSecretsFileOutsideDocroot' => !(0 === strpos(wp_normalize_path($runtime_secret_path), wp_normalize_path(ABSPATH))),
+                    'runtimeSecretsFileOutsideDocroot' => !('' !== $document_root && ucwp_path_is_within_root($runtime_secret_path, $document_root)),
                 ),
                 'hardSensitiveQueryArgs' => $dangerous_query_args,
                 'hardSensitiveQueryArgsMissingFromVisibleList' => array_values($missing_visible),
@@ -1405,7 +1406,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'redisSecret' => array(
                     'configured' => !empty($runtime_secret_values['redis_password']),
                     'location' => 'runtime-secrets-file',
-                    'insideDocumentRoot' => (0 === strpos(wp_normalize_path($runtime_secret_path), wp_normalize_path(ABSPATH))),
+                    'insideDocumentRoot' => ('' !== $document_root && ucwp_path_is_within_root($runtime_secret_path, $document_root)),
                     'inSettingsOption' => $redis_secret_in_settings,
                     'legacyFileExists' => file_exists($legacy_object_secret_path),
                     'legacyDisplayPath' => self::redact_path_for_diagnostics($legacy_object_secret_path),
@@ -1414,7 +1415,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 'varnishSecret' => array(
                     'configured' => !empty($runtime_secret_values['varnish_admin_secret']),
                     'location' => 'runtime-secrets-file',
-                    'insideDocumentRoot' => (0 === strpos(wp_normalize_path($runtime_secret_path), wp_normalize_path(ABSPATH))),
+                    'insideDocumentRoot' => ('' !== $document_root && ucwp_path_is_within_root($runtime_secret_path, $document_root)),
                     'inSettingsOption' => $varnish_secret_in_settings,
                     'displayPath' => self::redact_path_for_diagnostics($runtime_secret_path),
                 ),
@@ -1858,16 +1859,30 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             $table = method_exists('Ultra_Cache_Engine', 'get_analytics_table_name') ? Ultra_Cache_Engine::get_analytics_table_name() : $wpdb->prefix . 'ultracache_analytics';
             $diag['table'] = $table;
 
-            $exists = ((string) self::diagnostic_db_get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === (string) $table);
+            $previous_suppress = $wpdb->suppress_errors(true);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Optional read-only diagnostics must return unavailable instead of showing database errors.
+            $existing_table = $wpdb->get_var(
+                $wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table))
+            );
+            $exists = ((string) $existing_table === (string) $table);
             $diag['exists'] = (bool) $exists;
             if (!$exists) {
+                $wpdb->suppress_errors($previous_suppress);
                 $diag['message'] = self::maybe_translate('Analytics DB table is missing.');
                 return $diag;
             }
 
-            $row_count = self::diagnostic_db_get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $table));
-            $diag['rows'] = null === $row_count ? 0 : (int) $row_count;
-            $keys = self::diagnostic_db_get_col($wpdb->prepare('SELECT metric_key FROM %i ORDER BY metric_type ASC, metric_key ASC LIMIT 12', $table));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Optional read-only analytics diagnostics.
+            $row_count = $wpdb->get_var(
+                $wpdb->prepare('SELECT COUNT(*) FROM %i', $table)
+            );
+            $diag['rows'] = null === $row_count || false === $row_count || '' === $row_count ? 0 : (int) $row_count;
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Optional read-only analytics diagnostics.
+            $keys = $wpdb->get_col(
+                $wpdb->prepare('SELECT metric_key FROM %i ORDER BY metric_type ASC, metric_key ASC LIMIT 12', $table)
+            );
+            $wpdb->suppress_errors($previous_suppress);
             $diag['keys'] = is_array($keys) ? array_values(array_map('strval', $keys)) : array();
             $diag['valid'] = true;
             $diag['message'] = self::maybe_translate('Analytics DB table is ready.');
@@ -2181,43 +2196,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             return $last;
         }
 
-        private static function diagnostic_db_get_var($query, $x = 0, $y = 0)
-        {
-            global $wpdb;
-
-            if (!($wpdb instanceof wpdb) || !is_string($query) || '' === trim($query)) {
-                return null;
-            }
-
-            $previous_suppress = $wpdb->suppress_errors(true);
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Optional read-only diagnostics must return unavailable instead of showing database errors.
-            $result = $wpdb->get_var($query, (int) $x, (int) $y);
-            $wpdb->suppress_errors($previous_suppress);
-
-            if (null === $result || false === $result || '' === $result) {
-                return null;
-            }
-
-            return $result;
-        }
-
-        private static function diagnostic_db_get_col($query, $x = 0)
-        {
-            global $wpdb;
-
-            if (!($wpdb instanceof wpdb) || !is_string($query) || '' === trim($query)) {
-                return array();
-            }
-
-            $previous_suppress = $wpdb->suppress_errors(true);
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Optional read-only diagnostics must return unavailable instead of showing database errors.
-            $result = $wpdb->get_col($query, (int) $x);
-            $wpdb->suppress_errors($previous_suppress);
-
-            return is_array($result) ? $result : array();
-        }
-
-        private static function get_mysql_variable_value($variable_name, $fallback_query = '')
+        private static function get_mysql_variable_value($variable_name)
         {
             global $wpdb;
 
@@ -2230,12 +2209,25 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 return '';
             }
 
-            $result = self::diagnostic_db_get_var($wpdb->prepare('SHOW VARIABLES LIKE %s', $variable_name), 1);
-            if (null === $result && '' !== $fallback_query) {
-                $result = self::diagnostic_db_get_var($fallback_query);
+            $previous_suppress = $wpdb->suppress_errors(true);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Optional read-only diagnostics must return unavailable instead of showing database errors.
+            $result = $wpdb->get_var(
+                $wpdb->prepare('SHOW VARIABLES LIKE %s', $variable_name),
+                1
+            );
+
+            if ((null === $result || false === $result || '' === $result) && 'max_allowed_packet' === $variable_name) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Fixed read-only server capability query with no user input.
+                $result = $wpdb->get_var('SELECT @@max_allowed_packet');
             }
 
-            return null === $result ? '' : (string) $result;
+            $wpdb->suppress_errors($previous_suppress);
+
+            if (null === $result || false === $result || '' === $result) {
+                return '';
+            }
+
+            return (string) $result;
         }
 
         private static function get_mysql_query_cache_size()
@@ -2245,7 +2237,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
 
         private static function get_mysql_max_allowed_packet_size()
         {
-            return self::get_mysql_variable_value('max_allowed_packet', 'SELECT @@max_allowed_packet');
+            return self::get_mysql_variable_value('max_allowed_packet');
         }
 
         private static function get_advanced_environment_diagnostic()
@@ -2278,10 +2270,9 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 $ip_port .= ':' . $server_port;
             }
 
-            $document_root = (string) ucwp_server_value('DOCUMENT_ROOT');
-            if ('' === $document_root && defined('ABSPATH')) {
-                $document_root = untrailingslashit((string) ABSPATH);
-            }
+            $document_root = function_exists('ucwp_get_server_document_root_path')
+                ? ucwp_get_server_document_root_path()
+                : untrailingslashit((string) ABSPATH);
 
             $query_cache_raw = self::get_mysql_query_cache_size();
             $query_cache_size = '';

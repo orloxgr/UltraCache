@@ -1,3 +1,37 @@
+= 2.59.06.33 =
+* ultracache.php lines 6 and 21: bumps the plugin header and UCWP_VERSION constant from 2.59.06.32 to 2.59.06.33.
+* ultracache.php lines 1015-1023: replaces duplicated ABSPATH-based runtime-secret token/path construction with the shared ucwp_get_runtime_secret_site_token() and ucwp_get_runtime_secret_path() helpers.
+* ultracache.php lines 3915-3918: resolves the browser-cache .htaccess from get_home_path() through ucwp_get_wordpress_home_path(), so WordPress subdirectory installations update the public home root instead of ABSPATH.
+* includes/core/functions.php lines 608-704: adds shared WordPress-home, effective document-root, stable runtime-secret token, and canonical outside-document-root runtime-secret path helpers.
+* includes/core/functions.php lines 706-775: resolves installed plugin roots from get_plugins() real main-file entries, then uses plugin_dir_path() and plugin_dir_url() instead of concatenating a slug directly onto WP_PLUGIN_DIR/plugins_url().
+* includes/core/functions.php lines 2596-2599 and 2906-2909: replaces dirname(dirname(__DIR__)) own-plugin root discovery with the existing UCWP_PATH constant.
+* includes/core/functions.php lines 2993-2997: validates readable root server configuration files against the WordPress home path instead of ABSPATH.
+* includes/core/functions.php lines 3013-3018: makes the runtime-secret filesystem guard consume the shared canonical runtime-secret path helper.
+* includes/core/functions.php lines 3175-3179: validates browser-cache .htaccess writes against the WordPress home path instead of ABSPATH.
+* includes/class-object-cache-manager.php lines 252-258: makes object-cache Redis secret loading use the same shared runtime-secret token/path helpers as the main plugin.
+* includes/settings/class-settings-trait.php lines 1204-1209: detects installed W3 Total Cache-related plugins through the WordPress get_plugins() inventory helper instead of file_exists(WP_PLUGIN_DIR . slug).
+* includes/rest/class-rest-profiler-trait.php lines 3623-3627, 3647-3656, and 3962-3973: removes direct WP_PLUGIN_DIR + slug fallbacks from runtime JS discovery and resolves plugin roots only through the installed-plugin main-file helper.
+* includes/diagnostics/class-diagnostics-trait.php lines 1332, 1360, 1392, 1409, and 1418: reports secret-file document-root placement against the effective server document root instead of ABSPATH string-prefix checks.
+* includes/diagnostics/class-diagnostics-trait.php lines 2273-2275 and 2300: reports the shared effective server document root in server diagnostics.
+* uninstall.php lines 33-83 and 451-457: computes uninstall-time runtime-secret cleanup from get_home_path()/DOCUMENT_ROOT using the same canonical outside-document-root location rules.
+* readme.txt line 8 and README.md line 3: updates release metadata to 2.59.06.33.
+* No files or directories were added or deleted. WordPress core include paths, wp-config.php discovery, WP_CONTENT_DIR drop-ins/cache storage, and ABSPATH . WPINC core asset mapping remain intentionally unchanged.
+
+= 2.59.06.32 =
+* Removes the generic diagnostic database query wrappers that passed prepared SQL through an opaque `$query` parameter.
+* Executes the analytics table and MySQL variable diagnostics through direct, scoped `$wpdb` calls with placeholders where values or identifiers are dynamic.
+* Keeps database error suppression and unavailable-value behavior unchanged; no cache, analytics collection, or frontend runtime behavior changes.
+
+= 2.59.06.31 =
+* Corrects the first two Console Error Suggestion actions so they append to the unsaved JS Delay / Defer Exclusions draft instead of Defer those scripts.
+* Renames those actions to Add This Script Exclusions and Add Full Dependency Chain to Exclusions.
+* Keeps the two delay actions appending to the unsaved Safe Third-Party Delay Patterns draft; per-finding button hiding remains unchanged.
+
+= 2.59.06.30 =
+* Replaces the two per-result JS scanner append buttons with four choices: defer this script, defer the full discovered owner chain, delay this script, or delay the full discovered owner chain.
+* Appends the selected pattern only to the corresponding unsaved textarea draft; the other three buttons disappear only for that finding, while other findings remain unchanged.
+* Removes the provider-contact disclaimer text from Safe Third-Party Delay Patterns and Known Functional Third-Party Delay Patterns.
+
 = 2.59.06.29 =
 * Removes same-request manual CSS bundle tag generation when a page bundle is built too late for WordPress enqueue.
 * Applies page CSS bundle replacement only when the WordPress-enqueued bundle markup is present in the rendered HTML.
