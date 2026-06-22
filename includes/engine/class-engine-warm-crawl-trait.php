@@ -186,12 +186,12 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
         private function should_verify_loopback_ssl($url)
         {
-            return !function_exists('ucwp_is_local_https_url') || !ucwp_is_local_https_url($url);
+            return !function_exists('ultracache_is_local_https_url') || !ultracache_is_local_https_url($url);
         }
 
         private function get_runtime_locks_dir()
         {
-            return trailingslashit(UCWP_CACHE_DIR) . 'locks/';
+            return trailingslashit(ULTRACACHE_CACHE_DIR) . 'locks/';
         }
 
         private function is_runtime_lock_file_path($file)
@@ -202,8 +202,8 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             }
 
             $dir = wp_normalize_path($this->get_runtime_locks_dir());
-            if (function_exists('ucwp_path_has_dir_prefix')) {
-                if (!ucwp_path_has_dir_prefix($file, $dir)) {
+            if (function_exists('ultracache_path_has_dir_prefix')) {
+                if (!ultracache_path_has_dir_prefix($file, $dir)) {
                     return false;
                 }
             } elseif (0 !== strpos($file, trailingslashit($dir))) {
@@ -218,8 +218,8 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
         {
             $file = wp_normalize_path((string) $file);
             if ('' === $file || !$this->is_runtime_lock_file_path($file)) {
-                if (function_exists('ucwp_debug_log')) {
-                    ucwp_debug_log('runtime lock delete blocked: invalid path', array(
+                if (function_exists('ultracache_debug_log')) {
+                    ultracache_debug_log('runtime lock delete blocked: invalid path', array(
                         'path' => $file,
                         'context' => (string) $context,
                     ));
@@ -231,7 +231,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 return true;
             }
 
-            $deleted = function_exists('ucwp_safe_unlink') ? ucwp_safe_unlink($file, (string) $context) : false;
+            $deleted = ultracache_safe_unlink($file, (string) $context);
             clearstatcache(true, $file);
             if (!$deleted && file_exists($file)) {
                 $dir = dirname($file);
@@ -239,10 +239,10 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                     'context' => (string) $context,
                     'file' => basename($file),
                     'path' => $file,
-                    'dirWritable' => function_exists('ucwp_path_is_writable') ? (ucwp_path_is_writable($dir) ? 'yes' : 'no') : 'unknown',
+                    'dirWritable' => function_exists('ultracache_path_is_writable') ? (ultracache_path_is_writable($dir) ? 'yes' : 'no') : 'unknown',
                 ));
-                if (function_exists('ucwp_debug_log')) {
-                    ucwp_debug_log('runtime lock delete failed', array(
+                if (function_exists('ultracache_debug_log')) {
+                    ultracache_debug_log('runtime lock delete failed', array(
                         'path' => $file,
                         'context' => (string) $context,
                     ));
@@ -296,7 +296,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
             // Keep the normal HIT/MISS path cheap. Locks are also deleted on normal release;
             // this maintenance only handles orphaned files left by timeouts/fatals/killed PHP workers.
-            if (wp_rand(1, 200) !== 1 && '1' !== sanitize_text_field(ucwp_query_value('ucwp_lock_maintenance'))) {
+            if (wp_rand(1, 200) !== 1 && '1' !== sanitize_text_field(ultracache_query_value('ultracache_lock_maintenance'))) {
                 return 0;
             }
 
@@ -321,7 +321,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 if (!$this->is_runtime_lock_file_path($file) || !is_file($file)) {
                     continue;
                 }
-                $mtime = function_exists('ucwp_safe_filemtime') ? ucwp_safe_filemtime($file, 'runtime_lock_cleanup') : @filemtime($file);
+                $mtime = ultracache_safe_filemtime($file, 'runtime_lock_cleanup');
                 if (!$mtime || ($now - (int) $mtime) < $age_seconds) {
                     continue;
                 }
@@ -389,13 +389,13 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
         private function is_ultracache_internal_loopback_request()
         {
-            if ('1' === sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_INTERNAL_REQUEST'))) {
+            if ('1' === sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_INTERNAL_REQUEST'))) {
                 return true;
             }
-            if ('1' === sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_WARM'))) {
+            if ('1' === sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_WARM'))) {
                 return true;
             }
-            if ('1' === sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_CSS_BUNDLE'))) {
+            if ('1' === sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_CSS_BUNDLE'))) {
                 return true;
             }
             if ($this->is_frontpage_css_scan_mode()) {
@@ -437,7 +437,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             $ignore_runtime_bypass = !empty($args['ignore_runtime_bypass']);
             $force_refresh = !empty($args['force_refresh']);
             $settings_for_warm = $this->get_settings();
-            $operation_budget = function_exists('ucwp_get_safe_operation_budget') ? ucwp_get_safe_operation_budget('warm_url', $args['time_budget'] ?? null, 45) : array();
+            $operation_budget = function_exists('ultracache_get_safe_operation_budget') ? ultracache_get_safe_operation_budget('warm_url', $args['time_budget'] ?? null, 45) : array();
             $url = esc_url_raw((string) $url);
             if (!$this->is_cacheable_local_url($url)) {
                 $result = array(
@@ -507,20 +507,20 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             $last_error = '';
 
             foreach ($buckets as $bucket) {
-                $pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($operation_budget) : '';
+                $pause_reason = function_exists('ultracache_operation_pause_reason') ? ultracache_operation_pause_reason($operation_budget) : '';
                 if ('' !== $pause_reason) {
                     $last_error = 'Warm paused by ' . $pause_reason . '.';
                     break;
                 }
                 $accept_header = $this->get_accept_header_for_bucket($bucket);
-                $response = ucwp_safe_loopback_remote_request(
+                $response = ultracache_safe_loopback_remote_request(
                     $url,
                     array(
                         'method'      => 'GET',
                         'timeout'     => 10,
                         'redirection' => 3,
                         'sslverify'   => $this->should_verify_loopback_ssl($url),
-                        'user-agent'  => 'Mozilla/5.0 (compatible; UltraCache-Warm/' . UCWP_VERSION . '; +https://wordpress.org)',
+                        'user-agent'  => 'Mozilla/5.0 (compatible; UltraCache-Warm/' . ULTRACACHE_VERSION . '; +https://wordpress.org)',
                         'headers'     => array_filter(
                             array(
                                 'Accept'                          => $accept_header,
@@ -624,12 +624,12 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
         private function purge_cache_directory_preserving_google_fonts()
         {
-            $root = trailingslashit(UCWP_CACHE_DIR);
+            $root = trailingslashit(ULTRACACHE_CACHE_DIR);
             if ('' === $root || !is_dir($root)) {
                 return;
             }
 
-            $items = function_exists('ucwp_safe_scandir') ? ucwp_safe_scandir($root, 'purge_all_preserve_google_fonts scandir') : scandir($root);
+            $items = ultracache_safe_scandir($root, 'purge_all_preserve_google_fonts scandir');
             if (!is_array($items)) {
                 return;
             }
@@ -644,7 +644,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 if (is_dir($path) && !is_link($path)) {
                     $this->recursive_delete($path);
                 } else {
-                    ucwp_safe_unlink($path);
+                    ultracache_safe_unlink($path);
                 }
             }
         }
@@ -662,9 +662,6 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                     Ultra_Cache_WP::mark_all_cache_asset_refs_inactive();
                 }
                 self::ensure_cache_directories();
-                if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'sync_runtime_config')) {
-                    Ultra_Cache_WP::sync_runtime_config();
-                }
                 if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'reset_cron_warmup_queue_after_cache_flush')) {
                     Ultra_Cache_WP::reset_cron_warmup_queue_after_cache_flush('purge_all');
                 }
@@ -677,7 +674,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
                 $this->record_cache_event('purge-all');
                 $this->record_analytics_purge('all');
-                do_action('ucwp_after_purge_all', array('scope' => 'all'));
+                do_action('ultracache_after_purge_all', array('scope' => 'all'));
                 return true;
             } finally {
                 $this->release_runtime_lock($lock_name, true);
@@ -728,7 +725,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 )
             );
             $this->record_analytics_purge($scope, $primary_url);
-            do_action('ucwp_after_purge_urls', $purged_urls, (string) $scope, array_merge(array('url' => $primary_url), $payload));
+            do_action('ultracache_after_purge_urls', $purged_urls, (string) $scope, array_merge(array('url' => $primary_url), $payload));
 
             return true;
         }
@@ -1126,7 +1123,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
             $sql = "SELECT COUNT(DISTINCT p.ID) FROM {$wpdb->posts} p {$join} WHERE p.post_status = 'publish' AND p.post_type = %s {$where} AND (p.post_date > %s OR (p.post_date = %s AND p.ID >= %d))";
             // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
             $prepared = $wpdb->prepare($sql, array_merge(array($post_type), $params, array($post_date, $post_date, (int) $post->ID)));
-            $cache_key = 'ucwp_desc_pos_' . md5((string) $prepared);
+            $cache_key = 'ultracache_desc_pos_' . md5((string) $prepared);
             $cached = wp_cache_get($cache_key, 'ultracache');
             if (false !== $cached) {
                 return max(1, (int) $cached);
@@ -1224,7 +1221,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
         public function get_crawl_urls($scope = 'full')
         {
             $scope = $this->normalize_crawl_scope($scope);
-            $max_urls = (int) apply_filters('ucwp_max_crawl_urls', 5000);
+            $max_urls = (int) apply_filters('ultracache_max_crawl_urls', 5000);
             if ($max_urls <= 0) {
                 $max_urls = 5000;
             }
@@ -1242,7 +1239,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                     $urls = array_slice($urls, 0, $max_urls);
                 }
 
-                return apply_filters('ucwp_crawl_urls', $urls, $scope);
+                return apply_filters('ultracache_crawl_urls', $urls, $scope);
             }
 
             $urls = array(home_url('/'));
@@ -1319,7 +1316,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                 $urls = array_slice($urls, 0, $max_urls);
             }
 
-            return apply_filters('ucwp_crawl_urls', $urls, $scope);
+            return apply_filters('ultracache_crawl_urls', $urls, $scope);
         }
 
         public function get_crawl_urls_batch($offset = 0, $limit = 100, $scope = 'full')
@@ -1361,7 +1358,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
         public function get_crawl_urls_cursor_batch($cursor = '', $limit = 100, $scope = 'full')
         {
             $limit = max(1, min(500, (int) $limit));
-            $max_urls = (int) apply_filters('ucwp_max_crawl_urls', 5000);
+            $max_urls = (int) apply_filters('ultracache_max_crawl_urls', 5000);
             if ($max_urls <= 0) {
                 $max_urls = 5000;
             }
@@ -1516,7 +1513,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
         public function get_crawl_scope_summary($scope_settings_override = null)
         {
             $scope_settings = is_array($scope_settings_override) ? $this->normalize_warm_scope_settings_array($scope_settings_override) : $this->get_warm_scope_settings();
-            $max_urls = (int) apply_filters('ucwp_max_crawl_urls', 5000);
+            $max_urls = (int) apply_filters('ultracache_max_crawl_urls', 5000);
             if ($max_urls <= 0) {
                 $max_urls = 5000;
             }
@@ -1868,7 +1865,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
 
             $urls = array_values(array_unique(array_filter($urls)));
 
-            return apply_filters('ucwp_crawl_seed_urls', $urls, $scope);
+            return apply_filters('ultracache_crawl_seed_urls', $urls, $scope);
         }
 
         private function normalize_crawl_scope($scope)
@@ -1897,7 +1894,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
              * generation. Warm scope selection must stay a light option read.
              */
             if (null === $raw) {
-                $raw = get_option(UCWP_SETTINGS_KEY, array());
+                $raw = get_option(ULTRACACHE_SETTINGS_KEY, array());
             }
 
             return $this->normalize_warm_scope_settings_array(is_array($raw) ? $raw : array());

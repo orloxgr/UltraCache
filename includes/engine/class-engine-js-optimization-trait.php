@@ -9,14 +9,14 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
         private function get_script_critical_request_candidate($tag, $offset, $head_end, array $settings = array())
         {
             $tag = (string) $tag;
-            $delayed = (false !== stripos($tag, 'type="text/ucwp-delayed-js"') || false !== stripos($tag, "type='text/ucwp-delayed-js'") || false !== stripos($tag, 'data-ucwp-src='));
-            $src = $delayed ? (string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-src') : (string) $this->extract_attribute_from_html_tag($tag, 'src');
+            $delayed = (false !== stripos($tag, 'type="text/ultracache-delayed-js"') || false !== stripos($tag, "type='text/ultracache-delayed-js'") || false !== stripos($tag, 'data-ultracache-src='));
+            $src = $delayed ? (string) $this->extract_attribute_from_html_tag($tag, 'data-ultracache-src') : (string) $this->extract_attribute_from_html_tag($tag, 'src');
             $src = html_entity_decode($src, ENT_QUOTES | ENT_HTML5);
             if ('' === $src) {
                 return array();
             }
 
-            $handle = (string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-handle');
+            $handle = (string) $this->extract_attribute_from_html_tag($tag, 'data-ultracache-handle');
             if ('' === $handle) {
                 $handle = (string) $this->extract_attribute_from_html_tag($tag, 'id');
                 $handle = preg_replace('/-js(?:-extra)?$/', '', $handle);
@@ -112,14 +112,16 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return trim((string) $url);
             }
 
-            $markers = array(
-                '/wp-includes/js/' => 'core',
-            );
-            if (function_exists('ucwp_plugins_public_path')) {
-                $markers[ucwp_plugins_public_path()] = 'plugin';
+            $markers = array();
+            $core_js_marker = function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path('js/') : '';
+            if ('' !== $core_js_marker) {
+                $markers[$core_js_marker] = 'core';
             }
-            if (function_exists('ucwp_themes_public_paths')) {
-                foreach (ucwp_themes_public_paths() as $theme_marker) {
+            if (function_exists('ultracache_plugins_public_path')) {
+                $markers[ultracache_plugins_public_path()] = 'plugin';
+            }
+            if (function_exists('ultracache_themes_public_paths')) {
+                foreach (ultracache_themes_public_paths() as $theme_marker) {
                     $markers[$theme_marker] = 'theme';
                 }
             }
@@ -268,10 +270,10 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     if ('' === $trimmed_code) {
                         continue;
                     }
-                    if (false !== stripos($attrs, 'src=') || false !== stripos($attrs, 'data-ucwp-src=') || false !== stripos($attrs, 'text/ucwp-delayed-js') || false !== stripos($attrs, 'application/ld+json') || false !== stripos($attrs, 'speculationrules')) {
+                    if (false !== stripos($attrs, 'src=') || false !== stripos($attrs, 'data-ultracache-src=') || false !== stripos($attrs, 'text/ultracache-delayed-js') || false !== stripos($attrs, 'application/ld+json') || false !== stripos($attrs, 'speculationrules')) {
                         continue;
                     }
-                    if (false !== stripos($trimmed_code, '__ucwpDelayLoader') || false !== stripos($trimmed_code, 'text/ucwp-delayed-js') || false !== stripos($trimmed_code, 'gtm.start') || false !== stripos($trimmed_code, 'googletagmanager.com/gtm.js') || false !== stripos($trimmed_code, 'wp-emoji-settings') || false !== stripos($trimmed_code, '_wpemojiSettings')) {
+                    if (false !== stripos($trimmed_code, '__ultracacheDelayLoader') || false !== stripos($trimmed_code, 'text/ultracache-delayed-js') || false !== stripos($trimmed_code, 'gtm.start') || false !== stripos($trimmed_code, 'googletagmanager.com/gtm.js') || false !== stripos($trimmed_code, 'wp-emoji-settings') || false !== stripos($trimmed_code, '_wpemojiSettings')) {
                         continue;
                     }
 
@@ -312,12 +314,12 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             $html = is_string($html) ? $html : (string) $html;
             $definitions = array();
 
-            if (!preg_match_all('/<script\b[^>]*(?:type\s*=\s*["\']text\/ucwp-delayed-js["\']|data-ucwp-src\s*=)[^>]*>/i', $html, $matches)) {
+            if (!preg_match_all('/<script\b[^>]*(?:type\s*=\s*["\']text\/ultracache-delayed-js["\']|data-ultracache-src\s*=)[^>]*>/i', $html, $matches)) {
                 return $definitions;
             }
 
             foreach ((array) ($matches[0] ?? array()) as $tag) {
-                $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-src'), ENT_QUOTES | ENT_HTML5);
+                $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'data-ultracache-src'), ENT_QUOTES | ENT_HTML5);
                 if ('' === $src) {
                     $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'src'), ENT_QUOTES | ENT_HTML5);
                 }
@@ -330,12 +332,12 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     continue;
                 }
 
-                $content = ucwp_guarded_asset_file_get_contents($local_path, 'js', 'js_delay_safety_local_asset', true);
+                $content = ultracache_guarded_asset_file_get_contents($local_path, 'js', 'js_delay_safety_local_asset', true);
                 if (!is_string($content) || '' === $content) {
                     continue;
                 }
 
-                $handle = (string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-handle');
+                $handle = (string) $this->extract_attribute_from_html_tag($tag, 'data-ultracache-handle');
                 $suggestion = $this->get_delay_safety_suggested_exclusion_from_url($src);
                 $symbols = array();
 
@@ -380,12 +382,12 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             $html = is_string($html) ? $html : (string) $html;
             $records = array();
 
-            if (!preg_match_all('/<script\b[^>]*(?:type\s*=\s*["\']text\/ucwp-delayed-js["\']|data-ucwp-src\s*=)[^>]*>/i', $html, $matches)) {
+            if (!preg_match_all('/<script\b[^>]*(?:type\s*=\s*["\']text\/ultracache-delayed-js["\']|data-ultracache-src\s*=)[^>]*>/i', $html, $matches)) {
                 return $records;
             }
 
             foreach ((array) ($matches[0] ?? array()) as $tag) {
-                $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-src'), ENT_QUOTES | ENT_HTML5);
+                $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'data-ultracache-src'), ENT_QUOTES | ENT_HTML5);
                 if ('' === $src) {
                     $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($tag, 'src'), ENT_QUOTES | ENT_HTML5);
                 }
@@ -398,14 +400,14 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     continue;
                 }
 
-                $content = ucwp_guarded_asset_file_get_contents($local_path, 'js', 'js_delay_safety_local_asset', true);
+                $content = ultracache_guarded_asset_file_get_contents($local_path, 'js', 'js_delay_safety_local_asset', true);
                 if (!is_string($content) || '' === $content) {
                     continue;
                 }
 
                 $records[] = array(
                     'url' => $src,
-                    'handle' => (string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-handle'),
+                    'handle' => (string) $this->extract_attribute_from_html_tag($tag, 'data-ultracache-handle'),
                     'localPath' => $local_path,
                     'suggestedExclusion' => $this->get_delay_safety_suggested_exclusion_from_url($src),
                     'content' => $content,
@@ -515,10 +517,10 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     if ('' === $trimmed_code) {
                         continue;
                     }
-                    if (false !== stripos($attrs, 'src=') || false !== stripos($attrs, 'data-ucwp-src=') || false !== stripos($attrs, 'text/ucwp-delayed-js') || false !== stripos($attrs, 'application/ld+json') || false !== stripos($attrs, 'speculationrules')) {
+                    if (false !== stripos($attrs, 'src=') || false !== stripos($attrs, 'data-ultracache-src=') || false !== stripos($attrs, 'text/ultracache-delayed-js') || false !== stripos($attrs, 'application/ld+json') || false !== stripos($attrs, 'speculationrules')) {
                         continue;
                     }
-                    if (false !== stripos($trimmed_code, '__ucwpDelayLoader') || false !== stripos($trimmed_code, 'text/ucwp-delayed-js') || false !== stripos($trimmed_code, 'gtm.start') || false !== stripos($trimmed_code, 'googletagmanager.com/gtm.js') || false !== stripos($trimmed_code, 'wp-emoji-settings') || false !== stripos($trimmed_code, '_wpemojiSettings')) {
+                    if (false !== stripos($trimmed_code, '__ultracacheDelayLoader') || false !== stripos($trimmed_code, 'text/ultracache-delayed-js') || false !== stripos($trimmed_code, 'gtm.start') || false !== stripos($trimmed_code, 'googletagmanager.com/gtm.js') || false !== stripos($trimmed_code, 'wp-emoji-settings') || false !== stripos($trimmed_code, '_wpemojiSettings')) {
                         continue;
                     }
 
@@ -611,13 +613,26 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
              * for assets already present in the inspected HTML. They do not
              * enqueue, load, fetch, or contact third-party providers.
              */
+            $revslider_markers = array_values(array_filter(array(
+                function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('revslider') : '',
+                function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('slider-revolution') : '',
+            )));
+            $elementor_markers = array_values(array_filter(array(
+                function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('elementor') : '',
+                function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('elementor-pro') : '',
+            )));
+            $divi_markers = array_values(array_filter(array_merge(
+                function_exists('ultracache_themes_public_paths') ? ultracache_themes_public_paths('Divi') : array(),
+                array(function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('divi-builder') : '')
+            )));
+
             $groups = array(
                 array(
                     'category' => 'detected-component-protection',
                     'label' => __('Detected component protections', 'ultracache'),
                     'confidence' => 'recommended',
                     'appendable' => true,
-                    'markers' => array('sr7-module', 'sr7-slide', 'revslider', '/plugins/revslider/', 'themepunch', 'rs-module', 'wp-block-themepunch-revslider'),
+                    'markers' => array_merge(array('sr7-module', 'sr7-slide', 'revslider', 'themepunch', 'rs-module', 'wp-block-themepunch-revslider'), $revslider_markers),
                     'suggestions' => array('revslider', 'sr7', 'tptools', 'tp-tools', 'rs6', 'rs-module'),
                     'reason' => __('Slider Revolution / SR7 assets or markup were detected on this page. Keep slider runtime assets out of Delay JS unless visually tested.', 'ultracache'),
                 ),
@@ -680,7 +695,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'label' => __('Detected component protections', 'ultracache'),
                     'confidence' => 'recommended',
                     'appendable' => true,
-                    'markers' => array('elementor', 'elementor-widget', '/plugins/elementor/', '/plugins/elementor-pro/'),
+                    'markers' => array_merge(array('elementor', 'elementor-widget'), $elementor_markers),
                     'suggestions' => array('elementor', 'elementor-frontend', 'elementor-pro', 'frontend-modules', 'webpack.runtime'),
                     'reason' => __('Elementor assets or widgets were detected on this page. Keep core Elementor runtime dependencies protected unless dependency-safe testing passes.', 'ultracache'),
                 ),
@@ -689,7 +704,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'label' => __('Detected component protections', 'ultracache'),
                     'confidence' => 'recommended',
                     'appendable' => true,
-                    'markers' => array('et_pb_', 'et-builder', 'et-core', '/themes/Divi/', '/plugins/divi-builder/'),
+                    'markers' => array_merge(array('et_pb_', 'et-builder', 'et-core'), $divi_markers),
                     'suggestions' => array('divi', 'et-core', 'et-builder', 'et_pb', 'cmplz_activated_divi_recaptcha'),
                     'reason' => __('Divi builder assets or markup were detected on this page. Keep Divi runtime dependencies protected unless dependency-safe testing passes.', 'ultracache'),
                 ),
@@ -816,7 +831,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'confidence' => 'review',
                     'appendable' => false,
                     'markers' => array('woocommerce', 'wc-', 'cart', 'checkout', 'account', 'add-to-cart', 'wc-cart-fragments'),
-                    'suggestions' => array(function_exists('ucwp_plugins_public_path') ? ucwp_plugins_public_path('woocommerce') : 'woocommerce/', 'woocommerce/assets/js/frontend/', 'wc-cart-fragments', 'wc-add-to-cart', 'add-to-cart', 'single-product', 'cart-fragments'),
+                    'suggestions' => array(function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('woocommerce') : 'woocommerce/', 'woocommerce/assets/js/frontend/', 'wc-cart-fragments', 'wc-add-to-cart', 'add-to-cart', 'single-product', 'cart-fragments'),
                     'reason' => __('WooCommerce/cart/account markers were detected. Review these before excluding broadly because shop pages vary by site.', 'ultracache'),
                 ),
                 array(
@@ -877,9 +892,9 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             }
 
             foreach ($scripts as $script) {
-                $attrs = isset($script[1]) ? (string) $script[1] : '';
+                $tag = isset($script[0]) ? (string) $script[0] : '';
                 $code = isset($script[2]) ? (string) $script[2] : '';
-                $id = (string) $this->extract_attribute_from_html_tag('<script ' . $attrs . '>', 'id');
+                $id = (string) $this->extract_attribute_from_html_tag($tag, 'id');
                 $id_lc = strtolower(trim($id));
                 $code_lc = strtolower($code);
                 $sample = trim((string) preg_replace('/\s+/', ' ', wp_strip_all_tags($code)));
@@ -1091,7 +1106,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return;
             }
 
-            $GLOBALS['ucwp_runtime_js_scan_request_data'] = $data;
+            $GLOBALS['ultracache_runtime_js_scan_request_data'] = $data;
             if (function_exists('wp_set_current_user')) {
                 wp_set_current_user(0);
             }
@@ -1101,11 +1116,11 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
         private function get_runtime_js_scan_request_data($allow_preverified = true)
         {
-            if (!empty($allow_preverified) && isset($GLOBALS['ucwp_runtime_js_scan_request_data']) && is_array($GLOBALS['ucwp_runtime_js_scan_request_data'])) {
-                return $GLOBALS['ucwp_runtime_js_scan_request_data'];
+            if (!empty($allow_preverified) && isset($GLOBALS['ultracache_runtime_js_scan_request_data']) && is_array($GLOBALS['ultracache_runtime_js_scan_request_data'])) {
+                return $GLOBALS['ultracache_runtime_js_scan_request_data'];
             }
 
-            if (is_admin() || empty($_GET['ucwp_runtime_js_scan']) || empty($_GET['ucwp_runtime_js_scan_id']) || empty($_GET['ucwp_runtime_js_scan_nonce'])) {
+            if (is_admin() || empty($_GET['ultracache_runtime_js_scan']) || empty($_GET['ultracache_runtime_js_scan_id']) || empty($_GET['ultracache_runtime_js_scan_nonce'])) {
                 return false;
             }
 
@@ -1113,17 +1128,17 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return false;
             }
 
-            $nonce = sanitize_text_field(wp_unslash($_GET['ucwp_runtime_js_scan_nonce']));
-            if (!wp_verify_nonce($nonce, 'ucwp_runtime_js_scan')) {
+            $nonce = sanitize_text_field(wp_unslash($_GET['ultracache_runtime_js_scan_nonce']));
+            if (!wp_verify_nonce($nonce, 'ultracache_runtime_js_scan')) {
                 return false;
             }
 
-            $scan_id = sanitize_key(wp_unslash($_GET['ucwp_runtime_js_scan_id']));
+            $scan_id = sanitize_key(wp_unslash($_GET['ultracache_runtime_js_scan_id']));
             if ('' === $scan_id || strlen($scan_id) > 64) {
                 return false;
             }
 
-            $context = isset($_GET['ucwp_runtime_js_scan_context']) ? sanitize_key(wp_unslash($_GET['ucwp_runtime_js_scan_context'])) : 'anonymous';
+            $context = isset($_GET['ultracache_runtime_js_scan_context']) ? sanitize_key(wp_unslash($_GET['ultracache_runtime_js_scan_context'])) : 'anonymous';
             $context = 'logged-in' === $context ? 'logged-in' : 'anonymous';
 
             return array(
@@ -1147,7 +1162,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return $tag;
             }
 
-            if ($this->is_ucwp_frontend_js_helper_handle($handle)) {
+            if ($this->is_ultracache_frontend_js_helper_handle($handle)) {
                 return $this->strip_native_loading_attributes_from_script_tag($tag);
             }
 
@@ -1270,7 +1285,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $src = isset($record['src']) ? (string) $record['src'] : '';
                 $group = isset($record['group']) ? (string) $record['group'] : '';
 
-                if ($this->is_ucwp_frontend_js_helper_record($record)) {
+                if ($this->is_ultracache_frontend_js_helper_record($record)) {
                     continue;
                 }
 
@@ -1333,7 +1348,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $handle = isset($record['handle']) ? (string) $record['handle'] : '';
                 $src = isset($record['src']) ? (string) $record['src'] : '';
 
-                if ($this->is_ucwp_frontend_js_helper_record($record)) {
+                if ($this->is_ultracache_frontend_js_helper_record($record)) {
                     continue;
                 }
 
@@ -1410,7 +1425,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 if (in_array($name_lc, array('src', 'async', 'defer', 'type', 'data-wp-strategy'), true)) {
                     continue;
                 }
-                if (0 === strpos($name_lc, 'data-ucwp-')) {
+                if (0 === strpos($name_lc, 'data-ultracache-')) {
                     continue;
                 }
                 if (!preg_match('/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/', $name_lc)) {
@@ -1422,42 +1437,21 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             }
 
             $attrs['src'] = (string) $asset['url'];
-            $attrs['defer'] = 'defer';
-            $attrs['data-ucwp-deferred-inline'] = '1';
+            $attrs['defer'] = true;
+            $attrs['data-ultracache-deferred-inline'] = '1';
             if (!empty($asset['hash'])) {
-                $attrs['data-ucwp-deferred-inline-hash'] = (string) $asset['hash'];
+                $attrs['data-ultracache-deferred-inline-hash'] = (string) $asset['hash'];
             }
 
-            $compiled = array();
-            foreach ($attrs as $name => $value) {
-                $name = strtolower(trim((string) $name));
-                if ('' === $name || !preg_match('/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/', $name)) {
-                    continue;
-                }
-                if (true === $value || $value === $name) {
-                    $compiled[] = esc_attr($name);
-                    continue;
-                }
-                if ('src' === $name) {
-                    $compiled[] = 'src="' . esc_url((string) $value) . '"';
-                    continue;
-                }
-                $compiled[] = esc_attr($name) . '="' . esc_attr((string) $value) . '"';
-            }
-
-            if (empty($compiled)) {
-                return $tag;
-            }
-
-            // Intentional final HTML optimization output: this replaces an already-rendered inline script with a deferred generated asset reference.
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedScript
-            return '<script ' . implode(' ', $compiled) . '></script>';
+            // This replaces an already-rendered inline script during final HTML optimization, after the enqueue phase.
+            // Use the WordPress script-tag API so attributes are filtered and serialized by core instead of manual markup.
+            return rtrim(wp_get_script_tag($attrs), "\r\n");
         }
 
         private function write_deferred_inline_js_asset($content, array $record = array())
         {
             $content = (string) $content;
-            if ('' === trim($content) || !defined('UCWP_CACHE_DIR')) {
+            if ('' === trim($content) || !defined('ULTRACACHE_CACHE_DIR')) {
                 return array();
             }
 
@@ -1467,7 +1461,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $handle = 'inline';
             }
             $filename = 'defer-' . $handle . '-' . $hash . '.js';
-            $dir = ucwp_generated_asset_dir('deferred-inline-js');
+            $dir = ultracache_generated_asset_dir('deferred-inline-js');
             $file = $dir . $filename;
 
             if (!is_dir($dir) && function_exists('wp_mkdir_p')) {
@@ -1476,7 +1470,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             if (is_dir($dir)) {
                 $index = $dir . 'index.php';
                 if (!is_file($index)) {
-                    ucwp_safe_file_put_contents($index, "<?php\n// Silence is golden.\n", 0, 'deferred_inline_js_index');
+                    ultracache_safe_file_put_contents($index, "<?php\n// Silence is golden.\n", 0, 'deferred_inline_js_index');
                 }
             }
 
@@ -1485,7 +1479,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 if ('' !== $payload && "\n" !== substr($payload, -1)) {
                     $payload .= "\n";
                 }
-                $written = ucwp_safe_file_put_contents($file, $payload, LOCK_EX, 'deferred_inline_js_asset');
+                $written = ultracache_safe_file_put_contents($file, $payload, LOCK_EX, 'deferred_inline_js_asset');
                 if (false === $written) {
                     return array();
                 }
@@ -1494,13 +1488,13 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             return array(
                 'hash' => $hash,
                 'path' => $file,
-                'url'  => ucwp_generated_asset_url('deferred-inline-js', $filename),
+                'url'  => ultracache_generated_asset_url('deferred-inline-js', $filename),
             );
         }
 
         private function restore_user_excluded_delayed_scripts_in_html($html, array $settings = array())
         {
-            if (!is_string($html) || '' === $html || false === stripos($html, 'text/ucwp-delayed-js')) {
+            if (!is_string($html) || '' === $html || false === stripos($html, 'text/ultracache-delayed-js')) {
                 return $html;
             }
 
@@ -1556,7 +1550,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
         private function restore_delayed_script_record_tag(array $record)
         {
             $tag = isset($record['tag']) ? (string) $record['tag'] : '';
-            if ('' === $tag || false === stripos($tag, 'text/ucwp-delayed-js')) {
+            if ('' === $tag || false === stripos($tag, 'text/ultracache-delayed-js')) {
                 return $tag;
             }
 
@@ -1570,20 +1564,20 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             $preserved = $this->decode_delayed_script_preserved_attributes($attrs);
 
             foreach (array('id', 'nonce', 'crossorigin', 'referrerpolicy', 'integrity') as $attr) {
-                $data_key = 'data-ucwp-' . $attr;
+                $data_key = 'data-ultracache-' . $attr;
                 if (!isset($preserved[$attr]) && isset($attrs[$data_key]) && '' !== $attrs[$data_key]) {
                     $preserved[$attr] = (string) $attrs[$data_key];
                 }
             }
 
-            $is_inline = !empty($record['inline_delayed']) || (isset($attrs['data-ucwp-inline']) && '1' === (string) $attrs['data-ucwp-inline']);
+            $is_inline = !empty($record['inline_delayed']) || (isset($attrs['data-ultracache-inline']) && '1' === (string) $attrs['data-ultracache-inline']);
             if (!$is_inline) {
                 $src = isset($record['src']) ? (string) $record['src'] : '';
-                if ('' === $src && isset($attrs['data-ucwp-src'])) {
-                    $src = (string) $attrs['data-ucwp-src'];
+                if ('' === $src && isset($attrs['data-ultracache-src'])) {
+                    $src = (string) $attrs['data-ultracache-src'];
                 }
-                if ('' === $src && isset($attrs['data-ucwp-original-src'])) {
-                    $src = (string) $attrs['data-ucwp-original-src'];
+                if ('' === $src && isset($attrs['data-ultracache-original-src'])) {
+                    $src = (string) $attrs['data-ultracache-original-src'];
                 }
                 if ('' === $src) {
                     return $tag;
@@ -1595,35 +1589,32 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
             unset($preserved['type'], $preserved['async'], $preserved['defer'], $preserved['data-wp-strategy']);
             foreach (array_keys($preserved) as $name) {
-                if (0 === strpos(strtolower((string) $name), 'data-ucwp-')) {
+                if (0 === strpos(strtolower((string) $name), 'data-ultracache-')) {
                     unset($preserved[$name]);
                 }
             }
 
-            $compiled = array();
+            $script_attributes = array();
             foreach ($preserved as $name => $value) {
                 $name = strtolower(trim((string) $name));
                 if ('' === $name || !preg_match('/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/', $name)) {
                     continue;
                 }
-                if (true === $value || $value === $name) {
-                    $compiled[] = esc_attr($name);
-                    continue;
-                }
-                $compiled[] = esc_attr($name) . '="' . esc_attr((string) $value) . '"';
+                $script_attributes[$name] = true === $value || $value === $name ? true : (string) $value;
             }
 
-            // This restores a script tag from an UltraCache delayed-script placeholder in final rendered HTML.
-            // The original script was already printed by WordPress/theme/plugin output, so wp_enqueue_script() is not applicable here.
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedScript
-            $open_restored = '<script' . (!empty($compiled) ? ' ' . implode(' ', $compiled) : '') . '>';
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedScript
-            return $open_restored . ($is_inline ? $content : '') . '</script>';
+            // This restores a script from an UltraCache delayed-script placeholder in final rendered HTML.
+            // The source tag was already printed before optimization, so core's tag APIs are used instead of manual markup.
+            if ($is_inline) {
+                return rtrim(wp_get_inline_script_tag($content, $script_attributes), "\r\n");
+            }
+
+            return rtrim(wp_get_script_tag($script_attributes), "\r\n");
         }
 
         private function decode_delayed_script_preserved_attributes(array $attrs)
         {
-            $encoded = isset($attrs['data-ucwp-attrs']) ? (string) $attrs['data-ucwp-attrs'] : '';
+            $encoded = isset($attrs['data-ultracache-attrs']) ? (string) $attrs['data-ultracache-attrs'] : '';
             if ('' === $encoded) {
                 return array();
             }
@@ -1641,7 +1632,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
             $out = array();
             foreach ($json as $name => $value) {
                 $name = strtolower(trim((string) $name));
-                if ('' === $name || 0 === strpos($name, 'data-ucwp-')) {
+                if ('' === $name || 0 === strpos($name, 'data-ultracache-')) {
                     continue;
                 }
                 if (is_scalar($value)) {
@@ -1673,19 +1664,19 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $open = (string) $open_match[0];
                 $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 if ('' === $src) {
-                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ultracache-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 }
                 if ('' === $src) {
-                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-original-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ultracache-original-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 }
 
                 $id = (string) $this->extract_attribute_from_html_tag($open, 'id');
                 if ('' === $id) {
-                    $id = (string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-id');
+                    $id = (string) $this->extract_attribute_from_html_tag($open, 'data-ultracache-id');
                 }
 
                 $type = strtolower((string) $this->extract_attribute_from_html_tag($open, 'type'));
-                $is_delayed = (false !== stripos($type, 'ucwp-delayed') || false !== stripos($open, 'data-ucwp-src=') || false !== stripos($open, 'data-ucwp-inline=') || false !== stripos($open, 'data-ucwp-delayed'));
+                $is_delayed = (false !== stripos($type, 'ultracache-delayed') || false !== stripos($open, 'data-ultracache-src=') || false !== stripos($open, 'data-ultracache-inline=') || false !== stripos($open, 'data-ultracache-delayed'));
 
                 $code = (string) preg_replace('/^<script\b[^>]*>|<\/script>$/is', '', $tag);
                 if ('' === $id && '' !== trim($code) && preg_match('/#\s*sourceURL\s*=\s*([^\s\r\n<]+)/i', $code, $source_url_match)) {
@@ -1715,7 +1706,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'group' => $this->normalize_delayed_script_group_handle($handle),
                     'has_src' => ('' !== $src),
                     'delayed' => (bool) $is_delayed,
-                    'inline_delayed' => (bool) (false !== stripos($open, 'data-ucwp-inline=') || false !== stripos($open, 'data-ucwp-inline="1"') || false !== stripos($open, "data-ucwp-inline='1'")),
+                    'inline_delayed' => (bool) (false !== stripos($open, 'data-ultracache-inline=') || false !== stripos($open, 'data-ultracache-inline="1"') || false !== stripos($open, "data-ultracache-inline='1'")),
                     'code' => ('' === $src) ? $code : '',
                 );
             }
@@ -1802,7 +1793,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $record = $records[$index];
                 $group = isset($record['group']) ? (string) $record['group'] : '';
 
-                if ($this->is_ucwp_frontend_js_helper_record($record)) {
+                if ($this->is_ultracache_frontend_js_helper_record($record)) {
                     $protected[(int) $index] = true;
                     if ('' !== $group) {
                         $protected_groups[$group] = true;
@@ -1997,8 +1988,8 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 'wcb_params',
                 'elementor',
             );
-            if (function_exists('ucwp_themes_public_paths')) {
-                foreach (ucwp_themes_public_paths() as $theme_marker) {
+            if (function_exists('ultracache_themes_public_paths')) {
+                foreach (ultracache_themes_public_paths() as $theme_marker) {
                     $legacy_markers[] = $theme_marker;
                 }
             }
@@ -2022,7 +2013,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 if (false !== strpos($haystack, 'jquery')) {
                     return true;
                 }
-                if (function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($haystack, ucwp_themes_public_paths())) {
+                if (function_exists('ultracache_public_path_contains_any') && ultracache_public_path_contains_any($haystack, ultracache_themes_public_paths())) {
                     return true;
                 }
             }
@@ -2467,7 +2458,7 @@ private function script_handle_has_inline_before_segments($handle)
          * @param string $handle Script handle or derived inline script ID.
          * @return bool
          */
-        private function is_ucwp_frontend_js_helper_handle($handle)
+        private function is_ultracache_frontend_js_helper_handle($handle)
         {
             $handle = $this->normalize_delayed_script_group_handle($handle);
             if ('' === $handle) {
@@ -2475,12 +2466,12 @@ private function script_handle_has_inline_before_segments($handle)
             }
 
             return in_array($handle, array(
-                'ucwp-mailerlite-lazy-nonce',
-                'ucwp-runtime-js-scan-collector',
-                'ucwp-delayed-js-loader',
-                'ucwp-runtime-font-css-map',
-                'ucwp-font-display-cssom-patch',
-                'ucwp-sr7-lcp-priority',
+                'ultracache-mailerlite-lazy-nonce',
+                'ultracache-runtime-js-scan-collector',
+                'ultracache-delayed-js-loader',
+                'ultracache-runtime-font-css-map',
+                'ultracache-font-display-cssom-patch',
+                'ultracache-sr7-lcp-priority',
             ), true);
         }
 
@@ -2491,7 +2482,7 @@ private function script_handle_has_inline_before_segments($handle)
          * @param array<string,mixed> $record Script dependency record.
          * @return bool
          */
-        private function is_ucwp_frontend_js_helper_record(array $record)
+        private function is_ultracache_frontend_js_helper_record(array $record)
         {
             $candidates = array(
                 isset($record['handle']) ? (string) $record['handle'] : '',
@@ -2500,7 +2491,7 @@ private function script_handle_has_inline_before_segments($handle)
             );
 
             foreach ($candidates as $candidate) {
-                if ($this->is_ucwp_frontend_js_helper_handle($candidate)) {
+                if ($this->is_ultracache_frontend_js_helper_handle($candidate)) {
                     return true;
                 }
             }
@@ -2720,7 +2711,7 @@ private function script_handle_has_inline_before_segments($handle)
             if ('' !== (string) $tag) {
                 $id = (string) $this->extract_attribute_from_html_tag($tag, 'id');
                 if ('' === $id) {
-                    $id = (string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-id');
+                    $id = (string) $this->extract_attribute_from_html_tag($tag, 'data-ultracache-id');
                 }
             }
 
@@ -2868,17 +2859,17 @@ private function script_handle_is_footer_group($handle)
             }
 
             $markers = array();
-            if (function_exists('ucwp_plugins_public_path')) {
-                $markers[] = ucwp_plugins_public_path();
+            if (function_exists('ultracache_plugins_public_path')) {
+                $markers[] = ultracache_plugins_public_path();
             }
-            if (function_exists('ucwp_themes_public_paths')) {
-                $markers = array_merge($markers, ucwp_themes_public_paths());
+            if (function_exists('ultracache_themes_public_paths')) {
+                $markers = array_merge($markers, ultracache_themes_public_paths());
             }
-            if (function_exists('ucwp_uploads_public_path')) {
-                $markers[] = ucwp_uploads_public_path();
+            if (function_exists('ultracache_uploads_public_path')) {
+                $markers[] = ultracache_uploads_public_path();
             }
 
-            return function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($path, $markers);
+            return function_exists('ultracache_public_path_contains_any') && ultracache_public_path_contains_any($path, $markers);
         }
 
         private function script_matches_fragment_list($handle, $src, array $fragments)
@@ -2981,7 +2972,7 @@ private function script_handle_is_footer_group($handle)
                 }
 
                 if ('woocommerce' === $fragment) {
-                    if ((function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($haystack, ucwp_plugins_public_path('woocommerce'))) || false !== strpos($haystack, '/plugins/woocommerce/') || false !== strpos($haystack, '/woocommerce/assets/')) {
+                    if ((function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($haystack, ultracache_plugins_public_path('woocommerce'))) || false !== strpos($haystack, '/woocommerce/assets/')) {
                         return true;
                     }
 
@@ -3102,7 +3093,8 @@ private function script_handle_is_footer_group($handle)
                 return false;
             }
 
-            if (false !== strpos($src_lc, '/plugins/woocommerce/assets/')) {
+            $woocommerce_path = function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('woocommerce') : '';
+            if (('' !== $woocommerce_path && function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($src_lc, $woocommerce_path)) || false !== strpos($src_lc, '/woocommerce/assets/')) {
                 return false;
             }
 
@@ -3144,7 +3136,7 @@ private function script_handle_is_footer_group($handle)
                 return array('matched' => false);
             }
 
-            if (false !== stripos($tag, 'type="text/ucwp-delayed-js"') || false !== stripos($tag, "type='text/ucwp-delayed-js'") || false !== stripos($tag, 'data-ucwp-src=')) {
+            if (false !== stripos($tag, 'type="text/ultracache-delayed-js"') || false !== stripos($tag, "type='text/ultracache-delayed-js'") || false !== stripos($tag, 'data-ultracache-src=')) {
                 return array('matched' => false);
             }
             if ($this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings)) {
@@ -3412,7 +3404,7 @@ private function script_handle_is_footer_group($handle)
                     continue;
                 }
 
-                if (0 === strpos($name_lc, 'data-ucwp-')) {
+                if (0 === strpos($name_lc, 'data-ultracache-')) {
                     continue;
                 }
 
@@ -3425,38 +3417,33 @@ private function script_handle_is_footer_group($handle)
             }
 
             $attributes = array(
-                'type'                   => 'text/ucwp-delayed-js',
-                'data-ucwp-src'          => esc_url($delayed_src),
-                'data-ucwp-original-src' => esc_attr((string) $src),
-                'data-ucwp-handle'       => esc_attr((string) $handle),
+                'type'                   => 'text/ultracache-delayed-js',
+                'data-ultracache-src'          => $delayed_src,
+                'data-ultracache-original-src' => (string) $src,
+                'data-ultracache-handle'       => (string) $handle,
             );
 
             $reason = sanitize_key((string) $reason);
             if ('' !== $reason) {
-                $attributes['data-ucwp-delay-reason'] = esc_attr($reason);
+                $attributes['data-ultracache-delay-reason'] = $reason;
             }
 
             if (!empty($preserved_attributes)) {
                 $encoded = base64_encode((string) wp_json_encode($preserved_attributes));
                 if ('' !== $encoded) {
-                    $attributes['data-ucwp-attrs'] = esc_attr($encoded);
+                    $attributes['data-ultracache-attrs'] = $encoded;
                 }
             }
 
             foreach (array('id', 'crossorigin', 'referrerpolicy', 'integrity', 'nonce') as $attribute) {
                 if (isset($preserved_attributes[$attribute]) && '' !== $preserved_attributes[$attribute]) {
-                    $attributes['data-ucwp-' . $attribute] = esc_attr($preserved_attributes[$attribute]);
+                    $attributes['data-ultracache-' . $attribute] = (string) $preserved_attributes[$attribute];
                 }
             }
 
-            $compiled = array();
-            foreach ($attributes as $name => $value) {
-                $compiled[] = sprintf('%s="%s"', $name, $value);
-            }
-
-            // Intentional final HTML optimization output: this rewrites an already-rendered script tag into UltraCache's delayed-script placeholder.
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedScript
-            return '<script ' . implode(' ', $compiled) . '></script>';
+            // This rewrites an already-rendered script into an UltraCache delayed placeholder after the enqueue phase.
+            // Use the WordPress script-tag API rather than compiling raw HTML attributes manually.
+            return rtrim(wp_get_script_tag($attributes), "\r\n");
         }
 
         private function normalize_delayed_script_group_handle($handle)
@@ -3480,11 +3467,11 @@ private function script_handle_is_footer_group($handle)
                 return false;
             }
 
-            if (false !== stripos($tag, 'id="ucwp-runtime-js-scan-collector"') || false !== stripos($tag, "id='ucwp-runtime-js-scan-collector'") || false !== stripos($tag, '__ucwpRuntimeJsScan')) {
+            if (false !== stripos($tag, 'id="ultracache-runtime-js-scan-collector"') || false !== stripos($tag, "id='ultracache-runtime-js-scan-collector'") || false !== stripos($tag, '__ultracacheRuntimeJsScan')) {
                 return false;
             }
 
-            if (false !== stripos($tag, ' src=') || false !== stripos($tag, ' data-ucwp-src=') || false !== stripos($tag, 'text/ucwp-delayed-js')) {
+            if (false !== stripos($tag, ' src=') || false !== stripos($tag, ' data-ultracache-src=') || false !== stripos($tag, 'text/ultracache-delayed-js')) {
                 return false;
             }
 
@@ -3498,7 +3485,7 @@ private function script_handle_is_footer_group($handle)
                 return false;
             }
 
-            if (false !== stripos($code, '__ucwpDelayLoader') || false !== stripos($code, 'wp-emoji-settings') || false !== stripos($code, '_wpemojiSettings')) {
+            if (false !== stripos($code, '__ultracacheDelayLoader') || false !== stripos($code, 'wp-emoji-settings') || false !== stripos($code, '_wpemojiSettings')) {
                 return false;
             }
 
@@ -3524,44 +3511,39 @@ private function script_handle_is_footer_group($handle)
                 if ('type' === $name_lc && !$this->is_javascript_mime_type((string) $value)) {
                     continue;
                 }
-                if (0 === strpos($name_lc, 'data-ucwp-')) {
+                if (0 === strpos($name_lc, 'data-ultracache-')) {
                     continue;
                 }
                 $preserved_attributes[$name_lc] = (string) $value;
             }
 
             $attributes = array(
-                'type'             => 'text/ucwp-delayed-js',
-                'data-ucwp-inline' => '1',
-                'data-ucwp-handle' => esc_attr((string) $handle),
+                'type'             => 'text/ultracache-delayed-js',
+                'data-ultracache-inline' => '1',
+                'data-ultracache-handle' => (string) $handle,
             );
 
             $reason = sanitize_key((string) $reason);
             if ('' !== $reason) {
-                $attributes['data-ucwp-delay-reason'] = esc_attr($reason);
+                $attributes['data-ultracache-delay-reason'] = $reason;
             }
 
             if (!empty($preserved_attributes)) {
                 $encoded = base64_encode((string) wp_json_encode($preserved_attributes));
                 if ('' !== $encoded) {
-                    $attributes['data-ucwp-attrs'] = esc_attr($encoded);
+                    $attributes['data-ultracache-attrs'] = $encoded;
                 }
             }
 
             foreach (array('id', 'nonce') as $attribute) {
                 if (isset($preserved_attributes[$attribute]) && '' !== $preserved_attributes[$attribute]) {
-                    $attributes['data-ucwp-' . $attribute] = esc_attr($preserved_attributes[$attribute]);
+                    $attributes['data-ultracache-' . $attribute] = (string) $preserved_attributes[$attribute];
                 }
             }
 
-            $compiled = array();
-            foreach ($attributes as $name => $value) {
-                $compiled[] = sprintf('%s="%s"', $name, $value);
-            }
-
-            // Intentional final HTML optimization output: this rewrites an already-rendered inline script into UltraCache's delayed-script placeholder while preserving the script body.
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedScript
-            return '<script ' . implode(' ', $compiled) . '>' . $content . '</script>';
+            // This rewrites an already-rendered inline script into an UltraCache delayed placeholder after the enqueue phase.
+            // Use the WordPress inline-script tag API so core safely serializes the attributes and script body.
+            return rtrim(wp_get_inline_script_tag($content, $attributes), "\r\n");
         }
 
         private function extract_html_tag_attributes($tag)
@@ -3800,20 +3782,31 @@ private function script_handle_is_footer_group($handle)
         {
             // Keep this list plugin-specific. Broad fragments such as tooltipster,
             // icheck, html_types/slider, or by_sku can also belong to unrelated UI.
-            return array(
+            $fragments = array(
                 'handle:woocommerce-products-filter',
                 'handle:woof',
                 'handle:woof_',
                 'handle:woof-',
-                'src:/plugins/woocommerce-products-filter/',
-                'src:/plugins/woof-products-filter/',
-                'src:/plugins/woocommerce-filter/',
-                'src:/plugins/woocommerce-product-filter/',
-                'src:/plugins/woocommerce-products-filter/js/',
-                'src:/plugins/woocommerce-products-filter/ext/',
-                'src:/plugins/woocommerce-products-filter/views/',
-                'src:/plugins/woocommerce-products-filter/css/',
             );
+
+            $plugin_paths = array(
+                'woocommerce-products-filter',
+                'woof-products-filter',
+                'woocommerce-filter',
+                'woocommerce-product-filter',
+                'woocommerce-products-filter/js',
+                'woocommerce-products-filter/ext',
+                'woocommerce-products-filter/views',
+                'woocommerce-products-filter/css',
+            );
+            foreach ($plugin_paths as $plugin_path) {
+                $marker = function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path($plugin_path) : '';
+                if ('' !== $marker) {
+                    $fragments[] = 'src:' . $marker;
+                }
+            }
+
+            return $fragments;
         }
 
         private function asset_matches_fragment_list($handle, $src, array $fragments)
@@ -3893,12 +3886,12 @@ private function script_handle_is_footer_group($handle)
             $auto_seconds = isset($settings['delayed_local_js_auto_start_seconds']) ? (float) $settings['delayed_local_js_auto_start_seconds'] : 0.05;
             $auto_seconds = max(0.05, min(5.0, $auto_seconds));
 
-            $handle = 'ucwp-delayed-js-loader';
-            if (!$this->ucwp_enqueue_frontend_js_helper($handle, 'delayed-js-loader.js', array(), false)) {
+            $handle = 'ultracache-delayed-js-loader';
+            if (!$this->ultracache_enqueue_frontend_js_helper($handle, 'delayed-js-loader.js', array(), false)) {
                 return;
             }
 
-            $this->ucwp_add_frontend_js_helper_data($handle, 'ucwpDelayedJsLoaderConfig', array(
+            $this->ultracache_add_frontend_js_helper_data($handle, 'ultracacheDelayedJsLoaderConfig', array(
                 'relief'        => !empty($settings['main_thread_relief']),
                 'autoEvents'    => $auto_events,
                 'autoAfterLoad' => !empty($settings['delayed_js_autostart_after_load']),
@@ -3931,7 +3924,7 @@ private function script_handle_is_footer_group($handle)
                     }
 
                     $record = $records[$index];
-                    $open = isset($record['open']) ? (string) $record['open'] : '<script>';
+                    $open = (string) $record['open'];
                     $original_attributes = $this->extract_html_tag_attributes($open);
                     foreach (array_keys($original_attributes) as $attribute) {
                         $attribute = strtolower(trim((string) $attribute));
@@ -3989,15 +3982,15 @@ private function script_handle_is_footer_group($handle)
                 $open = (string) $open_match[0];
                 $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 if ('' === $src) {
-                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ultracache-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 }
                 if ('' === $src) {
-                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-original-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $src = html_entity_decode((string) $this->extract_attribute_from_html_tag($open, 'data-ultracache-original-src'), ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 }
 
                 $id = (string) $this->extract_attribute_from_html_tag($open, 'id');
                 if ('' === $id) {
-                    $id = (string) $this->extract_attribute_from_html_tag($open, 'data-ucwp-id');
+                    $id = (string) $this->extract_attribute_from_html_tag($open, 'data-ultracache-id');
                 }
                 $code = (string) preg_replace('/^<script\b[^>]*>|<\/script>$/is', '', $tag);
                 if ('' === $id && '' !== trim($code) && preg_match('/#\s*sourceURL\s*=\s*([^\s\r\n<]+)/i', $code, $source_url_match)) {
@@ -4010,7 +4003,7 @@ private function script_handle_is_footer_group($handle)
                 }
 
                 $type = strtolower((string) $this->extract_attribute_from_html_tag($open, 'type'));
-                $is_delayed = (false !== stripos($type, 'ucwp-delayed') || false !== stripos($open, 'data-ucwp-src=') || false !== stripos($open, 'data-ucwp-inline=') || false !== stripos($open, 'data-ucwp-delayed'));
+                $is_delayed = (false !== stripos($type, 'ultracache-delayed') || false !== stripos($open, 'data-ultracache-src=') || false !== stripos($open, 'data-ultracache-inline=') || false !== stripos($open, 'data-ultracache-delayed'));
                 $handle = $this->infer_script_handle_from_tag($open, $src);
                 if ('' === $handle && '' !== $src) {
                     $handle = $src;
@@ -4029,7 +4022,7 @@ private function script_handle_is_footer_group($handle)
                     'group'   => $this->normalize_delayed_script_group_handle($handle),
                     'has_src' => ('' !== $src),
                     'delayed' => (bool) $is_delayed,
-                    'inline_delayed' => (bool) (false !== stripos($open, 'data-ucwp-inline=') || false !== stripos($open, 'data-ucwp-inline="1"') || false !== stripos($open, "data-ucwp-inline='1'")),
+                    'inline_delayed' => (bool) (false !== stripos($open, 'data-ultracache-inline=') || false !== stripos($open, 'data-ultracache-inline="1"') || false !== stripos($open, "data-ultracache-inline='1'")),
                     'code'    => ('' === $src) ? $code : '',
                 );
             }
@@ -4145,7 +4138,7 @@ private function script_handle_is_footer_group($handle)
 
         private function infer_script_handle_from_tag($tag, $src = '')
         {
-            $handle = $this->extract_attribute_from_html_tag($tag, 'data-ucwp-handle');
+            $handle = $this->extract_attribute_from_html_tag($tag, 'data-ultracache-handle');
             $handle = trim((string) $handle);
             if ('' !== $handle) {
                 return $handle;
@@ -4154,7 +4147,7 @@ private function script_handle_is_footer_group($handle)
             $id = $this->extract_attribute_from_html_tag($tag, 'id');
             $id = trim((string) $id);
             if ('' === $id) {
-                $id = trim((string) $this->extract_attribute_from_html_tag($tag, 'data-ucwp-id'));
+                $id = trim((string) $this->extract_attribute_from_html_tag($tag, 'data-ultracache-id'));
             }
             if ('' !== $id) {
                 $id = preg_replace('/-js(?:-extra|-before|-after|-translations)?$/', '', $id);

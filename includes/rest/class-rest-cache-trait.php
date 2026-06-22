@@ -93,7 +93,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 return new WP_REST_Response(Ultra_Cache_WP::get_dashboard_settings_for_client(), 200);
             }
 
-            $settings = get_option(UCWP_SETTINGS_KEY, array());
+            $settings = get_option(ULTRACACHE_SETTINGS_KEY, array());
             return new WP_REST_Response(is_array($settings) ? array_diff_key($settings, array_flip(array('redisPassword', 'varnishCliKey'))) : array(), 200);
         }
 
@@ -131,16 +131,14 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 'objectCacheBackend',
                 'objectCacheFallbackBackend',
                 'browserCacheRulesEnabled',
+                'redisPassword',
+                'clearRedisPassword',
+                'varnishCliKey',
+                'clearVarnishCliKey',
             );
 
             foreach ($file_mutating_keys as $key) {
                 if (array_key_exists($key, $patch)) {
-                    return true;
-                }
-            }
-
-            foreach (array('redisPassword', 'varnishCliKey') as $secret_key) {
-                if (array_key_exists($secret_key, $patch) && '' !== trim((string) $patch[$secret_key])) {
                     return true;
                 }
             }
@@ -153,8 +151,8 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             return new WP_REST_Response(
                 array(
                     'success' => false,
-                    'code'    => 'ucwp_file_mutation_forbidden',
-                    'message' => __('This UltraCache action changes plugin drop-ins, wp-config.php, .htaccess, runtime secrets, or plugin activation state. It requires a full administrator with plugin activation permissions.', 'ultracache'),
+                    'code'    => 'ultracache_file_mutation_forbidden',
+                    'message' => __('This UltraCache action changes plugin drop-ins, wp-config.php, .htaccess, or plugin activation state. It requires a full administrator with plugin activation permissions.', 'ultracache'),
                 ),
                 403
             );
@@ -165,7 +163,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             $allowed_keys = array_keys($this->get_settings_update_args());
             $patch = $this->get_explicit_settings_patch($request, $allowed_keys);
 
-            $stored = get_option(UCWP_SETTINGS_KEY, array());
+            $stored = get_option(ULTRACACHE_SETTINGS_KEY, array());
             $stored = is_array($stored) ? $stored : array();
             $current = $stored;
 
@@ -192,7 +190,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
                 return new WP_REST_Response($response, 200);
             }
 
-            update_option(UCWP_SETTINGS_KEY, $current);
+            update_option(ULTRACACHE_SETTINGS_KEY, $current);
             $client_settings = is_array($current) ? array_diff_key($current, array_flip(array('redisPassword', 'varnishCliKey'))) : array();
             return new WP_REST_Response(array('success' => true, 'settings' => $client_settings, 'patchKeys' => array_keys($patch)), 200);
         }
@@ -359,15 +357,12 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             }
 
             $settings = array();
-            foreach (array('redisHost', 'redisPort', 'redisUsername', 'redisPassword', 'redisDatabase', 'redisPrefix', 'redisUseTls', 'redisPersistent', 'redisConnectTimeoutMs', 'redisReadTimeoutMs') as $key) {
+            foreach (array('redisHost', 'redisPort', 'redisUsername', 'redisDatabase', 'redisPrefix', 'redisUseTls', 'redisPersistent', 'redisConnectTimeoutMs', 'redisReadTimeoutMs') as $key) {
                 if (null !== $request->get_param($key)) {
                     $settings[$key] = $request->get_param($key);
                 }
             }
 
-            if (array_key_exists('redisPassword', $settings) && '' === trim((string) $settings['redisPassword']) && !empty($request->get_param('redisPasswordConfigured'))) {
-                unset($settings['redisPassword']);
-            }
 
             $result = Ultra_Cache_WP::test_redis_connection($settings);
             $status = !empty($result['blocked']) ? 400 : (!empty($result['success']) ? 200 : 500);
@@ -396,15 +391,12 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             }
 
             $settings = array();
-            foreach (array('redisHost', 'redisPort', 'redisUsername', 'redisPassword', 'redisDatabase', 'redisPrefix', 'redisUseTls', 'redisPersistent', 'redisConnectTimeoutMs', 'redisReadTimeoutMs') as $key) {
+            foreach (array('redisHost', 'redisPort', 'redisUsername', 'redisDatabase', 'redisPrefix', 'redisUseTls', 'redisPersistent', 'redisConnectTimeoutMs', 'redisReadTimeoutMs') as $key) {
                 if (null !== $request->get_param($key)) {
                     $settings[$key] = $request->get_param($key);
                 }
             }
 
-            if (array_key_exists('redisPassword', $settings) && '' === trim((string) $settings['redisPassword']) && !empty($request->get_param('redisPasswordConfigured'))) {
-                unset($settings['redisPassword']);
-            }
 
             $profile_probe = filter_var($request->get_param('profileProbe'), FILTER_VALIDATE_BOOLEAN)
                 || filter_var($request->get_param('skipPayloadProbe'), FILTER_VALIDATE_BOOLEAN);
@@ -488,7 +480,7 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
         private function is_dashboard_setting_enabled($key)
         {
-            $settings = defined('UCWP_SETTINGS_KEY') ? get_option(UCWP_SETTINGS_KEY, array()) : array();
+            $settings = defined('ULTRACACHE_SETTINGS_KEY') ? get_option(ULTRACACHE_SETTINGS_KEY, array()) : array();
             return is_array($settings) && !empty($settings[$key]);
         }
 

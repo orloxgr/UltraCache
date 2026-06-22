@@ -44,8 +44,8 @@ trait Ultra_Cache_WP_Varnish_Trait
         private static function sanitize_varnish_string($value)
         {
             $value = (string) $value;
-            if (function_exists('ucwp_redact_sensitive_string')) {
-                $value = ucwp_redact_sensitive_string($value);
+            if (function_exists('ultracache_redact_sensitive_string')) {
+                $value = ultracache_redact_sensitive_string($value);
             }
 
             return $value;
@@ -146,13 +146,9 @@ trait Ultra_Cache_WP_Varnish_Trait
             $servers = array_values(array_filter(array_map('trim', preg_split('/\s+/', $servers_raw))));
             $method = ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN';
             $effective_method = ('admin' === $mode) ? 'admin BAN' : $method;
-            $key = trim((string) $settings['varnishCliKey']);
-            if (method_exists(__CLASS__, 'get_runtime_varnish_admin_secret')) {
-                $runtime_key = trim((string) self::get_runtime_varnish_admin_secret());
-                if ('' !== $runtime_key) {
-                    $key = $runtime_key;
-                }
-            }
+            $key = function_exists('ultracache_get_varnish_password')
+                ? trim((string) ultracache_get_varnish_password())
+                : '';
 
             return array(
                 'enabled'      => !empty($settings['varnishCliEnabled']),
@@ -241,7 +237,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 $headers['X-UltraCache-Token'] = (string) $settings['key'];
             }
 
-            $response = ucwp_safe_configured_infrastructure_remote_request($target_url, array(
+            $response = ultracache_safe_configured_infrastructure_remote_request($target_url, array(
                 'method'      => (string) $method,
                 'timeout'     => max(1, (int) $timeout_s),
                 'redirection' => 0,
@@ -304,7 +300,7 @@ trait Ultra_Cache_WP_Varnish_Trait
         // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.WP.AlternativeFunctions.file_system_operations_fsockopen,WordPress.WP.AlternativeFunctions.file_system_operations_fclose,WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
         private static function read_varnish_admin_response($fp)
         {
-            $header = ucwp_safe_fread($fp, 13, 'read_varnish_admin_response header');
+            $header = ultracache_safe_fread($fp, 13, 'read_varnish_admin_response header');
             if (false === $header || strlen($header) < 13) {
                 return array('ok' => false, 'code' => 0, 'body' => 'Failed to read Varnish admin response header.');
             }
@@ -313,7 +309,7 @@ trait Ultra_Cache_WP_Varnish_Trait
             $length = (int) substr($header, 4, 6) + 1;
             $body = '';
             while (strlen($body) < $length && !feof($fp)) {
-                $chunk = ucwp_safe_fread($fp, $length - strlen($body), 'read_varnish_admin_response body');
+                $chunk = ultracache_safe_fread($fp, $length - strlen($body), 'read_varnish_admin_response body');
                 if (false === $chunk || '' === $chunk) {
                     break;
                 }
@@ -353,7 +349,7 @@ trait Ultra_Cache_WP_Varnish_Trait
             $port = (int) $port;
             $secret = (string) $secret;
 
-            if ('' === $host || $port <= 0 || !ucwp_is_allowed_socket_target($host, $port, 'configured_varnish_admin_endpoint')) {
+            if ('' === $host || $port <= 0 || !ultracache_is_allowed_socket_target($host, $port, 'configured_varnish_admin_endpoint')) {
                 return array('ok' => false, 'detail' => self::sanitize_varnish_string('Invalid or blocked Varnish admin endpoint.'));
             }
 
@@ -364,7 +360,7 @@ trait Ultra_Cache_WP_Varnish_Trait
             $connect = static function () use ($host, $port, $timeout_s) {
                 $errno  = 0;
                 $errstr = '';
-                $fp = ucwp_safe_fsockopen($host, $port, $errno, $errstr, max(1, (int) $timeout_s), 'configured_varnish_admin_endpoint');
+                $fp = ultracache_safe_fsockopen($host, $port, $errno, $errstr, max(1, (int) $timeout_s), 'configured_varnish_admin_endpoint');
                 if (!is_resource($fp)) {
                     return array(false, self::sanitize_varnish_string('Connection failed: ' . trim($errstr !== '' ? $errstr : ('Error ' . $errno))));
                 }
@@ -569,7 +565,7 @@ trait Ultra_Cache_WP_Varnish_Trait
 
         public static function varnish_flush_url($url)
         {
-            $parsed = ucwp_safe_wp_parse_url((string) $url, -1, 'varnish_flush_url');
+            $parsed = ultracache_safe_wp_parse_url((string) $url, -1, 'varnish_flush_url');
             if (!$parsed || empty($parsed['host'])) {
                 $result = array('success' => false, 'message' => self::maybe_translate('Invalid URL for Varnish purge.'), 'time' => time(), 'url' => (string) $url);
                 self::set_varnish_last_result($result);
@@ -692,7 +688,7 @@ trait Ultra_Cache_WP_Varnish_Trait
                 'message'            => '',
             );
 
-            $response = ucwp_safe_loopback_remote_request(home_url('/'), array(
+            $response = ultracache_safe_loopback_remote_request(home_url('/'), array(
                 'method'      => 'HEAD',
                 'timeout'     => 5,
                 'redirection' => 2,

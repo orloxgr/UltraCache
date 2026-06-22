@@ -5,8 +5,8 @@
 
 defined('ABSPATH') || exit;
 
-if (!trait_exists('UCWP_CLI_Media_Trait')) {
-    trait UCWP_CLI_Media_Trait
+if (!trait_exists('ULTRACACHE_CLI_Media_Trait')) {
+    trait ULTRACACHE_CLI_Media_Trait
     {
         /**
          * Manage UltraCache optimized AVIF/WebP media.

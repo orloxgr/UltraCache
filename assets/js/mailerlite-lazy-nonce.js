@@ -1,11 +1,11 @@
 (function(){
-  if (window.__ucwpMailerLiteLazyNonceV1) { return; }
-  window.__ucwpMailerLiteLazyNonceV1 = true;
+  if (window.__ultracacheMailerLiteLazyNonceV1) { return; }
+  window.__ultracacheMailerLiteLazyNonceV1 = true;
 
   var realFetch = window.fetch;
   if (typeof realFetch !== 'function') { return; }
 
-  var config = window.ucwpMailerLiteLazyNonceConfig || {};
+  var config = window.ultracacheMailerLiteLazyNonceConfig || {};
   var ajaxUrl = config.ajaxUrl || '';
   var refreshStarted = false;
 
@@ -95,7 +95,7 @@
 
   function refreshFormNonce(form) {
     if (!formLooksLikeMailerLite(form)) { return Promise.resolve(false); }
-    if (form.__ucwpMlNonceRefreshing) { return form.__ucwpMlNonceRefreshing; }
+    if (form.__ultracacheMlNonceRefreshing) { return form.__ultracacheMlNonceRefreshing; }
 
     var input = form.querySelector('input[name="ml_nonce"]');
     if (!input) { return Promise.resolve(false); }
@@ -106,7 +106,7 @@
     body.append('action', 'ml_create_nonce');
     body.append('ml_nonce', input.value || '');
 
-    form.__ucwpMlNonceRefreshing = realFetch.call(window, url, {
+    form.__ultracacheMlNonceRefreshing = realFetch.call(window, url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body
@@ -115,7 +115,7 @@
     }).then(function(json){
       if (json && json.success && json.data && json.data.ml_nonce) {
         input.value = json.data.ml_nonce;
-        form.__ucwpMlNonceReady = true;
+        form.__ultracacheMlNonceReady = true;
         setSubmitDisabled(form, false);
         return true;
       }
@@ -123,11 +123,11 @@
     }).catch(function(){
       return false;
     }).then(function(ok){
-      form.__ucwpMlNonceRefreshing = null;
+      form.__ultracacheMlNonceRefreshing = null;
       return ok;
     });
 
-    return form.__ucwpMlNonceRefreshing;
+    return form.__ultracacheMlNonceRefreshing;
   }
 
   window.fetch = function(input, init) {
@@ -140,7 +140,7 @@
 
   function maybeRefreshFromInteraction(event) {
     var form = findFormFromTarget(event && event.target ? event.target : null);
-    if (!form || form.__ucwpMlNonceReady || refreshStarted) { return; }
+    if (!form || form.__ultracacheMlNonceReady || refreshStarted) { return; }
     refreshStarted = true;
     refreshFormNonce(form).then(function(){ refreshStarted = false; });
   }
@@ -152,7 +152,7 @@
 
   document.addEventListener('submit', function(event){
     var form = event && event.target ? event.target : null;
-    if (!formLooksLikeMailerLite(form) || form.__ucwpMlNonceReady) { return; }
+    if (!formLooksLikeMailerLite(form) || form.__ultracacheMlNonceReady) { return; }
 
     event.preventDefault();
     event.stopImmediatePropagation();

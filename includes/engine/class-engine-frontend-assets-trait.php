@@ -15,7 +15,7 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
      * @param string $relative_path Relative path below assets/js/.
      * @return string
      */
-    protected function ucwp_normalize_frontend_js_asset_path($relative_path)
+    protected function ultracache_normalize_frontend_js_asset_path($relative_path)
     {
         $relative_path = str_replace('\\', '/', (string) $relative_path);
         $relative_path = ltrim($relative_path, '/');
@@ -38,14 +38,14 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
      * @param string $relative_path Relative path below assets/js/.
      * @return string
      */
-    protected function ucwp_frontend_js_asset_url($relative_path)
+    protected function ultracache_frontend_js_asset_url($relative_path)
     {
-        $relative_path = $this->ucwp_normalize_frontend_js_asset_path($relative_path);
+        $relative_path = $this->ultracache_normalize_frontend_js_asset_path($relative_path);
         if ('' === $relative_path) {
             return '';
         }
 
-        return plugins_url('assets/js/' . $relative_path, UCWP_FILE);
+        return ultracache_plugin_url('assets/js/' . $relative_path);
     }
 
     /**
@@ -57,10 +57,10 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
      * @param bool          $in_footer     Whether to load in the footer.
      * @return bool
      */
-    protected function ucwp_register_frontend_js_helper($handle, $relative_path, $dependencies = array(), $in_footer = false)
+    protected function ultracache_register_frontend_js_helper($handle, $relative_path, $dependencies = array(), $in_footer = false)
     {
         $handle = sanitize_key((string) $handle);
-        $src = $this->ucwp_frontend_js_asset_url($relative_path);
+        $src = $this->ultracache_frontend_js_asset_url($relative_path);
 
         if ('' === $handle || '' === $src) {
             return false;
@@ -70,7 +70,7 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
             $handle,
             $src,
             is_array($dependencies) ? array_values(array_filter(array_map('sanitize_key', $dependencies))) : array(),
-            UCWP_VERSION,
+            ULTRACACHE_VERSION,
             array('in_footer' => (bool) $in_footer)
         );
 
@@ -86,9 +86,9 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
      * @param bool          $in_footer     Whether to load in the footer.
      * @return bool
      */
-    protected function ucwp_enqueue_frontend_js_helper($handle, $relative_path, $dependencies = array(), $in_footer = false)
+    protected function ultracache_enqueue_frontend_js_helper($handle, $relative_path, $dependencies = array(), $in_footer = false)
     {
-        if (!$this->ucwp_register_frontend_js_helper($handle, $relative_path, $dependencies, $in_footer)) {
+        if (!$this->ultracache_register_frontend_js_helper($handle, $relative_path, $dependencies, $in_footer)) {
             return false;
         }
 
@@ -105,7 +105,7 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
      * @param array  $data        Configuration data.
      * @return bool
      */
-    protected function ucwp_add_frontend_js_helper_data($handle, $global_name, array $data)
+    protected function ultracache_add_frontend_js_helper_data($handle, $global_name, array $data)
     {
         $handle = sanitize_key((string) $handle);
         $global_name = preg_replace('/[^A-Za-z0-9_$]/', '', (string) $global_name);
@@ -114,7 +114,7 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
             return false;
         }
 
-        $json = wp_json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $json = wp_json_encode($data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         if (!is_string($json) || '' === $json) {
             return false;
         }
@@ -159,12 +159,12 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
             return;
         }
 
-        $handle = 'ucwp-runtime-js-scan-collector';
-        if (!$this->ucwp_enqueue_frontend_js_helper($handle, 'runtime-js-scan-collector.js', array(), false)) {
+        $handle = 'ultracache-runtime-js-scan-collector';
+        if (!$this->ultracache_enqueue_frontend_js_helper($handle, 'runtime-js-scan-collector.js', array(), false)) {
             return;
         }
 
-        $this->ucwp_add_frontend_js_helper_data($handle, 'ucwpRuntimeJsScanConfig', array(
+        $this->ultracache_add_frontend_js_helper_data($handle, 'ultracacheRuntimeJsScanConfig', array(
             'scanId'      => $scan_id,
             'endpoint'    => $endpoint,
             'restNonce'   => $rest_nonce,
@@ -192,12 +192,12 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
             return;
         }
 
-        $handle = 'ucwp-mailerlite-lazy-nonce';
-        if (!$this->ucwp_enqueue_frontend_js_helper($handle, 'mailerlite-lazy-nonce.js', array(), false)) {
+        $handle = 'ultracache-mailerlite-lazy-nonce';
+        if (!$this->ultracache_enqueue_frontend_js_helper($handle, 'mailerlite-lazy-nonce.js', array(), false)) {
             return;
         }
 
-        $this->ucwp_add_frontend_js_helper_data($handle, 'ucwpMailerLiteLazyNonceConfig', array(
+        $this->ultracache_add_frontend_js_helper_data($handle, 'ultracacheMailerLiteLazyNonceConfig', array(
             'ajaxUrl' => admin_url('admin-ajax.php'),
         ));
     }

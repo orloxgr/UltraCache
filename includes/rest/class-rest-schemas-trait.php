@@ -217,7 +217,8 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'redisHost'                            => array('type' => 'string', 'required' => false),
                 'redisPort'                            => array('type' => 'integer', 'required' => false),
                 'redisUsername'                        => array('type' => 'string', 'required' => false),
-                'redisPassword'                        => array('type' => 'string', 'required' => false),
+                'redisPassword'                        => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_secret_constant_param')),
+                'clearRedisPassword'                   => array('type' => 'boolean', 'required' => false),
                 'redisDatabase'                        => array('type' => 'integer', 'required' => false),
                 'redisPrefix'                          => array('type' => 'string', 'required' => false),
                 'redisUseTls'                          => array('type' => 'boolean', 'required' => false),
@@ -295,7 +296,8 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'varnishCliEnabled'                    => array('type' => 'boolean', 'required' => false),
                 'varnishCliMode'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_mode_param'), 'validate_callback' => array($this, 'validate_varnish_mode_param')),
                 'varnishCliServers'                    => array('type' => 'string', 'required' => false),
-                'varnishCliKey'                        => array('type' => 'string', 'required' => false),
+                'varnishCliKey'                        => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_secret_constant_param')),
+                'clearVarnishCliKey'                   => array('type' => 'boolean', 'required' => false),
                 'varnishCliTimeoutSeconds'             => array('type' => 'integer', 'required' => false),
                 'varnishCliMethod'                     => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_method_param'), 'validate_callback' => array($this, 'validate_varnish_method_param')),
                 'preRenderOnSave'                      => array('type' => 'boolean', 'required' => false),
@@ -333,6 +335,15 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
             );
         }
 
+        public function sanitize_secret_constant_param($value)
+        {
+            if (!is_scalar($value)) {
+                return '';
+            }
+
+            return str_replace("\0", '', (string) $value);
+        }
+
         public function sanitize_javascript_strategy_param($value)
         {
             return class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'sanitize_javascript_strategy')
@@ -365,8 +376,6 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'redisHost'             => array('type' => 'string', 'required' => false),
                 'redisPort'             => array('type' => 'integer', 'required' => false),
                 'redisUsername'         => array('type' => 'string', 'required' => false),
-                'redisPassword'         => array('type' => 'string', 'required' => false),
-                'redisPasswordConfigured' => array('type' => 'boolean', 'required' => false),
                 'redisDatabase'         => array('type' => 'integer', 'required' => false),
                 'redisPrefix'           => array('type' => 'string', 'required' => false),
                 'redisUseTls'           => array('type' => 'boolean', 'required' => false),

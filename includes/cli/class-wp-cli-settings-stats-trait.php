@@ -5,8 +5,8 @@
 
 defined('ABSPATH') || exit;
 
-if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
-    trait UCWP_CLI_Settings_Stats_Trait
+if (!trait_exists('ULTRACACHE_CLI_Settings_Stats_Trait')) {
+    trait ULTRACACHE_CLI_Settings_Stats_Trait
     {
         public function settings($args, $assoc_args)
         {
@@ -51,6 +51,9 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 }
 
                 $key = (string) $args[1];
+                if (in_array($key, $this->get_secret_setting_keys(), true)) {
+                    WP_CLI::error('Configure Redis and Varnish passwords from the UltraCache dashboard or directly in wp-config.php constants.');
+                }
                 $value = $this->coerce_setting_value($key, $args[2]);
                 $next = $current;
                 $next[$key] = $value;
@@ -296,11 +299,11 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
             $this->self_test_add_check(
                 $checks,
                 'Version constant',
-                defined('UCWP_VERSION') && '' !== (string) UCWP_VERSION,
-                defined('UCWP_VERSION') ? ('version=' . UCWP_VERSION) : 'Version constant unavailable.'
+                defined('ULTRACACHE_VERSION') && '' !== (string) ULTRACACHE_VERSION,
+                defined('ULTRACACHE_VERSION') ? ('version=' . ULTRACACHE_VERSION) : 'Version constant unavailable.'
             );
 
-            $stored = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ultracache_settings', array());
+            $stored = get_option(defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY : 'ultracache_settings', array());
             $stored = is_array($stored) ? $stored : array();
             $deprecated_keys = array_values(array_intersect(array_keys($stored), array_merge($this->get_deprecated_setting_keys(), array('criticalCssEnabled', 'criticalCssInlineEnabled', 'criticalCssExcludeList'))));
             $this->self_test_add_check(
@@ -311,7 +314,7 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 'warning'
             );
 
-            $cache_dir = ucwp_content_cache_storage_dir();
+            $cache_dir = ultracache_content_cache_storage_dir();
             $this->self_test_add_check(
                 $checks,
                 'Cache directory writable',
@@ -321,9 +324,9 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 $this->get_file_owner_summary($cache_dir)
             );
 
-            $advanced_cache = ucwp_dropin_path('advanced-cache.php');
+            $advanced_cache = ultracache_dropin_path('advanced-cache.php');
             $page_cache_expected = !empty($settings['pageCacheEnabled']);
-            $advanced_exists = file_exists($advanced_cache);
+            $advanced_exists = ultracache_dropin_exists('advanced-cache.php');
             $advanced_dropin_ok = $page_cache_expected ? $advanced_exists : !$advanced_exists;
             $this->self_test_add_check(
                 $checks,
@@ -334,9 +337,9 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 $this->get_file_owner_summary($advanced_cache)
             );
 
-            $object_cache = ucwp_dropin_path('object-cache.php');
+            $object_cache = ultracache_dropin_path('object-cache.php');
             $object_expected = !empty($settings['objectCacheEnabled']);
-            $object_exists = file_exists($object_cache);
+            $object_exists = ultracache_dropin_exists('object-cache.php');
             $object_status = !empty($diagnostics['objectCache']) && is_array($diagnostics['objectCache']) ? $diagnostics['objectCache'] : array();
             $object_dropin_ok = $object_expected ? $object_exists : !$object_exists;
             $this->self_test_add_check(
@@ -377,9 +380,9 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                 is_array($payload_probe) ? $payload_probe : array()
             );
 
-            $manifest_path = trailingslashit($cache_dir) . 'css-bundles/manifest.json';
+            $manifest_path = ultracache_generated_asset_dir('css-bundles', 'manifest.json');
             $css_bundle_expected = !empty($settings['homepageCssBundleEnabled']);
-            $manifest_raw = ($css_bundle_expected && file_exists($manifest_path) && is_readable($manifest_path)) ? ucwp_safe_file_get_contents($manifest_path, 'wp_cli_css_bundle_manifest_read', true) : '';
+            $manifest_raw = ($css_bundle_expected && file_exists($manifest_path) && is_readable($manifest_path)) ? ultracache_safe_file_get_contents($manifest_path, 'wp_cli_css_bundle_manifest_read', true) : '';
             $manifest_ok = !$css_bundle_expected || (is_string($manifest_raw) && is_array(json_decode((string) $manifest_raw, true)));
             $this->self_test_add_check(
                 $checks,
@@ -415,7 +418,7 @@ if (!trait_exists('UCWP_CLI_Settings_Stats_Trait')) {
                     'success' => 0 === $failures,
                     'failures' => $failures,
                     'warnings' => $warnings,
-                    'version' => defined('UCWP_VERSION') ? UCWP_VERSION : '',
+                    'version' => defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : '',
                 ),
                 'checks' => $checks,
             );

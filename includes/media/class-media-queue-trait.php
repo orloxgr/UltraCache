@@ -14,7 +14,7 @@ trait Ultra_Cache_Media_Queue_Trait
 		private function get_media_queue_table_name() {
 			global $wpdb;
 			$table = $wpdb->prefix . 'ultracache_media_queue';
-			return function_exists('ucwp_validate_custom_table_name') ? ucwp_validate_custom_table_name($table, 'media_queue') : $table;
+			return function_exists('ultracache_validate_custom_table_name') ? ultracache_validate_custom_table_name($table, 'media_queue') : $table;
 		}
 
 		private function media_queue_table_exists() {
@@ -33,7 +33,9 @@ trait Ultra_Cache_Media_Queue_Trait
 				return true;
 			}
 
-			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+			if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
+				return false;
+			}
 			$charset_collate = $wpdb->get_charset_collate();
 			$sql = "CREATE TABLE {$table} (
 				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -127,8 +129,8 @@ trait Ultra_Cache_Media_Queue_Trait
 		private function get_media_optimized_storage_health($format = 'best', $completed_rows = 0, $force_refresh = false) {
 			$format = $this->normalize_media_queue_format($format);
 			$completed_rows = max(0, (int) $completed_rows);
-			$avif_dir = defined('UCWP_AVIF_DIR') ? UCWP_AVIF_DIR : '';
-			$webp_dir = defined('UCWP_WEBP_DIR') ? UCWP_WEBP_DIR : '';
+			$avif_dir = defined('ULTRACACHE_AVIF_DIR') ? ULTRACACHE_AVIF_DIR : '';
+			$webp_dir = defined('ULTRACACHE_WEBP_DIR') ? ULTRACACHE_WEBP_DIR : '';
 			$avif_dir_exists = ('' !== (string) $avif_dir && is_dir($avif_dir));
 			$webp_dir_exists = ('' !== (string) $webp_dir && is_dir($webp_dir));
 			$cache_key = $this->get_media_optimized_storage_health_transient_key($format);
@@ -216,11 +218,11 @@ trait Ultra_Cache_Media_Queue_Trait
 				return array_merge(array('repaired' => false, 'requeued' => 0, 'reason' => 'not_needed'), $health);
 			}
 
-			if (defined('UCWP_AVIF_DIR') && UCWP_AVIF_DIR) {
-				$this->optimized_storage_ensure_directory(UCWP_AVIF_DIR);
+			if (defined('ULTRACACHE_AVIF_DIR') && ULTRACACHE_AVIF_DIR) {
+				$this->optimized_storage_ensure_directory(ULTRACACHE_AVIF_DIR);
 			}
-			if (defined('UCWP_WEBP_DIR') && UCWP_WEBP_DIR) {
-				$this->optimized_storage_ensure_directory(UCWP_WEBP_DIR);
+			if (defined('ULTRACACHE_WEBP_DIR') && ULTRACACHE_WEBP_DIR) {
+				$this->optimized_storage_ensure_directory(ULTRACACHE_WEBP_DIR);
 			}
 
 			$count = $wpdb->query($wpdb->prepare(
@@ -301,9 +303,9 @@ trait Ultra_Cache_Media_Queue_Trait
 		}
 
 		private function get_on_demand_queue_max_per_request() {
-			$default = defined('UCWP_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST') ? (int) UCWP_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST : 20;
+			$default = defined('ULTRACACHE_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST') ? (int) ULTRACACHE_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST : 20;
 			$context = method_exists($this, 'get_media_generation_context') ? $this->get_media_generation_context() : 'frontend';
-			$limit = (int) apply_filters('ucwp_media_on_demand_queue_max_per_request', $default, $context);
+			$limit = (int) apply_filters('ultracache_media_on_demand_queue_max_per_request', $default, $context);
 			return max(0, min(100, $limit));
 		}
 
@@ -347,7 +349,7 @@ trait Ultra_Cache_Media_Queue_Trait
 		private function get_media_page_refs_table_name() {
 			global $wpdb;
 			$table = $wpdb->prefix . 'ultracache_media_page_refs';
-			return function_exists('ucwp_validate_custom_table_name') ? ucwp_validate_custom_table_name($table, 'media_page_refs') : $table;
+			return function_exists('ultracache_validate_custom_table_name') ? ultracache_validate_custom_table_name($table, 'media_page_refs') : $table;
 		}
 
 		private function media_page_refs_table_exists() {
@@ -366,7 +368,9 @@ trait Ultra_Cache_Media_Queue_Trait
 				return true;
 			}
 
-			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+			if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
+				return false;
+			}
 			$charset_collate = $wpdb->get_charset_collate();
 			$sql = "CREATE TABLE {$table} (
 				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -412,7 +416,7 @@ trait Ultra_Cache_Media_Queue_Trait
 
 			global $wpdb;
 			$table = $this->get_media_page_refs_table_name();
-			$limit = (int) apply_filters('ucwp_media_page_refs_cleanup_max_deletes_per_run', 250);
+			$limit = (int) apply_filters('ultracache_media_page_refs_cleanup_max_deletes_per_run', 250);
 			$limit = max(25, min(1000, $limit));
 			$purged_cutoff = get_date_from_gmt(gmdate('Y-m-d H:i:s', time() - HOUR_IN_SECONDS));
 			$complete_cutoff = get_date_from_gmt(gmdate('Y-m-d H:i:s', time() - (2 * DAY_IN_SECONDS)));
@@ -449,7 +453,7 @@ trait Ultra_Cache_Media_Queue_Trait
 				return '';
 			}
 
-			$request_uri = ucwp_server_value('REQUEST_URI');
+			$request_uri = ultracache_server_value('REQUEST_URI');
 			if ('' === trim((string) $request_uri)) {
 				return '';
 			}
@@ -461,7 +465,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 
 			$url = home_url($path);
-			$url = remove_query_arg(array('ucwp_action', '_wpnonce', 'ucwp_odq_test', 'ucwp_cache_bust'), $url);
+			$url = remove_query_arg(array('ultracache_action', '_wpnonce', 'ultracache_odq_test', 'ultracache_cache_bust'), $url);
 			$url = esc_url_raw($url);
 			if ('' === $url) {
 				return '';
@@ -718,7 +722,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 			$this->on_demand_queue_discovery_seen[$discovery_key] = true;
 
-			$uploads = wp_get_upload_dir();
+			$uploads = ultracache_uploads_base_info();
 			$uploads_root = !empty($uploads['basedir']) ? realpath($uploads['basedir']) : false;
 			if (!is_string($uploads_root) || '' === $uploads_root) {
 				return false;
@@ -828,7 +832,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$processed = 0;
 			$pause_reason = '';
 			foreach ($items as $attachment_id) {
-				$pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+				$pause_reason = function_exists('ultracache_operation_pause_reason') ? ultracache_operation_pause_reason($budget) : '';
 				if ('' !== $pause_reason) {
 					break;
 				}
@@ -863,7 +867,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$is_limited_sample = ($limit > 0);
 			$reset = array_key_exists('reset', $args) ? (bool) $args['reset'] : !$is_limited_sample;
 			$time_budget = isset($args['time_budget']) ? max(0, (int) $args['time_budget']) : null;
-			$budget = function_exists('ucwp_get_safe_operation_budget') ? ucwp_get_safe_operation_budget('media_rebuild', $time_budget, 45) : array('started_at' => microtime(true), 'seconds' => 20);
+			$budget = function_exists('ultracache_get_safe_operation_budget') ? ultracache_get_safe_operation_budget('media_rebuild', $time_budget, 45) : array('started_at' => microtime(true), 'seconds' => 20);
 
 			if (!$is_limited_sample && $reset) {
 				$this->start_media_queue_rebuild($format);
@@ -888,14 +892,14 @@ trait Ultra_Cache_Media_Queue_Trait
 				$batch_size = min(250, max(25, $limit));
 				$batch = array('hasMore' => false);
 				do {
-					$pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+					$pause_reason = function_exists('ultracache_operation_pause_reason') ? ultracache_operation_pause_reason($budget) : '';
 					if ('' !== $pause_reason) {
 						break;
 					}
 					$batch = $this->get_media_ids_batch($offset, $batch_size, false);
 					$items = array_map('intval', (array) ($batch['items'] ?? array()));
 					foreach ($items as $attachment_id) {
-						$pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+						$pause_reason = function_exists('ultracache_operation_pause_reason') ? ultracache_operation_pause_reason($budget) : '';
 						if ('' !== $pause_reason || $scanned >= $limit) {
 							break 2;
 						}
@@ -1110,7 +1114,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			$format = $this->normalize_media_queue_format($args['format'] ?? 'best');
 			$only_missing = array_key_exists('only_missing', $args) ? (bool) $args['only_missing'] : true;
 			$time_budget = isset($args['time_budget']) ? max(0, (int) $args['time_budget']) : null;
-			$budget = function_exists('ucwp_get_safe_operation_budget') ? ucwp_get_safe_operation_budget('media_process', $time_budget, 45) : array('started_at' => microtime(true), 'seconds' => 20);
+			$budget = function_exists('ultracache_get_safe_operation_budget') ? ultracache_get_safe_operation_budget('media_process', $time_budget, 45) : array('started_at' => microtime(true), 'seconds' => 20);
 			$started = (float) ($budget['started_at'] ?? microtime(true));
 
 			if (get_transient(self::MEDIA_QUEUE_PROCESS_LOCK)) {
@@ -1129,7 +1133,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			try {
 				$batch = $this->get_media_queue_batch(0, $limit, $format, true);
 				foreach ((array) ($batch['items'] ?? array()) as $attachment_id) {
-					$loop_pause_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+					$loop_pause_reason = function_exists('ultracache_operation_pause_reason') ? ultracache_operation_pause_reason($budget) : '';
 					if ('' !== $loop_pause_reason) {
 						break;
 					}
@@ -1152,7 +1156,7 @@ trait Ultra_Cache_Media_Queue_Trait
 			}
 
 			$status = $this->get_media_queue_status($format);
-			$pause_detected_reason = function_exists('ucwp_operation_pause_reason') ? ucwp_operation_pause_reason($budget) : '';
+			$pause_detected_reason = function_exists('ultracache_operation_pause_reason') ? ultracache_operation_pause_reason($budget) : '';
 			$time_budget_reached = ('time_budget' === $pause_detected_reason && !empty($status['pending']));
 			$memory_budget_reached = ('memory_budget' === $pause_detected_reason && !empty($status['pending']));
 			$batch_limit_reached = (!empty($status['pending']) && $processed >= $limit);
@@ -1247,7 +1251,7 @@ trait Ultra_Cache_Media_Queue_Trait
 				return $attachment_id;
 			}
 
-			$uploads = wp_get_upload_dir();
+			$uploads = ultracache_uploads_base_info();
 			if (!empty($uploads['baseurl'])) {
 				$public_url = trailingslashit((string) $uploads['baseurl']) . ltrim(str_replace('\\', '/', (string) $relative_path), '/');
 				$attachment_id = function_exists('attachment_url_to_postid') ? absint(attachment_url_to_postid($public_url)) : 0;

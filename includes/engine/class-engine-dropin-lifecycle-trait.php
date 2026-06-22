@@ -22,10 +22,10 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
         public static function ensure_cache_directories()
         {
             $dirs = array(
-                UCWP_CACHE_DIR,
-                UCWP_AVIF_DIR,
-                UCWP_WEBP_DIR,
-                ucwp_generated_asset_dir('google-fonts'),
+                ULTRACACHE_CACHE_DIR,
+                ULTRACACHE_AVIF_DIR,
+                ULTRACACHE_WEBP_DIR,
+                ultracache_generated_asset_dir('google-fonts'),
             );
 
             foreach ($dirs as $dir) {
@@ -35,7 +35,7 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
 
                 $index_file = trailingslashit($dir) . 'index.php';
                 if (!file_exists($index_file)) {
-                    ucwp_safe_file_put_contents($index_file, "<?php\n// Silence is golden.\n");
+                    ultracache_safe_file_put_contents($index_file, "<?php\n// Silence is golden.\n");
                 }
             }
         }
@@ -44,14 +44,14 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
         {
             $profile = (bool) $profile;
             $checkpoint = function ($stage, array $extra = array()) use ($profile) {
-                if ($profile && function_exists('ucwp_request_profile_checkpoint')) {
-                    ucwp_request_profile_checkpoint('advanced_cache_setup_' . $stage, $extra);
+                if ($profile && function_exists('ultracache_request_profile_checkpoint')) {
+                    ultracache_request_profile_checkpoint('advanced_cache_setup_' . $stage, $extra);
                 }
             };
 
-            $target = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('advanced-cache.php') : '';
+            $target = function_exists('ultracache_dropin_path') ? ultracache_dropin_path('advanced-cache.php') : '';
             if ('' === $target) {
-                $checkpoint('skipped', array('reason' => 'wp_content_dir_missing'));
+                $checkpoint('skipped', array('reason' => 'filesystem_unavailable'));
                 return;
             }
             $marker = 'UltraCache advanced-cache drop-in';
@@ -64,37 +64,27 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 return;
             }
 
-            if (file_exists($target) && is_readable($target)) {
+            if (ultracache_dropin_exists('advanced-cache.php')) {
                 $checkpoint('existing_read_start', array('target' => basename((string) $target)));
-                $existing = (string) ucwp_safe_file_get_contents($target, 'advanced_cache_existing_read');
-                $checkpoint('existing_read_end', array('existing_bytes' => strlen((string) $existing)));
-                if ('' !== $existing && $existing === $dropin) {
+                $existing = ultracache_read_dropin('advanced-cache.php');
+                $checkpoint('existing_read_end', array('existing_bytes' => is_string($existing) ? strlen($existing) : 0));
+                if (is_string($existing) && $existing === $dropin) {
                     $checkpoint('unchanged', array('result' => 'already_current'));
                     return;
                 }
 
-                if ('' !== $existing && false === strpos($existing, $marker)) {
+                if (is_string($existing) && '' !== $existing && false === strpos($existing, $marker)) {
                     $checkpoint('skipped', array('reason' => 'foreign_dropin'));
                     return;
                 }
             }
 
-            $tmp = $target . '.tmp-' . uniqid('', true);
-            $checkpoint('write_temp_start');
-            if (false === ucwp_safe_file_put_contents($tmp, $dropin, LOCK_EX, 'advanced_cache_dropin_write')) {
-                $checkpoint('write_temp_failed');
-                ucwp_safe_unlink($tmp);
+            $checkpoint('write_start');
+            if (!ultracache_write_dropin('advanced-cache.php', $dropin)) {
+                $checkpoint('write_failed');
                 return;
             }
-            $checkpoint('write_temp_end');
-
-            $checkpoint('rename_start');
-            if (!ucwp_safe_rename($tmp, $target)) {
-                $checkpoint('rename_failed');
-                ucwp_safe_unlink($tmp);
-                return;
-            }
-            $checkpoint('rename_end', array('result' => 'written'));
+            $checkpoint('write_end', array('result' => 'written'));
         }
 
         public static function get_advanced_cache_dropin_status()
@@ -104,33 +94,28 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 'readable' => false,
                 'has_marker' => false,
                 'build' => '',
-                'expected_build' => defined('UCWP_VERSION') ? (string) UCWP_VERSION : '',
+                'expected_build' => defined('ULTRACACHE_VERSION') ? (string) ULTRACACHE_VERSION : '',
+                'config_hash' => '',
+                'expected_config_hash' => self::get_embedded_runtime_config_hash(),
+                'config_in_sync' => false,
                 'healthy' => false,
                 'reason' => '',
             );
 
-            $target = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('advanced-cache.php') : '';
+            $target = function_exists('ultracache_dropin_path') ? ultracache_dropin_path('advanced-cache.php') : '';
             if ('' === $target) {
-                $status['reason'] = 'wp_content_dir_missing';
+                $status['reason'] = 'filesystem_unavailable';
                 return $status;
             }
-            $status['exists'] = file_exists($target);
-            $status['readable'] = $status['exists'] && is_readable($target) && is_file($target);
+            $status['exists'] = ultracache_dropin_exists('advanced-cache.php');
+            $contents = $status['exists'] ? ultracache_read_dropin('advanced-cache.php') : false;
+            $status['readable'] = is_string($contents);
 
             if (!$status['exists']) {
                 $status['reason'] = 'missing';
                 return $status;
             }
 
-            if (!$status['readable']) {
-                $status['reason'] = 'not_readable';
-                return $status;
-            }
-
-            // Frontend health checks are read-only and intentionally avoid
-            // WP_Filesystem initialization. All writes/repairs are handled in
-            // admin, activation, settings-save, or WP-CLI contexts.
-            $contents = ucwp_safe_file_get_contents($target, 'advanced_cache_status_read', true);
             if (!is_string($contents) || '' === $contents) {
                 $status['reason'] = 'read_failed';
                 return $status;
@@ -140,6 +125,11 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
             if (preg_match('/Drop-in Build:\s*([^\r\n*]+)/', $contents, $matches)) {
                 $status['build'] = trim((string) $matches[1]);
             }
+            if (preg_match('/Embedded Runtime Config Hash:\s*([a-f0-9]{64})/i', $contents, $matches)) {
+                $status['config_hash'] = strtolower(trim((string) $matches[1]));
+            }
+            $status['config_in_sync'] = '' !== $status['config_hash']
+                && hash_equals((string) $status['expected_config_hash'], (string) $status['config_hash']);
 
             if (!$status['has_marker']) {
                 $status['reason'] = 'foreign_dropin';
@@ -156,43 +146,72 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 return $status;
             }
 
+            if (!$status['config_in_sync']) {
+                $status['reason'] = 'embedded_config_stale';
+                return $status;
+            }
+
             $status['healthy'] = true;
             $status['reason'] = 'current';
             return $status;
         }
 
-        public static function get_advanced_cache_dropin_contents()
+        private static function get_embedded_runtime_config_json()
         {
-            if (!defined('WP_CONTENT_DIR')) {
-                return '';
+            $runtime = array();
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_embedded_runtime_config')) {
+                $runtime = Ultra_Cache_WP::get_embedded_runtime_config();
             }
 
-            $template = trailingslashit(UCWP_PATH) . 'templates/advanced-cache.php.tpl';
+            $json = wp_json_encode(is_array($runtime) ? $runtime : array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            return is_string($json) ? $json : '{}';
+        }
+
+        private static function get_embedded_runtime_config_hash()
+        {
+            return hash('sha256', self::get_embedded_runtime_config_json());
+        }
+
+        public static function get_advanced_cache_dropin_contents()
+        {
+            $template = ultracache_plugin_dir('templates/advanced-cache.php.tpl');
             if (!file_exists($template) || !is_readable($template)) {
                 return '';
             }
 
-            $dropin = (string) ucwp_safe_file_get_contents($template, 'advanced_cache_template');
+            $dropin = (string) ultracache_safe_file_get_contents($template, 'advanced_cache_template');
             if ('' === $dropin) {
                 return '';
             }
 
-            return str_replace('__UCWP_DROPIN_BUILD__', UCWP_VERSION, $dropin);
+            return str_replace(
+                array(
+                    '__ULTRACACHE_DROPIN_BUILD__',
+                    '__ULTRACACHE_SITE_NAMESPACE_SEED__',
+                    '__ULTRACACHE_CACHE_DIR__',
+                    '__ULTRACACHE_RUNTIME_CONFIG_JSON__',
+                    '__ULTRACACHE_RUNTIME_CONFIG_HASH__',
+                ),
+                array(
+                    ULTRACACHE_VERSION,
+                    ultracache_php_string_literal(ultracache_site_namespace_seed()),
+                    ultracache_php_string_literal(untrailingslashit(ULTRACACHE_CACHE_DIR)),
+                    ultracache_php_string_literal(self::get_embedded_runtime_config_json()),
+                    self::get_embedded_runtime_config_hash(),
+                ),
+                $dropin
+            );
         }
 
         public static function maybe_remove_advanced_cache()
         {
-            $target = function_exists('ucwp_dropin_path') ? ucwp_dropin_path('advanced-cache.php') : '';
+            $target = function_exists('ultracache_dropin_path') ? ultracache_dropin_path('advanced-cache.php') : '';
             if ('' === $target) {
                 return;
             }
-            if (!file_exists($target)) {
-                return;
-            }
-
-            $contents = (string) ucwp_safe_file_get_contents($target);
-            if (false !== strpos($contents, 'UltraCache advanced-cache drop-in')) {
-                ucwp_safe_unlink($target);
+            $contents = ultracache_read_dropin('advanced-cache.php');
+            if (is_string($contents) && false !== strpos($contents, 'UltraCache advanced-cache drop-in')) {
+                ultracache_delete_dropin('advanced-cache.php');
             }
         }
 
@@ -202,7 +221,7 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 return;
             }
 
-            $items = function_exists('ucwp_safe_scandir') ? ucwp_safe_scandir($dir, 'page_cache_recursive_delete scandir') : scandir($dir);
+            $items = ultracache_safe_scandir($dir, 'page_cache_recursive_delete scandir');
             if (!is_array($items)) {
                 return;
             }
@@ -216,11 +235,11 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 if (is_dir($path) && !is_link($path)) {
                     $this->recursive_delete($path);
                 } else {
-                    ucwp_safe_unlink($path);
+                    ultracache_safe_unlink($path);
                 }
             }
 
-            ucwp_safe_rmdir($dir);
+            ultracache_safe_rmdir($dir);
         }
 
 }

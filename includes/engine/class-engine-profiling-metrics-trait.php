@@ -72,7 +72,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         }
 
         $stage_key = sanitize_key((string) $stage);
-        if (function_exists('ucwp_request_profile_should_record_checkpoint') && !ucwp_request_profile_should_record_checkpoint($stage_key)) {
+        if (function_exists('ultracache_request_profile_should_record_checkpoint') && !ultracache_request_profile_should_record_checkpoint($stage_key)) {
             return;
         }
 
@@ -93,7 +93,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
     private function profile_settings_request_checkpoint($stage, array $extra = array())
     {
-        if (function_exists('ucwp_request_profile_verbose_settings_enabled') && !ucwp_request_profile_verbose_settings_enabled()) {
+        if (function_exists('ultracache_request_profile_verbose_settings_enabled') && !ultracache_request_profile_verbose_settings_enabled()) {
             return;
         }
 
@@ -102,7 +102,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
     private function get_store_profile_request_checkpoints()
     {
-        $external = function_exists('ucwp_get_request_profile_checkpoints') ? ucwp_get_request_profile_checkpoints() : array();
+        $external = function_exists('ultracache_get_request_profile_checkpoints') ? ultracache_get_request_profile_checkpoints() : array();
         $checkpoints = array_merge(is_array($external) ? $external : array(), $this->store_profile_request_checkpoints);
 
         if (empty($checkpoints)) {
@@ -114,7 +114,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             if (!is_array($checkpoint)) {
                 continue;
             }
-            $checkpoint['_ucwp_order'] = $index;
+            $checkpoint['_ultracache_order'] = $index;
             $indexed[] = $checkpoint;
         }
 
@@ -122,7 +122,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             $a_ms = isset($a['at_ms']) ? (int) $a['at_ms'] : 0;
             $b_ms = isset($b['at_ms']) ? (int) $b['at_ms'] : 0;
             if ($a_ms === $b_ms) {
-                return (int) ($a['_ucwp_order'] ?? 0) <=> (int) ($b['_ucwp_order'] ?? 0);
+                return (int) ($a['_ultracache_order'] ?? 0) <=> (int) ($b['_ultracache_order'] ?? 0);
             }
             return $a_ms <=> $b_ms;
         });
@@ -131,7 +131,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         foreach ($indexed as $i => $checkpoint) {
             $at = isset($checkpoint['at_ms']) ? (int) $checkpoint['at_ms'] : 0;
             $checkpoint['since_previous_ms'] = 0 === $i ? $at : max(0, $at - $previous_at);
-            unset($checkpoint['_ucwp_order']);
+            unset($checkpoint['_ultracache_order']);
             $indexed[$i] = $checkpoint;
             $previous_at = $at;
         }
@@ -167,7 +167,6 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'advanced_cache_setup_rename_end',
             'page_cache_reconcile_full_end',
             'plugins_loaded_p20_before_object_cache_reconcile',
-            'plugins_loaded_p21_before_runtime_config_reconcile',
             'plugins_loaded_p22_after_reconcile',
             'plugins_loaded_end',
             'setup_theme_start',
@@ -240,8 +239,8 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
     private function get_store_profile_callback_timings()
     {
-        if (function_exists('ucwp_get_request_profile_callback_timings')) {
-            $timings = ucwp_get_request_profile_callback_timings(120);
+        if (function_exists('ultracache_get_request_profile_callback_timings')) {
+            $timings = ultracache_get_request_profile_callback_timings(120);
             return is_array($timings) ? $timings : array();
         }
 
@@ -250,8 +249,8 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
     private function get_store_profile_callback_timing_summary()
     {
-        if (function_exists('ucwp_get_request_profile_callback_timing_summary')) {
-            $summary = ucwp_get_request_profile_callback_timing_summary(80);
+        if (function_exists('ultracache_get_request_profile_callback_timing_summary')) {
+            $summary = ultracache_get_request_profile_callback_timing_summary(80);
             return is_array($summary) ? $summary : array();
         }
 
@@ -354,7 +353,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             return false;
         }
 
-        return ucwp_generated_asset_reference_matches($path, array('css-bundles', 'font-css', 'optimized-css'));
+        return ultracache_generated_asset_reference_matches($path, array('css-bundles', 'font-css', 'optimized-css'));
     }
 
     private function normalize_css_rewrite_map_lookup_url($url)
@@ -384,7 +383,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             return '';
         }
 
-        $map = get_transient('ucwp_runtime_font_css_url_map_v3');
+        $map = get_transient('ultracache_runtime_font_css_url_map_v3');
         if (!is_array($map)) {
             return '';
         }
@@ -452,19 +451,19 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
     private function get_css_bundle_source_type($url)
     {
         $path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
-        if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_plugins_public_path())) {
+        if (function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($path, ultracache_plugins_public_path())) {
             return 'plugin';
         }
-        if (function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($path, ucwp_themes_public_paths())) {
+        if (function_exists('ultracache_public_path_contains_any') && ultracache_public_path_contains_any($path, ultracache_themes_public_paths())) {
             return 'theme';
         }
-        if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_generated_asset_public_path())) {
+        if (function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($path, ultracache_generated_asset_public_path())) {
             return 'ultracache-generated';
         }
-        if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_uploads_public_path())) {
+        if (function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($path, ultracache_uploads_public_path())) {
             return 'uploads';
         }
-        if (function_exists('ucwp_public_path_contains') && function_exists('ucwp_content_cache_public_path') && ucwp_public_path_contains($path, ucwp_content_cache_public_path())) {
+        if (function_exists('ultracache_public_path_contains') && function_exists('ultracache_content_cache_public_path') && ultracache_public_path_contains($path, ultracache_content_cache_public_path())) {
             return 'ultracache-cache';
         }
         return 'local';
@@ -601,13 +600,13 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             return (bool) $this->store_profile_enabled;
         }
 
-        $this->store_profile_enabled = function_exists('ucwp_request_profiler_enabled') ? ucwp_request_profiler_enabled() : false;
+        $this->store_profile_enabled = function_exists('ultracache_request_profiler_enabled') ? ultracache_request_profiler_enabled() : false;
         return (bool) $this->store_profile_enabled;
     }
 
     private function get_store_profile_dir()
     {
-        return trailingslashit(UCWP_CACHE_DIR) . 'diagnostics/';
+        return trailingslashit(ULTRACACHE_CACHE_DIR) . 'diagnostics/';
     }
 
     private function get_store_profile_last_file()
@@ -617,9 +616,9 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
     private function get_store_profile_run_id()
     {
-        $run_id = sanitize_key((string) ucwp_query_value('ucwp_profile_run'));
+        $run_id = sanitize_key((string) ultracache_query_value('ultracache_profile_run'));
         if ('' === $run_id) {
-            $run_id = sanitize_key((string) ucwp_server_value('HTTP_X_ULTRACACHE_PROFILE_RUN'));
+            $run_id = sanitize_key((string) ultracache_server_value('HTTP_X_ULTRACACHE_PROFILE_RUN'));
         }
 
         return '' !== $run_id ? substr($run_id, 0, 64) : '';
@@ -642,7 +641,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             return;
         }
 
-        $entries = function_exists('ucwp_safe_scandir') ? ucwp_safe_scandir($dir, (string) $context) : scandir($dir);
+        $entries = ultracache_safe_scandir($dir, (string) $context);
         if (!is_array($entries)) {
             return;
         }
@@ -665,16 +664,12 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
                 continue;
             }
 
-            $mtime = function_exists('ucwp_safe_filemtime') ? ucwp_safe_filemtime($path, (string) $context) : filemtime($path);
+            $mtime = ultracache_safe_filemtime($path, (string) $context);
             if (!is_int($mtime) || $mtime >= $cutoff) {
                 continue;
             }
 
-            if (function_exists('ucwp_safe_unlink')) {
-                ucwp_safe_unlink($path, (string) $context);
-            } elseif (function_exists('wp_delete_file')) {
-                wp_delete_file($path);
-            }
+            ultracache_safe_unlink($path, (string) $context);
         }
     }
 
@@ -686,27 +681,27 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
         $dir = $this->get_store_profile_dir();
         if (!is_dir($dir)) {
-            ucwp_safe_mkdir($dir, 0755, true, (string) $context . '_mkdir');
+            ultracache_safe_mkdir($dir, 0755, true, (string) $context . '_mkdir');
         }
 
-        if (!is_dir($dir) || !ucwp_path_is_writable($dir)) {
-            ucwp_debug_log('store profile write failed', array('context' => (string) $context, 'reason' => 'diagnostics-dir-not-writable', 'dir' => $dir));
+        if (!is_dir($dir) || !ultracache_path_is_writable($dir)) {
+            ultracache_debug_log('store profile write failed', array('context' => (string) $context, 'reason' => 'diagnostics-dir-not-writable', 'dir' => $dir));
             return false;
         }
 
         $json = wp_json_encode($this->store_profile, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if (!is_string($json) || '' === $json) {
-            ucwp_debug_log('store profile write failed', array('context' => (string) $context, 'reason' => 'json-encode-failed'));
+            ultracache_debug_log('store profile write failed', array('context' => (string) $context, 'reason' => 'json-encode-failed'));
             return false;
         }
 
-        $last_ok = false !== ucwp_safe_file_put_contents($this->get_store_profile_last_file(), $json, LOCK_EX, (string) $context . '_last');
+        $last_ok = false !== ultracache_safe_file_put_contents($this->get_store_profile_last_file(), $json, LOCK_EX, (string) $context . '_last');
         $run_ok = true;
         $run_id = isset($this->store_profile['profile_run_id']) ? sanitize_key((string) $this->store_profile['profile_run_id']) : '';
         if ('' !== $run_id) {
             $run_file = $this->get_store_profile_run_file($run_id);
             if ('' !== $run_file) {
-                $run_ok = false !== ucwp_safe_file_put_contents($run_file, $json, LOCK_EX, (string) $context . '_run');
+                $run_ok = false !== ultracache_safe_file_put_contents($run_file, $json, LOCK_EX, (string) $context . '_run');
             }
         }
 
@@ -715,7 +710,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         }
 
         if (!$last_ok || !$run_ok) {
-            ucwp_debug_log('store profile write failed', array('context' => (string) $context, 'last_ok' => $last_ok ? 'yes' : 'no', 'run_ok' => $run_ok ? 'yes' : 'no'));
+            ultracache_debug_log('store profile write failed', array('context' => (string) $context, 'last_ok' => $last_ok ? 'yes' : 'no', 'run_ok' => $run_ok ? 'yes' : 'no'));
         }
 
         return $last_ok && $run_ok;
@@ -728,7 +723,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             return array();
         }
 
-        $json = ucwp_safe_file_get_contents($file);
+        $json = ultracache_safe_file_get_contents($file);
         $data = json_decode((string) $json, true);
         return is_array($data) ? $data : array();
     }
@@ -740,7 +735,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             return array();
         }
 
-        $json = ucwp_safe_file_get_contents($file);
+        $json = ultracache_safe_file_get_contents($file);
         $data = json_decode((string) $json, true);
         return is_array($data) ? $data : array();
     }
@@ -749,7 +744,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
     {
         $file = $this->get_store_profile_last_file();
         if (file_exists($file)) {
-            ucwp_safe_unlink($file);
+            ultracache_safe_unlink($file);
         }
         return !file_exists($file);
     }
@@ -773,8 +768,8 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $this->store_profile_started_at = microtime(true);
         $request_id = gmdate('Ymd-His') . '-' . substr(md5(uniqid('', true)), 0, 10);
         $this->store_profile = array(
-            'label' => __('UCWP STORE PROFILE', 'ultracache'),
-            'version' => defined('UCWP_VERSION') ? UCWP_VERSION : '',
+            'label' => __('ULTRACACHE STORE PROFILE', 'ultracache'),
+            'version' => defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : '',
             'request_id' => $request_id,
             'profile_run_id' => $this->get_store_profile_run_id(),
             'url' => $this->get_current_request_url(),
@@ -884,7 +879,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
         $bytes = 0;
         $offset = 0;
-        $needle = 'data-ucwp-page-css-bundle';
+        $needle = 'data-ultracache-page-css-bundle';
         while (false !== ($style_start = stripos($html, '<style', $offset))) {
             $tag_end = strpos($html, '>', $style_start);
             if (false === $tag_end) {
@@ -926,11 +921,11 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
         $media = strtolower(trim((string) $this->extract_attribute_from_html_tag($tag, 'media')));
         $is_print = (false !== strpos($media, 'print') || false !== strpos($media, 'speech'));
-        $async_marker = (bool) preg_match('/\b(?:disabled|onload|data-ucwp-async-css|data-ucwp-page-css-bundle-fallback)\b/i', (string) $tag);
+        $async_marker = (bool) preg_match('/\b(?:disabled|onload|data-ultracache-async-css|data-ultracache-page-css-bundle-fallback)\b/i', (string) $tag);
         $render_blocking = (!$is_print && !$async_marker);
         $origin = $this->get_public_resource_origin_type($href);
         $path = $this->get_public_resource_path_fragment($href);
-        $is_bundle = ucwp_generated_asset_reference_matches($href, array('css-bundles'));
+        $is_bundle = ultracache_generated_asset_reference_matches($href, array('css-bundles'));
         $slider_fragment = !empty($settings['slider_safe_mode']) ? $this->get_matching_fragment('', $href, $tag, $this->get_slider_hero_protected_fragments()) : '';
         $bytes = 0;
         $local_path = $this->resolve_local_path_from_public_url($href);
@@ -1086,7 +1081,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             if (!$this->html_tag_rel_contains_stylesheet($tag_html)) {
                 continue;
             }
-            if (preg_match('/\b(?:disabled|onload|data-ucwp-async-css|data-ucwp-page-css-bundle-fallback)\b/i', $tag_html)) {
+            if (preg_match('/\b(?:disabled|onload|data-ultracache-async-css|data-ultracache-page-css-bundle-fallback)\b/i', $tag_html)) {
                 continue;
             }
 
@@ -1101,7 +1096,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
                 $result['render_blocking_stylesheet_hrefs'][] = $href;
             }
 
-            if (ucwp_generated_asset_reference_matches($href, array('css-bundles'))) {
+            if (ultracache_generated_asset_reference_matches($href, array('css-bundles'))) {
                 $result['render_blocking_css_bundle_links']++;
             } else {
                 $result['render_blocking_non_bundle_stylesheet_links']++;
@@ -1127,20 +1122,20 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             'fonts_googleapis_refs' => $this->count_store_profile_regex('/fonts\.googleapis\.com/i', $html),
             'local_google_fonts_refs' => $this->count_store_profile_regex('#uploads/ultracache/google-fonts#i', $html),
             'css_bundle_refs' => $this->count_store_profile_regex('#uploads/ultracache/css-bundles#i', $html),
-            'page_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ucwp-page-css-bundle\s*=/i', $html),
-            'page_css_bundle_external_links' => $this->count_store_profile_regex('/<link\b(?=[^>]*\bdata-ucwp-page-css-bundle\s*=)[^>]*>/i', $html),
-            'page_css_bundle_inline_style_tags' => $this->count_store_profile_regex('/<style\b(?=[^>]*\bdata-ucwp-page-css-bundle\s*=)[^>]*>/i', $html),
+            'page_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ultracache-page-css-bundle\s*=/i', $html),
+            'page_css_bundle_external_links' => $this->count_store_profile_regex('/<link\b(?=[^>]*\bdata-ultracache-page-css-bundle\s*=)[^>]*>/i', $html),
+            'page_css_bundle_inline_style_tags' => $this->count_store_profile_regex('/<style\b(?=[^>]*\bdata-ultracache-page-css-bundle\s*=)[^>]*>/i', $html),
             'page_css_bundle_inline_style_bytes' => $this->sum_store_profile_page_css_inline_bytes($html),
-            'page_css_bundle_fallback_markers' => $this->count_store_profile_regex('/\bdata-ucwp-page-css-bundle-fallback\s*=/i', $html),
-            'page_css_bundle_fallback_blocks' => $this->count_store_profile_regex('/\bdata-ucwp-page-css-bundle-fallback-block\s*=/i', $html),
-            'page_css_bundle_fallback_links' => $this->count_store_profile_regex('/<link\b(?=[^>]*\bdata-ucwp-page-css-bundle-fallback\s*=)[^>]*>/i', $html),
+            'page_css_bundle_fallback_markers' => $this->count_store_profile_regex('/\bdata-ultracache-page-css-bundle-fallback\s*=/i', $html),
+            'page_css_bundle_fallback_blocks' => $this->count_store_profile_regex('/\bdata-ultracache-page-css-bundle-fallback-block\s*=/i', $html),
+            'page_css_bundle_fallback_links' => $this->count_store_profile_regex('/<link\b(?=[^>]*\bdata-ultracache-page-css-bundle-fallback\s*=)[^>]*>/i', $html),
             'leftover_css_bundle_refs' => $this->count_store_profile_regex('#uploads/ultracache/css-bundles#i', $html),
-            'leftover_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ucwp-leftover-css-bundle\s*=/i', $html),
-            'frontpage_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ucwp-frontpage-css\s*=/i', $html),
-            'async_css_markers' => $this->count_store_profile_regex('/\bdata-ucwp-async-css\s*=/i', $html),
-            'async_css_fallback_markers' => $this->count_store_profile_regex('/\bdata-ucwp-async-css-fallback\s*=/i', $html),
-            'delayed_js_markers' => $this->count_store_profile_regex('/text\/ucwp-delayed-js/i', $html),
-            'data_ucwp_src_markers' => $this->count_store_profile_regex('/\bdata-ucwp-src\s*=/i', $html),
+            'leftover_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ultracache-leftover-css-bundle\s*=/i', $html),
+            'frontpage_css_bundle_markers' => $this->count_store_profile_regex('/\bdata-ultracache-frontpage-css\s*=/i', $html),
+            'async_css_markers' => $this->count_store_profile_regex('/\bdata-ultracache-async-css\s*=/i', $html),
+            'async_css_fallback_markers' => $this->count_store_profile_regex('/\bdata-ultracache-async-css-fallback\s*=/i', $html),
+            'delayed_js_markers' => $this->count_store_profile_regex('/text\/ultracache-delayed-js/i', $html),
+            'data_ultracache_src_markers' => $this->count_store_profile_regex('/\bdata-ultracache-src\s*=/i', $html),
             'lcp_priority_markers' => $this->count_store_profile_regex('/\bfetchpriority\s*=\s*["\']high/i', $html),
         ));
     }
@@ -1226,7 +1221,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $this->store_profile['peak_memory_bytes'] = function_exists('memory_get_peak_usage') ? (int) memory_get_peak_usage(true) : (int) ($this->store_profile['peak_memory_bytes'] ?? 0);
         $this->store_profile['request_profile'] = array(
             'request_started_at_ms' => 0,
-            'mode' => (function_exists('ucwp_request_profile_verbose_enabled') && ucwp_request_profile_verbose_enabled()) ? 'verbose' : 'compact',
+            'mode' => (function_exists('ultracache_request_profile_verbose_enabled') && ultracache_request_profile_verbose_enabled()) ? 'verbose' : 'compact',
             'total_request_duration_ms' => $total_request_ms,
             'unmeasured_before_store_profile_ms' => max(0, $total_request_ms - $total_ms),
             'checkpoints' => $merged_checkpoints,
@@ -1261,7 +1256,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $merged_checkpoints = $this->get_store_profile_request_checkpoints();
         $this->store_profile['request_profile'] = array(
             'request_started_at_ms' => 0,
-            'mode' => (function_exists('ucwp_request_profile_verbose_enabled') && ucwp_request_profile_verbose_enabled()) ? 'verbose' : 'compact',
+            'mode' => (function_exists('ultracache_request_profile_verbose_enabled') && ultracache_request_profile_verbose_enabled()) ? 'verbose' : 'compact',
             'total_request_duration_ms' => $total_request_ms,
             'unmeasured_before_store_profile_ms' => max(0, $total_request_ms - $total_ms),
             'checkpoints' => $merged_checkpoints,
@@ -1272,7 +1267,7 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         $this->store_profile['css_bundle_context_after'] = $this->get_store_profile_css_bundle_context();
         $critical_request_html = '';
         if ('' !== (string) $file_path && is_readable((string) $file_path)) {
-            $critical_request_html = ucwp_safe_file_get_contents((string) $file_path);
+            $critical_request_html = ultracache_safe_file_get_contents((string) $file_path);
         }
         $this->store_profile['critical_request_chain'] = $this->collect_store_profile_critical_request_chain(is_string($critical_request_html) ? $critical_request_html : '');
         $this->store_profile['js_delay_safety_scan'] = $this->collect_store_profile_js_delay_safety_scan(is_string($critical_request_html) ? $critical_request_html : '');

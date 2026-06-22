@@ -79,10 +79,7 @@ trait Ultra_Cache_Media_Diagnostics_Trait
 
 		private function detect_preferred_image_editor_class() {
 			if (!function_exists('wp_get_image_editor')) {
-				$maybe = ABSPATH . 'wp-admin/includes/image.php';
-				if (file_exists($maybe)) {
-					require_once $maybe;
-				}
+				ultracache_require_wordpress_admin_include('image.php', 'wp_get_image_editor');
 			}
 
 			if ($this->supports_imagick_avif() || $this->supports_imagick_webp()) {
@@ -141,7 +138,7 @@ trait Ultra_Cache_Media_Diagnostics_Trait
 		}
 
 		public function get_support_status() {
-			$cache_key = 'ultracache_media_support_status_v3';
+			$cache_key = 'ultracache_media_support_status_v4';
 			$cached = get_transient($cache_key);
 			if (is_array($cached) && array_key_exists('supported', $cached)) {
 				$cached['cached'] = true;
@@ -226,8 +223,8 @@ trait Ultra_Cache_Media_Diagnostics_Trait
 				return array('files' => $count, 'bytes' => $bytes, 'scannedFiles' => $scanned, 'truncated' => $truncated, 'timedOut' => $timed_out, 'error' => '');
 			};
 
-			$avif = $scan(defined('UCWP_AVIF_DIR') ? UCWP_AVIF_DIR : '', 'avif');
-			$webp = $scan(defined('UCWP_WEBP_DIR') ? UCWP_WEBP_DIR : '', 'webp');
+			$avif = $scan(defined('ULTRACACHE_AVIF_DIR') ? ULTRACACHE_AVIF_DIR : '', 'avif');
+			$webp = $scan(defined('ULTRACACHE_WEBP_DIR') ? ULTRACACHE_WEBP_DIR : '', 'webp');
 			$avif_files = (int) ($avif['files'] ?? 0);
 			$webp_files = (int) ($webp['files'] ?? 0);
 			return array(

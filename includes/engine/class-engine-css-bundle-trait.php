@@ -8,7 +8,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
     {
         private function is_frontpage_css_scan_mode()
         {
-            return '1' === sanitize_text_field(ucwp_query_value('ucwp_frontpage_css_scan'));
+            return '1' === sanitize_text_field(ultracache_query_value('ultracache_frontpage_css_scan'));
         }
 
         private function get_css_bundle_scope(array $settings = array())
@@ -28,7 +28,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
 
         private function get_frontpage_css_dir()
         {
-            return ucwp_generated_asset_dir('css-bundles');
+            return ultracache_generated_asset_dir('css-bundles');
         }
 
         private function get_frontpage_css_manifest_file()
@@ -42,13 +42,13 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
              * Caps per-page CSS bundle manifest growth. The manifest is a runtime lookup file,
              * not a diagnostics archive; old entries are safe to rebuild on demand.
              */
-            $max = (int) apply_filters('ucwp_css_bundle_manifest_max_entries', 500);
+            $max = (int) apply_filters('ultracache_css_bundle_manifest_max_entries', 500);
             return max(50, min(5000, $max));
         }
 
         private function get_css_bundle_manifest_tmp_cleanup_age_seconds()
         {
-            $seconds = (int) apply_filters('ucwp_css_bundle_manifest_tmp_cleanup_age_seconds', 10 * MINUTE_IN_SECONDS);
+            $seconds = (int) apply_filters('ultracache_css_bundle_manifest_tmp_cleanup_age_seconds', 10 * MINUTE_IN_SECONDS);
             return max(60, min(DAY_IN_SECONDS, $seconds));
         }
 
@@ -75,7 +75,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 if (!$mtime || ($now - (int) $mtime) < $age_seconds) {
                     continue;
                 }
-                if (ucwp_safe_unlink($file)) {
+                if (ultracache_safe_unlink($file)) {
                     $deleted++;
                 }
                 if ($deleted >= $max_delete) {
@@ -246,7 +246,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
                 );
             }
 
-            $raw = ucwp_safe_file_get_contents($file);
+            $raw = ultracache_safe_file_get_contents($file);
             $decoded = is_string($raw) && '' !== $raw ? json_decode($raw, true) : array();
             if (!is_array($decoded)) {
                 $decoded = array();
@@ -329,7 +329,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
              * supplies the default value, while the filter can still tighten or extend the
              * policy for managed hosting or custom deployments.
              */
-            $seconds = (int) apply_filters('ucwp_css_bundle_cleanup_grace_seconds', $seconds);
+            $seconds = (int) apply_filters('ultracache_css_bundle_cleanup_grace_seconds', $seconds);
             return max(HOUR_IN_SECONDS, min(WEEK_IN_SECONDS, $seconds));
         }
 
@@ -344,7 +344,7 @@ if (!trait_exists('Ultra_Cache_Engine_CSS_Bundle_Trait')) {
              * Advanced server-side override. Dashboard value is the default; filter may
              * override it for hosts that need stricter filesystem cleanup limits.
              */
-            $max = (int) apply_filters('ucwp_css_bundle_cleanup_max_deletes_per_run', $max);
+            $max = (int) apply_filters('ultracache_css_bundle_cleanup_max_deletes_per_run', $max);
             return max(5, min(500, $max));
         }
 
@@ -456,7 +456,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     continue;
                 }
 
-                if (ucwp_safe_unlink($file)) {
+                if (ultracache_safe_unlink($file)) {
                     $deleted++;
                 }
 
@@ -503,7 +503,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                         continue;
                     }
                 }
-                if (ucwp_safe_unlink($file)) {
+                if (ultracache_safe_unlink($file)) {
                     $deleted++;
                 }
                 if ($deleted >= $max_deletes) {
@@ -569,7 +569,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
 
             $file = $this->get_frontpage_css_manifest_file();
             if (file_exists($file)) {
-                ucwp_safe_unlink($file);
+                ultracache_safe_unlink($file);
             }
         }
 
@@ -778,7 +778,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     'stylesheetLinks' => 0,
                 );
 
-                $html = ucwp_safe_file_get_contents($file);
+                $html = ultracache_safe_file_get_contents($file);
                 if (!is_string($html) || '' === $html) {
                     $verification['inspectedFiles'][] = $file_result;
                     continue;
@@ -798,9 +798,9 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 }
 
                 $lower_html = strtolower($html);
-                $css_bundle_marker = function_exists('ucwp_generated_asset_public_path') ? strtolower(ucwp_generated_asset_public_path('css-bundles')) : '';
+                $css_bundle_marker = function_exists('ultracache_generated_asset_public_path') ? strtolower(ultracache_generated_asset_public_path('css-bundles')) : '';
                 $path_refs = '' !== $css_bundle_marker ? substr_count($lower_html, $css_bundle_marker) : 0;
-                $marker_refs = substr_count($lower_html, 'data-ucwp-page-css-bundle=') + substr_count($lower_html, 'id="ucwp-page-css-bundle"') + substr_count($lower_html, "id='ucwp-page-css-bundle'");
+                $marker_refs = substr_count($lower_html, 'data-ultracache-page-css-bundle=') + substr_count($lower_html, 'id="ultracache-page-css-bundle"') + substr_count($lower_html, "id='ultracache-page-css-bundle'");
                 $file_result['cssBundleRefs'] = max((int) $path_refs, (int) $marker_refs);
                 $file_result['containsCssBundle'] = $file_result['cssBundleRefs'] > 0;
 
@@ -851,9 +851,9 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 'disabled',
                 'data-href',
                 'data-src',
-                'data-ucwp-frontpage-css',
-                'data-ucwp-page-css-bundle',
-                'data-ucwp-async-css',
+                'data-ultracache-frontpage-css',
+                'data-ultracache-page-css-bundle',
+                'data-ultracache-async-css',
             );
 
             // This rebuilds an existing stylesheet tag from final rendered HTML for diagnostics/manifest comparison.
@@ -928,20 +928,20 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
         {
             $scan_url = add_query_arg(
                 array(
-                    'ucwp_frontpage_css_scan' => 1,
-                    'ucwp_css_v' => rawurlencode(UCWP_VERSION),
+                    'ultracache_frontpage_css_scan' => 1,
+                    'ultracache_css_v' => rawurlencode(ULTRACACHE_VERSION),
                 ),
                 $url
             );
 
-            $response = ucwp_safe_loopback_remote_request(
+            $response = ultracache_safe_loopback_remote_request(
                 $scan_url,
                 array(
                     'method' => 'GET',
                     'timeout' => 10,
                     'redirection' => 3,
                     'sslverify' => $this->should_verify_loopback_ssl($scan_url),
-                    'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-CSSBundle/' . UCWP_VERSION . '; +https://wordpress.org)',
+                    'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-CSSBundle/' . ULTRACACHE_VERSION . '; +https://wordpress.org)',
                     'headers' => array(
                         'Cache-Control' => 'no-cache',
                         'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -1085,7 +1085,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return array();
             }
 
-            if (false !== stripos($tag_html, 'data-ucwp-frontpage-css=') || false !== stripos($tag_html, 'data-ucwp-page-css-bundle=') || false !== stripos($tag_html, 'data-ucwp-async-css=')) {
+            if (false !== stripos($tag_html, 'data-ultracache-frontpage-css=') || false !== stripos($tag_html, 'data-ultracache-page-css-bundle=') || false !== stripos($tag_html, 'data-ultracache-async-css=')) {
                 return array();
             }
 
@@ -1329,14 +1329,14 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                         $delayed_block = $preferred_delayed_block;
                     }
                 }
-                if (function_exists('ucwp_optimize_font_face_block')) {
+                if (function_exists('ultracache_optimize_font_face_block')) {
                     $delayed_stats = array(
                         'fontDisplayAdded' => 0,
                         'duplicateSrcRemoved' => 0,
                         'ttfSourcesRemoved' => 0,
                         'fontFaceBlocksChanged' => 0,
                     );
-                    $optimized_delayed_block = ucwp_optimize_font_face_block($delayed_block, $delayed_stats);
+                    $optimized_delayed_block = ultracache_optimize_font_face_block($delayed_block, $delayed_stats);
                     if (is_string($optimized_delayed_block) && '' !== trim($optimized_delayed_block)) {
                         $delayed_block = $optimized_delayed_block;
                     }
@@ -1367,7 +1367,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             return $result;
         }
 
-        private function normalize_delayed_icon_fonts_stylesheet_entry(array $entry, $handle = 'ucwp-delayed-icon-fonts')
+        private function normalize_delayed_icon_fonts_stylesheet_entry(array $entry, $handle = 'ultracache-delayed-icon-fonts')
         {
             $policy = $this->get_font_optimization_policy();
             if (empty($policy['delay_icon_fonts'])) {
@@ -1390,7 +1390,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
 
             $handle = preg_replace('/[^a-z0-9_\-]/i', '-', (string) $handle);
             if (!is_string($handle) || '' === $handle) {
-                $handle = 'ucwp-delayed-icon-fonts';
+                $handle = 'ultracache-delayed-icon-fonts';
             }
 
             return array(
@@ -1432,7 +1432,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     if (!empty($entry) && is_array($entry)) {
                         $entries[] = array(
                             'entry'  => $entry,
-                            'handle' => 'ucwp-page-delayed-icon-fonts',
+                            'handle' => 'ultracache-page-delayed-icon-fonts',
                         );
                     }
                 }
@@ -1444,7 +1444,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     if (!is_array($asset)) {
                         continue;
                     }
-                    $handle = 'ucwp-no-bundle-delayed-icon-fonts';
+                    $handle = 'ultracache-no-bundle-delayed-icon-fonts';
                     if ($index > 0) {
                         $handle .= '-' . (string) ($index + 1);
                     }
@@ -1462,7 +1462,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     continue;
                 }
 
-                $normalized = $this->normalize_delayed_icon_fonts_stylesheet_entry($item['entry'], isset($item['handle']) ? (string) $item['handle'] : 'ucwp-delayed-icon-fonts');
+                $normalized = $this->normalize_delayed_icon_fonts_stylesheet_entry($item['entry'], isset($item['handle']) ? (string) $item['handle'] : 'ultracache-delayed-icon-fonts');
                 if (empty($normalized['url']) || empty($normalized['handle'])) {
                     continue;
                 }
@@ -1473,7 +1473,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 }
                 $seen[$url_key] = true;
 
-                wp_register_style((string) $normalized['handle'], (string) $normalized['url'], array(), defined('UCWP_VERSION') ? UCWP_VERSION : null, 'print');
+                wp_register_style((string) $normalized['handle'], (string) $normalized['url'], array(), defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : null, 'print');
                 wp_enqueue_style((string) $normalized['handle']);
             }
         }
@@ -1481,7 +1481,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
         public function add_delayed_icon_font_style_attributes($html, $handle, $href, $media)
         {
             $handle = (string) $handle;
-            if (0 !== strpos($handle, 'ucwp-page-delayed-icon-fonts') && 0 !== strpos($handle, 'ucwp-no-bundle-delayed-icon-fonts')) {
+            if (0 !== strpos($handle, 'ultracache-page-delayed-icon-fonts') && 0 !== strpos($handle, 'ultracache-no-bundle-delayed-icon-fonts')) {
                 return $html;
             }
 
@@ -1495,9 +1495,9 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     if ($processor->next_tag('LINK')) {
                         $processor->set_attribute('media', 'print');
                         $processor->set_attribute('onload', "this.media='all'");
-                        $processor->set_attribute('data-ucwp-delayed-icon-fonts', '1');
-                        $processor->set_attribute('data-ucwp-css-role', 'delayed-fonts-css');
-                        $processor->set_attribute('data-ucwp-css-async-reason', 'delayed-fonts');
+                        $processor->set_attribute('data-ultracache-delayed-icon-fonts', '1');
+                        $processor->set_attribute('data-ultracache-css-role', 'delayed-fonts-css');
+                        $processor->set_attribute('data-ultracache-css-async-reason', 'delayed-fonts');
                         $updated = $processor->get_updated_html();
                         return is_string($updated) && '' !== $updated ? $updated : $html;
                     }
@@ -1558,14 +1558,14 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     );
                 }
 
-                $css = ucwp_guarded_asset_file_get_contents($path, 'css', 'frontpage_css_bundle_asset', false);
+                $css = ultracache_guarded_asset_file_get_contents($path, 'css', 'frontpage_css_bundle_asset', false);
                 if (!is_string($css) || '' === $css) {
                     $stats['skipped']++;
                     continue;
                 }
 
                 $original_bytes = strlen($css);
-                $signature_parts[] = $url . '|' . (string) ucwp_safe_filemtime($path, 'frontpage_css_bundle_signature') . '|' . $original_bytes;
+                $signature_parts[] = $url . '|' . (string) ultracache_safe_filemtime($path, 'frontpage_css_bundle_signature') . '|' . $original_bytes;
                 $prepared_css = $this->prepare_css_asset_for_bundle($css, $url);
                 $prepared_body = isset($prepared_css['body']) ? (string) $prepared_css['body'] : '';
                 $css_image_stats = array();
@@ -1659,8 +1659,8 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 $stats['fontDisplayAdded'] += max(0, (int) ($bundle_font_display_stats['fontDisplayAdded'] ?? 0));
                 $stats['fontFaceBlocksScanned'] += max(0, (int) ($bundle_font_display_stats['fontFaceBlocksScanned'] ?? 0));
             }
-            if (function_exists('ucwp_strip_source_mapping_url_comments')) {
-                $bundle_content = trim(ucwp_strip_source_mapping_url_comments($bundle_content)) . "
+            if (function_exists('ultracache_strip_source_mapping_url_comments')) {
+                $bundle_content = trim(ultracache_strip_source_mapping_url_comments($bundle_content)) . "
 ";
             }
             $content_hash = md5($bundle_content);
@@ -1695,8 +1695,8 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             $delayed_font_bytes = 0;
             if ('' !== trim($delayed_font_css)) {
                 $delayed_font_content = trim($delayed_font_css) . "\n";
-                if (function_exists('ucwp_strip_source_mapping_url_comments')) {
-                    $delayed_font_content = trim(ucwp_strip_source_mapping_url_comments($delayed_font_content)) . "\n";
+                if (function_exists('ultracache_strip_source_mapping_url_comments')) {
+                    $delayed_font_content = trim(ultracache_strip_source_mapping_url_comments($delayed_font_content)) . "\n";
                 }
                 if (false !== stripos($delayed_font_content, '.ttf')) {
                     $delayed_font_content = $this->rewrite_font_face_ttf_sources_to_preferred_formats($delayed_font_content, home_url('/'));
@@ -1734,7 +1734,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     );
                 }
                 $delayed_font_bytes = (int) filesize($delayed_font_file);
-                $delayed_font_url = ucwp_generated_asset_url('css-bundles', $delayed_font_filename);
+                $delayed_font_url = ultracache_generated_asset_url('css-bundles', $delayed_font_filename);
                 $delayed_font_url = $this->normalize_public_resource_url($delayed_font_url);
             }
 
@@ -1755,7 +1755,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 $message .= ' Skipped ' . (int) $stats['skipped'] . ' empty stylesheet(s).';
             }
 
-            $bundle_url = ucwp_generated_asset_url('css-bundles', $filename);
+            $bundle_url = ultracache_generated_asset_url('css-bundles', $filename);
             $bundle_url = $this->normalize_public_resource_url($bundle_url);
 
             return array(
@@ -1821,7 +1821,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             $css = preg_replace('/^\xEF\xBB\xBF/', '', $css);
             $comments = array();
             $masked_css = (string) preg_replace_callback('/\/\*[\s\S]*?\*\//', function ($matches) use (&$comments) {
-                $key = '___UCWP_CSS_COMMENT_' . count($comments) . '___';
+                $key = '___ULTRACACHE_CSS_COMMENT_' . count($comments) . '___';
                 $comments[$key] = (string) $matches[0];
                 return $key;
             }, $css);
@@ -1942,7 +1942,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return false;
             }
 
-            $request_method = function_exists('ucwp_server_value') ? ucwp_server_value('REQUEST_METHOD') : '';
+            $request_method = function_exists('ultracache_server_value') ? ultracache_server_value('REQUEST_METHOD') : '';
             $request_method = strtoupper(sanitize_text_field($request_method));
             if ('' !== $request_method && 'GET' !== $request_method) {
                 return false;
@@ -1970,7 +1970,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return false;
             }
 
-            $request_method = function_exists('ucwp_server_value') ? ucwp_server_value('REQUEST_METHOD') : '';
+            $request_method = function_exists('ultracache_server_value') ? ultracache_server_value('REQUEST_METHOD') : '';
             $request_method = strtoupper(sanitize_text_field($request_method));
             if ('' !== $request_method && 'GET' !== $request_method) {
                 return false;
@@ -2067,7 +2067,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
          * @param string $source_marker Attribute used to mark inert source links.
          * @return string
          */
-        private function replace_cached_css_bundle_links_with_html_api($html, array $source_urls, $replacement_markup, $base_url = '', $source_marker = 'data-ucwp-css-bundle-source')
+        private function replace_cached_css_bundle_links_with_html_api($html, array $source_urls, $replacement_markup, $base_url = '', $source_marker = 'data-ultracache-css-bundle-source')
         {
             $html = is_string($html) ? $html : '';
             $replacement_markup = is_string($replacement_markup) ? trim($replacement_markup) : '';
@@ -2093,11 +2093,11 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
 
             $source_marker = preg_replace('/[^A-Za-z0-9_:-]/', '', (string) $source_marker);
             if (!is_string($source_marker) || '' === $source_marker) {
-                $source_marker = 'data-ucwp-css-bundle-source';
+                $source_marker = 'data-ultracache-css-bundle-source';
             }
 
-            $insertion_marker = 'data-ucwp-css-bundle-insertion-point';
-            $insertion_token = 'ucwp-css-bundle-' . md5($replacement_markup . '|' . implode('|', array_keys($source_urls)));
+            $insertion_marker = 'data-ultracache-css-bundle-insertion-point';
+            $insertion_token = 'ultracache-css-bundle-' . md5($replacement_markup . '|' . implode('|', array_keys($source_urls)));
             $base_url = '' !== (string) $base_url ? (string) $base_url : home_url('/');
 
             try {
@@ -2130,7 +2130,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     }
 
                     $processor->set_attribute($source_marker, '1');
-                    $processor->set_attribute('data-ucwp-css-bundle-original-href', $absolute_url);
+                    $processor->set_attribute('data-ultracache-css-bundle-original-href', $absolute_url);
                 }
 
                 if ($matched <= 0) {
@@ -2161,8 +2161,8 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
 
                 return $updated_head . $tail_html;
             } catch (\Throwable $e) {
-                if (function_exists('ucwp_debug_log')) {
-                    ucwp_debug_log('CSS bundle HTML API replacement failed.', array(
+                if (function_exists('ultracache_debug_log')) {
+                    ultracache_debug_log('CSS bundle HTML API replacement failed.', array(
                         'error' => $e->getMessage(),
                     ));
                 }
@@ -2233,16 +2233,16 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             $page_bundle_role = $this->get_generated_css_bundle_role_from_mode($entry_mode);
 
             if (!empty($settings['homepage_css_bundle_inline'])) {
-                $maybe_css = ucwp_guarded_asset_file_get_contents($bundle_file, 'generated-css', 'page_css_bundle_inline_generated_asset', false);
+                $maybe_css = ultracache_guarded_asset_file_get_contents($bundle_file, 'generated-css', 'page_css_bundle_inline_generated_asset', false);
                 $bundle_css = $this->prepare_inline_css_bundle_for_style_tag($maybe_css);
                 if ('' === $bundle_css) {
                     return;
                 }
 
-                wp_register_style('ucwp-page-css-bundle', false, array(), defined('UCWP_VERSION') ? UCWP_VERSION : null);
-                wp_style_add_data('ucwp-page-css-bundle', 'ucwp_css_role', $page_bundle_role);
-                wp_enqueue_style('ucwp-page-css-bundle');
-                wp_add_inline_style('ucwp-page-css-bundle', $bundle_css);
+                wp_register_style('ultracache-page-css-bundle', false, array(), defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : null);
+                wp_style_add_data('ultracache-page-css-bundle', 'ultracache_css_role', $page_bundle_role);
+                wp_enqueue_style('ultracache-page-css-bundle');
+                wp_add_inline_style('ultracache-page-css-bundle', $bundle_css);
                 return;
             }
 
@@ -2251,9 +2251,9 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return;
             }
 
-            wp_register_style('ucwp-page-css-bundle', $href, array(), defined('UCWP_VERSION') ? UCWP_VERSION : null);
-            wp_style_add_data('ucwp-page-css-bundle', 'ucwp_css_role', $page_bundle_role);
-            wp_enqueue_style('ucwp-page-css-bundle');
+            wp_register_style('ultracache-page-css-bundle', $href, array(), defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : null);
+            wp_style_add_data('ultracache-page-css-bundle', 'ultracache_css_role', $page_bundle_role);
+            wp_enqueue_style('ultracache-page-css-bundle');
         }
 
         /**
@@ -2267,7 +2267,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
          */
         public function add_page_css_bundle_style_attributes($html, $handle, $href, $media)
         {
-            if ('ucwp-page-css-bundle' !== (string) $handle || '' === (string) $html) {
+            if ('ultracache-page-css-bundle' !== (string) $handle || '' === (string) $html) {
                 return $html;
             }
 
@@ -2275,7 +2275,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             if (function_exists('wp_styles')) {
                 $wp_styles = wp_styles();
                 if (is_object($wp_styles) && method_exists($wp_styles, 'get_data')) {
-                    $role = (string) $wp_styles->get_data('ucwp-page-css-bundle', 'ucwp_css_role');
+                    $role = (string) $wp_styles->get_data('ultracache-page-css-bundle', 'ultracache_css_role');
                 }
             }
             if ('' === $role) {
@@ -2286,9 +2286,9 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 try {
                     $processor = new WP_HTML_Tag_Processor((string) $html);
                     if ($processor->next_tag('LINK')) {
-                        $processor->set_attribute('data-ucwp-page-css-bundle', '1');
-                        $processor->set_attribute('data-ucwp-css-role', $role);
-                        $processor->set_attribute('data-ucwp-css-blocking-reason', 'main-layout-risk');
+                        $processor->set_attribute('data-ultracache-page-css-bundle', '1');
+                        $processor->set_attribute('data-ultracache-css-role', $role);
+                        $processor->set_attribute('data-ultracache-css-blocking-reason', 'main-layout-risk');
                         $updated = $processor->get_updated_html();
                         return is_string($updated) && '' !== $updated ? $updated : $html;
                     }
@@ -2313,9 +2313,9 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 try {
                     $processor = new WP_HTML_Tag_Processor($markup);
                     if ($processor->next_tag('STYLE')) {
-                        $processor->set_attribute('data-ucwp-page-css-bundle', '1');
-                        $processor->set_attribute('data-ucwp-css-role', $role);
-                        $processor->set_attribute('data-ucwp-css-blocking-reason', 'main-layout-risk');
+                        $processor->set_attribute('data-ultracache-page-css-bundle', '1');
+                        $processor->set_attribute('data-ultracache-css-role', $role);
+                        $processor->set_attribute('data-ultracache-css-blocking-reason', 'main-layout-risk');
                         $updated = $processor->get_updated_html();
                         return is_string($updated) && '' !== $updated ? $updated : $markup;
                     }
@@ -2336,8 +2336,8 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             }
 
             $patterns = array(
-                '/<style\b(?=[^>]*\bid=([' . "'\"" . '])ucwp-page-css-bundle-inline-css\1)[^>]*>.*?<\/style>/is',
-                '/<link\b(?=[^>]*\bid=([' . "'\"" . '])ucwp-page-css-bundle-css\1)[^>]*>/i',
+                '/<style\b(?=[^>]*\bid=([' . "'\"" . '])ultracache-page-css-bundle-inline-css\1)[^>]*>.*?<\/style>/is',
+                '/<link\b(?=[^>]*\bid=([' . "'\"" . '])ultracache-page-css-bundle-css\1)[^>]*>/i',
             );
 
             foreach ($patterns as $pattern) {
@@ -2518,7 +2518,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             }
 
             // Do not process the same HTML twice.
-            if (false !== stripos($html, 'data-ucwp-page-css-bundle-source=')) {
+            if (false !== stripos($html, 'data-ultracache-page-css-bundle-source=')) {
                 return $html;
             }
 
@@ -2562,7 +2562,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 $source_urls,
                 $replacement,
                 '' !== $current_url ? $current_url : home_url('/'),
-                'data-ucwp-page-css-bundle-source'
+                'data-ultracache-page-css-bundle-source'
             );
 
             // Preserve an already WordPress-enqueued CSS bundle if no source links were replaced.
@@ -2613,7 +2613,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return array('asset' => array(), 'skip' => 'not-stylesheet');
             }
 
-            if (false !== stripos($tag_html, 'data-ucwp-frontpage-css=') || false !== stripos($tag_html, 'data-ucwp-page-css-bundle=') || false !== stripos($tag_html, 'data-ucwp-leftover-css-bundle=') || false !== stripos($tag_html, 'data-ucwp-async-css=')) {
+            if (false !== stripos($tag_html, 'data-ultracache-frontpage-css=') || false !== stripos($tag_html, 'data-ultracache-page-css-bundle=') || false !== stripos($tag_html, 'data-ultracache-leftover-css-bundle=') || false !== stripos($tag_html, 'data-ultracache-async-css=')) {
                 return array('asset' => array(), 'skip' => 'existing-bundle');
             }
 
@@ -2699,7 +2699,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return $html;
             }
 
-            if (false !== stripos($html, 'data-ucwp-leftover-css-bundle=')) {
+            if (false !== stripos($html, 'data-ultracache-leftover-css-bundle=')) {
                 $stats['skipped_reason'] = 'already-applied';
                 $this->record_leftover_css_bundle_profile($stats);
                 return $html;
@@ -2834,7 +2834,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return array('asset' => array(), 'skip' => 'not-stylesheet');
             }
 
-            foreach (array('data-ucwp-frontpage-css', 'data-ucwp-page-css-bundle', 'data-ucwp-leftover-css-bundle', 'data-ucwp-async-css') as $attribute) {
+            foreach (array('data-ultracache-frontpage-css', 'data-ultracache-page-css-bundle', 'data-ultracache-leftover-css-bundle', 'data-ultracache-async-css') as $attribute) {
                 if (null !== $processor->get_attribute($attribute)) {
                     return array('asset' => array(), 'skip' => 'existing-bundle');
                 }
@@ -2916,7 +2916,7 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             }
 
             $parts = array();
-            foreach (array('id', 'class', 'href', 'media', 'data-ucwp-css-role') as $attribute) {
+            foreach (array('id', 'class', 'href', 'media', 'data-ultracache-css-role') as $attribute) {
                 $value = $processor->get_attribute($attribute);
                 if (is_string($value) && '' !== $value) {
                     $parts[] = $attribute . '=' . $value;
@@ -2989,17 +2989,17 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
         {
             $this->clear_leftover_css_link_processor_attributes($processor);
             $processor->set_attribute('rel', 'stylesheet');
-            $processor->set_attribute('id', 'ucwp-leftover-css-bundle');
+            $processor->set_attribute('id', 'ultracache-leftover-css-bundle');
             $processor->set_attribute('href', (string) $bundle_url);
-            $processor->set_attribute('data-ucwp-leftover-css-bundle', '1');
-            $processor->set_attribute('data-ucwp-css-role', 'leftover-bundle');
+            $processor->set_attribute('data-ultracache-leftover-css-bundle', '1');
+            $processor->set_attribute('data-ultracache-css-role', 'leftover-bundle');
         }
 
         private function neutralize_link_processor_for_leftover_css_source($processor, $source_url)
         {
             $this->clear_leftover_css_link_processor_attributes($processor);
-            $processor->set_attribute('data-ucwp-leftover-css-source-removed', '1');
-            $processor->set_attribute('data-ucwp-leftover-css-original-href', (string) $source_url);
+            $processor->set_attribute('data-ultracache-leftover-css-source-removed', '1');
+            $processor->set_attribute('data-ultracache-leftover-css-original-href', (string) $source_url);
         }
 
         private function clear_leftover_css_link_processor_attributes($processor)

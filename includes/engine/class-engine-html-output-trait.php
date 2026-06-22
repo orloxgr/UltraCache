@@ -14,25 +14,29 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             if ('' !== $host && '' !== $home_host && $host !== $home_host) {
                 return 'external';
             }
-            if (false !== strpos($path, '/wp-includes/') || false !== strpos($path, '/wp-admin/')) {
+            $core_markers = array_values(array_filter(array(
+                function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path() : '',
+                function_exists('ultracache_wordpress_admin_public_path') ? ultracache_wordpress_admin_public_path() : '',
+            )));
+            if (function_exists('ultracache_public_path_contains_any') && ultracache_public_path_contains_any($path, $core_markers)) {
                 return 'core';
             }
 
-            $generated_marker = function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path() : '';
-            if ('' !== $generated_marker && function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, $generated_marker)) {
+            $generated_marker = function_exists('ultracache_generated_asset_public_path') ? ultracache_generated_asset_public_path() : '';
+            if ('' !== $generated_marker && function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($path, $generated_marker)) {
                 return 'ultracache-cache';
             }
-            $cache_marker = function_exists('ucwp_content_cache_storage_url') ? (string) wp_parse_url(ucwp_content_cache_storage_url(), PHP_URL_PATH) : '';
-            if ('' !== $cache_marker && function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, $cache_marker)) {
+            $cache_marker = function_exists('ultracache_content_cache_storage_url') ? (string) wp_parse_url(ultracache_content_cache_storage_url(), PHP_URL_PATH) : '';
+            if ('' !== $cache_marker && function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($path, $cache_marker)) {
                 return 'ultracache-cache';
             }
-            if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_plugins_public_path())) {
+            if (function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($path, ultracache_plugins_public_path())) {
                 return 'plugin';
             }
-            if (function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($path, ucwp_themes_public_paths())) {
+            if (function_exists('ultracache_public_path_contains_any') && ultracache_public_path_contains_any($path, ultracache_themes_public_paths())) {
                 return 'theme';
             }
-            if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($path, ucwp_uploads_public_path())) {
+            if (function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($path, ultracache_uploads_public_path())) {
                 return 'uploads';
             }
             return 'local';
@@ -525,7 +529,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            $html = $this->apply_html_rewrite_safely($html, 'dedupe-ucwp-stylesheet-links', function ($html) {
+            $html = $this->apply_html_rewrite_safely($html, 'dedupe-ultracache-stylesheet-links', function ($html) {
                 return $this->dedupe_ultracache_stylesheet_links_in_html($html);
             });
 
@@ -555,18 +559,18 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                     }
 
                     $href_lc = strtolower(html_entity_decode($href, ENT_QUOTES | ENT_HTML5));
-                    $generated_marker = function_exists('ucwp_generated_asset_public_path') ? ucwp_generated_asset_public_path() : '';
-                    $cache_marker = function_exists('ucwp_content_cache_storage_url') ? (string) wp_parse_url(ucwp_content_cache_storage_url(), PHP_URL_PATH) : '';
-                    $is_ucwp = ('' !== $cache_marker && false !== strpos($href_lc, strtolower($cache_marker)))
+                    $generated_marker = function_exists('ultracache_generated_asset_public_path') ? ultracache_generated_asset_public_path() : '';
+                    $cache_marker = function_exists('ultracache_content_cache_storage_url') ? (string) wp_parse_url(ultracache_content_cache_storage_url(), PHP_URL_PATH) : '';
+                    $is_ultracache = ('' !== $cache_marker && false !== strpos($href_lc, strtolower($cache_marker)))
                         || ('' !== $generated_marker && false !== strpos($href_lc, strtolower($generated_marker)))
-                        || null !== $processor->get_attribute('data-ucwp-async-css')
-                        || null !== $processor->get_attribute('data-ucwp-delayed-icon-fonts')
-                        || null !== $processor->get_attribute('data-ucwp-css-async-reason')
-                        || null !== $processor->get_attribute('data-ucwp-frontpage-css')
-                        || null !== $processor->get_attribute('data-ucwp-page-css-bundle')
-                        || null !== $processor->get_attribute('data-ucwp-leftover-css-bundle')
-                        || null !== $processor->get_attribute('data-ucwp-async-css-fallback');
-                    if (!$is_ucwp) {
+                        || null !== $processor->get_attribute('data-ultracache-async-css')
+                        || null !== $processor->get_attribute('data-ultracache-delayed-icon-fonts')
+                        || null !== $processor->get_attribute('data-ultracache-css-async-reason')
+                        || null !== $processor->get_attribute('data-ultracache-frontpage-css')
+                        || null !== $processor->get_attribute('data-ultracache-page-css-bundle')
+                        || null !== $processor->get_attribute('data-ultracache-leftover-css-bundle')
+                        || null !== $processor->get_attribute('data-ultracache-async-css-fallback');
+                    if (!$is_ultracache) {
                         continue;
                     }
 
@@ -576,9 +580,9 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                     }
                     $absolute = strtolower((string) preg_replace('/#.*$/', '', (string) $absolute));
                     $media = strtolower(trim((string) $processor->get_attribute('media')));
-                    $is_async = null !== $processor->get_attribute('data-ucwp-async-css')
-                        || null !== $processor->get_attribute('data-ucwp-delayed-icon-fonts')
-                        || null !== $processor->get_attribute('data-ucwp-css-async-reason')
+                    $is_async = null !== $processor->get_attribute('data-ultracache-async-css')
+                        || null !== $processor->get_attribute('data-ultracache-delayed-icon-fonts')
+                        || null !== $processor->get_attribute('data-ultracache-css-async-reason')
                         || null !== $processor->get_attribute('onload')
                         || 'print' === $media;
                     $key = ($is_async ? 'async|' : 'blocking|') . $absolute;
@@ -592,7 +596,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                     $processor->remove_attribute('href');
                     $processor->remove_attribute('media');
                     $processor->remove_attribute('onload');
-                    $processor->set_attribute('data-ucwp-deduped-stylesheet-link', '1');
+                    $processor->set_attribute('data-ultracache-deduped-stylesheet-link', '1');
                     $changed = true;
                 }
 
@@ -659,9 +663,9 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                         continue;
                     }
 
-                    if (null !== $processor->get_attribute('data-ucwp-async-css')
-                        || null !== $processor->get_attribute('data-ucwp-frontpage-css')
-                        || null !== $processor->get_attribute('data-ucwp-page-css-bundle')) {
+                    if (null !== $processor->get_attribute('data-ultracache-async-css')
+                        || null !== $processor->get_attribute('data-ultracache-frontpage-css')
+                        || null !== $processor->get_attribute('data-ultracache-page-css-bundle')) {
                         continue;
                     }
 
@@ -678,7 +682,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
 
                     $processor->set_attribute('media', 'print');
                     $processor->set_attribute('onload', "this.media='all'");
-                    $processor->set_attribute('data-ucwp-async-css', '1');
+                    $processor->set_attribute('data-ultracache-async-css', '1');
                     $changed = true;
                 }
 
@@ -755,8 +759,8 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                         continue;
                     }
 
-                    $token = 'ucwp-remove-asset-' . md5($tag_name . '|' . $url . '|' . (++$index));
-                    $processor->set_attribute('data-ucwp-remove-asset-token', $token);
+                    $token = 'ultracache-remove-asset-' . md5($tag_name . '|' . $url . '|' . (++$index));
+                    $processor->set_attribute('data-ultracache-remove-asset-token', $token);
                     $tokens[$token] = strtolower($tag_name);
                     $changed = true;
                 }
@@ -772,14 +776,14 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
 
                 foreach ($tokens as $token => $tag_name) {
                     if ('script' === $tag_name) {
-                        $pattern = '/<script\b(?=[^>]*\bdata-ucwp-remove-asset-token=("|\')' . preg_quote($token, '/') . '\1)[^>]*>\s*<\/script>/is';
+                        $pattern = '/<script\b(?=[^>]*\bdata-ultracache-remove-asset-token=("|\')' . preg_quote($token, '/') . '\1)[^>]*>\s*<\/script>/is';
                     } else {
-                        $pattern = '/<link\b(?=[^>]*\bdata-ucwp-remove-asset-token=("|\')' . preg_quote($token, '/') . '\1)[^>]*>/i';
+                        $pattern = '/<link\b(?=[^>]*\bdata-ultracache-remove-asset-token=("|\')' . preg_quote($token, '/') . '\1)[^>]*>/i';
                     }
                     $updated_html = preg_replace($pattern, '', $updated_html, 1);
                 }
 
-                if (!is_string($updated_html) || false !== stripos($updated_html, 'data-ucwp-remove-asset-token=')) {
+                if (!is_string($updated_html) || false !== stripos($updated_html, 'data-ultracache-remove-asset-token=')) {
                     return null;
                 }
 
@@ -818,7 +822,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
 
         private function current_request_matches_asset_cleanup_exclusion(array $settings = array())
         {
-            $request_uri = function_exists('ucwp_server_value') ? strtolower(sanitize_text_field(ucwp_server_value('REQUEST_URI'))) : '';
+            $request_uri = function_exists('ultracache_server_value') ? strtolower(sanitize_text_field(ultracache_server_value('REQUEST_URI'))) : '';
             if ('' === $request_uri) {
                 return false;
             }
@@ -949,7 +953,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 return false;
             }
 
-            if ('' !== sanitize_text_field(ucwp_query_value('preview')) || '' !== sanitize_text_field(ucwp_query_value('customize_changeset_uuid')) || '' !== sanitize_text_field(ucwp_query_value('customize_autosaved'))) {
+            if ('' !== sanitize_text_field(ultracache_query_value('preview')) || '' !== sanitize_text_field(ultracache_query_value('customize_changeset_uuid')) || '' !== sanitize_text_field(ultracache_query_value('customize_autosaved'))) {
                 return false;
             }
 
@@ -1257,7 +1261,7 @@ private function html_tag_processor_available()
 
         private function normalize_public_resource_url($url)
         {
-            return function_exists('ucwp_normalize_public_url') ? ucwp_normalize_public_url($url) : trim(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
+            return function_exists('ultracache_normalize_public_url') ? ultracache_normalize_public_url($url) : trim(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
         }
 
         private function normalize_protocol_relative_urls_in_html($html)
@@ -1379,7 +1383,7 @@ private function html_tag_processor_available()
 
         private function resolve_local_path_from_public_url($url)
         {
-            return function_exists('ucwp_local_path_from_public_url') ? ucwp_local_path_from_public_url($url) : '';
+            return function_exists('ultracache_local_path_from_public_url') ? ultracache_local_path_from_public_url($url) : '';
         }
 
         private function absolutize_public_resource_url($url, $base_url = '')
@@ -1502,8 +1506,8 @@ private function html_tag_processor_available()
                         continue;
                     }
 
-                    $token = 'ucwp-strip-authoring-' . md5($tag_name . '|' . $url . '|' . (++$index));
-                    $processor->set_attribute('data-ucwp-strip-authoring-token', $token);
+                    $token = 'ultracache-strip-authoring-' . md5($tag_name . '|' . $url . '|' . (++$index));
+                    $processor->set_attribute('data-ultracache-strip-authoring-token', $token);
                     $tokens[$token] = strtolower($tag_name);
                     $changed = true;
                 }
@@ -1519,14 +1523,14 @@ private function html_tag_processor_available()
 
                 foreach ($tokens as $token => $tag_name) {
                     if ('script' === $tag_name) {
-                        $pattern = '/<script\b(?=[^>]*\bdata-ucwp-strip-authoring-token=(\"|\')' . preg_quote($token, '/') . '\1)[^>]*>\s*<\/script>/is';
+                        $pattern = '/<script\b(?=[^>]*\bdata-ultracache-strip-authoring-token=(\"|\')' . preg_quote($token, '/') . '\1)[^>]*>\s*<\/script>/is';
                     } else {
-                        $pattern = '/<link\b(?=[^>]*\bdata-ucwp-strip-authoring-token=(\"|\')' . preg_quote($token, '/') . '\1)[^>]*>/i';
+                        $pattern = '/<link\b(?=[^>]*\bdata-ultracache-strip-authoring-token=(\"|\')' . preg_quote($token, '/') . '\1)[^>]*>/i';
                     }
                     $updated_html = preg_replace($pattern, '', $updated_html, 1);
                 }
 
-                if (!is_string($updated_html) || false !== stripos($updated_html, 'data-ucwp-strip-authoring-token=')) {
+                if (!is_string($updated_html) || false !== stripos($updated_html, 'data-ultracache-strip-authoring-token=')) {
                     return null;
                 }
 
@@ -1546,17 +1550,23 @@ private function html_tag_processor_available()
 
             $location_haystack = $url . ' ' . $tag_html;
             $is_plugin_or_theme = false;
-            if (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($location_haystack, ucwp_plugins_public_path())) {
+            if (function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($location_haystack, ultracache_plugins_public_path())) {
                 $is_plugin_or_theme = true;
             }
-            if (!$is_plugin_or_theme && function_exists('ucwp_public_path_contains_any') && ucwp_public_path_contains_any($location_haystack, ucwp_themes_public_paths())) {
+            if (!$is_plugin_or_theme && function_exists('ultracache_public_path_contains_any') && ultracache_public_path_contains_any($location_haystack, ultracache_themes_public_paths())) {
                 $is_plugin_or_theme = true;
             }
             if (!$is_plugin_or_theme) {
                 return false;
             }
 
-            foreach (array('/admin/', '/wp-admin/', '/shortcode_generator/') as $pattern) {
+            $authoring_patterns = array('/admin/', '/shortcode_generator/');
+            $wordpress_admin_path = function_exists('ultracache_wordpress_admin_public_path') ? ultracache_wordpress_admin_public_path() : '';
+            if ('' !== $wordpress_admin_path) {
+                $authoring_patterns[] = $wordpress_admin_path;
+            }
+
+            foreach ($authoring_patterns as $pattern) {
                 if (false !== strpos($url, $pattern)) {
                     return true;
                 }

@@ -1,7 +1,7 @@
 (function () {
 	'use strict';
 
-	var config = window.ucwpRuntimeJsScanConfig || {};
+	var config = window.ultracacheRuntimeJsScanConfig || {};
 	var scanId = String(config.scanId || '');
 	var endpoint = String(config.endpoint || '');
 	var restNonce = String(config.restNonce || '');
@@ -18,7 +18,7 @@
 	var originalOnError = window.onerror;
 	var originalOnUnhandledRejection = window.onunhandledrejection;
 
-	window.__ucwpRuntimeJsScan = window.__ucwpRuntimeJsScan || {
+	window.__ultracacheRuntimeJsScan = window.__ultracacheRuntimeJsScan || {
 		injectedAt: startedAt,
 		context: scanContext,
 		errors: errors,
@@ -70,10 +70,10 @@
 		};
 
 		errors.push(item);
-		window.__ucwpRuntimeJsScan.errors = errors;
+		window.__ultracacheRuntimeJsScan.errors = errors;
 		if (errors.length > maxErrors) {
 			errors = errors.slice(errors.length - maxErrors);
-			window.__ucwpRuntimeJsScan.errors = errors;
+			window.__ultracacheRuntimeJsScan.errors = errors;
 		}
 		send(false);
 	}
@@ -110,10 +110,10 @@
 			var scripts = document.getElementsByTagName('script');
 			for (var i = 0; i < scripts.length && list.length < 240; i++) {
 				var s = scripts[i];
-				var src = s && s.getAttribute ? String(s.getAttribute('src') || s.getAttribute('data-ucwp-src') || s.getAttribute('data-ucwp-original-src') || '') : '';
-				var id = s && s.getAttribute ? String((s.id || '') || s.getAttribute('data-ucwp-id') || s.getAttribute('data-ucwp-handle') || '') : '';
-				var handle = s && s.getAttribute ? String(s.getAttribute('data-ucwp-handle') || '') : '';
-				var delayed = !!(s && (s.type === 'text/ucwp-delayed-js' || (s.hasAttribute && (s.hasAttribute('data-ucwp-src') || s.hasAttribute('data-ucwp-inline') || s.hasAttribute('data-ucwp-delayed')))));
+				var src = s && s.getAttribute ? String(s.getAttribute('src') || s.getAttribute('data-ultracache-src') || s.getAttribute('data-ultracache-original-src') || '') : '';
+				var id = s && s.getAttribute ? String((s.id || '') || s.getAttribute('data-ultracache-id') || s.getAttribute('data-ultracache-handle') || '') : '';
+				var handle = s && s.getAttribute ? String(s.getAttribute('data-ultracache-handle') || '') : '';
+				var delayed = !!(s && (s.type === 'text/ultracache-delayed-js' || (s.hasAttribute && (s.hasAttribute('data-ultracache-src') || s.hasAttribute('data-ultracache-inline') || s.hasAttribute('data-ultracache-delayed')))));
 				var text = '';
 				if ((!src || delayed) && s && s.textContent) {
 					text = trimText(s.textContent, 60000);
@@ -149,11 +149,11 @@
 			userAgent: String(window.navigator && window.navigator.userAgent ? window.navigator.userAgent : ''),
 			sentCount: ++sentCount,
 			elapsedMs: now() - startedAt,
-			debug: window.__ucwpRuntimeJsScan && window.__ucwpRuntimeJsScan.debug ? window.__ucwpRuntimeJsScan.debug : {}
+			debug: window.__ultracacheRuntimeJsScan && window.__ultracacheRuntimeJsScan.debug ? window.__ultracacheRuntimeJsScan.debug : {}
 		};
 
-		window.__ucwpRuntimeJsScan.sentCount = sentCount;
-		window.__ucwpRuntimeJsScan.lastPayload = payload;
+		window.__ultracacheRuntimeJsScan.sentCount = sentCount;
+		window.__ultracacheRuntimeJsScan.lastPayload = payload;
 
 		try {
 			window.fetch(endpoint, {
@@ -169,11 +169,11 @@
 		} catch (e) {}
 	}
 
-	window.__ucwpRuntimeJsScan.flush = send;
+	window.__ultracacheRuntimeJsScan.flush = send;
 
 	window.onerror = function (message, source, line, column, error) {
 		try {
-			window.__ucwpRuntimeJsScan.debug.onerror = true;
+			window.__ultracacheRuntimeJsScan.debug.onerror = true;
 			addError('window-onerror', message || 'Script error', source || '', line || 0, column || 0, error && error.stack ? error.stack : asText(error || message));
 		} catch (e) {}
 		if (typeof originalOnError === 'function') {
@@ -186,7 +186,7 @@
 		if (!event) {
 			return;
 		}
-		window.__ucwpRuntimeJsScan.debug.eventError = true;
+		window.__ultracacheRuntimeJsScan.debug.eventError = true;
 		var target = event.target || event.srcElement || null;
 		if (target && target !== window && (target.tagName || target.getAttribute)) {
 			var resourceUrl = getResourceUrl(target);
@@ -214,11 +214,11 @@
 		addError('unhandledrejection', asText(reason), '', 0, 0, reason && reason.stack ? reason.stack : '');
 	}, true);
 
-	if (window.console && typeof window.console.error === 'function' && !window.console.__ucwpRuntimeScanWrapped) {
+	if (window.console && typeof window.console.error === 'function' && !window.console.__ultracacheRuntimeScanWrapped) {
 		var originalError = window.console.error;
 		window.console.error = function () {
 			try {
-				window.__ucwpRuntimeJsScan.debug.consoleError = true;
+				window.__ultracacheRuntimeJsScan.debug.consoleError = true;
 				var parts = [];
 				for (var i = 0; i < arguments.length; i++) {
 					parts.push(asText(arguments[i]));
@@ -227,7 +227,7 @@
 			} catch (e) {}
 			return originalError.apply(window.console, arguments);
 		};
-		window.console.__ucwpRuntimeScanWrapped = true;
+		window.console.__ultracacheRuntimeScanWrapped = true;
 	}
 
 	send(false);

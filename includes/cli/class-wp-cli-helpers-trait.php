@@ -5,8 +5,8 @@
 
 defined('ABSPATH') || exit;
 
-if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
-    trait UCWP_CLI_Helpers_Trait
+if (!trait_exists('ULTRACACHE_CLI_Helpers_Trait')) {
+    trait ULTRACACHE_CLI_Helpers_Trait
     {
         private function get_engine()
         {
@@ -32,11 +32,11 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
 
         private function get_dashboard_settings()
         {
-            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')) {
-                return Ultra_Cache_WP::get_dashboard_settings();
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
+                return Ultra_Cache_WP::get_dashboard_settings_for_client();
             }
 
-            $settings = get_option(defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY : 'ultracache_settings', array());
+            $settings = get_option(defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY : 'ultracache_settings', array());
             return is_array($settings) ? $settings : array();
         }
 
@@ -77,17 +77,9 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
         private function redact_dashboard_settings_for_output(array $settings)
         {
             $settings = $this->remove_deprecated_setting_keys($settings);
-            $flag_map = $this->get_secret_configuration_flag_map();
 
             foreach ($this->get_secret_setting_keys() as $key) {
-                $flag = isset($flag_map[$key]) ? $flag_map[$key] : '';
-                if ('' !== $flag) {
-                    $settings[$flag] = ('' !== trim((string) ($settings[$key] ?? '')));
-                }
-
-                if (array_key_exists($key, $settings)) {
-                    $settings[$key] = '[redacted]';
-                }
+                unset($settings[$key]);
             }
 
             return $settings;
@@ -104,15 +96,11 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
 
             if (in_array($key, $this->get_secret_setting_keys(), true)) {
                 $flag_map = $this->get_secret_configuration_flag_map();
-                $payload = array(
-                    $key => '[redacted]',
-                );
+                $flag = isset($flag_map[$key]) ? $flag_map[$key] : '';
 
-                if (!empty($flag_map[$key])) {
-                    $payload[$flag_map[$key]] = ('' !== trim((string) $value));
-                }
-
-                return $payload;
+                return '' !== $flag
+                    ? array($flag => !empty($settings[$flag]))
+                    : array();
             }
 
             return array($key => $value);
@@ -149,8 +137,8 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 return (bool) $engine->is_cacheable_local_url($url);
             }
 
-            if (function_exists('ucwp_is_strict_frontend_loopback_url')) {
-                return ucwp_is_strict_frontend_loopback_url($url);
+            if (function_exists('ultracache_is_strict_frontend_loopback_url')) {
+                return ultracache_is_strict_frontend_loopback_url($url);
             }
 
             $parts = wp_parse_url($url);
@@ -342,7 +330,6 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'delayNonCriticalJsExcludeList',
                 'manualLcpHeroSelector',
                 'varnishCliServers',
-                'varnishCliKey',
                 'varnishCliMethod',
                 'objectCacheBackend',
                 'cssBundleScope',
@@ -350,7 +337,6 @@ if (!trait_exists('UCWP_CLI_Helpers_Trait')) {
                 'googleFontsAdditionalScanUrls',
                 'redisHost',
                 'redisUsername',
-                'redisPassword',
                 'redisPrefix',
             );
 

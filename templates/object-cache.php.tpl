@@ -2,168 +2,146 @@
 /**
  * UltraCache generated object-cache drop-in.
  * Marker: UltraCache generated object-cache drop-in
- * Drop-in Build: __UCWP_DROPIN_BUILD__
+ * Drop-in Build: __ULTRACACHE_DROPIN_BUILD__
  * Safe to overwrite.
  * Storage format: redis-apcu-runtime-v4 with explicit disk-only mode and signed-payload-v1 metrics.
  */
 
 defined('ABSPATH') || exit;
 
-if (!function_exists('ucwp_dropin_guard_normalize_path')) {
-	function ucwp_dropin_guard_normalize_path($path) {
-		$path = is_string($path) ? trim($path) : '';
-		if ('' === $path || false !== strpos($path, "\0")) {
-			return '';
-		}
-		$path = str_replace('\\', '/', $path);
-		$path = preg_replace('#/+#', '/', $path);
-		return is_string($path) ? rtrim($path, '/') : '';
+function ultracache_object_cache_guard_normalize_path($path) {
+	$path = is_string($path) ? trim($path) : '';
+	if ('' === $path || false !== strpos($path, "\0")) {
+		return '';
 	}
+	$path = str_replace('\\', '/', $path);
+	$path = preg_replace('#/+#', '/', $path);
+	return is_string($path) ? rtrim($path, '/') : '';
 }
 
-if (!function_exists('ucwp_dropin_guard_resolve_path')) {
-	function ucwp_dropin_guard_resolve_path($path, $must_exist = false) {
-		$path = is_string($path) ? trim($path) : '';
-		if ('' === $path || false !== strpos($path, "\0")) {
-			return '';
-		}
-		$real = function_exists('realpath') ? realpath($path) : false;
-		if (is_string($real) && '' !== $real) {
-			return ucwp_dropin_guard_normalize_path($real);
-		}
-		if ($must_exist) {
-			return '';
-		}
-		$parent = dirname($path);
-		$leaf = basename($path);
-		if ('' === $leaf || '.' === $leaf || '..' === $leaf) {
-			return '';
-		}
-		$real_parent = function_exists('realpath') ? realpath($parent) : false;
-		if (is_string($real_parent) && '' !== $real_parent) {
-			return ucwp_dropin_guard_normalize_path(rtrim($real_parent, '/\\') . DIRECTORY_SEPARATOR . $leaf);
-		}
-		return ucwp_dropin_guard_normalize_path($path);
+function ultracache_object_cache_guard_resolve_path($path, $must_exist = false) {
+	$path = is_string($path) ? trim($path) : '';
+	if ('' === $path || false !== strpos($path, "\0")) {
+		return '';
 	}
+	$real = function_exists('realpath') ? realpath($path) : false;
+	if (is_string($real) && '' !== $real) {
+		return ultracache_object_cache_guard_normalize_path($real);
+	}
+	if ($must_exist) {
+		return '';
+	}
+	$parent = dirname($path);
+	$leaf = basename($path);
+	if ('' === $leaf || '.' === $leaf || '..' === $leaf) {
+		return '';
+	}
+	$real_parent = function_exists('realpath') ? realpath($parent) : false;
+	if (is_string($real_parent) && '' !== $real_parent) {
+		return ultracache_object_cache_guard_normalize_path(rtrim($real_parent, '/\\') . DIRECTORY_SEPARATOR . $leaf);
+	}
+	return ultracache_object_cache_guard_normalize_path($path);
 }
 
-if (!function_exists('ucwp_dropin_allowed_file_roots')) {
-	function ucwp_dropin_allowed_file_roots() {
-		return array(__UCWP_OBJECT_CACHE_DIR__);
-	}
+function ultracache_object_cache_allowed_file_roots() {
+	return array(__ULTRACACHE_OBJECT_CACHE_DIR__);
 }
 
-if (!function_exists('ucwp_dropin_is_allowed_file_path')) {
-	function ucwp_dropin_is_allowed_file_path($path, $must_exist = false) {
-		$resolved = ucwp_dropin_guard_resolve_path($path, (bool) $must_exist);
-		if ('' === $resolved) {
-			return false;
-		}
-		foreach (ucwp_dropin_allowed_file_roots() as $root) {
-			$root = ucwp_dropin_guard_resolve_path($root, false);
-			if ('' === $root) {
-				continue;
-			}
-			if ($resolved === $root || 0 === strpos($resolved, $root . '/')) {
-				return true;
-			}
-		}
+function ultracache_object_cache_is_allowed_file_path($path, $must_exist = false) {
+	$resolved = ultracache_object_cache_guard_resolve_path($path, (bool) $must_exist);
+	if ('' === $resolved) {
 		return false;
 	}
-}
-
-if (!function_exists('ucwp_dropin_safe_file_get_contents')) {
-	function ucwp_dropin_safe_file_get_contents($file) {
-		return ucwp_dropin_is_allowed_file_path($file, true) && is_readable($file) ? file_get_contents($file) : false;
-	}
-}
-
-if (!function_exists('ucwp_dropin_safe_file_put_contents')) {
-    function ucwp_dropin_safe_file_put_contents($file, $data, $flags = 0, $context = '') {
-        $file = is_string($file) ? trim($file) : '';
-        if ('' === $file || !ucwp_dropin_is_allowed_file_path($file, false)) {
-            return false;
-        }
-        $dir = dirname($file);
-        if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
-            ucwp_dropin_safe_mkdir($dir, 0755, true);
-        }
-        if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !is_writable($dir))) {
-            if (is_dir($dir)) {
-                @chmod($dir, 0755);
-            }
-            if (!is_dir($dir) || !is_writable($dir)) {
-                return false;
-            }
-        }
-        return @file_put_contents($file, $data, $flags);
-    }
-}
-if (!function_exists('ucwp_dropin_safe_unlink')) {
-	function ucwp_dropin_safe_unlink($file) {
-		if (!ucwp_dropin_is_allowed_file_path($file, false)) {
-			return false;
+	foreach (ultracache_object_cache_allowed_file_roots() as $root) {
+		$root = ultracache_object_cache_guard_resolve_path($root, false);
+		if ('' === $root) {
+			continue;
 		}
-		return !file_exists($file) ? true : @unlink($file);
-	}
-}
-
-if (!function_exists('ucwp_dropin_safe_rename')) {
-	function ucwp_dropin_safe_rename($from, $to) {
-		if (!ucwp_dropin_is_allowed_file_path($from, true) || !ucwp_dropin_is_allowed_file_path($to, false)) {
-			return false;
-		}
-		return @rename($from, $to);
-	}
-}
-
-if (!function_exists('ucwp_dropin_safe_mkdir')) {
-    function ucwp_dropin_safe_mkdir($dir, $mode = 0755, $recursive = true) {
-        $dir = is_string($dir) ? trim($dir) : '';
-        if ('' === $dir || !ucwp_dropin_is_allowed_file_path($dir, false)) {
-            return false;
-        }
-        if (is_dir($dir)) {
-            return true;
-        }
-        return @mkdir($dir, $mode, $recursive) || is_dir($dir);
-    }
-}
-
-if (!function_exists('ucwp_dropin_safe_scandir')) {
-	function ucwp_dropin_safe_scandir($dir) {
-		$dir = is_string($dir) ? trim($dir) : '';
-		if ('' === $dir || !ucwp_dropin_is_allowed_file_path($dir, true) || !is_dir($dir) || !is_readable($dir)) {
-			return false;
-		}
-		return scandir($dir);
-	}
-}
-
-if (!function_exists('ucwp_dropin_safe_rmdir')) {
-	function ucwp_dropin_safe_rmdir($dir) {
-		$dir = is_string($dir) ? trim($dir) : '';
-		if ('' === $dir || !ucwp_dropin_is_allowed_file_path($dir, false)) {
-			return false;
-		}
-		if (!file_exists($dir)) {
+		if ($resolved === $root || 0 === strpos($resolved, $root . '/')) {
 			return true;
 		}
-		if (!is_dir($dir) || is_link($dir)) {
+	}
+	return false;
+}
+
+function ultracache_object_cache_safe_file_get_contents($file) {
+	return ultracache_object_cache_is_allowed_file_path($file, true) && is_readable($file) ? file_get_contents($file) : false;
+}
+
+function ultracache_object_cache_safe_file_put_contents($file, $data, $flags = 0, $context = '') {
+    $file = is_string($file) ? trim($file) : '';
+    if ('' === $file || !ultracache_object_cache_is_allowed_file_path($file, false)) {
+        return false;
+    }
+    $dir = dirname($file);
+    if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
+        ultracache_object_cache_safe_mkdir($dir, 0755, true);
+    }
+    if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !is_writable($dir))) {
+        if (is_dir($dir)) {
+            @chmod($dir, 0755);
+        }
+        if (!is_dir($dir) || !is_writable($dir)) {
+            return false;
+        }
+    }
+    return @file_put_contents($file, $data, $flags);
+}
+function ultracache_object_cache_safe_unlink($file) {
+	if (!ultracache_object_cache_is_allowed_file_path($file, false)) {
+		return false;
+	}
+	return !file_exists($file) ? true : @unlink($file);
+}
+
+function ultracache_object_cache_safe_rename($from, $to) {
+	if (!ultracache_object_cache_is_allowed_file_path($from, true) || !ultracache_object_cache_is_allowed_file_path($to, false)) {
+		return false;
+	}
+	return @rename($from, $to);
+}
+
+function ultracache_object_cache_safe_mkdir($dir, $mode = 0755, $recursive = true) {
+    $dir = is_string($dir) ? trim($dir) : '';
+    if ('' === $dir || !ultracache_object_cache_is_allowed_file_path($dir, false)) {
+        return false;
+    }
+    if (is_dir($dir)) {
+        return true;
+    }
+    return @mkdir($dir, $mode, $recursive) || is_dir($dir);
+}
+
+function ultracache_object_cache_safe_scandir($dir) {
+	$dir = is_string($dir) ? trim($dir) : '';
+	if ('' === $dir || !ultracache_object_cache_is_allowed_file_path($dir, true) || !is_dir($dir) || !is_readable($dir)) {
+		return false;
+	}
+	return scandir($dir);
+}
+
+function ultracache_object_cache_safe_rmdir($dir) {
+	$dir = is_string($dir) ? trim($dir) : '';
+	if ('' === $dir || !ultracache_object_cache_is_allowed_file_path($dir, false)) {
+		return false;
+	}
+	if (!file_exists($dir)) {
+		return true;
+	}
+	if (!is_dir($dir) || is_link($dir)) {
+		return false;
+	}
+	$items = ultracache_object_cache_safe_scandir($dir);
+	if (is_array($items)) {
+		foreach ($items as $item) {
+			if ('.' === $item || '..' === $item) {
+				continue;
+			}
 			return false;
 		}
-		$items = ucwp_dropin_safe_scandir($dir);
-		if (is_array($items)) {
-			foreach ($items as $item) {
-				if ('.' === $item || '..' === $item) {
-					continue;
-				}
-				return false;
-			}
-		}
-		clearstatcache(true, $dir);
-		return @rmdir($dir) || !file_exists($dir);
 	}
+	clearstatcache(true, $dir);
+	return @rmdir($dir) || !file_exists($dir);
 }
 
 if (!class_exists('WP_Object_Cache')) {
@@ -171,32 +149,31 @@ if (!class_exists('WP_Object_Cache')) {
 		private $cache = array();
 		private $global_groups = array();
 		private $non_persistent_groups = array();
-		private $cache_dir = __UCWP_OBJECT_CACHE_DIR__;
+		private $cache_dir = __ULTRACACHE_OBJECT_CACHE_DIR__;
 		private $blog_id = 1;
 		private $metrics_file = '';
 		private $stats = array(
 			'hits'   => 0,
 			'misses' => 0,
 		);
-		private $selected_backend = __UCWP_SELECTED_BACKEND__;
-		private $fallback_backend_policy = __UCWP_FALLBACK_BACKEND__;
-		private $metrics_enabled = __UCWP_CACHE_STATS_ENABLED__;
+		private $selected_backend = __ULTRACACHE_SELECTED_BACKEND__;
+		private $fallback_backend_policy = __ULTRACACHE_FALLBACK_BACKEND__;
+		private $metrics_enabled = __ULTRACACHE_CACHE_STATS_ENABLED__;
 		private $active_backend = 'runtime';
 		private $redis = null;
 		private $redis_enabled = false;
 		private $apcu_enabled = false;
 		private $apcu_prefix = '';
-		private $redis_host = __UCWP_REDIS_HOST__;
-		private $redis_port = __UCWP_REDIS_PORT__;
-		private $redis_username = __UCWP_REDIS_USERNAME__;
-		private $redis_password = __UCWP_REDIS_PASSWORD__;
-		private $redis_secret_config = __UCWP_REDIS_SECRET_CONFIG__;
-		private $redis_database = __UCWP_REDIS_DATABASE__;
-		private $redis_prefix = __UCWP_REDIS_PREFIX__;
-		private $redis_use_tls = __UCWP_REDIS_USE_TLS__;
-		private $redis_persistent = __UCWP_REDIS_PERSISTENT__;
-		private $redis_connect_timeout = __UCWP_REDIS_CONNECT_TIMEOUT__;
-		private $redis_read_timeout = __UCWP_REDIS_READ_TIMEOUT__;
+		private $redis_host = __ULTRACACHE_REDIS_HOST__;
+		private $redis_port = __ULTRACACHE_REDIS_PORT__;
+		private $redis_username = __ULTRACACHE_REDIS_USERNAME__;
+		private $redis_password = '';
+		private $redis_database = __ULTRACACHE_REDIS_DATABASE__;
+		private $redis_prefix = __ULTRACACHE_REDIS_PREFIX__;
+		private $redis_use_tls = __ULTRACACHE_REDIS_USE_TLS__;
+		private $redis_persistent = __ULTRACACHE_REDIS_PERSISTENT__;
+		private $redis_connect_timeout = __ULTRACACHE_REDIS_CONNECT_TIMEOUT__;
+		private $redis_read_timeout = __ULTRACACHE_REDIS_READ_TIMEOUT__;
 		private $redis_error = '';
 		private $redis_payload_skip_reason = '';
 		private $redis_value_max_items = 64;
@@ -210,7 +187,7 @@ if (!class_exists('WP_Object_Cache')) {
 			$this->blog_id = $this->detect_blog_id();
 			$this->metrics_file = rtrim($this->cache_dir, '/\\') . '/object-cache-metrics.json';
 			$this->ensure_base_dir();
-			$this->load_redis_secret_config();
+			$this->load_redis_credentials_from_constants();
 			$this->bootstrap_backend();
 			if ($this->metrics_enabled) {
 				register_shutdown_function(array($this, 'persist_metrics'));
@@ -275,34 +252,37 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 
-		private function load_redis_secret_config() {
-			$config = is_string($this->redis_secret_config) ? trim($this->redis_secret_config) : '';
-			if ('' === $config) {
+		private function load_redis_credentials_from_constants() {
+			if (!defined('WP_REDIS_PASSWORD')) {
 				return;
 			}
 
-			$allowed = false;
-			$cache_base = is_string($this->cache_dir) ? rtrim((string) $this->cache_dir, '/\\') : '';
-			if ('' !== $cache_base && $this->is_path_within_base($config, $cache_base, true)) {
-				$allowed = true;
-			}
+			$value = constant('WP_REDIS_PASSWORD');
+			if (is_array($value)) {
+				if (array_key_exists(0, $value) && is_scalar($value[0])) {
+					$this->redis_username = trim((string) $value[0]);
+				} elseif (isset($value['username']) && is_scalar($value['username'])) {
+					$this->redis_username = trim((string) $value['username']);
+				} elseif (isset($value['user']) && is_scalar($value['user'])) {
+					$this->redis_username = trim((string) $value['user']);
+				}
 
-			$runtime_base = defined('ABSPATH') ? dirname(rtrim((string) ABSPATH, '/\\')) : '';
-			if (!$allowed && is_string($runtime_base) && '' !== trim($runtime_base) && '.' !== $runtime_base && '/' !== $runtime_base && $this->is_path_within_base($config, $runtime_base, true)) {
-				$allowed = true;
-			}
-
-			if (!$allowed || !is_readable($config)) {
+				if (array_key_exists(1, $value) && is_scalar($value[1])) {
+					$this->redis_password = (string) $value[1];
+				} elseif (isset($value['password']) && is_scalar($value['password'])) {
+					$this->redis_password = (string) $value['password'];
+				}
 				return;
 			}
 
-			$data = require $config;
-			if (!is_array($data)) {
-				return;
+			if (is_scalar($value)) {
+				$this->redis_password = (string) $value;
 			}
-
-			if (isset($data['redis_password']) && is_scalar($data['redis_password'])) {
-				$this->redis_password = (string) $data['redis_password'];
+			if (defined('WP_REDIS_USERNAME')) {
+				$username = constant('WP_REDIS_USERNAME');
+				if (is_scalar($username)) {
+					$this->redis_username = trim((string) $username);
+				}
 			}
 		}
 
@@ -371,7 +351,7 @@ if (!class_exists('WP_Object_Cache')) {
 
 				$connected = false;
 				if ($this->redis_persistent) {
-					$persistent_id = 'ucwp:' . md5(implode('|', array($connection_host, $port, (string) $this->redis_database, (string) $this->redis_prefix)));
+					$persistent_id = 'ultracache:' . md5(implode('|', array($connection_host, $port, (string) $this->redis_database, (string) $this->redis_prefix)));
 					$connected = $this->with_redis_error_handler(function () use ($redis, $connection_host, $port, $timeout, $persistent_id) {
 						return $redis->pconnect($connection_host, $port, $timeout, $persistent_id);
 					}, false);
@@ -512,7 +492,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$this->is_cache_path($this->metrics_file)) {
 				return $data;
 			}
-			$raw = ucwp_dropin_safe_file_get_contents($this->metrics_file);
+			$raw = ultracache_object_cache_safe_file_get_contents($this->metrics_file);
 			if (false === $raw || '' === $raw) {
 				return $data;
 			}
@@ -532,9 +512,9 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 			$dir = dirname($this->metrics_file);
 			if (!file_exists($dir)) {
-				ucwp_dropin_safe_mkdir($dir, 0755, true);
+				ultracache_object_cache_safe_mkdir($dir, 0755, true);
 			}
-			ucwp_dropin_safe_file_put_contents($this->metrics_file, json_encode($data), LOCK_EX);
+			ultracache_object_cache_safe_file_put_contents($this->metrics_file, json_encode($data), LOCK_EX);
 		}
 
 		public function persist_metrics() {
@@ -876,7 +856,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$this->is_cache_path($dir)) {
 				return false;
 			}
-			if (!is_dir($dir) && !ucwp_dropin_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
+			if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
 				return false;
 			}
 			return $dir . '/' . sha1($key) . '.cache';
@@ -938,11 +918,11 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function ensure_base_dir() {
 			if (!is_dir($this->cache_dir)) {
-				ucwp_dropin_safe_mkdir($this->cache_dir, 0755, true);
+				ultracache_object_cache_safe_mkdir($this->cache_dir, 0755, true);
 			}
 			$index = rtrim($this->cache_dir, '/\\') . '/index.php';
 			if (!file_exists($index)) {
-				ucwp_dropin_safe_file_put_contents($index, "<?php\n// Silence is golden.\n");
+				ultracache_object_cache_safe_file_put_contents($index, "<?php\n// Silence is golden.\n");
 			}
 		}
 
@@ -971,15 +951,9 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function build_apcu_prefix() {
-			$seed = implode('|', array(
-				defined('DB_NAME') ? DB_NAME : '',
-				defined('DB_USER') ? DB_USER : '',
-				defined('ABSPATH') ? ABSPATH : '',
-				defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : '',
-				(string) $this->redis_prefix,
-			));
-			$hash = function_exists('hash') ? hash('sha256', 'ucwp-apcu|' . $seed) : md5('ucwp-apcu|' . $seed);
-			return 'ucwp_apcu:' . substr((string) $hash, 0, 16) . ':';
+			$seed = __ULTRACACHE_SITE_NAMESPACE_SEED__ . '|' . (string) $this->redis_prefix;
+			$hash = function_exists('hash') ? hash('sha256', 'ultracache-apcu|' . $seed) : md5('ultracache-apcu|' . $seed);
+			return 'ultracache_apcu:' . substr((string) $hash, 0, 16) . ':';
 		}
 
 		private function get_apcu_namespace() {
@@ -992,7 +966,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if ($success && is_string($namespace) && '' !== $namespace) {
 				return $namespace;
 			}
-			$namespace = sha1(uniqid('ucwp-apcu-', true));
+			$namespace = sha1(uniqid('ultracache-apcu-', true));
 			@apcu_add($key, $namespace);
 			$stored = apcu_fetch($key, $success);
 			return ($success && is_string($stored) && '' !== $stored) ? $stored : $namespace;
@@ -1075,14 +1049,14 @@ if (!class_exists('WP_Object_Cache')) {
 				return;
 			}
 			$key = $this->apcu_prefix . 'group_version:' . $this->get_redis_scope($group) . ':' . $this->get_redis_group_slug($group);
-			@apcu_store($key, sha1(uniqid('ucwp-apcu-group-', true)));
+			@apcu_store($key, sha1(uniqid('ultracache-apcu-group-', true)));
 		}
 
 		private function flush_apcu_cache() {
 			if (!$this->apcu_enabled || !$this->apcu_available()) {
 				return;
 			}
-			@apcu_store($this->apcu_prefix . 'namespace', sha1(uniqid('ucwp-apcu-flush-', true)));
+			@apcu_store($this->apcu_prefix . 'namespace', sha1(uniqid('ultracache-apcu-flush-', true)));
 		}
 
 		private function get_redis_scope($group) {
@@ -1160,7 +1134,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$path || !$this->is_cache_path($path) || !file_exists($path)) {
 				return true;
 			}
-			return ucwp_dropin_safe_unlink($path);
+			return ultracache_object_cache_safe_unlink($path);
 		}
 
 		private function write_redis_payload($key, $group, $payload, $expire) {
@@ -1309,7 +1283,7 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 			$dir = dirname($path);
-			if (!is_dir($dir) && !ucwp_dropin_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
+			if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
 				return false;
 			}
 			$tmp = $path . '.tmp-' . uniqid('', true);
@@ -1319,13 +1293,13 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 			$data = serialize($envelope);
-			$result = ucwp_dropin_safe_file_put_contents($tmp, $data, LOCK_EX);
+			$result = ultracache_object_cache_safe_file_put_contents($tmp, $data, LOCK_EX);
 			if (false === $result) {
-				ucwp_dropin_safe_unlink($tmp);
+				ultracache_object_cache_safe_unlink($tmp);
 				return false;
 			}
-			if (!ucwp_dropin_safe_rename($tmp, $path)) {
-				ucwp_dropin_safe_unlink($tmp);
+			if (!ultracache_object_cache_safe_rename($tmp, $path)) {
+				ultracache_object_cache_safe_unlink($tmp);
 				return false;
 			}
 			return true;
@@ -1343,7 +1317,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!is_string($path) || '' === trim($path) || !$this->is_cache_path($path)) {
 				return false;
 			}
-			$data = ucwp_dropin_safe_file_get_contents($path);
+			$data = ultracache_object_cache_safe_file_get_contents($path);
 			if (false === $data || '' === $data) {
 				return false;
 			}
@@ -1568,7 +1542,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!is_dir($this->cache_dir) || !$this->is_cache_path($this->cache_dir)) {
 				return;
 			}
-			$items = ucwp_dropin_safe_scandir($this->cache_dir);
+			$items = ultracache_object_cache_safe_scandir($this->cache_dir);
 			if (!is_array($items)) {
 				return;
 			}
@@ -1583,7 +1557,7 @@ if (!class_exists('WP_Object_Cache')) {
 				if (is_dir($path)) {
 					$this->recursive_delete($path, true);
 				} else {
-					ucwp_dropin_safe_unlink($path);
+					ultracache_object_cache_safe_unlink($path);
 				}
 			}
 		}
@@ -1593,18 +1567,14 @@ if (!class_exists('WP_Object_Cache')) {
 			if ('' === $item) {
 				return false;
 			}
-			$preserve = array('index.php');
-			if (is_string($this->redis_secret_config) && '' !== trim($this->redis_secret_config)) {
-				$preserve[] = basename($this->redis_secret_config);
-			}
-			return in_array($item, array_values(array_unique(array_filter($preserve))), true);
+			return 'index.php' === $item;
 		}
 
 		private function recursive_delete($dir, $remove_root = true) {
 			if (!is_string($dir) || '' === trim($dir) || !is_dir($dir) || is_link($dir) || !$this->is_cache_path($dir)) {
 				return;
 			}
-			$items = ucwp_dropin_safe_scandir($dir);
+			$items = ultracache_object_cache_safe_scandir($dir);
 			if (!is_array($items)) {
 				return;
 			}
@@ -1619,10 +1589,10 @@ if (!class_exists('WP_Object_Cache')) {
 				if (is_dir($path)) {
 					$this->recursive_delete($path, true);
 				} else {
-					ucwp_dropin_safe_unlink($path);
+					ultracache_object_cache_safe_unlink($path);
 				}
 			}
-			$remaining = ucwp_dropin_safe_scandir($dir);
+			$remaining = ultracache_object_cache_safe_scandir($dir);
 			if (is_array($remaining)) {
 				foreach ($remaining as $item) {
 					if ('.' === $item || '..' === $item) {
@@ -1630,12 +1600,12 @@ if (!class_exists('WP_Object_Cache')) {
 					}
 					$path = $dir . DIRECTORY_SEPARATOR . $item;
 					if (!is_link($path) && $this->is_cache_path($path) && is_file($path)) {
-						ucwp_dropin_safe_unlink($path);
+						ultracache_object_cache_safe_unlink($path);
 					}
 				}
 			}
 			if ($remove_root) {
-				ucwp_dropin_safe_rmdir($dir);
+				ultracache_object_cache_safe_rmdir($dir);
 			}
 		}
 	}

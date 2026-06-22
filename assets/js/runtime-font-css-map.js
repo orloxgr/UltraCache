@@ -1,5 +1,5 @@
 (function () {
-    var cfg = window.ucwpRuntimeFontCssMapConfig || {};
+    var cfg = window.ultracacheRuntimeFontCssMapConfig || {};
     var map = cfg.map;
     if (!map || typeof map !== 'object') {
         map = {};
@@ -16,7 +16,7 @@
         try {
             var node = root();
             if (node) {
-                node.setAttribute('data-ucwp-runtime-font-' + key, String(value));
+                node.setAttribute('data-ultracache-runtime-font-' + key, String(value));
             }
         } catch (e) {}
     };
@@ -58,7 +58,7 @@
         var abs = toAbs(href);
         if (abs && map[abs] && abs !== map[abs]) {
             node.setAttribute('href', map[abs]);
-            node.setAttribute('data-ucwp-runtime-font-rewrite-hit', '1');
+            node.setAttribute('data-ultracache-runtime-font-rewrite-hit', '1');
             try {
                 node.href = map[abs];
             } catch (e) {}

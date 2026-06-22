@@ -30,11 +30,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
 
             if ('' === $home_host || '' === $host || $host !== $home_host) {
-                return new WP_Error('ucwp_profile_url_not_allowed', __('Only same-site URLs can be scanned.', 'ultracache'));
+                return new WP_Error('ultracache_profile_url_not_allowed', __('Only same-site URLs can be scanned.', 'ultracache'));
             }
 
-            if (function_exists('ucwp_is_strict_frontend_loopback_url') && !ucwp_is_strict_frontend_loopback_url($url)) {
-                return new WP_Error('ucwp_profile_url_not_allowed', __('Only same-site frontend URLs on the site port can be scanned.', 'ultracache'));
+            if (function_exists('ultracache_is_strict_frontend_loopback_url') && !ultracache_is_strict_frontend_loopback_url($url)) {
+                return new WP_Error('ultracache_profile_url_not_allowed', __('Only same-site frontend URLs on the site port can be scanned.', 'ultracache'));
             }
 
             $scheme = isset($parts['scheme']) && in_array(strtolower((string) $parts['scheme']), array('http', 'https'), true) ? strtolower((string) $parts['scheme']) : '';
@@ -494,7 +494,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             return array(
                 'available'                     => true,
-                'version'                       => isset($profile['version']) ? (string) $profile['version'] : (defined('UCWP_VERSION') ? UCWP_VERSION : ''),
+                'version'                       => isset($profile['version']) ? (string) $profile['version'] : (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : ''),
                 'requestId'                     => isset($profile['request_id']) ? (string) $profile['request_id'] : '',
                 'url'                           => isset($profile['url']) ? (string) $profile['url'] : '',
                 'status'                        => isset($profile['status']) ? (string) $profile['status'] : '',
@@ -693,7 +693,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'X-UltraCache-Internal-Request'=> '1',
                 'X-UltraCache-Force-Refresh'  => '1',
                 'X-UltraCache-Profile-Run'    => $run_id,
-                'X-UltraCache-Token'          => (function_exists('ucwp_create_runtime_control_token') ? ucwp_create_runtime_control_token() : ''),
+                'X-UltraCache-Token'          => (function_exists('ultracache_create_runtime_control_token') ? ultracache_create_runtime_control_token() : ''),
                 'Cache-Control'               => 'no-cache, no-store, max-age=0',
                 'Pragma'                      => 'no-cache',
             );
@@ -718,25 +718,25 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             // cached page to the dashboard profiler. These query args are stripped
             // from UltraCache cache keys/cacheability checks by the engine.
             $profile_query_args = array(
-                'ucwp_store_profile' => '1',
-                'ucwp_revalidate'    => '1',
-                'ucwp_profile_run'   => $run_id,
-                'ucwp_rt'            => (function_exists('ucwp_create_runtime_control_token') ? ucwp_create_runtime_control_token() : ''),
+                'ultracache_store_profile' => '1',
+                'ultracache_revalidate'    => '1',
+                'ultracache_profile_run'   => $run_id,
+                'ultracache_rt'            => (function_exists('ultracache_create_runtime_control_token') ? ultracache_create_runtime_control_token() : ''),
             );
             if ('verbose' === $mode) {
-                $profile_query_args['ucwp_store_profile_verbose'] = '1';
+                $profile_query_args['ultracache_store_profile_verbose'] = '1';
             }
             if ('callback' === $mode) {
-                $profile_query_args['ucwp_callback_profile'] = '1';
+                $profile_query_args['ultracache_callback_profile'] = '1';
             }
             $profile_url = add_query_arg($profile_query_args, $url);
 
             $started = microtime(true);
-            $response = ucwp_safe_loopback_remote_request($profile_url, array(
+            $response = ultracache_safe_loopback_remote_request($profile_url, array(
                 'timeout'     => 90,
                 'redirection' => 3,
                 'headers'     => $headers,
-                'user-agent'  => 'UltraCache Dashboard Profiler/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown') . '; ' . home_url('/'),
+                'user-agent'  => 'UltraCache Dashboard Profiler/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown') . '; ' . home_url('/'),
             ));
             $elapsed_ms = (int) round((microtime(true) - $started) * 1000);
 
@@ -827,7 +827,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
         private function get_runtime_js_scan_transient_key($scan_id)
         {
             $scan_id = sanitize_key((string) $scan_id);
-            return 'ucwp_runtime_js_scan_' . $scan_id;
+            return 'ultracache_runtime_js_scan_' . md5($scan_id);
         }
 
         private function get_runtime_js_scan_current_exclusions()
@@ -840,7 +840,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
             }
             if ('' === $value) {
-                $raw = get_option(UCWP_SETTINGS_KEY, array());
+                $raw = get_option(ULTRACACHE_SETTINGS_KEY, array());
                 if (is_array($raw) && isset($raw['deferJsExcludeList'])) {
                     $value = (string) $raw['deferJsExcludeList'];
                 }
@@ -920,8 +920,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
 
             if ('woocommerce' === $line) {
-                return (function_exists('ucwp_public_path_contains') && ucwp_public_path_contains($suggestion, ucwp_plugins_public_path('woocommerce')))
-                    || false !== strpos($suggestion, '/plugins/woocommerce/')
+                return (function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($suggestion, ultracache_plugins_public_path('woocommerce')))
                     || false !== strpos($suggestion, '/woocommerce/assets/');
             }
 
@@ -1093,7 +1092,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 return '';
             }
 
-            $owner = function_exists('ucwp_plugin_theme_owner_from_public_source') ? ucwp_plugin_theme_owner_from_public_source('/' . $path) : array();
+            $owner = function_exists('ultracache_plugin_theme_owner_from_public_source') ? ultracache_plugin_theme_owner_from_public_source('/' . $path) : array();
             if (!empty($owner['slug'])) {
                 $relative = isset($owner['relative']) ? trim((string) $owner['relative'], '/') : '';
                 if ('' === $relative) {
@@ -1150,7 +1149,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 return array();
             }
 
-            $owner = function_exists('ucwp_plugin_theme_owner_from_public_source') ? ucwp_plugin_theme_owner_from_public_source('/' . $path) : array();
+            $owner = function_exists('ultracache_plugin_theme_owner_from_public_source') ? ultracache_plugin_theme_owner_from_public_source('/' . $path) : array();
             if (empty($owner['kind']) || empty($owner['slug'])) {
                 return array();
             }
@@ -1199,11 +1198,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
             }
             $dynamic_root_markers = array();
-            if (function_exists('ucwp_plugins_public_path')) {
-                $dynamic_root_markers[] = ucwp_plugins_public_path();
+            if (function_exists('ultracache_plugins_public_path')) {
+                $dynamic_root_markers[] = ultracache_plugins_public_path();
             }
-            if (function_exists('ucwp_themes_public_paths')) {
-                $dynamic_root_markers = array_merge($dynamic_root_markers, ucwp_themes_public_paths());
+            if (function_exists('ultracache_themes_public_paths')) {
+                $dynamic_root_markers = array_merge($dynamic_root_markers, ultracache_themes_public_paths());
             }
             foreach (array_filter($dynamic_root_markers) as $marker) {
                 $quoted = preg_quote(rtrim((string) $marker, '/'), '#');
@@ -1313,8 +1312,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $parts = max(2, min(6, (int) $parts));
             $fragment = implode('/', array_slice($segments, -1 * min($parts, count($segments))));
             $base = basename($fragment);
-            $owner = function_exists('ucwp_plugin_theme_owner_from_public_source') ? ucwp_plugin_theme_owner_from_public_source('/' . trim((string) $path, '/')) : array();
-            $is_targeted_local_asset = !empty($owner['slug']) || 0 === strpos(strtolower($path), 'plugins/') || 0 === strpos(strtolower($path), 'themes/');
+            $owner = function_exists('ultracache_plugin_theme_owner_from_public_source') ? ultracache_plugin_theme_owner_from_public_source('/' . trim((string) $path, '/')) : array();
+            $is_targeted_local_asset = !empty($owner['slug']);
             if ($this->runtime_js_scan_is_generic_script_basename($base) && !$is_targeted_local_asset) {
                 return '';
             }
@@ -1393,18 +1392,18 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
 
             return remove_query_arg(array(
-                'ucwp_runtime_js_scan',
-                'ucwp_runtime_js_scan_id',
-                'ucwp_runtime_js_scan_nonce',
-                'ucwp_runtime_js_scan_context',
-                'ucwp_rt',
-                'ucwp_profile_bypass',
-                'ucwp_store_profile',
-                'ucwp_callback_profile',
-                'ucwp_store_profile_verbose',
-                'ucwp_store_profile_verbose_settings',
-                'ucwp_profile_run',
-                'ucwp_revalidate',
+                'ultracache_runtime_js_scan',
+                'ultracache_runtime_js_scan_id',
+                'ultracache_runtime_js_scan_nonce',
+                'ultracache_runtime_js_scan_context',
+                'ultracache_rt',
+                'ultracache_profile_bypass',
+                'ultracache_store_profile',
+                'ultracache_callback_profile',
+                'ultracache_store_profile_verbose',
+                'ultracache_store_profile_verbose_settings',
+                'ultracache_profile_run',
+                'ultracache_revalidate',
             ), $url);
         }
 
@@ -2470,8 +2469,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
             if ('' !== $script_id) {
                 $related_id = $this->runtime_js_scan_related_external_id_for_inline_id($script_id);
-                if (!$has_path_or_service_suggestion && '' !== $related_id && isset($GLOBALS['ucwp_runtime_js_scan_scripts'])) {
-                    $related = $this->runtime_js_scan_find_script_by_id((array) $GLOBALS['ucwp_runtime_js_scan_scripts'], $related_id);
+                if (!$has_path_or_service_suggestion && '' !== $related_id && isset($GLOBALS['ultracache_runtime_js_scan_scripts'])) {
+                    $related = $this->runtime_js_scan_find_script_by_id((array) $GLOBALS['ultracache_runtime_js_scan_scripts'], $related_id);
                     if (!empty($related) && !empty($related['src'])) {
                         $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $related, $label . ' related external', $source_for_display, $message, $reason, $exclusions, $confidence, $global);
                         return;
@@ -2480,8 +2479,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 if (!$has_path_or_service_suggestion) {
                     $this->runtime_js_scan_add_suggestion($suggestions, $seen, $script_id, $label . ' handle/id', $source_for_display, $message, $reason, $exclusions, $confidence);
                 }
-                if ('' !== $related_id && isset($GLOBALS['ucwp_runtime_js_scan_scripts'])) {
-                    $related = $this->runtime_js_scan_find_script_by_id((array) $GLOBALS['ucwp_runtime_js_scan_scripts'], $related_id);
+                if ('' !== $related_id && isset($GLOBALS['ultracache_runtime_js_scan_scripts'])) {
+                    $related = $this->runtime_js_scan_find_script_by_id((array) $GLOBALS['ultracache_runtime_js_scan_scripts'], $related_id);
                     if (!empty($related) && empty($related['src'])) {
                         $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $related, $label . ' related external', $source_for_display, $message, $reason, $exclusions, $confidence, $global);
                     }
@@ -2518,7 +2517,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
             }
 
-            $GLOBALS['ucwp_runtime_js_scan_scripts'] = $scripts;
+            $GLOBALS['ultracache_runtime_js_scan_scripts'] = $scripts;
             foreach ($globals as $global) {
                 $this->runtime_js_scan_add_suggestion($suggestions, $seen, $global, 'resolved dynamic window callback global', $source, $message, $reason, $exclusions, 'recommended');
                 foreach ($this->runtime_js_scan_find_scripts_with_symbol_text($global, $scripts) as $provider) {
@@ -2528,7 +2527,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     $this->runtime_js_scan_add_script_identity_suggestions($suggestions, $seen, $provider, 'resolved dynamic callback source/provider hint', $source, $message, $reason, $exclusions, 'recommended', $global);
                 }
             }
-            unset($GLOBALS['ucwp_runtime_js_scan_scripts']);
+            unset($GLOBALS['ultracache_runtime_js_scan_scripts']);
         }
 
         private function runtime_js_scan_fetch_script_inventory_for_url($url = '')
@@ -2544,11 +2543,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
 
             $request_url = add_query_arg(array(
-                'ucwp_js_inventory' => '1',
-                'ucwp_rt'           => time(),
+                'ultracache_js_inventory' => '1',
+                'ultracache_rt'           => time(),
             ), $normalized);
 
-            $response = ucwp_safe_loopback_remote_request($request_url, array(
+            $response = ultracache_safe_loopback_remote_request($request_url, array(
                 'timeout'     => 8,
                 'redirection' => 3,
                 'headers'     => array(
@@ -2556,7 +2555,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     'Cache-Control' => 'no-cache',
                     'Pragma'        => 'no-cache',
                 ),
-                'user-agent'  => 'UltraCache JS inventory/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown') . '; ' . home_url('/'),
+                'user-agent'  => 'UltraCache JS inventory/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown') . '; ' . home_url('/'),
             ), 'runtime-js-inventory-scan');
             if (is_wp_error($response)) {
                 return array();
@@ -2578,16 +2577,16 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 while ($processor->next_tag('SCRIPT')) {
                     $src = $this->runtime_js_scan_processor_attribute($processor, 'src');
                     if ('' === $src) {
-                        $src = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-src');
+                        $src = $this->runtime_js_scan_processor_attribute($processor, 'data-ultracache-src');
                     }
                     if ('' === $src) {
-                        $src = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-original-src');
+                        $src = $this->runtime_js_scan_processor_attribute($processor, 'data-ultracache-original-src');
                     }
 
                     $body = method_exists($processor, 'get_modifiable_text') ? (string) $processor->get_modifiable_text() : '';
                     $id = $this->runtime_js_scan_processor_attribute($processor, 'id');
                     if ('' === $id) {
-                        $id = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-id');
+                        $id = $this->runtime_js_scan_processor_attribute($processor, 'data-ultracache-id');
                     }
                     if ('' === $id) {
                         $source_url_id = $this->runtime_js_scan_source_url_id_from_inline_text($body);
@@ -2596,19 +2595,19 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         }
                     }
                     if ('' === $id) {
-                        $handle_id = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-handle');
+                        $handle_id = $this->runtime_js_scan_processor_attribute($processor, 'data-ultracache-handle');
                         if ('' !== $handle_id) {
                             $id = $handle_id;
                         }
                     }
 
                     $type = $this->runtime_js_scan_processor_attribute($processor, 'type');
-                    $handle = $this->runtime_js_scan_processor_attribute($processor, 'data-ucwp-handle');
+                    $handle = $this->runtime_js_scan_processor_attribute($processor, 'data-ultracache-handle');
                     $strategy = $this->runtime_js_scan_processor_attribute($processor, 'data-wp-strategy');
-                    $is_delayed = (null !== $processor->get_attribute('data-ucwp-src')
-                        || null !== $processor->get_attribute('data-ucwp-inline')
-                        || null !== $processor->get_attribute('data-ucwp-delayed')
-                        || false !== stripos($type, 'ucwp-delayed'));
+                    $is_delayed = (null !== $processor->get_attribute('data-ultracache-src')
+                        || null !== $processor->get_attribute('data-ultracache-inline')
+                        || null !== $processor->get_attribute('data-ultracache-delayed')
+                        || false !== stripos($type, 'ultracache-delayed'));
 
                     $scripts[] = array(
                         'id'       => sanitize_text_field(substr($id, 0, 160)),
@@ -2642,11 +2641,11 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
             $src = html_entity_decode($src, ENT_QUOTES, 'UTF-8');
             $absolute = $this->runtime_js_scan_url_to_absolute($src);
-            if ('' === $absolute || !function_exists('ucwp_local_path_from_public_url')) {
+            if ('' === $absolute || !function_exists('ultracache_local_path_from_public_url')) {
                 return '';
             }
 
-            $path = ucwp_local_path_from_public_url($absolute, array('js', 'mjs'));
+            $path = ultracache_local_path_from_public_url($absolute, array('js', 'mjs'));
             if ('' === $path || !is_file($path) || !is_readable($path)) {
                 return '';
             }
@@ -2674,8 +2673,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
 
             $content = '';
-            if (function_exists('ucwp_guarded_asset_file_get_contents')) {
-                $raw = ucwp_guarded_asset_file_get_contents($path, 'js', 'runtime_js_scan_read_local_script_content', true);
+            if (function_exists('ultracache_guarded_asset_file_get_contents')) {
+                $raw = ultracache_guarded_asset_file_get_contents($path, 'js', 'runtime_js_scan_read_local_script_content', true);
                 if (is_string($raw)) {
                     $content = $raw;
                 }
@@ -2871,13 +2870,13 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
                 $seen[$key] = true;
-                $script['_ucwp_match_score'] = $score;
+                $script['_ultracache_match_score'] = $score;
                 $matches[] = $script;
             }
 
             usort($matches, static function ($a, $b) {
-                $a_score = isset($a['_ucwp_match_score']) ? (int) $a['_ucwp_match_score'] : 0;
-                $b_score = isset($b['_ucwp_match_score']) ? (int) $b['_ucwp_match_score'] : 0;
+                $a_score = isset($a['_ultracache_match_score']) ? (int) $a['_ultracache_match_score'] : 0;
+                $b_score = isset($b['_ultracache_match_score']) ? (int) $b['_ultracache_match_score'] : 0;
                 if ($a_score === $b_score) {
                     return 0;
                 }
@@ -3404,7 +3403,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $queue = array(array($root, 0));
             $blocked_dirs = array('node_modules', 'vendor', '.git', 'cache', 'dist/cache', 'build/cache');
 
-            $filesystem = function_exists('ucwp_get_wp_filesystem') ? ucwp_get_wp_filesystem() : null;
+            $filesystem = function_exists('ultracache_get_wp_filesystem') ? ultracache_get_wp_filesystem() : null;
             if (!$filesystem || !is_object($filesystem)) {
                 return array();
             }
@@ -3417,7 +3416,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
 
-                $items = function_exists('ucwp_safe_scandir') ? ucwp_safe_scandir($dir, 'runtime_js_theme_stage_scan') : false;
+                $items = ultracache_safe_scandir($dir, 'runtime_js_theme_stage_scan');
                 if (!is_array($items)) {
                     continue;
                 }
@@ -3509,7 +3508,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
 
                 foreach ($this->runtime_js_scan_theme_stage_files($root_dir) as $file) {
-                    $content = function_exists('ucwp_guarded_asset_file_get_contents') ? ucwp_guarded_asset_file_get_contents($file, 'js', 'runtime_js_theme_stage_scan', true) : false;
+                    $content = function_exists('ultracache_guarded_asset_file_get_contents') ? ultracache_guarded_asset_file_get_contents($file, 'js', 'runtime_js_theme_stage_scan', true) : false;
                     if (!is_string($content) || '' === $content) {
                         continue;
                     }
@@ -3622,7 +3621,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
         private function runtime_js_scan_plugin_stage_roots($source, $message, $detail)
         {
-            if (!function_exists('ucwp_plugin_root_dir')) {
+            if (!function_exists('ultracache_plugin_root_dir')) {
                 return array();
             }
 
@@ -3639,7 +3638,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $scan_slugs = $has_clear_owner ? $owner_slugs : array_keys($active_slugs);
             $roots = array();
             $seen = array();
-            $filesystem = function_exists('ucwp_get_wp_filesystem') ? ucwp_get_wp_filesystem() : null;
+            $filesystem = function_exists('ultracache_get_wp_filesystem') ? ultracache_get_wp_filesystem() : null;
             if (!$filesystem || !is_object($filesystem)) {
                 return array();
             }
@@ -3650,7 +3649,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
 
-                $dir = ucwp_plugin_root_dir($slug);
+                $dir = ultracache_plugin_root_dir($slug);
                 if (!$filesystem->is_dir($dir)) {
                     continue;
                 }
@@ -3665,7 +3664,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     'stage'     => $has_clear_owner ? 'targeted active plugin' : 'active plugin scan',
                     'slug'      => $slug,
                     'dir'       => untrailingslashit($dir),
-                    'uri'       => function_exists('ucwp_plugin_root_uri') ? ucwp_plugin_root_uri($slug) : '',
+                    'uri'       => function_exists('ultracache_plugin_root_uri') ? ultracache_plugin_root_uri($slug) : '',
                     'max_files' => $has_clear_owner ? 120 : 35,
                     'max_depth' => $has_clear_owner ? 6 : 4,
                 );
@@ -3690,7 +3689,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $queue = array(array($root, 0));
             $blocked_dirs = array('node_modules', 'vendor', '.git', 'cache', 'dist/cache', 'build/cache', 'tests', 'test');
 
-            $filesystem = function_exists('ucwp_get_wp_filesystem') ? ucwp_get_wp_filesystem() : null;
+            $filesystem = function_exists('ultracache_get_wp_filesystem') ? ultracache_get_wp_filesystem() : null;
             if (!$filesystem || !is_object($filesystem)) {
                 return array();
             }
@@ -3703,7 +3702,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
 
-                $items = function_exists('ucwp_safe_scandir') ? ucwp_safe_scandir($dir, 'runtime_js_plugin_stage_scan') : false;
+                $items = ultracache_safe_scandir($dir, 'runtime_js_plugin_stage_scan');
                 if (!is_array($items)) {
                     continue;
                 }
@@ -3761,7 +3760,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
 
                 foreach ($this->runtime_js_scan_plugin_stage_files($root_dir, $max_files, $max_depth) as $file) {
-                    $content = function_exists('ucwp_guarded_asset_file_get_contents') ? ucwp_guarded_asset_file_get_contents($file, 'js', 'runtime_js_plugin_stage_scan', true) : false;
+                    $content = function_exists('ultracache_guarded_asset_file_get_contents') ? ultracache_guarded_asset_file_get_contents($file, 'js', 'runtime_js_plugin_stage_scan', true) : false;
                     if (!is_string($content) || '' === $content) {
                         continue;
                     }
@@ -3966,10 +3965,10 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if ('' === $kind || '' === $slug) {
                 return array();
             }
-            if ('plugin' === $kind && function_exists('ucwp_plugin_root_dir')) {
-                $dir = ucwp_plugin_root_dir($slug);
+            if ('plugin' === $kind && function_exists('ultracache_plugin_root_dir')) {
+                $dir = ultracache_plugin_root_dir($slug);
                 if (is_dir($dir)) {
-                    return array('kind' => 'plugin', 'slug' => $slug, 'dir' => untrailingslashit($dir), 'uri' => function_exists('ucwp_plugin_root_uri') ? ucwp_plugin_root_uri($slug) : '');
+                    return array('kind' => 'plugin', 'slug' => $slug, 'dir' => untrailingslashit($dir), 'uri' => function_exists('ultracache_plugin_root_uri') ? ultracache_plugin_root_uri($slug) : '');
                 }
             }
             if ('theme' === $kind) {
@@ -4005,7 +4004,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 $root_uri = (string) $root['uri'];
                 $files = ('plugin' === $kind) ? $this->runtime_js_scan_plugin_stage_files($root_dir, 140, 7) : $this->runtime_js_scan_theme_stage_files($root_dir, 120, 7);
                 foreach ($files as $file) {
-                    $content = function_exists('ucwp_guarded_asset_file_get_contents') ? ucwp_guarded_asset_file_get_contents($file, 'js', 'runtime_js_discovery_symbol_search', true) : false;
+                    $content = function_exists('ultracache_guarded_asset_file_get_contents') ? ultracache_guarded_asset_file_get_contents($file, 'js', 'runtime_js_discovery_symbol_search', true) : false;
                     if (!is_string($content) || !$this->runtime_js_scan_file_defines_symbol($content, $symbol)) {
                         continue;
                     }
@@ -4630,7 +4629,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
             }
 
-            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
+                return false;
+            }
             $charset_collate = $wpdb->get_charset_collate();
             $sql = "CREATE TABLE {$table} (
                 job_id varchar(64) NOT NULL,
@@ -4740,12 +4741,12 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
 
         private function runtime_js_diagnostic_queue_job_cache_key($job_id)
         {
-            return 'job_' . md5(sanitize_text_field((string) $job_id));
+            return 'ultracache_runtime_js_diagnostic_job_' . md5(sanitize_text_field((string) $job_id));
         }
 
         private function runtime_js_diagnostic_queue_latest_cache_key()
         {
-            return 'latest_job';
+            return 'ultracache_runtime_js_diagnostic_latest_job';
         }
 
         private function runtime_js_diagnostic_queue_delete_cache($job_id = '')

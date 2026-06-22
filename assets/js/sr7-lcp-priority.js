@@ -1,13 +1,13 @@
 (function () {
     "use strict";
 
-    if (window.__ucwpSr7LcpPriorityV107) {
+    if (window.__ultracacheSr7LcpPriorityV107) {
         return;
     }
 
-    window.__ucwpSr7LcpPriorityV107 = 1;
+    window.__ultracacheSr7LcpPriorityV107 = 1;
 
-    var config = window.ucwpSr7LcpPriorityConfig || {};
+    var config = window.ultracacheSr7LcpPriorityConfig || {};
     var manualSelectors = Array.isArray(config.manualSelectors) ? config.manualSelectors : [];
 
     function tag(node) {
@@ -51,7 +51,7 @@
 
     function getPreloadUrl() {
         try {
-            var link = document.querySelector('link[rel="preload"][as="image"][data-ucwp-lcp-preload="1"]');
+            var link = document.querySelector('link[rel="preload"][as="image"][data-ultracache-lcp-preload="1"]');
             return link ? (link.href || link.getAttribute("href") || "") : "";
         } catch (error) {
             return "";
@@ -183,15 +183,15 @@
 
             if (!node.hasAttribute("fetchpriority")) {
                 node.setAttribute("fetchpriority", "high");
-                node.setAttribute("data-ucwp-added-fetchpriority", "1");
+                node.setAttribute("data-ultracache-added-fetchpriority", "1");
             } else if (node.getAttribute("fetchpriority") !== "high") {
                 node.setAttribute("fetchpriority", "high");
             }
 
-            node.setAttribute("data-ucwp-sr7-lcp", "1");
-            node.setAttribute("data-ucwp-sr7-role", matchesPreload(node, preloadUrl) ? "preload-matched" : "preload-scoped");
-            node.setAttribute("data-ucwp-lcp-runtime-winner", "1");
-            node.setAttribute("data-ucwp-lcp-reason", matchesPreload(node, preloadUrl) ? "sr7-preload-matched-runtime" : "sr7-preload-scoped-runtime");
+            node.setAttribute("data-ultracache-sr7-lcp", "1");
+            node.setAttribute("data-ultracache-sr7-role", matchesPreload(node, preloadUrl) ? "preload-matched" : "preload-scoped");
+            node.setAttribute("data-ultracache-lcp-runtime-winner", "1");
+            node.setAttribute("data-ultracache-lcp-reason", matchesPreload(node, preloadUrl) ? "sr7-preload-matched-runtime" : "sr7-preload-scoped-runtime");
 
             if ((tag(node) === "img" || tag(node) === "sr7-img") && (!node.hasAttribute("loading") || node.getAttribute("loading") === "lazy")) {
                 node.setAttribute("loading", "eager");
@@ -201,14 +201,14 @@
                 node.setAttribute("decoding", "sync");
             }
 
-            window.__ucwpLcpDiscovery = window.__ucwpLcpDiscovery || {};
-            window.__ucwpLcpDiscovery.runtimeWinner = {
+            window.__ultracacheLcpDiscovery = window.__ultracacheLcpDiscovery || {};
+            window.__ultracacheLcpDiscovery.runtimeWinner = {
                 url: imageUrl(node),
                 preload: preloadUrl || "",
                 tag: tag(node),
                 id: node.id || "",
-                role: node.getAttribute("data-ucwp-sr7-role") || "",
-                reason: node.getAttribute("data-ucwp-lcp-reason") || ""
+                role: node.getAttribute("data-ultracache-sr7-role") || "",
+                reason: node.getAttribute("data-ultracache-lcp-reason") || ""
             };
 
             return true;

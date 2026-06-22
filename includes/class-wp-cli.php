@@ -11,14 +11,14 @@ require_once __DIR__ . '/cli/class-wp-cli-media-trait.php';
 require_once __DIR__ . '/cli/class-wp-cli-settings-stats-trait.php';
 require_once __DIR__ . '/cli/class-wp-cli-integrations-trait.php';
 
-if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
-    class UCWP_CLI_Command extends WP_CLI_Command
+if (!class_exists('ULTRACACHE_CLI_Command') && defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
+    class ULTRACACHE_CLI_Command extends WP_CLI_Command
     {
-        use UCWP_CLI_Helpers_Trait;
-        use UCWP_CLI_Cache_Trait;
-        use UCWP_CLI_Media_Trait;
-        use UCWP_CLI_Settings_Stats_Trait;
-        use UCWP_CLI_Integrations_Trait;
+        use ULTRACACHE_CLI_Helpers_Trait;
+        use ULTRACACHE_CLI_Cache_Trait;
+        use ULTRACACHE_CLI_Media_Trait;
+        use ULTRACACHE_CLI_Settings_Stats_Trait;
+        use ULTRACACHE_CLI_Integrations_Trait;
 
         /**
          * UltraCache command router.
@@ -192,7 +192,7 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
         private function print_ultracache_cli_command_reference(array $groups)
         {
             WP_CLI::line('UltraCache WP-CLI command reference');
-            WP_CLI::line('Version: ' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown'));
+            WP_CLI::line('Version: ' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown'));
             WP_CLI::line('');
             WP_CLI::line('Usage:');
             WP_CLI::line('  wp ultracache');
@@ -426,31 +426,29 @@ if (!class_exists('UCWP_CLI_Command') && defined('WP_CLI') && WP_CLI && class_ex
 }
 
 
-if (!class_exists('Ultra_Cache_WP_CLI')) {
-    final class Ultra_Cache_WP_CLI
+final class Ultra_Cache_WP_CLI
+{
+    public static function register()
     {
-        public static function register()
-        {
-            if (!defined('WP_CLI') || !WP_CLI || !class_exists('WP_CLI')) {
-                return;
-            }
-
-            if (!class_exists('UCWP_CLI_Command')) {
-                return;
-            }
-
-            if (defined('UCWP_WP_CLI_REGISTERED')) {
-                return;
-            }
-
-            define('UCWP_WP_CLI_REGISTERED', true);
-
-            // 2.56.191: register UltraCache once as a manual router. WP-CLI does
-            // not allow adding subcommands under an invokable root command, and an
-            // invokable class without a variadic synopsis swallows `media rebuild`
-            // as invalid positional arguments. The router accepts the command path
-            // itself and dispatches to the existing command handlers.
-            WP_CLI::add_command('ultracache', 'UCWP_CLI_Command');
+        if (!defined('WP_CLI') || !WP_CLI || !class_exists('WP_CLI')) {
+            return;
         }
+
+        if (!class_exists('ULTRACACHE_CLI_Command')) {
+            return;
+        }
+
+        if (defined('ULTRACACHE_WP_CLI_REGISTERED')) {
+            return;
+        }
+
+        define('ULTRACACHE_WP_CLI_REGISTERED', true);
+
+        // 2.56.191: register UltraCache once as a manual router. WP-CLI does
+        // not allow adding subcommands under an invokable root command, and an
+        // invokable class without a variadic synopsis swallows `media rebuild`
+        // as invalid positional arguments. The router accepts the command path
+        // itself and dispatches to the existing command handlers.
+        WP_CLI::add_command('ultracache', 'ULTRACACHE_CLI_Command');
     }
 }

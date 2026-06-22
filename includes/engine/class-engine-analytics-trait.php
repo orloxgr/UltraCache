@@ -59,7 +59,9 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 return true;
             }
 
-            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
+                return false;
+            }
             $charset_collate = $wpdb->get_charset_collate();
             $sql = "CREATE TABLE {$table} (
                 metric_key varchar(191) NOT NULL DEFAULT '',
@@ -84,7 +86,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
         private static function get_analytics_reason_row_cap()
         {
-            $cap = (int) apply_filters('ucwp_analytics_reason_row_cap', 100);
+            $cap = (int) apply_filters('ultracache_analytics_reason_row_cap', 100);
             return max(20, min(500, $cap));
         }
 
@@ -296,18 +298,17 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
         private static function get_analytics_file()
         {
-            return trailingslashit(UCWP_CACHE_DIR) . 'analytics.json';
+            return trailingslashit(ULTRACACHE_CACHE_DIR) . 'analytics.json';
         }
 
         private static function get_analytics_hit_buffer_file()
         {
-            return trailingslashit(UCWP_CACHE_DIR) . 'analytics-hit-buffer.log';
+            return trailingslashit(ULTRACACHE_CACHE_DIR) . 'analytics-hit-buffer.log';
         }
 
         private static function get_analytics_hit_buffer_key_prefix()
         {
-            $base = defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : UCWP_CACHE_DIR;
-            return 'ultracache_analytics_hit_buffer_' . md5((string) $base) . '_';
+            return 'ultracache_analytics_hit_buffer_' . md5(ultracache_site_namespace_seed()) . '_';
         }
 
         private static function analytics_apcu_available()
@@ -325,18 +326,14 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
         private static function get_analytics_redis_prefix()
         {
-            $settings = defined('UCWP_SETTINGS_KEY') ? get_option(UCWP_SETTINGS_KEY, array()) : array();
+            $settings = defined('ULTRACACHE_SETTINGS_KEY') ? get_option(ULTRACACHE_SETTINGS_KEY, array()) : array();
             $prefix = is_array($settings) && isset($settings['redisPrefix']) ? preg_replace('/[^A-Za-z0-9:_\-]/', '', (string) $settings['redisPrefix']) : '';
             $prefix = trim((string) $prefix, ':');
             if ('' !== $prefix) {
                 $prefix .= ':';
             } else {
-                $seed = implode('|', array(
-                    defined('DB_NAME') ? DB_NAME : '',
-                    defined('ABSPATH') ? ABSPATH : '',
-                    defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : '',
-                ));
-                $prefix = 'ucwp:' . substr((string) (function_exists('hash') ? hash('sha256', 'ucwp-redis|' . $seed) : md5('ucwp-redis|' . $seed)), 0, 12) . ':';
+                $seed = ultracache_site_namespace_seed();
+                $prefix = 'ultracache:' . substr((string) (function_exists('hash') ? hash('sha256', 'ultracache-redis|' . $seed) : md5('ultracache-redis|' . $seed)), 0, 12) . ':';
             }
 
             return $prefix . 'analytics-hit-buffer:';
@@ -352,11 +349,11 @@ trait Ultra_Cache_Engine_Analytics_Trait
             }
             $attempted = true;
 
-            if (!class_exists('Redis') || !defined('UCWP_SETTINGS_KEY')) {
+            if (!class_exists('Redis') || !defined('ULTRACACHE_SETTINGS_KEY')) {
                 return null;
             }
 
-            $settings = get_option(UCWP_SETTINGS_KEY, array());
+            $settings = get_option(ULTRACACHE_SETTINGS_KEY, array());
             if (!is_array($settings) || empty($settings['objectCacheEnabled']) || 'redis' !== strtolower(trim((string) ($settings['objectCacheBackend'] ?? 'redis')))) {
                 return null;
             }
@@ -368,7 +365,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                     $host = '127.0.0.1';
                 }
                 $port = max(1, min(65535, (int) ($settings['redisPort'] ?? 6379)));
-                if (function_exists('ucwp_is_allowed_redis_socket_target') && !ucwp_is_allowed_redis_socket_target($host, $port, 'analytics_redis_connect')) {
+                if (function_exists('ultracache_is_allowed_redis_socket_target') && !ultracache_is_allowed_redis_socket_target($host, $port, 'analytics_redis_connect')) {
                     return null;
                 }
                 if (!empty($settings['redisUseTls']) && 0 !== strpos($host, 'tls://')) {
@@ -381,7 +378,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 $persistent = !empty($settings['redisPersistent']);
 
                 if ($persistent) {
-                    $connected = @$client->pconnect($host, $port, $connect_timeout, 'ucwp-analytics-' . md5($host . '|' . $port . '|' . $database));
+                    $connected = @$client->pconnect($host, $port, $connect_timeout, 'ultracache-analytics-' . md5($host . '|' . $port . '|' . $database));
                 } else {
                     $connected = @$client->connect($host, $port, $connect_timeout);
                 }
@@ -396,8 +393,13 @@ trait Ultra_Cache_Engine_Analytics_Trait
                     @$client->setOption(Redis::OPT_READ_TIMEOUT, $read_timeout);
                 }
 
-                $username = isset($settings['redisUsername']) ? trim((string) $settings['redisUsername']) : '';
-                $password = isset($settings['redisPassword']) ? (string) $settings['redisPassword'] : '';
+                $credentials = function_exists('ultracache_get_redis_credentials')
+                    ? ultracache_get_redis_credentials()
+                    : array('username' => '', 'password' => '');
+                $username = '' !== trim((string) ($credentials['username'] ?? ''))
+                    ? trim((string) $credentials['username'])
+                    : (isset($settings['redisUsername']) ? trim((string) $settings['redisUsername']) : '');
+                $password = isset($credentials['password']) ? (string) $credentials['password'] : '';
                 if ('' !== $password) {
                     $authenticated = '' !== $username ? @$client->auth(array($username, $password)) : @$client->auth($password);
                     if (!$authenticated) {
@@ -664,7 +666,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 }
             }
 
-            ucwp_safe_unlink(self::get_analytics_hit_buffer_file(), 'analytics_hit_buffer_clear');
+            ultracache_safe_unlink(self::get_analytics_hit_buffer_file(), 'analytics_hit_buffer_clear');
         }
 
         private static function flush_analytics_hit_buffer()
@@ -827,7 +829,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
         private static function analytics_enabled()
         {
-            $settings = defined('UCWP_SETTINGS_KEY') ? get_option(UCWP_SETTINGS_KEY, array()) : array();
+            $settings = defined('ULTRACACHE_SETTINGS_KEY') ? get_option(ULTRACACHE_SETTINGS_KEY, array()) : array();
             return is_array($settings) && !empty($settings['cacheStatsEnabled']);
         }
 
@@ -1083,7 +1085,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
             $source_urls = isset($result['sourceUrls']) && is_array($result['sourceUrls']) ? array_values(array_unique(array_map('strval', $result['sourceUrls']))) : array();
 
             $summary = array(
-                'version' => (defined('UCWP_VERSION') ? (string) UCWP_VERSION : ''),
+                'version' => (defined('ULTRACACHE_VERSION') ? (string) ULTRACACHE_VERSION : ''),
                 'success' => !empty($result['success']),
                 'message' => isset($result['message']) ? (string) $result['message'] : '',
                 'bundleCount' => max(0, (int) ($result['bundleCount'] ?? 0)),
@@ -1125,9 +1127,9 @@ trait Ultra_Cache_Engine_Analytics_Trait
             $count = 0;
             $size = 0;
 
-            if (is_dir(UCWP_CACHE_DIR)) {
+            if (is_dir(ULTRACACHE_CACHE_DIR)) {
                 $iterator = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator(UCWP_CACHE_DIR, FilesystemIterator::SKIP_DOTS)
+                    new RecursiveDirectoryIterator(ULTRACACHE_CACHE_DIR, FilesystemIterator::SKIP_DOTS)
                 );
 
                 foreach ($iterator as $item) {

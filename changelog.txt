@@ -1,10 +1,237 @@
+= 2.59.06.59 =
+* Documents the two intentional `var_export( ..., true )` calls used to generate valid PHP string literals for UltraCache-managed `wp-config.php` password constants.
+* Adds narrowly scoped PHPCS exceptions for `WordPress.PHP.DevelopmentFunctions.error_log_var_export`; the calls return strings and do not emit debug output.
+* Bumps release metadata from 2.59.06.58 to 2.59.06.59. No runtime behavior, files, or directories were added or removed.
+
+= 2.59.06.58 =
+* Completes the final reviewer validation across declared URLs, WordPress-native asset enqueueing, remote dependency checks, path resolution, guarded storage, late escaping, prefixes/dynamic names, generated drop-ins, and full uninstall cleanup.
+* Synchronizes the plugin header, runtime version constant, WordPress.org stable tag, and README current-version marker at 2.59.06.58.
+* Regenerates `languages/ultracache.pot` from the current PHP and JavaScript sources, updates source references/header metadata, adds previously missing translatable strings, and removes obsolete catalog entries.
+* Revalidates the AVIF Imagick/GD/WebP fallback policy and Safe CLS responsive-dimension safeguards without changing their runtime behavior.
+* No runtime feature behavior, files, or directories were added or removed.
+
+= 2.59.06.57 =
+* Removes 221 `function_exists()` declaration wrappers and six `class_exists()` declaration wrappers from UltraCache-owned functions/classes, leaving guards only for the standard `WP_Object_Cache` and `wp_cache_*` drop-in symbols.
+* Gives advanced-cache and object-cache internal helpers separate `ultracache_advanced_cache_*` and `ultracache_object_cache_*` names so both drop-ins can load without shared helper declarations or load-order fallbacks.
+* Prefixes the remaining plugin-owned object-cache keys for action-job schema/rows, cron-warm schema, runtime JS diagnostic jobs, CSS rewrite-map rows, and payload diagnostics with `ultracache_`.
+* Removes the unused case-only REST class alias and the duplicate admin `ultracache-root` element/lookup.
+* Bumps release metadata from 2.59.06.56 to 2.59.06.57. No files or directories were added or deleted.
+
+= 2.59.06.56 =
+* Preserves every existing image `width` and `height` attribute instead of replacing percentage, `auto`, empty, zero, boolean, or otherwise non-numeric values with intrinsic pixel dimensions.
+* Skips Safe CLS processing for an image when either existing dimension attribute is non-numeric, and skips inline `max-width: none` images without injecting plugin CSS or changing responsive styles.
+* When exactly one positive numeric dimension exists, calculates only the missing dimension from the resolved intrinsic aspect ratio instead of copying the source image's full opposite dimension.
+* Adds both intrinsic dimensions only when both attributes are absent, while leaving `srcset`, `sizes`, inline styles, classes, and responsive theme behavior unchanged.
+* Extends the Safe CLS raster-image exclusion to SVGZ as well as SVG and bumps release metadata from 2.59.06.55 to 2.59.06.56. No files or directories were added or deleted.
+
+= 2.59.06.55 =
+* Makes AVIF conversion prefer Imagick first and use GD only when a real transparent/semi-transparent AVIF encode-and-decode probe verifies alpha preservation.
+* Adds an equivalent real Imagick AVIF alpha probe instead of trusting format advertisement alone, so unusable AVIF codecs are not treated as supported.
+* Falls back to WebP as the effective media output when neither Imagick nor GD can produce a verified alpha-safe AVIF file, and keeps WebP available as the per-image fallback when an AVIF file is missing.
+* Detects the source image by its real MIME type as well as its extension, handles renamed PNG/JPEG files correctly, and rejects SVG/SVGZ from all raster conversion paths.
+* Preserves alpha in the direct GD and Imagick conversion paths and updates media support/reset probe cache keys.
+* Bumps release metadata from 2.59.06.54.01 to 2.59.06.55. No files or directories were added or deleted.
+
+= 2.59.06.54.01 =
+* Prevents the Delete Everything/deactivation and WordPress uninstall requests from recreating UltraCache-owned database state after cleanup by defining an explicit uninstall-in-progress guard before teardown.
+* Skips deactivation-hook work, cache-asset/CSS-rewrite table creation, and object-cache flush-report persistence while the uninstall guard is active.
+* Refactors uninstall table removal through a validated UltraCache-only helper, verifies each requested table is absent, and repeats the two affected table drops as the final full-cleanup operation.
+* Deletes and re-verifies the final `ultracache_object_cache_last_flush_report`, `ultracache_cache_asset_refs_db_version`, and `ultracache_css_rewrite_map_db_version` options after drop-in/file cleanup.
+* Bumps release metadata from 2.59.06.54 to 2.59.06.54.01. No files or directories were added or deleted.
+
+= 2.59.06.54 =
+* Removes the uniquely delimited UltraCache managed-constants block from the exact active `wp-config.php` during plugin uninstall, regardless of the selected data-retention policy.
+* Resolves only the configuration file loaded by WordPress or authoritatively located by WP-CLI; no WordPress-root or parent-directory path guessing is added.
+* Writes only through `WP_Filesystem::put_contents()`, validates the resulting PHP, verifies the update by SHA-256 read-back, and retains the original contents only in memory for immediate verified rollback.
+* Leaves every `WP_CACHE`, `WP_REDIS_PASSWORD`, and `ULTRACACHE_VARNISH_PASSWORD` declaration outside the UltraCache managed block unchanged.
+* Bumps release metadata from 2.59.06.53 to 2.59.06.54. No files or directories were added or deleted.
+
+= 2.59.06.53 =
+* Replaces every internal short-form plugin identifier with the full ultracache/ULTRACACHE prefix across PHP, JavaScript, generated drop-in templates, persistent keys, hooks, nonces, REST/AJAX integration, HTML identifiers, diagnostics, uninstall cleanup, translations, and documentation.
+* Removes the unused action-queue option helper and obsolete action_jobs_rows_v1 cache cleanup.
+* Bounds runtime JavaScript scan transient names with a fixed MD5 suffix.
+* Corrects Delete All and uninstall cleanup for the active action-queue heavy lock, cron warm transient, and dynamic Google Fonts database locks while removing obsolete option cleanup entries.
+* No migration, legacy aliases, fallback keys, files, or directories were added. A clean Delete All Data and reinstall is required for testing this pre-public refactor.
+
+= 2.59.06.52 =
+* Encodes all frontend helper configuration passed through `wp_add_inline_script()` with `JSON_HEX_TAG`, `JSON_HEX_AMP`, `JSON_HEX_APOS`, and `JSON_HEX_QUOT` to prevent inline-script context breakout across all five helper-data callers.
+* Restricts the WordPress-engine full-page cache output path to canonical files inside `ULTRACACHE_CACHE_DIR` whose basename matches `index-(orig|avif|webp)-<32-character MD5>.html` before raw HTML output.
+* Restricts the early `advanced-cache.php` drop-in output path to canonical files inside `ULTRACACHE_CACHE_DIR` using the same UltraCache filename format, allowing only the generated `.html`, `.html.gz`, and `.html.br` payloads.
+* Documents the two intentional raw full-page cache output paths with narrow PHPCS exceptions; HTML escaping is not applied because it would corrupt the complete cached WordPress response.
+* Bumps release metadata from 2.59.06.51 to 2.59.06.52. No files or directories were added or deleted.
+
+= 2.59.06.51 =
+* Removes the remaining native filesystem fallback branches from guarded reads, file metadata, directory listing/deletion, media optimized-file checks, runtime cleanup, diagnostics, font cleanup, profiling, warm-crawl cleanup, and uninstall cleanup. These paths now fail closed when WP_Filesystem is unavailable.
+* Replaces `tempnam()` with WordPress `wp_tempnam()` and verifies that the returned temporary path remains inside the requested guarded directory.
+* Removes confirmed unused helpers: `ultracache_safe_chmod()`, `ultracache_safe_stream_set_blocking()`, `ultracache_uninstall_home_path()`, `ultracache_json_encode_for_inline_script()`, `ultracache_content_cache_reference_matches()`, `ultracache_request_profile_hook_priority_details()`, `ultracache_font_css_file_diagnostics()`, and the obsolete native recursive-delete helper.
+* Keeps all existing storage locations and runtime behavior otherwise unchanged. No files or directories were added or deleted.
+* Bumps release metadata from 2.59.06.50 to 2.59.06.51.
+
+= 2.59.06.50 =
+* Removes the unused `ultracache_safe_copy()` helper and its native `copy()` fallback.
+* Removes the native `file_put_contents()` fallback from `ultracache_safe_file_put_contents()`; generated UltraCache files now write only through `WP_Filesystem::put_contents()`.
+* Removes the native `rename()` path from `ultracache_safe_rename()`; generated cache and drop-in temporary files now move into place only through `WP_Filesystem::move()`.
+* Replaces the temporary `.htaccess` file and rename workflow with a direct `WP_Filesystem::put_contents()` write. UltraCache retains the original `.htaccess` content only in memory, verifies the new content by SHA-256 read-back, restores or removes the file if verification fails, and removes the obsolete temporary `.htaccess` writable-path allowance.
+* Bumps release metadata from 2.59.06.49 to 2.59.06.50. No files or directories were added or deleted.
+
+= 2.59.06.49 =
+* Restores the Redis and Varnish password fields as explicit administrator controls. Saving a non-empty Redis password writes `WP_REDIS_PASSWORD`; saving a non-empty Varnish password writes `ULTRACACHE_VARNISH_PASSWORD`. Empty fields preserve existing managed values, and dedicated remove actions delete only UltraCache-managed values.
+* Adds a uniquely delimited UltraCache managed-constants block to the active `wp-config.php`. Existing `WP_CACHE`, `WP_REDIS_PASSWORD`, or `ULTRACACHE_VARNISH_PASSWORD` definitions outside that block are never moved, replaced, or removed; externally managed password constants are reported as configured and remain read-only in the dashboard.
+* Replaces the previous custom wp-config.php backup, temporary-file, native copy, native file-write, and native rename workflow. The new writer uses `WP_Filesystem::get_contents()` and `WP_Filesystem::put_contents()`, validates the generated PHP, verifies the written content by SHA-256 read-back, and retains the original content only in memory for immediate verified rollback.
+* Adds combined settings/wp-config transaction handling. If page-cache, browser-cache, or object-cache synchronization fails after a constants update, UltraCache restores the previous settings and original wp-config.php content; an unverified rollback is surfaced as a dedicated error instead of being hidden by the original save failure.
+* Generates constant values with safe PHP literals and validates managed-block parsing for quotes, backslashes, line breaks, duplicate definitions, external definitions, and the active `WP_CACHE` state.
+* Password values remain excluded from WordPress options, dashboard responses, REST responses, WP-CLI output, diagnostics, logs, embedded runtime configuration, and generated cache drop-ins. Responses expose only configured/managed/external status flags.
+* Updates REST permissions so password writes require both `manage_options` and `activate_plugins` plus the existing REST nonce. The dashboard never displays the stored value; a blank field means keep, while removal requires a separate explicit action.
+* Removes the obsolete wp-config backup-registry cleanup entry rather than adding previous-version cleanup. No migration, legacy lookup, backward-compatibility layer, old-file cleanup, or old-option cleanup was added.
+* Bumps release metadata from 2.59.06.48 to 2.59.06.49. No files or directories were added or deleted.
+
+= 2.59.06.48 =
+* Removes the generated executable runtime-secret PHP sidecar and all related path discovery, rendering, synchronization, protection, diagnostics, object-cache loading, and uninstall code. No replacement secret file is created.
+* Redis authentication now uses only the standard `WP_REDIS_PASSWORD` constant from the active `wp-config.php`. Scalar passwords and Redis ACL arrays containing username/password are supported; `WP_REDIS_USERNAME` remains an optional scalar username source.
+* Varnish authentication now uses only the uniquely prefixed `ULTRACACHE_VARNISH_PASSWORD` constant from the active `wp-config.php`.
+* Derives the early-runtime revalidation/control secret deterministically from the existing WordPress authentication keys and salts, so no additional secret needs to be persisted in the database or filesystem.
+* Updates `advanced-cache.php` and `object-cache.php` generation so early Redis authentication and runtime-control validation read constants/salts directly, without requiring a generated secret include.
+* Removes Redis and Varnish password inputs from REST update/test schemas and WP-CLI mutation paths. Dashboard fields are read-only status indicators, and client/API/CLI responses expose only configured yes/no flags.
+* Forces any transient dashboard password keys to remain blank before option persistence. Runtime consumers hydrate credentials from constants only; diagnostics and logs expose no secret values.
+* Updates readme documentation with the required `WP_REDIS_PASSWORD` and `ULTRACACHE_VARNISH_PASSWORD` definitions.
+* Bumps release metadata from 2.59.06.47 to 2.59.06.48. No files or directories were added or deleted. No migration, legacy cleanup, backward-compatibility layer, or old-secret-file removal was added.
+
+= 2.59.06.47 =
+* Removes the generated executable `runtime-config.php` sidecar and its JSON predecessor. UltraCache no longer writes, loads, protects, reconciles, or cleans a standalone runtime configuration file.
+* Embeds the normalized secret-free early page-cache configuration directly into the standard WordPress `advanced-cache.php` drop-in as a JSON-decoded array generated at drop-in build time.
+* Adds an SHA-256 embedded-configuration marker to `advanced-cache.php`; drop-in status and diagnostics now verify that the embedded configuration matches the current dashboard settings.
+* Removes the dedicated runtime-config bootstrap hook, file synchronization cycle, protection-file generation, warm-up sync call, path helper, diagnostics path card, and uninstall cleanup associated with the deleted sidecar architecture.
+* Preserves the current runtime secret file architecture unchanged for the following dedicated secret-constants stage. Redis/Varnish password storage and wp-config.php writing are outside this patch.
+* Updates dashboard diagnostics to report `embedded_in_advanced_cache` configuration instead of a runtime-config.php file.
+* Bumps release metadata from 2.59.06.46.02 to 2.59.06.47. No files or directories were added or deleted. No migration, legacy lookup, or backward-compatibility fallback was added.
+
+= 2.59.06.46.02 =
+* Corrective validation patch for the final path-refactor test. `ultracache_wordpress_admin_include_path()` now rejects any value containing `/` or `\` before basename normalization and allowlist matching, so values such as `../file.php` cannot be reduced to an approved filename.
+* includes/core/functions.php: extends `ultracache_loaded_wp_config_path()` for WP-CLI. Normal web requests continue to use PHP's loaded-file list; WP-CLI requests use `WP_CLI\Utils\locate_wp_config()` because WP-CLI evaluates wp-config.php instead of including it. UltraCache adds no ABSPATH/root/parent search fallback.
+* The existing wp-config read/write, backup, temporary-file, atomic-replace, capability, and guard behavior remains unchanged. The exact path returned by either authoritative runtime source continues to be the only primary config accepted by UltraCache's companion-path guard.
+* Bumps release metadata from 2.59.06.46.01 to 2.59.06.46.02. No files or directories were added or deleted.
+
+= 2.59.06.46.01 =
+* Corrective public-path compliance patch after the 2.59.06.46 scan. Functional plugin, theme, uploads, wp-includes, and wp-admin URL matching no longer assumes default directory names such as `/plugins/`, `/themes/`, `/uploads/`, `/wp-includes/`, or `/wp-admin/`.
+* includes/core/functions.php: adds `ultracache_wordpress_includes_public_path()` and `ultracache_wordpress_admin_public_path()`, resolving root-relative WordPress core/admin public paths through `includes_url()` and `admin_url()` while preserving file-versus-directory references.
+* JavaScript optimization, LCP protection, runtime scanning, cache bypass, diagnostics, and default dependency exclusions now consume dynamic WordPress public-path resolvers. Plugin-specific CDN heuristics retain only owner/slug fragments such as `/woocommerce/assets/`; they no longer assume the configured plugins root name.
+* includes/admin/class-admin-trait.php and includes/admin-dashboard.js: expose resolved public paths through the existing `wp_add_inline_script()` configuration and use them for WooCommerce matching and path examples. Dead profile copies of preserved path settings were removed.
+* Product-filter, Slider Revolution, Elementor, Divi, WooCommerce, WordPress core JS, generated-assets, uploads, plugin, and theme references now derive from WordPress APIs. No remote request, asset load, storage location, cache key, setting key, migration, or compatibility fallback was added.
+* Bumps release metadata from 2.59.06.46 to 2.59.06.46.01. No files or directories were added or deleted.
+
+= 2.59.06.46 =
+* Final path-compliance scan: verifies that active PHP code contains no `WP_CONTENT_DIR` or `WP_PLUGIN_DIR` references, no hardcoded plugin/uploads filesystem roots, and no `ABSPATH`-based wp-config.php assumptions. Direct-access guards remain unchanged; the unavoidable WordPress core-root `ABSPATH` and `WPINC` uses remain isolated in their documented canonical resolvers.
+* includes/core/functions.php: adds `ultracache_mu_plugins_root_dir()` and `ultracache_mu_plugins_root_url()` as the only access points for WordPress's configurable must-use plugin path/URL constants, because WordPress exposes no public helpers for those roots. Font scanning, path-to-URL conversion, profiler ownership, and readable-root guards now consume the centralized resolvers instead of reading `WPMU_PLUGIN_DIR` / `WPMU_PLUGIN_URL` directly.
+* readme.txt and README.md: replaces default-layout examples such as `wp-content/uploads/...` and `/wp-content/plugins/` with wording based on the active WordPress uploads/plugins directories, so the documentation remains correct for custom content, uploads, and plugin locations.
+* ultracache.php: replaces the object-cache failure message's literal `wp-content/object-cache.php` reference with the WordPress content-directory location, preserving the same error condition and action.
+* This patch does not change any storage location, generated URL, cache key, drop-in location, wp-config.php behavior, runtime-secret behavior, setting, or uninstall policy. No migration, legacy lookup, compatibility fallback, file move, or directory move was added.
+* Bumps the plugin version and release metadata from 2.59.06.45 to 2.59.06.46. No files or directories were added or deleted.
+
+= 2.59.06.45 =
+* includes/core/functions.php: adds `ultracache_loaded_wp_config_path()` to resolve the exact `wp-config.php` file already loaded by the current WordPress request through PHP's authoritative `get_included_files()` list. The plugin no longer assumes that wp-config.php is under the WordPress core root or one directory above it. No root/parent fallback search is retained.
+* includes/core/functions.php: adds `ultracache_is_loaded_wp_config_companion_path()` and updates readable, writable, and destructive path guards so wp-config access is limited to the actually loaded config file and UltraCache's existing temporary/backup filename patterns in that exact directory. The write, backup, temporary-file, and atomic-replace behavior itself is intentionally unchanged for the separate reviewer finding.
+* ultracache.php: changes `get_wp_config_path()` to consume the loaded-config resolver while preserving the existing readability check, error handling, WP_CACHE parser, and enable/disable workflow.
+* Removes the final wp-config root/parent path assumptions from the active runtime. Existing WordPress core-root helpers remain only for genuine core paths and includes.
+* This patch changes wp-config.php path discovery only. It does not alter wp-config.php contents, backup retention, temporary files, atomic writes, runtime secrets, cache storage, drop-ins, settings, or uninstall policy. No migration, legacy lookup, compatibility fallback, file move, or directory move was added.
+* Bumps the plugin version and release metadata from 2.59.06.44 to 2.59.06.45. No files or directories were added or deleted.
+
+= 2.59.06.44 =
+* includes/core/functions.php: adds `ultracache_wordpress_admin_include_path()` and `ultracache_require_wordpress_admin_include()` as the single approved resolver/loader for the WordPress core admin files used by UltraCache (`file.php`, `image.php`, `plugin.php`, and `upgrade.php`). The unavoidable WordPress core-root `ABSPATH` dependency is isolated in `ultracache_wordpress_core_root_dir()`; callers no longer concatenate `ABSPATH . 'wp-admin/includes/...'` themselves.
+* UltraCache table installers, image-editor diagnostics, plugin inventory/deactivation, home-path discovery, and WP_Filesystem initialization now load their required WordPress core APIs through the centralized helper. Existing functions, timing, database schemas, and failure returns remain unchanged.
+* includes/core/functions.php and ultracache.php: replaces remaining non-guard WordPress-root uses for cron-command generation, runtime path identity, and existing wp-config.php candidate construction with `ultracache_wordpress_core_root_dir()`. This changes path discovery only; wp-config.php read/write behavior is intentionally unchanged for its later dedicated reviewer-compliance design.
+* uninstall.php: adds uninstall-local WordPress core/admin include resolvers and removes repeated direct `ABSPATH . 'wp-admin/includes/file.php'` construction. The single unavoidable uninstall `ABSPATH` read is isolated and documented.
+* Direct-access guards and generated runtime-file guards using `defined('ABSPATH')` remain unchanged because they are access-control checks, not file/directory location logic. `WPINC` remains isolated in the existing canonical wp-includes resolver.
+* This patch does not change storage locations, drop-ins, runtime secrets, wp-config.php behavior, cache behavior, settings, or uninstall policy. No migration, legacy lookup, compatibility fallback, file move, or directory move was added.
+* Bumps the plugin version and release metadata from 2.59.06.43 to 2.59.06.44. No files or directories were added or deleted.
+
+= 2.59.06.43 =
+* includes/core/functions.php: changes `ultracache_runtime_config_storage_dir()` from direct `WP_CONTENT_DIR` concatenation to the existing `ultracache_wordpress_content_dir()` resolver backed by `WP_Filesystem_Base::wp_content_dir()`. `runtime-config.php` and `runtime-config.json` remain at the same WordPress content-directory `cache/ultracache/` location; this patch changes path discovery only.
+* includes/core/functions.php: removes the remaining direct `WP_CONTENT_DIR` candidate from runtime-secret path discovery and uses the centralized WordPress content-directory resolver instead. Runtime-secret location, file format, protection, and read/write behavior remain unchanged for their later dedicated reviewer-remediation stage.
+* readme.txt and README.md: describe required cache drop-ins as residing in the WordPress content directory without presenting the internal `WP_CONTENT_DIR` constant as the integration path.
+* Removes all active PHP references to `WP_CONTENT_DIR` while retaining required WordPress-core `ABSPATH`/`WPINC` use, wp-config.php discovery, and the current runtime configuration architecture for their separate roadmap stages.
+* This patch does not move files, create migration logic, add fallback paths, alter settings, modify wp-config.php, or change cache/runtime behavior.
+* Bumps the plugin version and release metadata from 2.59.06.42 to 2.59.06.43. No files or directories were added or deleted.
+
+= 2.59.06.42 =
+* uninstall.php: replaces direct `WP_CONTENT_DIR` use for `advanced-cache.php` and `object-cache.php` with `ultracache_uninstall_wordpress_content_dir()`, which resolves the active WordPress content directory through `WP_Filesystem_Base::wp_content_dir()` before constructing the required drop-in paths.
+* uninstall.php: centralizes the current runtime-config cleanup path through `ultracache_uninstall_runtime_config_storage_dir()` instead of directly concatenating `WP_CONTENT_DIR . '/cache/ultracache/'`. The runtime-config files remain in their existing location until the later dedicated runtime-configuration storage stage.
+* uninstall.php: routes generated CSS/font/deferred-JS cleanup through the existing WordPress uploads resolver, so uninstall uses the same `uploads/ultracache/...` roots as runtime writers and does not carry legacy cache-directory lookup or migration logic.
+* uninstall.php: removes redundant `ABSPATH` and `WP_CONTENT_DIR` candidates from runtime-secret path identity and uses the WordPress home/content resolvers instead. WordPress core include paths that officially require `ABSPATH` remain unchanged.
+* This patch changes uninstall path resolution only. Runtime storage, wp-config.php modification behavior, runtime-secret architecture, cache operation, generated-asset generation, and plugin settings are unchanged. No migration, legacy path lookup, compatibility fallback, file move, or directory move was added.
+* Bumps the plugin version and release metadata from 2.59.06.41 to 2.59.06.42. No files or directories were added or deleted.
+
+= 2.59.06.41 =
+* includes/core/functions.php: replaces UltraCache's direct `WP_CONTENT_DIR` cache-drop-in resolver with `ultracache_wordpress_content_dir()`, which obtains the active WordPress content-directory path from `WP_Filesystem_Base::wp_content_dir()`. `advanced-cache.php` and `object-cache.php` remain in the WordPress-required content-directory root.
+* includes/core/functions.php: adds dedicated WordPress Filesystem helpers for cache-drop-in existence, reads, atomic replacement, deletion, backup copying, size, and modification time. Drop-in operations no longer use UltraCache's generic filesystem wrappers or native PHP fallback operations.
+* includes/engine/class-engine-dropin-lifecycle-trait.php: routes advanced-cache.php status, comparison, installation, replacement, and removal through the dedicated WP_Filesystem drop-in API. The generated drop-in contents and runtime behavior are unchanged.
+* includes/class-object-cache-manager.php: routes object-cache.php status, ownership verification, installation, replacement, and removal through the same dedicated WP_Filesystem drop-in API. Object-cache backend selection and runtime configuration are unchanged.
+* includes/settings/class-settings-trait.php: resolves drop-in conflicts through the canonical Filesystem API path, reads metadata through WP_Filesystem, and performs optional backup/copy/delete operations through the same filesystem transport. Removes the direct `WP_CONTENT_DIR` availability checks from active drop-in management.
+* includes/diagnostics/class-diagnostics-trait.php and includes/cli/class-wp-cli-settings-stats-trait.php: use the canonical drop-in existence helper instead of native filesystem checks.
+* This patch changes only cache-drop-in path resolution and lifecycle I/O. Page-cache/object-cache data storage, generated assets, runtime-config.php, runtime secrets, wp-config.php handling, and uninstall cleanup remain assigned to their separate roadmap stages. No migration, legacy path lookup, or compatibility fallback was added.
+* Bumps the plugin version and release metadata from 2.59.06.40 to 2.59.06.41. No files or directories were added or deleted.
+
+= 2.59.06.40 =
+* includes/core/functions.php: changes the canonical page-cache root from `wp-content/cache/ultracache/` to the WordPress-resolved `uploads/ultracache/cache/` path and changes disk object-cache storage from `wp-content/cache/ultracache-objects/` to `uploads/ultracache/object-cache/`.
+* templates/advanced-cache.php.tpl and includes/engine/class-engine-dropin-lifecycle-trait.php: replace hardcoded `WP_CONTENT_DIR` cache paths with build-time injected, WordPress-resolved cache and runtime-config paths. The advanced-cache drop-in location itself remains unchanged under the WordPress content directory.
+* Page-cache HTML, compressed variants, locks, temporary media files, drop-in backups, diagnostics profiles, and the legacy file analytics buffer now resolve below `uploads/ultracache/cache/`. Existing files are not moved or read from legacy paths.
+* ultracache.php: keeps `runtime-config.php` and its protection files at their current dedicated path until the later runtime-configuration storage stage, so executable runtime configuration is not moved into uploads.
+* uninstall.php: updates clean-install cleanup roots to the new uploads page-cache and disk-object-cache directories, with no migration or legacy cache cleanup logic.
+* readme.txt and README.md: document the new WordPress uploads-based cache and object-cache layout.
+* Bumps the plugin version and release metadata from 2.59.06.39 to 2.59.06.40. No files or directories were added or deleted.
+
+= 2.59.06.39 =
+* includes/diagnostics/class-diagnostics-trait.php: replaces stale font-pipeline, CSS-bundle storage, and CSS-bundle summary readers that still looked under the internal page-cache directory with `ultracache_generated_asset_dir()` calls. Diagnostics now inspect the same WordPress uploads locations used by the writers for css-bundles, font-css, optimized-css, google-fonts, and the CSS bundle manifest.
+* includes/cli/class-wp-cli-settings-stats-trait.php: changes the WP-CLI CSS bundle self-test from `wp-content/cache/ultracache/css-bundles/manifest.json` to the canonical `uploads/ultracache/css-bundles/manifest.json` path resolved through `ultracache_generated_asset_dir()`.
+* ultracache.php, uninstall.php: adds the `deferred-inline-js` bucket to Delete All and uninstall generated-runtime cleanup so every ephemeral browser-loaded generated asset directory is covered. Persistent optimized AVIF/WebP files under `uploads/ultracache/images` remain intentionally excluded.
+* Confirms that all active generated-asset writers already use the centralized WordPress uploads helpers introduced before this patch: CSS bundles, optimized CSS, font CSS, localized Google Fonts, deferred inline JavaScript, and optimized images remain under `uploads/ultracache/...`. This patch removes the remaining stale cache-root readers; it does not move files and adds no legacy lookup, migration, or fallback path.
+* Page-cache, disk-object-cache, logs/analytics, drop-ins, wp-config.php, and runtime-secret storage remain unchanged for their dedicated roadmap stages.
+* Bumps the plugin version and release metadata from 2.59.06.38 to 2.59.06.39. No files or directories were added or deleted.
+
+= 2.59.06.38 =
+* includes/core/functions.php: adds `ultracache_plugin_dir()` and `ultracache_plugin_url()` as the single WordPress-native resolver pair for UltraCache-owned files and URLs. Both are derived from `ULTRACACHE_FILE` through `plugin_dir_path()` / `plugin_dir_url()` and sanitize all optional relative paths.
+* ultracache.php, includes/class-media-converter.php, includes/class-object-cache-manager.php, includes/admin/class-admin-trait.php, includes/diagnostics/class-diagnostics-trait.php, includes/engine/class-engine-dropin-lifecycle-trait.php, includes/engine/class-engine-frontend-assets-trait.php: replaces runtime concatenation of `ULTRACACHE_PATH`, `ULTRACACHE_URL`, and direct `plugins_url()` calls with the centralized plugin path/URL helpers. The initial bootstrap include remains based on the main-file constants because the helper file must load first.
+* includes/core/functions.php: adds `ultracache_uploads_storage_dir()` and `ultracache_uploads_storage_url()` as the single filesystem/URL joiners for WordPress uploads. They consume the existing `ultracache_uploads_base_info()` result and preserve custom uploads directories, custom uploads URLs, multisite paths, and URL-encoded relative segments.
+* includes/core/functions.php: routes generated CSS/JS/font assets, optimized image paths, uploads public-path markers, and their URLs through the centralized uploads helpers without changing their current `uploads/ultracache/...` locations.
+* includes/engine/class-engine-media-image-trait.php, includes/media/class-media-html-rewrite-trait.php, includes/media/class-media-path-url-trait.php, includes/media/class-media-queue-trait.php: replaces seven direct `wp_get_upload_dir()` reads with `ultracache_uploads_base_info()` so media resolution, HTML rewriting, on-demand queue discovery, and attachment lookup share the same normalized uploads identity.
+* This patch only centralizes path resolution. Page-cache, disk-object-cache, logs, analytics, drop-in, wp-config.php, and runtime-secret storage locations remain unchanged for their dedicated roadmap stages. No migration, legacy lookup, compatibility fallback, file move, or directory move is added.
+* Bumps the plugin version and release metadata from 2.59.06.37 to 2.59.06.38. No files or directories were added or deleted.
+
+= 2.59.06.37 =
+* includes/core/functions.php: adds centralized WordPress-aware resolvers for the standard plugins root, WordPress core root, and wp-includes directory. The plugins root is now derived from the main plugin file through plugin_dir_path(), while the unavoidable core-root ABSPATH/WPINC use is isolated and documented in one place.
+* includes/core/functions.php: replaces every active WP_PLUGIN_DIR use in installed-plugin resolution, font scanning, public URL/path mapping, readable-root allowlists, and callback profiling with the centralized plugins-root resolver. Callback profiling now classifies uploads through wp_upload_dir() data instead of a generic WP_CONTENT_DIR path.
+* includes/core/functions.php, includes/diagnostics/class-diagnostics-trait.php: changes diagnostic path classification/redaction from direct WP_CONTENT_DIR/ABSPATH comparisons to known plugin, theme, uploads, WordPress-core, and document-root resolvers. No absolute server paths are exposed.
+* includes/core/functions.php, includes/class-object-cache-manager.php, includes/engine/class-engine-analytics-trait.php: replaces filesystem-path-based Redis, APCu, and analytics namespace seeds with one installation-stable identity based on database identity, table prefix, and multisite network constants.
+* templates/object-cache.php.tpl, templates/advanced-cache.php.tpl, includes/engine/class-engine-dropin-lifecycle-trait.php: injects the same non-filesystem namespace seed into generated drop-ins so dashboard/runtime diagnostics and drop-in cache operations use identical Redis/APCu/analytics prefixes.
+* Namespace keys intentionally change in this clean-install pre-public build. No legacy-prefix lookup, cache-key migration, or backward-compatibility fallback is added.
+* Existing page-cache, disk-object-cache, generated-asset, drop-in, wp-config.php, and runtime-secret storage locations remain unchanged for their later dedicated roadmap stages.
+* Bumps the plugin version and release metadata from 2.59.06.36 to 2.59.06.37. No files or directories were added or deleted.
+
+= 2.59.06.36 =
+* includes/admin-dashboard.js, PERFORMANCE_PROFILES: removes the three dead Safe, Balanced, and Aggressive copies of `delayFunctionalThirdPartyJsPatterns`. Profile application already preserves this user-editable setting through `PERFORMANCE_PROFILE_PRESERVED_SETTING_KEYS`, so these copied values were never applied.
+* Keeps the canonical PHP default matching-fragment list unchanged for installation defaults, reset/default restoration, and the dashboard Populate action. The listed third-party domains are detection patterns for scripts already present on the site; UltraCache does not request or load files from those providers.
+* Bumps the plugin version and release metadata from 2.59.06.35 to 2.59.06.36. No files or directories were added or deleted, and runtime behavior is unchanged.
+
+= 2.59.06.35 =
+* includes/engine/class-engine-js-optimization-trait.php, build_deferred_external_inline_script_tag(): replaces the manually compiled `<script src="..." defer>` markup for generated deferred inline-JS assets with `wp_get_script_tag()`, while preserving the generated asset URL, defer state, original attributes, and UltraCache metadata.
+* includes/engine/class-engine-js-optimization-trait.php, restore_delayed_script_record_tag(): replaces manual opening/closing script reconstruction with `wp_get_script_tag()` for external scripts and `wp_get_inline_script_tag()` for inline scripts, while preserving the restored source, body, nonce, integrity, crossorigin, referrer policy, ID, and other valid original attributes.
+* includes/engine/class-engine-js-optimization-trait.php, build_delayed_script_tag(): replaces manually concatenated delayed external-script placeholder markup with `wp_get_script_tag()` and passes unescaped attribute values to WordPress so core performs final attribute serialization and escaping.
+* includes/engine/class-engine-js-optimization-trait.php, build_delayed_inline_script_tag(): replaces manually concatenated delayed inline-script placeholder markup with `wp_get_inline_script_tag()` and lets WordPress serialize both the placeholder attributes and inline body.
+* includes/engine/class-engine-js-optimization-trait.php, apply_delayed_script_replacements_with_processor(): removes the unreachable `'<script>'` default value from the required record opening tag, eliminating the reviewer-detected raw script literal without adding a fallback path.
+* includes/engine/class-engine-js-optimization-trait.php, collect_js_inline_dependency_defer_recommendations(): stops rebuilding a temporary `<script>` opening tag only to inspect its ID and reads the ID from the complete regex-matched tag instead.
+* Removes the related NonEnqueuedScript PHPCS suppressions because the affected final-HTML transformations now use the WordPress 5.7+ script-tag APIs. Existing plugin-owned admin and frontend files continue to load through `wp_register_script()`, `wp_enqueue_script()`, and `wp_add_inline_script()`.
+* Bumps the plugin version and release metadata from 2.59.06.34 to 2.59.06.35. No files or directories were added or deleted.
+
+= 2.59.06.34 =
+* Corrects the PayPal Terms and Privacy URLs in readme.txt and README.md to the working US Legal Hub URLs.
+* Bumps the plugin version and release metadata from 2.59.06.33 to 2.59.06.34.
+
 = 2.59.06.33 =
-* ultracache.php lines 6 and 21: bumps the plugin header and UCWP_VERSION constant from 2.59.06.32 to 2.59.06.33.
-* ultracache.php lines 1015-1023: replaces duplicated ABSPATH-based runtime-secret token/path construction with the shared ucwp_get_runtime_secret_site_token() and ucwp_get_runtime_secret_path() helpers.
-* ultracache.php lines 3915-3918: resolves the browser-cache .htaccess from get_home_path() through ucwp_get_wordpress_home_path(), so WordPress subdirectory installations update the public home root instead of ABSPATH.
+* ultracache.php lines 6 and 21: bumps the plugin header and ULTRACACHE_VERSION constant from 2.59.06.32 to 2.59.06.33.
+* ultracache.php lines 1015-1023: replaces duplicated ABSPATH-based runtime-secret token/path construction with the shared ultracache_get_runtime_secret_site_token() and ultracache_get_runtime_secret_path() helpers.
+* ultracache.php lines 3915-3918: resolves the browser-cache .htaccess from get_home_path() through ultracache_get_wordpress_home_path(), so WordPress subdirectory installations update the public home root instead of ABSPATH.
 * includes/core/functions.php lines 608-704: adds shared WordPress-home, effective document-root, stable runtime-secret token, and canonical outside-document-root runtime-secret path helpers.
 * includes/core/functions.php lines 706-775: resolves installed plugin roots from get_plugins() real main-file entries, then uses plugin_dir_path() and plugin_dir_url() instead of concatenating a slug directly onto WP_PLUGIN_DIR/plugins_url().
-* includes/core/functions.php lines 2596-2599 and 2906-2909: replaces dirname(dirname(__DIR__)) own-plugin root discovery with the existing UCWP_PATH constant.
+* includes/core/functions.php lines 2596-2599 and 2906-2909: replaces dirname(dirname(__DIR__)) own-plugin root discovery with the existing ULTRACACHE_PATH constant.
 * includes/core/functions.php lines 2993-2997: validates readable root server configuration files against the WordPress home path instead of ABSPATH.
 * includes/core/functions.php lines 3013-3018: makes the runtime-secret filesystem guard consume the shared canonical runtime-secret path helper.
 * includes/core/functions.php lines 3175-3179: validates browser-cache .htaccess writes against the WordPress home path instead of ABSPATH.
@@ -97,7 +324,7 @@
 - Defers the automatic Local Google Fonts rebuild triggered by the toggle so settings save can finish first and the rebuild starts as a background dashboard queue job without blocking the UI flow.
 
 = 2.59.06.11 =
-- Cleans UltraCache-owned runtime options and transient prefixes during uninstall/Delete all data, including ucwp_* and ultracache_* transient rows.
+- Cleans UltraCache-owned runtime options and transient prefixes during uninstall/Delete all data, including ultracache_* and ultracache_* transient rows.
 - Removes generated runtime CSS/font directories under uploads/ultracache during full cleanup: css-bundles, font-css, google-fonts, and optimized-css.
 - Keeps persistent optimized image derivatives under uploads/ultracache/images by design.
 - Keeps the Media Optimization Image Output Format dropdown from 2.59.06.09 and the exact-file warm verification from 2.59.06.10.
@@ -433,7 +660,7 @@
 - Kept JS inventory scan requests on the same trusted same-site URL policy, SSL fallback reporting, and debug logging used by other internal scans.
 
 2.58.08 - Admin runtime config inline script
-- Replaced the admin dashboard ucwpData runtime config use of wp_localize_script with wp_add_inline_script and wp_json_encode before the module script.
+- Replaced the admin dashboard ultracacheData runtime config use of wp_localize_script with wp_add_inline_script and wp_json_encode before the module script.
 - Kept wp_set_script_translations dedicated to dashboard translation loading.
 
 2.58.07 - REST output guard for dashboard batch jobs

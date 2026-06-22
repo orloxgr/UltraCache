@@ -4,31 +4,45 @@
 	const ReactApi = elementApi || window.React;
 	const ReactDOMApi = elementApi || window.ReactDOM;
 	const { createElement: h, useCallback, useEffect, useMemo, useRef, useState } = ReactApi;
-	const ucwpI18n = (window.wp && window.wp.i18n) ? window.wp.i18n : {};
-	const __ = typeof ucwpI18n.__ === 'function' ? ucwpI18n.__ : function (text) { return text; };
-	const sprintf = typeof ucwpI18n.sprintf === 'function' ? ucwpI18n.sprintf : function (text) { return text; };
+	const ultracacheI18n = (window.wp && window.wp.i18n) ? window.wp.i18n : {};
+	const __ = typeof ultracacheI18n.__ === 'function' ? ultracacheI18n.__ : function (text) { return text; };
+	const sprintf = typeof ultracacheI18n.sprintf === 'function' ? ultracacheI18n.sprintf : function (text) { return text; };
 
 	const rootEl =
 		document.getElementById('uc-dashboard') ||
-		document.getElementById('ucwp-admin-root') ||
-		document.getElementById('ucwp-root') ||
+		document.getElementById('ultracache-admin-root') ||
 		document.getElementById('ultracache-root');
 	if (!rootEl) {
 		return;
 	}
 
-	const ucwp = window.ucwpData || {};
-	const ucwpRestBase = String(ucwp.restBase || '');
-	const ucwpRestNonce = String(ucwp.restNonce || '');
-	const ucwpFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
-	const initialSettings = ucwp.settings || {};
-	const initialStats = ucwp.stats || {};
-	const avifSupport = ucwp.avifSupport || { supported: false };
-	const initialDiagnostics = ucwp.diagnostics || initialStats.diagnostics || {};
-	const initialDefaults = ucwp.defaults || {};
-	let crawlScopeSummary = ucwp.crawlScopeSummary || {};
-	const initialWarmupGeneration = Math.max(0, Number(ucwp.warmupGeneration || 0));
-	const frontendProbeUrl = ucwp.frontendProbeUrl || '/';
+	const ultracache = window.ultracacheData || {};
+	const ultracacheRestBase = String(ultracache.restBase || '');
+	const ultracacheRestNonce = String(ultracache.restNonce || '');
+	const ultracacheFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+	const initialSettings = ultracache.settings || {};
+	const initialStats = ultracache.stats || {};
+	const avifSupport = ultracache.avifSupport || { supported: false };
+	const initialDiagnostics = ultracache.diagnostics || initialStats.diagnostics || {};
+	const initialDefaults = ultracache.defaults || {};
+	let crawlScopeSummary = ultracache.crawlScopeSummary || {};
+	const initialWarmupGeneration = Math.max(0, Number(ultracache.warmupGeneration || 0));
+	const frontendProbeUrl = ultracache.frontendProbeUrl || '/';
+	const ultracachePublicPaths = (ultracache.publicPaths && typeof ultracache.publicPaths === 'object') ? ultracache.publicPaths : {};
+	const normalizePublicPath = (value) => String(value || '').replace(/\\/g, '/');
+	const joinPublicPath = (base, relative) => {
+		const root = normalizePublicPath(base).replace(/\/+$/, '');
+		const child = normalizePublicPath(relative).replace(/^\/+/, '');
+		return root && child ? `${root}/${child}` : (root || child);
+	};
+	const pluginsPublicPath = normalizePublicPath(ultracachePublicPaths.plugins || '');
+	const themesPublicPaths = Array.isArray(ultracachePublicPaths.themes) ? ultracachePublicPaths.themes.map(normalizePublicPath).filter(Boolean) : [];
+	const uploadsPublicPath = normalizePublicPath(ultracachePublicPaths.uploads || '');
+	const generatedAssetsPublicPath = normalizePublicPath(ultracachePublicPaths.generatedAssets || '');
+	const woocommercePublicPath = normalizePublicPath(ultracachePublicPaths.woocommerce || '').toLowerCase();
+	const jqueryPublicPath = normalizePublicPath(ultracachePublicPaths.jquery || '');
+	const wpUtilPublicPath = normalizePublicPath(ultracachePublicPaths.wpUtil || '');
+	const apiFetchPublicPath = normalizePublicPath(ultracachePublicPaths.apiFetch || '');
 
 	const CLEAR_NOTICE_DELAY = 4200;
 	const SYSTEM_NOTICE_DELAY = 7000;
@@ -36,7 +50,7 @@
 	const STATS_REFRESH_INTERVAL = 60000;
 	const ACTION_QUEUE_POLL_DELAY = 750;
 	const ACTION_QUEUE_MAX_POLLS = 480;
-	const JOB_STORAGE_KEY = 'ucwp-dashboard-job-state-v3';
+	const JOB_STORAGE_KEY = 'ultracache-dashboard-job-state-v3';
 	const DEFAULT_QUEUE_BATCH_SIZE = 100;
 	const MAX_ITEM_RETRIES = 2;
 	const SUPPORT_LINKS = {
@@ -205,7 +219,6 @@
 		'varnishCliServers',
 		'varnishCliTimeoutSeconds',
 		'varnishCliMethod',
-		'varnishCliKey',
 		'varnishCliKeyConfigured',
 		'cacheCleanupEnabled',
 		'apcuFlushOnScheduledCleanup',
@@ -296,7 +309,6 @@
 			// These are matching fragments for existing site scripts only; they do not load or contact third-party providers.
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
 			delayFunctionalThirdPartyJsEnabled: false,
-			delayFunctionalThirdPartyJsPatterns: "recaptcha\nhcaptcha\ngoogle.com/recaptcha\ngstatic.com/recaptcha\nmaps.googleapis.com\nmaps.gstatic.com\ncomplianz\ncmplz\ncookieyes\ncky-\nintercom\ncrisp.chat\ntawk.to\nzendesk\ncalendly\ntypeform\njotform",
 			asyncExternalScriptsEnabled: false,
 			homepageCssBundleEnabled: false,
 			homepageCssBundleInlineEnabled: false,
@@ -358,7 +370,6 @@
 			cacheCleanupIntervalHours: 24,
 			cacheFreshTtlMinutes: 60,
 			cacheMaxStaleMinutes: 1440,
-			cacheExceptionPaths: "/cart/\n/checkout/\n/my-account/\n/wp-admin/\n/wp-login.php\n/wc-api/\n/wp-json/",
 			cacheExceptionQueryArgs: "preview\ncustomize_changeset_uuid\ncustomize_autosaved\nelementor-preview\nvc_editable\net_fb\nadd-to-cart\nwc-ajax\nremove_item\nundo_item\napply_coupon\nremove_coupon\norder_again\n_wpnonce\n_ajax_nonce\nnonce\nsecurity\ntoken\nauth\nauth_token\naccess_token\nkey\norder_key\npassword\npass\npwd\nredirect_to\ncustomer-logout\nlogout\npay_for_order\ncancel_order\ndownload_file",
 			cacheQueryStringsEnabled: false,
 			cacheSafeTrackingCookiesEnabled: true,
@@ -395,7 +406,6 @@
 			// These are matching fragments for existing site scripts only; they do not load or contact third-party providers.
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
 			delayFunctionalThirdPartyJsEnabled: true,
-			delayFunctionalThirdPartyJsPatterns: "recaptcha\nhcaptcha\ngoogle.com/recaptcha\ngstatic.com/recaptcha\nmaps.googleapis.com\nmaps.gstatic.com\ncomplianz\ncmplz\ncookieyes\ncky-\nintercom\ncrisp.chat\ntawk.to\nzendesk\ncalendly\ntypeform\njotform",
 			asyncExternalScriptsEnabled: false,
 			homepageCssBundleEnabled: true,
 			homepageCssBundleInlineEnabled: false,
@@ -457,7 +467,6 @@
 			cacheCleanupIntervalHours: 24,
 			cacheFreshTtlMinutes: 60,
 			cacheMaxStaleMinutes: 1440,
-			cacheExceptionPaths: "/cart/\n/checkout/\n/my-account/\n/wp-admin/\n/wp-login.php\n/wc-api/\n/wp-json/",
 			cacheExceptionQueryArgs: "preview\ncustomize_changeset_uuid\ncustomize_autosaved\nelementor-preview\nvc_editable\net_fb\nadd-to-cart\nwc-ajax\nremove_item\nundo_item\napply_coupon\nremove_coupon\norder_again\n_wpnonce\n_ajax_nonce\nnonce\nsecurity\ntoken\nauth\nauth_token\naccess_token\nkey\norder_key\npassword\npass\npwd\nredirect_to\ncustomer-logout\nlogout\npay_for_order\ncancel_order\ndownload_file",
 			cacheQueryStringsEnabled: false,
 			cacheSafeTrackingCookiesEnabled: true,
@@ -487,14 +496,12 @@
 			delayedLocalJsAutoStart: 'custom',
 			delayedLocalJsAutoStartSeconds: 0.05, delayedJsAutostartAfterLoadEnabled: false, delayedJsAutostartMousemoveEnabled: false, delayedJsAutostartScrollEnabled: false, delayedJsAutostartClickEnabled: false, delayedJsAutostartTouchPointerEnabled: false, delayedJsAutostartKeyboardEnabled: false,
 			deferJsForceList: "",
-			deferJsExcludeList: "/wp-includes/js/jquery/jquery.min.js",
 			delaySafeThirdPartyJsEnabled: true,
 			delayAllThirdPartyJsEnabled: true,
 			lazyMailerliteNonceEnabled: false,
 			// These are matching fragments for existing site scripts only; they do not load or contact third-party providers.
 			delaySafeThirdPartyJsPatterns: "googletagmanager.com\ngoogle-analytics.com\ngtag/js\ngtm.js\ngooglesitekit-events-provider\ngoogle-site-kit/dist/assets/js\nconnect.facebook.net\nfbevents.js\nfbq\nanalytics.tiktok.com\nsnap.licdn.com\ninsight.min.js\nbat.bing.com\nclarity.ms\nstatic.hotjar.com\nscript.hotjar.com\ns.pinimg.com\npintrk\ndoubleclick.net\ngoogleadservices.com\ntaboola\noutbrain\nyahoo\nyimg.com",
 			delayFunctionalThirdPartyJsEnabled: true,
-			delayFunctionalThirdPartyJsPatterns: "recaptcha\nhcaptcha\ngoogle.com/recaptcha\ngstatic.com/recaptcha\nmaps.googleapis.com\nmaps.gstatic.com\ncomplianz\ncmplz\ncookieyes\ncky-\nintercom\ncrisp.chat\ntawk.to\nzendesk\ncalendly\ntypeform\njotform",
 			asyncExternalScriptsEnabled: false,
 			homepageCssBundleEnabled: true,
 			homepageCssBundleInlineEnabled: false,
@@ -556,7 +563,6 @@
 			cacheCleanupIntervalHours: 24,
 			cacheFreshTtlMinutes: 60,
 			cacheMaxStaleMinutes: 1440,
-			cacheExceptionPaths: "/cart/\n/checkout/\n/my-account/\n/wp-admin/\n/wp-login.php\n/wc-api/\n/wp-json/",
 			cacheExceptionQueryArgs: "preview\ncustomize_changeset_uuid\ncustomize_autosaved\nelementor-preview\nvc_editable\net_fb\nadd-to-cart\nwc-ajax\nremove_item\nundo_item\napply_coupon\nremove_coupon\norder_again\n_wpnonce\n_ajax_nonce\nnonce\nsecurity\ntoken\nauth\nauth_token\naccess_token\nkey\norder_key\npassword\npass\npwd\nredirect_to\ncustomer-logout\nlogout\npay_for_order\ncancel_order\ndownload_file",
 			cacheQueryStringsEnabled: true,
 			cacheSafeTrackingCookiesEnabled: true,
@@ -725,7 +731,7 @@
 
 	async function probeFrontendCompressionViaBrowser() {
 		const probeUrl = new URL(frontendProbeUrl || '/', window.location.origin);
-		probeUrl.searchParams.set('ucwp_probe_browser', String(Date.now()));
+		probeUrl.searchParams.set('ultracache_probe_browser', String(Date.now()));
 
 		const result = {
 			ready: true,
@@ -793,7 +799,7 @@
 	}
 
 	function getSystemNoticeStorageKey(id) {
-		return 'ucwp-system-notice:' + String(id || 'notice');
+		return 'ultracache-system-notice:' + String(id || 'notice');
 	}
 
 	function shouldShowSystemNotice(id, cooldownMs) {
@@ -821,7 +827,7 @@
 
 
 	function getPersistentDismissalStorageKey(id) {
-		return 'ucwp-dismissed-notice:' + String(id || 'notice');
+		return 'ultracache-dismissed-notice:' + String(id || 'notice');
 	}
 
 	function isPersistentNoticeDismissed(id) {
@@ -1255,7 +1261,7 @@
 		return {
 			format: 'ultracache-settings-v1',
 			plugin: 'UltraCache',
-			version: ucwp.version || '',
+			version: ultracache.version || '',
 			exportedAt: new Date().toISOString(),
 			site: window.location.origin || '',
 			settings: pickTransferableSettings(source),
@@ -1327,8 +1333,7 @@
 			return true;
 		}
 		if (value === 'woocommerce') {
-			return candidate.indexOf('/plugins/woocommerce/') !== -1
-				|| candidate.indexOf('/plugins/woocommerce/') !== -1
+			return (woocommercePublicPath && candidate.indexOf(woocommercePublicPath) !== -1)
 				|| candidate.indexOf('/woocommerce/assets/') !== -1;
 		}
 		return false;
@@ -1556,17 +1561,17 @@
 		};
 
 		const route = routes[subAction];
-		if (!route || !ucwpRestBase) {
+		if (!route || !ultracacheRestBase) {
 			throw new Error('REST route not available for action: ' + subAction);
 		}
-		if (!ucwpFetch) {
+		if (!ultracacheFetch) {
 			throw new Error('Browser fetch API is not available for UltraCache REST action: ' + subAction);
 		}
 
 		let payload = params;
-		let requestUrl = ucwpRestBase + route.path;
+		let requestUrl = ultracacheRestBase + route.path;
 		if ((subAction === 'queue_status' || subAction === 'queue_run') && params && params.id) {
-			requestUrl = ucwpRestBase + route.path.replace('{id}', encodeURIComponent(String(params.id)));
+			requestUrl = ultracacheRestBase + route.path.replace('{id}', encodeURIComponent(String(params.id)));
 		}
 
 		if (route.method === 'GET' && params && typeof params === 'object') {
@@ -1609,12 +1614,12 @@
 		let data = null;
 		let responseText = '';
 		try {
-			response = await ucwpFetch(requestUrl, {
+			response = await ultracacheFetch(requestUrl, {
 				method: route.method,
 				credentials: 'same-origin',
 				cache: 'no-store',
 				headers: {
-					'X-WP-Nonce': ucwpRestNonce || '',
+					'X-WP-Nonce': ultracacheRestNonce || '',
 					'Cache-Control': 'no-cache, no-store, max-age=0',
 					'Pragma': 'no-cache',
 					...(route.method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
@@ -1675,7 +1680,7 @@
 			if (parsedResponse.noisy) {
 				if (data && typeof data === 'object') {
 					try {
-						Object.defineProperty(data, '__ucwpNoisyRestResponse', {
+						Object.defineProperty(data, '__ultracacheNoisyRestResponse', {
 							value: {
 								action: subAction,
 								method: route.method,
@@ -1686,7 +1691,7 @@
 							enumerable: false,
 						});
 					} catch (propertyError) {
-						data.__ucwpNoisyRestResponse = { action: subAction, method: route.method, path: route.path, status: response.status, preview: parsedResponse.noisePreview || '' };
+						data.__ultracacheNoisyRestResponse = { action: subAction, method: route.method, path: route.path, status: response.status, preview: parsedResponse.noisePreview || '' };
 					}
 				}
 
@@ -2170,7 +2175,7 @@
 	function StatCard({ label, value, hint, action }) {
 		return h('div', { className: 'uc-card relative' }, [
 			h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-2 pr-8', key: 'label' }, label),
-			h('div', { className: 'ucwp-stat-card-value text-3xl font-black tracking-tight text-white pr-8', key: 'value' }, value),
+			h('div', { className: 'ultracache-stat-card-value text-3xl font-black tracking-tight text-white pr-8', key: 'value' }, value),
 			h('div', { className: 'text-xs text-zinc-500 mt-2 pr-8', key: 'hint' }, hint || '\u00A0'),
 			action
 				? h('button', {
@@ -2341,7 +2346,7 @@
 	}
 
 	function DeferDelayExclusionsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onScan, onRuntimeScan, onLoadLatestProfileScan, onAppendDelayPattern }) {
-		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
+		const defaultScanUrl = (typeof ultracache !== "undefined" && ultracache && ultracache.frontendProbeUrl) ? String(ultracache.frontendProbeUrl || "") : "";
 		const [draft, setDraft] = useState(value || "");
 		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
 		const [scan, setScan] = useState(null);
@@ -3037,7 +3042,7 @@
 						style: { minHeight: '142px' },
 						value: consoleErrorInput,
 						disabled: !!disabled,
-						placeholder: 'Paste console errors, e.g. "complianz is not defined" or stack lines containing /plugins/example/js/file.min.js',
+						placeholder: `Paste console errors, e.g. "complianz is not defined" or stack lines containing ${joinPublicPath(pluginsPublicPath, 'example/js/file.min.js')}`,
 						onChange: (e) => setConsoleErrorInput(e.target.value),
 					}),
 					h('div', { className: 'flex flex-wrap', style: { marginTop: '10px', gap: '12px' } }, [
@@ -3115,7 +3120,7 @@
 
 
 	function CssBundleExclusionsDiagnosticsField({ value, onSave, disabled, placeholder, onPopulateDefaults, onRunDiagnostics, onDownloadJson, onClearResult, profile, onCopyCssExclusion }) {
-		const defaultScanUrl = (typeof ucwp !== "undefined" && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || "") : "";
+		const defaultScanUrl = (typeof ultracache !== "undefined" && ultracache && ultracache.frontendProbeUrl) ? String(ultracache.frontendProbeUrl || "") : "";
 		const [draft, setDraft] = useState(value || '');
 		const [scanUrl, setScanUrl] = useState(defaultScanUrl);
 		const [populateBusy, setPopulateBusy] = useState(false);
@@ -3768,7 +3773,7 @@
 			['Object-cache generated version', !!objectCacheDiag.dropInBuild, objectCacheDiag.dropInBuild ? ('Build ' + objectCacheDiag.dropInBuild) : 'Unavailable'],
 			['Object-cache storage format', !!objectCacheDiag.storageFormat, objectCacheDiag.storageFormat || 'Unavailable'],
 			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : ('Disabled' + (analyticsBackend.message ? ' · ' + analyticsBackend.message : ''))],
-			['Runtime config', !!runtimeConfigDiag.exists && !!runtimeConfigDiag.valid, runtimeConfigDiag.exists ? (runtimeConfigDiag.valid ? 'Present · Valid' : 'Present · Invalid') : 'Missing'],
+			['Embedded runtime config', !!runtimeConfigDiag.exists && !!runtimeConfigDiag.valid && !!runtimeConfigDiag.inSync, runtimeConfigDiag.exists ? (runtimeConfigDiag.inSync ? 'Embedded · In sync' : 'Embedded · Out of sync') : 'Advanced cache missing'],
 			['Analytics storage', !!analyticsDiag.exists && !!analyticsDiag.valid, analyticsDiag.exists ? ('DB table · ' + formatNumber(analyticsDiag.rows || 0) + ' rows') : 'Missing DB table'],
 			['Browser cache rules', !!browserCacheRulesDiag.exists && !!browserCacheRulesDiag.managed, browserCacheRulesDiag.exists ? (browserCacheRulesDiag.managed ? 'Present · Managed block found' : 'Present · No UltraCache block') : 'Missing'],
 			['Object cache directory', !!objectCacheDirDiag.exists, objectCacheDirDiag.exists ? (objectCacheDirDiag.writable ? 'Present · Writable' : 'Present · Not writable') : 'Missing'],
@@ -3835,7 +3840,7 @@
 				})) : null,
 			]),
 			runtimeConfigRows.length ? h('div', { className: 'uc-diagnostic-group', key: 'runtime-config-group' }, [
-				h('div', { className: 'uc-section-title' }, __("Runtime config in use", 'ultracache')),
+				h('div', { className: 'uc-section-title' }, __("Embedded runtime config in use", 'ultracache')),
 				renderRows(runtimeConfigRows),
 			]) : null,
 				]),
@@ -3941,7 +3946,7 @@
 			['Orphan-like CSS files', storageCssBundles.oldOrphanLikeFiles === 0, formatNumber(storageCssBundles.orphanLikeFiles || 0) + ' total · ' + formatNumber(storageCssBundles.oldOrphanLikeFiles || 0) + ' eligible · ' + formatNumber(storageCssBundles.recentOrphanLikeFiles || 0) + ' protected by grace · ' + formatNumber(storageCssBundles.protectedByCachedHtmlRefs || 0) + ' protected by cached HTML'],
 			['Cached HTML CSS refs', false, formatNumber(storageCssBundles.cachedHtmlRefFiles || 0) + ' refs · ' + formatNumber(storageCssBundles.cachedHtmlRefFilesWithRefs || 0) + '/' + formatNumber(storageCssBundles.cachedHtmlRefFilesScanned || 0) + ' HTML files' + (storageCssBundles.cachedHtmlRefScanTimedOut ? ' · time-capped scan' : (storageCssBundles.cachedHtmlRefScanTruncated ? ' · capped scan' : ''))],
 			['Cleanup grace / delete limit', false, getCssCleanupGraceLabel(storageCssBundles) + ' · ' + getCssCleanupDeleteLimitLabel(storageCssBundles)],
-			['Cleanup policy source', false, (storageCssBundles.cleanupPolicySource || 'dashboard/filter') + ' · ' + (storageCssBundles.cleanupGraceFilter || 'ucwp_css_bundle_cleanup_grace_seconds') + ' · ' + (storageCssBundles.cleanupDeleteLimitFilter || 'ucwp_css_bundle_cleanup_max_deletes_per_run')],
+			['Cleanup policy source', false, (storageCssBundles.cleanupPolicySource || 'dashboard/filter') + ' · ' + (storageCssBundles.cleanupGraceFilter || 'ultracache_css_bundle_cleanup_grace_seconds') + ' · ' + (storageCssBundles.cleanupDeleteLimitFilter || 'ultracache_css_bundle_cleanup_max_deletes_per_run')],
 			['Cleanup bounds', false, 'Grace ' + (storageCssBundles.cleanupGraceMinLabel || formatDurationSeconds(storageCssBundles.cleanupGraceMinSeconds || 3600)) + '–' + (storageCssBundles.cleanupGraceMaxLabel || formatDurationSeconds(storageCssBundles.cleanupGraceMaxSeconds || 604800)) + ' · delete limit ' + formatNumber(storageCssBundles.cleanupDeleteLimitMin || 5) + '–' + formatNumber(storageCssBundles.cleanupDeleteLimitMax || 500)],
 		];
 
@@ -4014,13 +4019,12 @@
 							lastCacheWrite.error ? h(DetailRow, { label: __("Scan error", 'ultracache'), value: lastCacheWrite.error }) : null,
 						]) : h('div', { className: 'text-xs text-zinc-500 pt-2' }, __("No page cache files have been detected yet.", 'ultracache')),
 					]),
-					(runtimeConfigDiag.path || analyticsDiag.path || advancedCacheDiag.path || objectCacheDiag.path || cacheDirDiag.path || objectCacheDirDiag.path)
+					(analyticsDiag.path || advancedCacheDiag.path || objectCacheDiag.path || cacheDirDiag.path || objectCacheDirDiag.path)
 						? h('div', { className: 'uc-diagnostic-group', key: 'path-grid' }, [
 							h('div', { className: 'uc-section-title' }, __("Path details", 'ultracache')),
 							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
 								renderPathDetails('advanced-cache.php', advancedCacheDiag),
 								renderPathDetails('object-cache.php', objectCacheDiag),
-								renderPathDetails('runtime-config.php', runtimeConfigDiag, runtimeConfigDiag.keys && runtimeConfigDiag.keys.length ? h(DetailRow, { label: __("Keys", 'ultracache'), value: runtimeConfigDiag.keys.join(', ') }) : null),
 								analyticsDiag.table ? renderPathDetails('Analytics DB table', Object.assign({}, analyticsDiag, { path: analyticsDiag.table, readable: analyticsDiag.exists, writable: analyticsDiag.exists }), analyticsDiag.keys && analyticsDiag.keys.length ? h(DetailRow, { label: __("Top keys", 'ultracache'), value: analyticsDiag.keys.join(', ') }) : null) : null,
 								renderPathDetails('Cache directory', cacheDirDiag),
 								renderPathDetails('Object cache directory', objectCacheDirDiag),
@@ -4470,7 +4474,7 @@
 			return null;
 		}
 
-		return h('div', { id: 'ucwp-cache-conflict-review', className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-3' }, [
+		return h('div', { id: 'ultracache-cache-conflict-review', className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-3' }, [
 			h('div', { className: 'font-bold text-amber-200 mb-2', key: 'title' }, __("Conflicting WordPress cache helpers detected", 'ultracache')),
 			h('div', { className: 'space-y-1 mb-2', key: 'dropins' }, dropins.map((item) => h('div', { key: 'dropin-' + item.file }, [
 				h('span', { className: 'font-mono text-amber-100' }, item.file || 'drop-in'),
@@ -4515,6 +4519,8 @@
 		const effectiveMethod = varnish.effectiveMethod || (isAdminMode ? 'admin BAN' : (form.varnishCliMethod || 'BAN'));
 		const endpointCount = typeof varnish.endpointCount !== 'undefined' ? varnish.endpointCount : (formServers.trim() ? formServers.trim().split(/\s+/).length : 0);
 		const secretConfigured = !!(varnish.secretConfigured || form.varnishCliKeyConfigured);
+		const secretManaged = !!form.varnishCliKeyManaged;
+		const secretExternal = !!form.varnishCliKeyExternal;
 		const modeLabel = isAdminMode ? 'Admin secret' : 'HTTP frontend';
 
 		return h(Card, {
@@ -4554,15 +4560,31 @@
 					placeholder: isAdminMode ? '127.0.0.1:6082' : '127.0.0.1:82',
 					key: 'servers',
 				}),
-				h(TextField, {
-					label: isAdminMode ? 'Admin secret' : 'HTTP token / control key',
-					description: isAdminMode ? (secretConfigured ? 'A saved Varnish admin secret exists. Leave blank to keep it, or enter a new one to replace it. The secret is never displayed.' : 'Shared secret used to authenticate against the Varnish admin interface. The secret is never displayed after saving.') : (form.varnishCliKeyConfigured ? 'A saved HTTP token exists. Leave blank to keep it, or enter a new one to replace it.' : 'Optional token sent as the X-UltraCache-Token header with Varnish HTTP requests.'),
-					value: form.varnishCliKey || '',
-					onChange: (value) => onFieldChange('varnishCliKey', value),
-					disabled: busy,
-					placeholder: isAdminMode ? 'varnish-secret' : 'your-secret-key',
-					key: 'key',
-				}),
+				h('div', { className: 'uc-field-wrap', key: 'key-wrap' }, [
+					h(TextField, {
+						label: isAdminMode ? 'Admin secret' : 'HTTP token / control key',
+						description: secretExternal
+							? 'Configured outside the UltraCache managed block in wp-config.php. It is read-only here.'
+							: (secretConfigured ? 'Managed by UltraCache in wp-config.php. Enter a new value to replace it; the current value is never displayed.' : 'Enter a value to save ULTRACACHE_VARNISH_PASSWORD in the UltraCache managed wp-config.php block.'),
+						value: form.varnishCliKey || '',
+						onChange: (value) => {
+							onFieldChange('varnishCliKey', value);
+							if (value) {
+								onFieldChange('clearVarnishCliKey', false);
+							}
+						},
+						disabled: busy || secretExternal,
+						placeholder: secretExternal ? 'Externally configured' : (secretConfigured ? 'Leave blank to keep current value' : 'Enter password or token'),
+						type: 'password',
+						key: 'key-input',
+					}),
+					secretManaged ? h(Button, {
+						onClick: () => onFieldChange('clearVarnishCliKey', !form.clearVarnishCliKey),
+						disabled: busy || secretExternal,
+						variant: form.clearVarnishCliKey ? 'primary' : 'light',
+						key: 'clear-key',
+					}, form.clearVarnishCliKey ? 'Password will be removed on save' : 'Remove managed password') : null,
+				]),
 				h(SelectField, {
 					label: __("Command type", 'ultracache'),
 					description: isAdminMode ? 'Admin mode uses the Varnish admin interface. BAN is the effective action even if you change this selector.' : 'BAN is safer across most builds. PURGE sends PURGE only; choose BAN if your Varnish setup does not explicitly support PURGE.',
@@ -4886,6 +4908,8 @@
 	function RedisCard({ form, diagnostics, busy, objectCacheEnabled, onObjectCacheEnabledChange, onFieldChange, onSave, onTest, onFlush, onRemoveConflictingDropins, onRecheckConflicts }) {
 		const objectCache = diagnostics.objectCache || {};
 		const redis = objectCache.redis || {};
+		const secretManaged = !!form.redisPasswordManaged;
+		const secretExternal = !!form.redisPasswordExternal;
 		const legacyConflicts = diagnostics.legacyCacheConflicts || {};
 		const normalizeBackendChoice = (value) => {
 			value = String(value || '').toLowerCase();
@@ -5024,17 +5048,34 @@
 					autoComplete: 'off',
 					key: 'redis-username',
 				}),
-				h(TextRow, {
-					label: __("Redis password", 'ultracache'),
-					description: form.redisPasswordConfigured ? 'A saved Redis password already exists. Leave blank to keep it, or enter a new one to replace it.' : 'Leave empty when the server does not require auth.',
-					value: form.redisPassword || '',
-					onChange: (value) => onFieldChange('redisPassword', value),
-					disabled: busy,
-					placeholder: 'optional',
-					type: 'password',
-					autoComplete: 'new-password',
-					key: 'redis-password',
-				}),
+				h('div', { key: 'redis-password-wrap' }, [
+					h(TextRow, {
+						label: __("Redis password", 'ultracache'),
+						description: secretExternal
+							? 'Configured outside the UltraCache managed block in wp-config.php. It is read-only here.'
+							: (form.redisPasswordConfigured ? 'Managed by UltraCache in wp-config.php. Enter a new value to replace it; the current value is never displayed.' : 'Enter a value to save WP_REDIS_PASSWORD in the UltraCache managed wp-config.php block.'),
+						value: form.redisPassword || '',
+						onChange: (value) => {
+							onFieldChange('redisPassword', value);
+							if (value) {
+								onFieldChange('clearRedisPassword', false);
+							}
+						},
+						disabled: busy || secretExternal,
+						placeholder: secretExternal ? 'Externally configured' : (form.redisPasswordConfigured ? 'Leave blank to keep current value' : 'Enter Redis password'),
+						type: 'password',
+						autoComplete: 'new-password',
+						key: 'redis-password-input',
+					}),
+					secretManaged ? h('div', { className: 'pb-4 flex justify-end', key: 'redis-password-clear-wrap' }, [
+						h(Button, {
+							onClick: () => onFieldChange('clearRedisPassword', !form.clearRedisPassword),
+							disabled: busy || secretExternal,
+							variant: form.clearRedisPassword ? 'primary' : 'light',
+							key: 'redis-password-clear',
+						}, form.clearRedisPassword ? 'Password will be removed on save' : 'Remove managed password'),
+					]) : null,
+				]),
 				h(NumberRow, {
 					label: __("Redis database", 'ultracache'),
 					description: __("Usually 0. Typical range: 0-15.", 'ultracache'),
@@ -5304,7 +5345,6 @@
 		const engineOnly = Array.isArray(diag.engineOnlySafeguards) ? diag.engineOnlySafeguards : [];
 		const missing = Array.isArray(diag.hardSensitiveQueryArgsMissingFromVisibleList) ? diag.hardSensitiveQueryArgsMissingFromVisibleList : [];
 		const runtime = diag.runtimeConfigProtection || {};
-		const secretFiles = diag.secretFiles || {};
 		const ok = !!summary.debugContextRedactionEnabled && !!summary.secretsRedactedFromClientSettings;
 
 		function stat(label, value, tone) {
@@ -5319,7 +5359,7 @@
 				h('summary', { className: 'uc-accordion__summary' }, [
 					h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
 						h('div', { className: 'uc-accordion__title' }, __("Security / Cache Correctness", 'ultracache')),
-						h('div', { className: 'uc-accordion__description' }, __("Read-only audit of cache-poisoning safeguards, secret redaction, and runtime config protection.", 'ultracache')),
+						h('div', { className: 'uc-accordion__description' }, __("Read-only audit of cache-poisoning safeguards, secret redaction, and embedded runtime configuration.", 'ultracache')),
 					]),
 					h('span', { className: ok ? 'text-emerald-300 font-mono text-[11px]' : 'text-amber-300 font-mono text-[11px]', key: 'status' }, ok ? 'Guarded' : 'Review'),
 					h('span', { className: 'uc-accordion__chevron', 'aria-hidden': 'true', key: 'chevron' }, '▸'),
@@ -5342,14 +5382,14 @@
 					]),
 					h('div', { className: 'mt-4 grid grid-cols-1 md:grid-cols-2 gap-3', key: 'files' }, [
 						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'runtime' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Runtime config protection", 'ultracache')),
-							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'runtime-config.php: ' + (runtime.runtimeConfigExists ? 'exists' : 'missing')),
-							h('div', { className: 'text-xs text-zinc-300 mt-1' }, '.htaccess: ' + (runtime.htaccessProtectionFile ? 'present' : 'missing') + ' · web.config: ' + (runtime.webConfigProtectionFile ? 'present' : 'missing')),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Embedded runtime config", 'ultracache')),
+							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'advanced-cache.php: ' + (runtime.advancedCacheExists ? 'present' : 'missing')),
+							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Configuration: ' + (runtime.configInSync ? 'embedded and in sync' : 'review required')),
 						]),
 						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'secrets' }, [
-							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Secret sidecar files", 'ultracache')),
-							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Runtime secret: ' + (secretFiles.runtimeSecret && secretFiles.runtimeSecret.exists ? 'exists' : 'missing')),
-							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Redis secret: ' + (secretFiles.objectCacheRedisSecret && secretFiles.objectCacheRedisSecret.exists ? 'exists' : 'missing')),
+							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Secret configuration", 'ultracache')),
+							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Redis: ' + (summary.redisSecretConfigured ? 'WP_REDIS_PASSWORD configured' : 'not configured')),
+							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Varnish: ' + (summary.varnishSecretConfigured ? 'ULTRACACHE_VARNISH_PASSWORD configured' : 'not configured')),
 						]),
 					]),
 				]),
@@ -5387,10 +5427,13 @@
 			varnishCliEnabled: !!initialSettings.varnishCliEnabled,
 			varnishCliMode: initialSettings.varnishCliMode || 'http',
 			varnishCliServers: initialSettings.varnishCliServers || getDefaultVarnishServersForMode(initialSettings.varnishCliMode || 'http'),
-			varnishCliKey: initialSettings.varnishCliKey || '',
 			varnishCliTimeoutSeconds: initialSettings.varnishCliTimeoutSeconds || 2,
 			varnishCliMethod: initialSettings.varnishCliMethod || 'BAN',
+			varnishCliKey: '',
+			clearVarnishCliKey: false,
 			varnishCliKeyConfigured: !!initialSettings.varnishCliKeyConfigured,
+			varnishCliKeyManaged: !!initialSettings.varnishCliKeyManaged,
+			varnishCliKeyExternal: !!initialSettings.varnishCliKeyExternal,
 		});
 		const [redisForm, setRedisForm] = useState({
 			objectCacheBackend: initialSettings.objectCacheBackend || 'redis',
@@ -5398,20 +5441,23 @@
 			redisHost: initialSettings.redisHost || '127.0.0.1',
 			redisPort: initialSettings.redisPort || 6379,
 			redisUsername: initialSettings.redisUsername || '',
-			redisPassword: initialSettings.redisPassword || '',
 			redisDatabase: typeof initialSettings.redisDatabase === 'undefined' ? 0 : initialSettings.redisDatabase,
 			redisPrefix: initialSettings.redisPrefix || '',
 			redisUseTls: !!initialSettings.redisUseTls,
 			redisPersistent: !!initialSettings.redisPersistent,
 			redisConnectTimeoutMs: typeof initialSettings.redisConnectTimeoutMs === 'undefined' ? 200 : initialSettings.redisConnectTimeoutMs,
 			redisReadTimeoutMs: typeof initialSettings.redisReadTimeoutMs === 'undefined' ? 200 : initialSettings.redisReadTimeoutMs,
+			redisPassword: '',
+			clearRedisPassword: false,
 			redisPasswordConfigured: !!initialSettings.redisPasswordConfigured,
+			redisPasswordManaged: !!initialSettings.redisPasswordManaged,
+			redisPasswordExternal: !!initialSettings.redisPasswordExternal,
 		});
 		const [inspectUrl, setInspectUrl] = useState('');
 		const [inspectBusy, setInspectBusy] = useState(false);
 		const [inspectResult, setInspectResult] = useState(null);
 		const [performanceProfile, setPerformanceProfile] = useState(null);
-		const [cssDiagnosticsUrl, setCssDiagnosticsUrl] = useState((typeof ucwp !== 'undefined' && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || '') : '');
+		const [cssDiagnosticsUrl, setCssDiagnosticsUrl] = useState((typeof ultracache !== 'undefined' && ultracache && ultracache.frontendProbeUrl) ? String(ultracache.frontendProbeUrl || '') : '');
 		const [cssDiagnosticsBusy, setCssDiagnosticsBusy] = useState(false);
 		const [homepageHtmlBusy, setHomepageHtmlBusy] = useState(false);
 		const [homepageHtmlCssBusy, setHomepageHtmlCssBusy] = useState(false);
@@ -5667,19 +5713,23 @@
 				varnishCliEnabled: !!settings.varnishCliEnabled,
 				varnishCliMode: settings.varnishCliMode || 'http',
 				varnishCliServers: settings.varnishCliServers || getDefaultVarnishServersForMode(settings.varnishCliMode || 'http'),
-				varnishCliKey: settings.varnishCliKey || '',
 				varnishCliTimeoutSeconds: settings.varnishCliTimeoutSeconds || 2,
 				varnishCliMethod: settings.varnishCliMethod || 'BAN',
+				varnishCliKey: '',
+				clearVarnishCliKey: false,
 				varnishCliKeyConfigured: !!settings.varnishCliKeyConfigured,
+				varnishCliKeyManaged: !!settings.varnishCliKeyManaged,
+				varnishCliKeyExternal: !!settings.varnishCliKeyExternal,
 			});
 		}, [
 			settings.varnishCliEnabled,
 			settings.varnishCliMode,
 			settings.varnishCliServers,
-			settings.varnishCliKey,
 			settings.varnishCliTimeoutSeconds,
 			settings.varnishCliMethod,
 			settings.varnishCliKeyConfigured,
+			settings.varnishCliKeyManaged,
+			settings.varnishCliKeyExternal,
 		]);
 
 		useEffect(() => {
@@ -5690,14 +5740,17 @@
 					redisHost: settings.redisHost || '127.0.0.1',
 					redisPort: settings.redisPort || 6379,
 					redisUsername: settings.redisUsername || '',
-					redisPassword: settings.redisPassword || '',
 					redisDatabase: typeof settings.redisDatabase === 'undefined' ? 0 : settings.redisDatabase,
 					redisPrefix: settings.redisPrefix || '',
 					redisUseTls: !!settings.redisUseTls,
 					redisPersistent: !!settings.redisPersistent,
 					redisConnectTimeoutMs: typeof settings.redisConnectTimeoutMs === 'undefined' ? 200 : settings.redisConnectTimeoutMs,
 					redisReadTimeoutMs: typeof settings.redisReadTimeoutMs === 'undefined' ? 200 : settings.redisReadTimeoutMs,
+					redisPassword: '',
+					clearRedisPassword: false,
 					redisPasswordConfigured: !!settings.redisPasswordConfigured,
+					redisPasswordManaged: !!settings.redisPasswordManaged,
+					redisPasswordExternal: !!settings.redisPasswordExternal,
 				};
 				return next;
 			});
@@ -5707,7 +5760,6 @@
 			settings.redisHost,
 			settings.redisPort,
 			settings.redisUsername,
-			settings.redisPassword,
 			settings.redisDatabase,
 			settings.redisPrefix,
 			settings.redisUseTls,
@@ -5715,6 +5767,8 @@
 			settings.redisConnectTimeoutMs,
 			settings.redisReadTimeoutMs,
 			settings.redisPasswordConfigured,
+			settings.redisPasswordManaged,
+			settings.redisPasswordExternal,
 		]);
 
 
@@ -5814,11 +5868,14 @@
 					redisConnectTimeoutMs: form.redisConnectTimeoutMs,
 					redisReadTimeoutMs: form.redisReadTimeoutMs,
 				};
+				if (form.redisPassword) {
+					patch.redisPassword = form.redisPassword;
+				}
+				if (form.clearRedisPassword) {
+					patch.clearRedisPassword = true;
+				}
 				if (String(patch.objectCacheBackend || '').toLowerCase() === 'apcu') {
 					patch.flushAllIncludeApcu = true;
-				}
-				if (String(form.redisPassword || '').trim()) {
-					patch.redisPassword = String(form.redisPassword || '');
 				}
 				const response = await saveSettingsPatch(patch);
 				return response;
@@ -5830,12 +5887,7 @@
 				const selectedBackend = (redisForm && redisForm.objectCacheBackend) || (settingsRef.current || {}).objectCacheBackend || 'redis';
 				const payload = Object.assign({}, redisForm || {}, {
 					backend: selectedBackend,
-					redisPasswordConfigured: !!((settingsRef.current || {}).redisPasswordConfigured || (redisForm || {}).redisPasswordConfigured),
 				});
-				const passwordValue = String(payload.redisPassword || '').trim();
-				if (!passwordValue) {
-					delete payload.redisPassword;
-				}
 				const response = await apiRequest('object_cache_test', payload);
 				applyDashboardPayload(response || {});
 				if (selectedBackend === 'redis') {
@@ -5856,7 +5908,7 @@
 
 		function scrollToCacheConflictReview() {
 			try {
-				const element = document.getElementById('ucwp-cache-conflict-review');
+				const element = document.getElementById('ultracache-cache-conflict-review');
 				if (element && typeof element.scrollIntoView === 'function') {
 					element.scrollIntoView({ behavior: 'smooth', block: 'center' });
 				}
@@ -5913,7 +5965,6 @@
 		async function saveVarnishSettings() {
 			return enqueueUiOperation('varnish_settings_save', 'Save Varnish settings', async () => {
 				const form = Object.assign({}, varnishForm || {});
-				const submittedSecret = String(form.varnishCliKey || '').trim();
 				const patch = {
 					varnishCliEnabled: !!form.varnishCliEnabled,
 					varnishCliMode: form.varnishCliMode || 'http',
@@ -5921,13 +5972,13 @@
 					varnishCliTimeoutSeconds: form.varnishCliTimeoutSeconds,
 					varnishCliMethod: form.varnishCliMethod || 'BAN',
 				};
-				if (submittedSecret) {
-					patch.varnishCliKey = submittedSecret;
+				if (form.varnishCliKey) {
+					patch.varnishCliKey = form.varnishCliKey;
+				}
+				if (form.clearVarnishCliKey) {
+					patch.clearVarnishCliKey = true;
 				}
 				const response = await saveSettingsPatch(patch);
-				if (submittedSecret) {
-					setVarnishForm((current) => Object.assign({}, current || {}, { varnishCliKey: '', varnishCliKeyConfigured: true }));
-				}
 				return response;
 			}, { processingText: 'Processing Varnish settings save…', successText: 'Varnish settings saved.', failedText: 'Failed to save Varnish settings.' });
 		}
@@ -6099,12 +6150,6 @@
 				keys[key] = true;
 			});
 
-			if (keys.redisPassword) {
-				keys.redisPasswordConfigured = true;
-			}
-			if (keys.varnishCliKey) {
-				keys.varnishCliKeyConfigured = true;
-			}
 			if (keys.cacheFreshTtlMinutes || keys.cacheMaxStaleMinutes) {
 				keys.cacheFreshTtlMinutes = true;
 				keys.cacheMaxStaleMinutes = true;
@@ -6112,6 +6157,18 @@
 			if (keys.pageCssBundleOnEntryEnabled || keys.pageAsyncBundleOnEntryEnabled) {
 				keys.pageCssBundleOnEntryEnabled = true;
 				keys.pageAsyncBundleOnEntryEnabled = true;
+			}
+			if (keys.redisPassword || keys.clearRedisPassword) {
+				keys.redisPassword = true;
+				keys.redisPasswordConfigured = true;
+				keys.redisPasswordManaged = true;
+				keys.redisPasswordExternal = true;
+			}
+			if (keys.varnishCliKey || keys.clearVarnishCliKey) {
+				keys.varnishCliKey = true;
+				keys.varnishCliKeyConfigured = true;
+				keys.varnishCliKeyManaged = true;
+				keys.varnishCliKeyExternal = true;
 			}
 
 			return Object.keys(keys);
@@ -6252,7 +6309,7 @@
 			const responseCrawlScopeSummary = payload.crawlScopeSummary || (payload.result && payload.result.crawlScopeSummary);
 			if (responseCrawlScopeSummary && typeof responseCrawlScopeSummary === 'object') {
 				crawlScopeSummary = responseCrawlScopeSummary;
-				ucwp.crawlScopeSummary = responseCrawlScopeSummary;
+				ultracache.crawlScopeSummary = responseCrawlScopeSummary;
 				setCrawlScopeVersion((version) => version + 1);
 			}
 
@@ -6367,7 +6424,7 @@
 			const actionKey = key || ('operation_' + Date.now());
 			const readableLabel = label || formatDashboardActionLabel(actionKey);
 			const sequence = ++uiActionSequenceRef.current;
-			const toastId = 'ucwp-fifo-' + sequence + '-' + String(actionKey).replace(/[^a-z0-9_-]+/gi, '-');
+			const toastId = 'ultracache-fifo-' + sequence + '-' + String(actionKey).replace(/[^a-z0-9_-]+/gi, '-');
 			const opts = options || {};
 			uiActionQueueDepthRef.current += 1;
 			setUiActionQueueCount((count) => count + 1);
@@ -6574,7 +6631,7 @@
 
 
 		async function runCssDiagnosticsForUrl(url) {
-			const targetUrl = String(url || '').trim() || ((typeof ucwp !== 'undefined' && ucwp && ucwp.frontendProbeUrl) ? String(ucwp.frontendProbeUrl || '') : '');
+			const targetUrl = String(url || '').trim() || ((typeof ultracache !== 'undefined' && ultracache && ultracache.frontendProbeUrl) ? String(ultracache.frontendProbeUrl || '') : '');
 			if (!targetUrl) {
 				pushToast({ type: 'warning', text: __("Enter a same-site URL to diagnose.", 'ultracache') });
 				return null;
@@ -6941,7 +6998,7 @@
 				return;
 			}
 			googleFontsAutoRebuildQueuedRef.current = true;
-			const toastId = 'ucwp-google-fonts-auto-rebuild';
+			const toastId = 'ultracache-google-fonts-auto-rebuild';
 			pushToast({
 				id: toastId,
 				type: 'info',
@@ -7129,8 +7186,8 @@
 
 		async function populateDeferDelayExclusionDefaults(currentDraft) {
 			const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
-			let defaults = ucwp && typeof ucwp.jsDelayDeferRecommendedExclusions !== 'undefined'
-				? String(ucwp.jsDelayDeferRecommendedExclusions || '')
+			let defaults = ultracache && typeof ultracache.jsDelayDeferRecommendedExclusions !== 'undefined'
+				? String(ultracache.jsDelayDeferRecommendedExclusions || '')
 				: '';
 			if (!defaults.trim() && Object.prototype.hasOwnProperty.call(defaultsPayload, 'deferJsExcludeList')) {
 				defaults = String(defaultsPayload.deferJsExcludeList || '');
@@ -7235,27 +7292,27 @@
 			}
 			try {
 				const parsed = new URL(value, window.location.origin);
-				['ucwp_runtime_js_scan', 'ucwp_runtime_js_scan_id', 'ucwp_runtime_js_scan_nonce', 'ucwp_runtime_js_scan_context', 'ucwp_rt', 'ucwp_profile_bypass', 'ucwp_store_profile', 'ucwp_callback_profile', 'ucwp_store_profile_verbose', 'ucwp_store_profile_verbose_settings', 'ucwp_profile_run', 'ucwp_revalidate'].forEach((key) => parsed.searchParams.delete(key));
+				['ultracache_runtime_js_scan', 'ultracache_runtime_js_scan_id', 'ultracache_runtime_js_scan_nonce', 'ultracache_runtime_js_scan_context', 'ultracache_rt', 'ultracache_profile_bypass', 'ultracache_store_profile', 'ultracache_callback_profile', 'ultracache_store_profile_verbose', 'ultracache_store_profile_verbose_settings', 'ultracache_profile_run', 'ultracache_revalidate'].forEach((key) => parsed.searchParams.delete(key));
 				return parsed.toString();
 			} catch (error) {
-				return value.replace(/([?&])ucwp_(runtime_js_scan(?:_id|_nonce|_context)?|rt|profile_bypass|store_profile(?:_verbose(?:_settings)?)?|callback_profile|profile_run|revalidate)=[^&#]*/g, '$1').replace(/[?&]$/, '');
+				return value.replace(/([?&])ultracache_(runtime_js_scan(?:_id|_nonce|_context)?|rt|profile_bypass|store_profile(?:_verbose(?:_settings)?)?|callback_profile|profile_run|revalidate)=[^&#]*/g, '$1').replace(/[?&]$/, '');
 			}
 		}
 
 		function buildRuntimeJsScanUrl(url, scanId, context) {
-			let target = String(url || '').trim() || ((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/');
+			let target = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
 			let parsed;
 			try {
 				parsed = new URL(target, window.location.origin);
 			} catch (error) {
-				parsed = new URL((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/', window.location.origin);
+				parsed = new URL((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/', window.location.origin);
 			}
 			const scanContext = context === 'logged-in' ? 'logged-in' : 'anonymous';
-			parsed.searchParams.set('ucwp_runtime_js_scan', '1');
-			parsed.searchParams.set('ucwp_runtime_js_scan_id', scanId);
-			parsed.searchParams.set('ucwp_runtime_js_scan_nonce', ucwp.runtimeJsScanNonce || '');
-			parsed.searchParams.set('ucwp_runtime_js_scan_context', scanContext);
-			parsed.searchParams.set('ucwp_rt', String(Date.now()));
+			parsed.searchParams.set('ultracache_runtime_js_scan', '1');
+			parsed.searchParams.set('ultracache_runtime_js_scan_id', scanId);
+			parsed.searchParams.set('ultracache_runtime_js_scan_nonce', ultracache.runtimeJsScanNonce || '');
+			parsed.searchParams.set('ultracache_runtime_js_scan_context', scanContext);
+			parsed.searchParams.set('ultracache_rt', String(Date.now()));
 			return parsed.toString();
 		}
 
@@ -7284,16 +7341,16 @@
 
 		function readPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, queueJobId) {
 			try {
-				if (!popup || popup.closed || !popup.__ucwpRuntimeJsScan) {
+				if (!popup || popup.closed || !popup.__ultracacheRuntimeJsScan) {
 					return null;
 				}
-				const state = popup.__ucwpRuntimeJsScan;
+				const state = popup.__ultracacheRuntimeJsScan;
 				const errors = Array.isArray(state.errors) ? state.errors.slice(0, 120) : [];
 				return {
 					scanId,
 					url: sanitizeRuntimeJsScanDisplayUrl(String((popup.location && popup.location.href) || scanUrl || '')),
 					completed: false,
-					scanContext: (popup.__ucwpRuntimeJsScan && popup.__ucwpRuntimeJsScan.context) ? String(popup.__ucwpRuntimeJsScan.context) : 'anonymous',
+					scanContext: (popup.__ultracacheRuntimeJsScan && popup.__ultracacheRuntimeJsScan.context) ? String(popup.__ultracacheRuntimeJsScan.context) : 'anonymous',
 					errors,
 					userAgent: String((popup.navigator && popup.navigator.userAgent) || ''),
 					elapsedMs: state.injectedAt ? Math.max(0, Date.now() - Number(state.injectedAt || 0)) : 0,
@@ -7327,11 +7384,11 @@
 					onStatus(message);
 				}
 			}
-			const scanUrl = String(url || '').trim() || ((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/');
+			const scanUrl = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
 			const scanId = 'rt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 			const runtimeUrl = buildRuntimeJsScanUrl(scanUrl, scanId, scanContext);
 			setRuntimeStatus('Opening ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' diagnostic page…');
-			const popup = window.open(runtimeUrl, 'ucwpRuntimeJsScan', 'width=1280,height=900');
+			const popup = window.open(runtimeUrl, 'ultracacheRuntimeJsScan', 'width=1280,height=900');
 			if (!popup) {
 				setRuntimeStatus('Popup was blocked. Allow popups for this admin page and try again. Diagnostic URL: ' + runtimeUrl);
 				pushToast({ type: 'error', text: __("Browser blocked the runtime scan window. Allow popups for this admin page and try again.", 'ultracache') });
@@ -7388,7 +7445,7 @@
 
 
 		async function runJsDelaySafetyScanForUrl(url) {
-			const scanUrl = String(url || '').trim() || ((ucwp && ucwp.frontendProbeUrl) ? ucwp.frontendProbeUrl : '/');
+			const scanUrl = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
 			const completed = await queueDashboardAction('performance_profile', { mode: 'compact', url: scanUrl }, {
 				queued: 'JS Delay Safety Scan queued…',
 				success: 'JS Delay Safety Scan completed.',
@@ -7446,11 +7503,7 @@
 				backend: backend,
 				profileProbe: true,
 				skipPayloadProbe: true,
-				redisPasswordConfigured: !!(currentSettings.redisPasswordConfigured || currentRedisForm.redisPasswordConfigured),
 			});
-			if (!String(payload.redisPassword || '').trim()) {
-				delete payload.redisPassword;
-			}
 			try {
 				const response = await apiRequest('object_cache_test', payload);
 				return normalizeProfileBackendProbeResult(backend, response, null);
@@ -7658,7 +7711,7 @@
 		function setCurrentWarmupGeneration(value) {
 			const next = Math.max(0, Number(value || 0));
 			warmupGenerationRef.current = next;
-			ucwp.warmupGeneration = next;
+			ultracache.warmupGeneration = next;
 			setWarmupGeneration(next);
 		}
 
@@ -8203,7 +8256,7 @@
 			try {
 				const payload = buildSettingsExportPayload(settings);
 				const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-				const filename = 'ultracache-settings-' + (ucwp.version || 'export') + '-' + stamp + '.json';
+				const filename = 'ultracache-settings-' + (ultracache.version || 'export') + '-' + stamp + '.json';
 				triggerFileDownload(filename, JSON.stringify(payload, null, 2), 'application/json');
 				pushToast({ type: 'success', text: __("Settings exported.", 'ultracache') });
 			} catch (error) {
@@ -9327,7 +9380,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																										value: settings.manualLcpHeroSelector || '',
 																										onSave: (value) => updateSetting('manualLcpHeroSelector', value),
 																										disabled: busy || !settings.lcpImagePriorityEnabled,
-																										placeholder: '#main-hero\n.hero-slider\n/uploads/hero.webp\nhero-home.jpg',
+																										placeholder: `#main-hero\n.hero-slider\n${joinPublicPath(uploadsPublicPath, 'hero.webp')}\nhero-home.jpg`,
 																										saveLabel: 'Save Manual LCP Selector',
 																										key: 'manual-lcp-hero-selector',
 																										}),
@@ -9337,7 +9390,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																											value: settings.criticalResourcePreloadList || '',
 																											onSave: (value) => updateSetting('criticalResourcePreloadList', value),
 																											disabled: busy || !settings.criticalRequestChainReliefEnabled,
-																											placeholder: 'image /uploads/hero.webp\nstyle /uploads/ultracache/css-bundles/bundle.css\nfont /uploads/fonts/manrope.woff2\nfetch /sliders/1?srengine=7',
+																											placeholder: `image ${joinPublicPath(uploadsPublicPath, 'hero.webp')}\nstyle ${joinPublicPath(generatedAssetsPublicPath, 'css-bundles/bundle.css')}\nfont ${joinPublicPath(uploadsPublicPath, 'fonts/manrope.woff2')}\nfetch /sliders/1?srengine=7`,
 																											saveLabel: 'Save Priority Preloads',
 																											key: 'critical-resource-preload-list',
 																										}),
@@ -9363,7 +9416,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																		value: settings.homepageCssBundleExcludeList || '',
 																		onSave: (value) => updateSetting('homepageCssBundleExcludeList', value),
 																		disabled: busy || !settings.homepageCssBundleEnabled,
-																		placeholder: '/plugins/plugin-name/assets/style.css\n/themes/theme-name/assets/critical.css',
+																		placeholder: `${joinPublicPath(pluginsPublicPath, 'plugin-name/assets/style.css')}\n${joinPublicPath(themesPublicPaths[0] || '', 'theme-name/assets/critical.css')}`,
 																		onPopulateDefaults: populateCssBundleExclusionDefaults,
 																		onRunDiagnostics: runCssDiagnosticsForUrl,
 																		onDownloadJson: downloadCssDiagnosticsJson,
@@ -9433,7 +9486,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																		value: settings.deferJsExcludeList || '',
 																		onSave: (value) => updateSetting('deferJsExcludeList', value),
 																		disabled: busy,
-																		placeholder: '/wp-includes/js/jquery/jquery.min.js\n/wp-includes/js/wp-util.min.js\n/wp-includes/js/dist/api-fetch.min.js',
+																		placeholder: [jqueryPublicPath, wpUtilPublicPath, apiFetchPublicPath].filter(Boolean).join('\n'),
 																		onPopulateDefaults: populateDeferDelayExclusionDefaults,
 																		onScan: runJsDelaySafetyScanForUrl,
 																		onRuntimeScan: runBrowserRuntimeJsScanForUrl,

@@ -245,7 +245,7 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 }
 
 
-#uc-dashboard .ucwp-stat-card-value {
+#uc-dashboard .ultracache-stat-card-value {
 	font-size: 24px !important;
 	font-weight: 300 !important;
 	line-height: 1.18;
@@ -951,7 +951,7 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 }
 
 
-.ucwp-version-badge {
+.ultracache-version-badge {
 	position: fixed;
 	right: 18px;
 	bottom: 18px;
@@ -973,7 +973,7 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 }
 
 @media (max-width: 782px) {
-	.ucwp-version-badge {
+	.ultracache-version-badge {
 		right: 12px;
 		bottom: 12px;
 		font-size: 10px;

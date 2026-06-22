@@ -1,13 +1,13 @@
 (function () {
 	'use strict';
 
-	if (window.__ucwpDelayLoader) {
+	if (window.__ultracacheDelayLoader) {
 		return;
 	}
 
-	window.__ucwpDelayLoader = 1;
+	window.__ultracacheDelayLoader = 1;
 
-	var config = window.ucwpDelayedJsLoaderConfig || {};
+	var config = window.ultracacheDelayedJsLoaderConfig || {};
 	var relief = !!config.relief;
 	var autoEvents = Array.isArray(config.autoEvents) ? config.autoEvents : [];
 	var autoAfterLoad = !!config.autoAfterLoad;
@@ -31,19 +31,19 @@
 		try {
 			var target = root();
 			if (target) {
-				target.setAttribute('data-ucwp-delay-' + key, String(value));
+				target.setAttribute('data-ultracache-delay-' + key, String(value));
 			}
 		} catch (e) {}
 	}
 
 	function queryDelayedScripts() {
 		return Array.prototype.slice.call(
-			document.querySelectorAll('script[type="text/ucwp-delayed-js"][data-ucwp-src],script[type="text/ucwp-delayed-js"][data-ucwp-inline="1"]')
+			document.querySelectorAll('script[type="text/ultracache-delayed-js"][data-ultracache-src],script[type="text/ultracache-delayed-js"][data-ultracache-inline="1"]')
 		);
 	}
 
-	function ucwpData(node, attr) {
-		var value = node && node.getAttribute ? node.getAttribute('data-ucwp-' + attr) : '';
+	function ultracacheData(node, attr) {
+		var value = node && node.getAttribute ? node.getAttribute('data-ultracache-' + attr) : '';
 		return value || '';
 	}
 
@@ -53,7 +53,7 @@
 		var local = 0;
 
 		for (var i = 0; i < all.length; i++) {
-			var reason = ucwpData(all[i], 'delay-reason');
+			var reason = ultracacheData(all[i], 'delay-reason');
 			if (reason === 'safe-third-party' || reason === 'functional-third-party' || reason === 'all-third-party') {
 				thirdParty++;
 			} else {
@@ -67,7 +67,7 @@
 	}
 
 	function decodeAttrs(node) {
-		var raw = ucwpData(node, 'attrs');
+		var raw = ultracacheData(node, 'attrs');
 		var attrs = {};
 
 		if (raw) {
@@ -79,7 +79,7 @@
 		}
 
 		['id', 'crossorigin', 'referrerpolicy', 'integrity', 'nonce'].forEach(function (attr) {
-			var value = ucwpData(node, attr);
+			var value = ultracacheData(node, attr);
 			if (value && !attrs[attr]) {
 				attrs[attr] = value;
 			}
@@ -175,7 +175,7 @@
 
 		var queue = readyQueue.slice(0);
 		readyQueue = [];
-		emit('ucwp:delayed-jquery-ready-flush', { mode: 'all', count: queue.length });
+		emit('ultracache:delayed-jquery-ready-flush', { mode: 'all', count: queue.length });
 
 		for (var i = 0; i < queue.length; i++) {
 			try {
@@ -201,20 +201,20 @@
 	}
 
 	function isInlineNode(node) {
-		return node && node.getAttribute('data-ucwp-inline') === '1';
+		return node && node.getAttribute('data-ultracache-inline') === '1';
 	}
 
 	function isExternalNode(node) {
-		return node && node.getAttribute('data-ucwp-src') && !isInlineNode(node);
+		return node && node.getAttribute('data-ultracache-src') && !isInlineNode(node);
 	}
 
 	function loadInline(node, done) {
-		if (!node || node.getAttribute('data-ucwp-loading') === '1' || node.getAttribute('data-ucwp-loaded') === '1') {
+		if (!node || node.getAttribute('data-ultracache-loading') === '1' || node.getAttribute('data-ultracache-loaded') === '1') {
 			done();
 			return;
 		}
 
-		node.setAttribute('data-ucwp-loading', '1');
+		node.setAttribute('data-ultracache-loading', '1');
 
 		var script = document.createElement('script');
 		applyAttrs(script, node);
@@ -227,7 +227,7 @@
 
 		insertAndRemove(node, script);
 		tryHookReady();
-		node.setAttribute('data-ucwp-loaded', '1');
+		node.setAttribute('data-ultracache-loaded', '1');
 		done();
 	}
 
@@ -235,7 +235,7 @@
 		var end = start;
 		var group = [];
 
-		while (end < list.length && isExternalNode(list[end]) && list[end].getAttribute('data-ucwp-loading') !== '1' && list[end].getAttribute('data-ucwp-loaded') !== '1') {
+		while (end < list.length && isExternalNode(list[end]) && list[end].getAttribute('data-ultracache-loading') !== '1' && list[end].getAttribute('data-ultracache-loaded') !== '1') {
 			group.push(list[end]);
 			end++;
 		}
@@ -257,9 +257,9 @@
 			}
 
 			var node = group[position];
-			node.setAttribute('data-ucwp-loading', '1');
+			node.setAttribute('data-ultracache-loading', '1');
 
-			var src = node.getAttribute('data-ucwp-src');
+			var src = node.getAttribute('data-ultracache-src');
 			var script = document.createElement('script');
 			var finished = false;
 
@@ -273,7 +273,7 @@
 
 				finished = true;
 				tryHookReady();
-				node.setAttribute('data-ucwp-loaded', '1');
+				node.setAttribute('data-ultracache-loaded', '1');
 				completed++;
 				mark('all-ordered-completed', completed);
 				loadOne(position + 1);
@@ -289,14 +289,14 @@
 	}
 
 	function load(list, index) {
-		while (index < list.length && (list[index].getAttribute('data-ucwp-loaded') === '1' || list[index].getAttribute('data-ucwp-loading') === '1')) {
+		while (index < list.length && (list[index].getAttribute('data-ultracache-loaded') === '1' || list[index].getAttribute('data-ultracache-loading') === '1')) {
 			index++;
 		}
 
 		if (index >= list.length) {
 			flushReadyHold();
 			mark('all-done', '1');
-			emit('ucwp:delayed-scripts-done', { mode: 'all', count: list.length });
+			emit('ultracache:delayed-scripts-done', { mode: 'all', count: list.length });
 			return;
 		}
 
@@ -329,7 +329,7 @@
 		counts();
 
 		var list = queryDelayedScripts().filter(function (node) {
-			return node && node.getAttribute('data-ucwp-loading') !== '1' && node.getAttribute('data-ucwp-loaded') !== '1';
+			return node && node.getAttribute('data-ultracache-loading') !== '1' && node.getAttribute('data-ultracache-loaded') !== '1';
 		});
 
 		if (!list.length) {
@@ -340,7 +340,7 @@
 		mark('all-started', '1');
 		mark('all-count', list.length);
 		beginReadyHold();
-		emit('ucwp:delayed-scripts-start', { mode: 'all', count: list.length });
+		emit('ultracache:delayed-scripts-start', { mode: 'all', count: list.length });
 		load(list, 0);
 	}
 
@@ -401,7 +401,7 @@
 				var rect = node.getBoundingClientRect ? node.getBoundingClientRect() : { top: 0, bottom: 0 };
 				if (i < 3 || (rect.top < viewportHeight * 2 && rect.bottom > -viewportHeight)) {
 					node.classList.add('e-lazyloaded');
-					node.setAttribute('data-ucwp-elementor-bg-lazy-class', '1');
+					node.setAttribute('data-ultracache-elementor-bg-lazy-class', '1');
 					revealed++;
 				}
 			}

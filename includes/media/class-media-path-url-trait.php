@@ -22,7 +22,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return false;
 			}
 
-			return trailingslashit(UCWP_AVIF_DIR) . $relative_path;
+			return trailingslashit(ULTRACACHE_AVIF_DIR) . $relative_path;
 		}
 
 		private function get_webp_path_from_source($source_file) {
@@ -41,11 +41,11 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return false;
 			}
 
-			return trailingslashit(UCWP_WEBP_DIR) . $relative_path;
+			return trailingslashit(ULTRACACHE_WEBP_DIR) . $relative_path;
 		}
 
 		private function optimized_storage_filesystem() {
-			return function_exists('ucwp_get_wp_filesystem') ? ucwp_get_wp_filesystem() : false;
+			return function_exists('ultracache_get_wp_filesystem') ? ultracache_get_wp_filesystem() : false;
 		}
 
 		private function optimized_storage_path_exists($path, $refresh = false) {
@@ -60,15 +60,9 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			$filesystem = $this->optimized_storage_filesystem();
-			if ($filesystem && method_exists($filesystem, 'exists')) {
-				$exists = (bool) $filesystem->exists($path);
-				if ($exists && method_exists($filesystem, 'is_file')) {
-					$exists = (bool) $filesystem->is_file($path);
-				}
-			} else {
-				// Encapsulated fallback only. Most installations use the direct WP_Filesystem transport,
-				// but frontend rendering must fail open and keep original JPG/PNG when filesystem access is unavailable.
-				$exists = @file_exists($path) && @is_file($path);
+			$exists = $filesystem && method_exists($filesystem, 'exists') && $filesystem->exists($path);
+			if ($exists && method_exists($filesystem, 'is_file')) {
+				$exists = (bool) $filesystem->is_file($path);
 			}
 
 			$this->optimized_variant_exists_memo[$key] = (bool) $exists;
@@ -82,20 +76,19 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			$filesystem = $this->optimized_storage_filesystem();
-			if ($filesystem && method_exists($filesystem, 'exists')) {
-				$exists = (bool) $filesystem->exists($path);
-				if ($exists && method_exists($filesystem, 'is_file')) {
-					$exists = (bool) $filesystem->is_file($path);
-				}
-				if ($exists && method_exists($filesystem, 'is_readable')) {
-					$exists = (bool) $filesystem->is_readable($path);
-				}
-				return (bool) $exists;
+			if (!$filesystem || !method_exists($filesystem, 'exists')) {
+				return false;
 			}
 
-			// Encapsulated fallback. Image libraries require a real local path, so this helper is
-			// the only place this touched media path uses native readability checks.
-			return @file_exists($path) && @is_file($path) && @is_readable($path);
+			$exists = (bool) $filesystem->exists($path);
+			if ($exists && method_exists($filesystem, 'is_file')) {
+				$exists = (bool) $filesystem->is_file($path);
+			}
+			if ($exists && method_exists($filesystem, 'is_readable')) {
+				$exists = (bool) $filesystem->is_readable($path);
+			}
+
+			return (bool) $exists;
 		}
 
 		private function optimized_storage_ensure_directory($dir) {
@@ -159,13 +152,13 @@ trait Ultra_Cache_Media_Path_Url_Trait
 
 			if ('avif' === $format) {
 				$optimized_relative_path = preg_replace('/\.(?:jpe?g|png|webp)$/i', '.avif', $relative_path);
-				$base_dir = defined('UCWP_AVIF_DIR') ? UCWP_AVIF_DIR : '';
+				$base_dir = defined('ULTRACACHE_AVIF_DIR') ? ULTRACACHE_AVIF_DIR : '';
 			} else {
 				if (!preg_match('/\.(?:jpe?g|png)$/i', $relative_path)) {
 					return false;
 				}
 				$optimized_relative_path = preg_replace('/\.(?:jpe?g|png)$/i', '.webp', $relative_path);
-				$base_dir = defined('UCWP_WEBP_DIR') ? UCWP_WEBP_DIR : '';
+				$base_dir = defined('ULTRACACHE_WEBP_DIR') ? ULTRACACHE_WEBP_DIR : '';
 			}
 
 			if (!is_string($optimized_relative_path) || '' === $optimized_relative_path || '' === (string) $base_dir) {
@@ -210,7 +203,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return false;
 			}
 
-			$relative_path = ltrim(str_replace(trailingslashit(UCWP_AVIF_DIR), '', $avif_path), '/\\');
+			$relative_path = ltrim(str_replace(trailingslashit(ULTRACACHE_AVIF_DIR), '', $avif_path), '/\\');
 
 			if ('' === $relative_path) {
 				return false;
@@ -230,7 +223,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return false;
 			}
 
-			$relative_path = ltrim(str_replace(trailingslashit(UCWP_WEBP_DIR), '', $webp_path), '/\\');
+			$relative_path = ltrim(str_replace(trailingslashit(ULTRACACHE_WEBP_DIR), '', $webp_path), '/\\');
 
 			if ('' === $relative_path) {
 				return false;
@@ -252,10 +245,10 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				}
 			}
 
-			$base_url = ('avif' === $format && defined('UCWP_AVIF_URL')) ? UCWP_AVIF_URL : (defined('UCWP_WEBP_URL') ? UCWP_WEBP_URL : '');
+			$base_url = ('avif' === $format && defined('ULTRACACHE_AVIF_URL')) ? ULTRACACHE_AVIF_URL : (defined('ULTRACACHE_WEBP_URL') ? ULTRACACHE_WEBP_URL : '');
 			$base_path = (string) wp_parse_url((string) $base_url, PHP_URL_PATH);
 			if ('' === $base_path) {
-				$base_path = ucwp_optimized_images_storage_url_path($format);
+				$base_path = ultracache_optimized_images_storage_url_path($format);
 			}
 
 			$base_path = '/' . ltrim(str_replace('\\', '/', (string) $base_path), '/');
@@ -346,7 +339,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		}
 
 		private function get_uploads_relative_path_from_source($source_file) {
-			$uploads = wp_get_upload_dir();
+			$uploads = ultracache_uploads_base_info();
 
 			if (empty($uploads['basedir'])) {
 				return false;
@@ -373,7 +366,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return false;
 			}
 
-			$uploads = wp_get_upload_dir();
+			$uploads = ultracache_uploads_base_info();
 			if (empty($uploads['baseurl']) || empty($uploads['basedir'])) {
 				return false;
 			}
@@ -443,7 +436,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		}
 
 		private function normalize_public_url($public_url) {
-			return function_exists('ucwp_normalize_public_url') ? ucwp_normalize_public_url($public_url) : trim((string) $public_url);
+			return function_exists('ultracache_normalize_public_url') ? ultracache_normalize_public_url($public_url) : trim((string) $public_url);
 		}
 
 		private function get_best_url_from_attachment_context($attachment, $size) {

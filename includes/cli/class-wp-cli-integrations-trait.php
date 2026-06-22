@@ -5,8 +5,8 @@
 
 defined('ABSPATH') || exit;
 
-if (!trait_exists('UCWP_CLI_Integrations_Trait')) {
-    trait UCWP_CLI_Integrations_Trait
+if (!trait_exists('ULTRACACHE_CLI_Integrations_Trait')) {
+    trait ULTRACACHE_CLI_Integrations_Trait
     {
         public function varnish($args, $assoc_args)
         {
@@ -196,7 +196,7 @@ if (!trait_exists('UCWP_CLI_Integrations_Trait')) {
 
             $profile = $engine->get_last_store_profile();
             if (empty($profile)) {
-                WP_CLI::warning('No STORE profiler report found yet. Trigger a STORE request with X-UltraCache-Store-Profile: 1 or ?ucwp_store_profile=1.');
+                WP_CLI::warning('No STORE profiler report found yet. Trigger a STORE request with X-UltraCache-Store-Profile: 1 or ?ultracache_store_profile=1.');
                 return;
             }
 
@@ -240,16 +240,16 @@ if (!trait_exists('UCWP_CLI_Integrations_Trait')) {
                 }
 
                 $started = microtime(true);
-                $response = ucwp_safe_loopback_remote_request($url, array(
+                $response = ultracache_safe_loopback_remote_request($url, array(
                     'timeout'     => 90,
                     'redirection' => 3,
                     'headers'     => array(
                         'X-UltraCache-Store-Profile'  => '1',
                         'X-UltraCache-Debug'          => '1',
                         'X-UltraCache-Profile-Bypass' => '1',
-                        'X-UltraCache-Token'          => (function_exists('ucwp_create_runtime_control_token') ? ucwp_create_runtime_control_token() : ''),
+                        'X-UltraCache-Token'          => (function_exists('ultracache_create_runtime_control_token') ? ultracache_create_runtime_control_token() : ''),
                     ),
-                    'user-agent'  => 'UltraCache CSS Diagnostics/' . (defined('UCWP_VERSION') ? UCWP_VERSION : 'unknown') . '; ' . home_url('/'),
+                    'user-agent'  => 'UltraCache CSS Diagnostics/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown') . '; ' . home_url('/'),
                 ));
                 $elapsed_ms = (int) round((microtime(true) - $started) * 1000);
 
@@ -337,7 +337,7 @@ if (!trait_exists('UCWP_CLI_Integrations_Trait')) {
 
             return array(
                 'url' => isset($request_meta['url']) ? (string) $request_meta['url'] : (isset($profile['url']) ? (string) $profile['url'] : ''),
-                'version' => isset($profile['version']) ? (string) $profile['version'] : (defined('UCWP_VERSION') ? UCWP_VERSION : ''),
+                'version' => isset($profile['version']) ? (string) $profile['version'] : (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : ''),
                 'responseCode' => isset($request_meta['responseCode']) ? (int) $request_meta['responseCode'] : 0,
                 'requestMs' => isset($request_meta['requestMs']) ? (int) $request_meta['requestMs'] : 0,
                 'cacheStatus' => isset($request_meta['cacheStatus']) ? (string) $request_meta['cacheStatus'] : '',

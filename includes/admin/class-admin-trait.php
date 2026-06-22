@@ -88,14 +88,13 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
         {
             $version_label = self::maybe_translate_sprintf(
                 'UltraCache %s',
-                (string) UCWP_VERSION
+                (string) ULTRACACHE_VERSION
             );
 
             echo '<div id="uc-dashboard"></div>';
-            echo '<div class="ucwp-version-badge" aria-label="' . esc_attr($version_label) . '">' . esc_html($version_label) . '</div>';
-            echo '<div id="ucwp-root" style="display:none"></div>';
-            echo '<div id="ucwp-admin-root" style="display:none"></div>';
+            echo '<div class="ultracache-version-badge" aria-label="' . esc_attr($version_label) . '">' . esc_html($version_label) . '</div>';
             echo '<div id="ultracache-root" style="display:none"></div>';
+            echo '<div id="ultracache-admin-root" style="display:none"></div>';
         }
 
         public function enqueue_admin_assets($hook)
@@ -104,10 +103,10 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                 return;
             }
 
-            wp_enqueue_style('ucwp-admin-css', UCWP_URL . 'includes/admin-dashboard.css', array(), UCWP_VERSION);
-            wp_enqueue_script('ucwp-admin-js', UCWP_URL . 'includes/admin-dashboard.js', array('wp-element', 'wp-i18n'), UCWP_VERSION, array('in_footer' => true));
-            wp_set_script_translations('ucwp-admin-js', 'ultracache', UCWP_PATH . 'languages');
-            wp_script_add_data('ucwp-admin-js', 'type', 'module');
+            wp_enqueue_style('ultracache-admin-css', ultracache_plugin_url('includes/admin-dashboard.css'), array(), ULTRACACHE_VERSION);
+            wp_enqueue_script('ultracache-admin-js', ultracache_plugin_url('includes/admin-dashboard.js'), array('wp-element', 'wp-i18n'), ULTRACACHE_VERSION, array('in_footer' => true));
+            wp_set_script_translations('ultracache-admin-js', 'ultracache', ultracache_plugin_dir('languages'));
+            wp_script_add_data('ultracache-admin-js', 'type', 'module');
 
             $settings_for_client = self::get_dashboard_settings_for_client();
             $cache_stats_enabled = !empty($settings_for_client['cacheStatsEnabled']);
@@ -142,12 +141,12 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                 ? self::get_dashboard_diagnostics()
                 : (isset($dashboard_stats['diagnostics']) && is_array($dashboard_stats['diagnostics']) ? $dashboard_stats['diagnostics'] : array());
 
-            $ucwp_runtime_config = array(
+            $ultracache_runtime_config = array(
                 'restBase'     => esc_url_raw(rest_url('ultracache/v1/')),
                 'restNonce'    => wp_create_nonce('wp_rest'),
-                'runtimeJsScanNonce' => wp_create_nonce('ucwp_runtime_js_scan'),
+                'runtimeJsScanNonce' => wp_create_nonce('ultracache_runtime_js_scan'),
                 'frontendProbeUrl' => esc_url_raw(home_url('/')),
-                'version'      => UCWP_VERSION,
+                'version'      => ULTRACACHE_VERSION,
                 'stats'        => $dashboard_stats,
                 'settings'     => $settings_for_client,
                 'defaults'     => self::get_dashboard_defaults_for_client(),
@@ -156,12 +155,24 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                 'diagnostics'  => $dashboard_diagnostics,
                 'crawlScopeSummary' => self::get_crawl_scope_summary(),
                 'warmupGeneration' => method_exists(__CLASS__, 'get_warmup_generation') ? self::get_warmup_generation() : 0,
+                'publicPaths' => array(
+                    'admin' => function_exists('ultracache_wordpress_admin_public_path') ? ultracache_wordpress_admin_public_path() : '',
+                    'includes' => function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path() : '',
+                    'uploads' => function_exists('ultracache_uploads_public_path') ? ultracache_uploads_public_path() : '',
+                    'generatedAssets' => function_exists('ultracache_generated_asset_public_path') ? ultracache_generated_asset_public_path() : '',
+                    'plugins' => function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path() : '',
+                    'themes' => function_exists('ultracache_themes_public_paths') ? ultracache_themes_public_paths() : array(),
+                    'woocommerce' => function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('woocommerce') : '',
+                    'jquery' => function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path('js/jquery/jquery.min.js') : '',
+                    'wpUtil' => function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path('js/wp-util.min.js') : '',
+                    'apiFetch' => function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path('js/dist/api-fetch.min.js') : '',
+                ),
             );
-            $ucwp_runtime_config_json = wp_json_encode($ucwp_runtime_config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-            if (false === $ucwp_runtime_config_json) {
-                $ucwp_runtime_config_json = '{}';
+            $ultracache_runtime_config_json = wp_json_encode($ultracache_runtime_config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+            if (false === $ultracache_runtime_config_json) {
+                $ultracache_runtime_config_json = '{}';
             }
-            wp_add_inline_script('ucwp-admin-js', 'window.ucwpData = ' . $ucwp_runtime_config_json . ';', 'before');
+            wp_add_inline_script('ultracache-admin-js', 'window.ultracacheData = ' . $ultracache_runtime_config_json . ';', 'before');
         }
 
         public function suppress_conflicting_admin_assets($hook = '')
@@ -260,7 +271,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                     'id'     => 'ultracache-purge-all',
                     'parent' => 'ultracache',
                     'title'  => __('Clear All Cache', 'ultracache'),
-                    'href'   => wp_nonce_url(add_query_arg('ucwp_action', 'purge_all'), 'ucwp_purge_nonce'),
+                    'href'   => wp_nonce_url(add_query_arg('ultracache_action', 'purge_all'), 'ultracache_purge_nonce'),
                 )
             );
 
@@ -270,7 +281,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                         'id'     => 'ultracache-purge-page',
                         'parent' => 'ultracache',
                         'title'  => __('Clear This Page', 'ultracache'),
-                        'href'   => wp_nonce_url(add_query_arg('ucwp_action', 'purge_page'), 'ucwp_purge_nonce'),
+                        'href'   => wp_nonce_url(add_query_arg('ultracache_action', 'purge_page'), 'ultracache_purge_nonce'),
                     )
                 );
             }
@@ -278,11 +289,11 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
 
         public function handle_admin_bar_actions()
         {
-            if (empty($_GET['ucwp_action']) || !current_user_can('manage_options')) {
+            if (empty($_GET['ultracache_action']) || !current_user_can('manage_options')) {
                 return;
             }
 
-            if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'ucwp_purge_nonce')) {
+            if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'ultracache_purge_nonce')) {
                 return;
             }
 
@@ -291,7 +302,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                 return;
             }
 
-            $action = sanitize_key(wp_unslash($_GET['ucwp_action']));
+            $action = sanitize_key(wp_unslash($_GET['ultracache_action']));
             if ('purge_all' === $action && method_exists($engine, 'purge_all')) {
                 $engine->purge_all();
                 set_transient('ultracache_admin_notice', __('UltraCache: all cache cleared.', 'ultracache'), 30);
@@ -308,7 +319,7 @@ if (!trait_exists('Ultra_Cache_WP_Admin_Trait')) {
                 }
             }
 
-            wp_safe_redirect(remove_query_arg(array('ucwp_action', '_wpnonce')));
+            wp_safe_redirect(remove_query_arg(array('ultracache_action', '_wpnonce')));
             exit;
         }
 

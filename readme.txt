@@ -5,7 +5,7 @@ Donate link: https://iniotakis.com/
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 2.59.06.33
+Stable tag: 2.59.06.59
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -18,7 +18,7 @@ It provides page caching, object-cache integration, media rewrite tools, CSS/fon
 
 = Storage and WordPress drop-ins =
 
-UltraCache writes browser-loaded generated assets under the WordPress uploads directory, in uploads/ultracache/. WordPress drop-ins are the exception: advanced-cache.php and object-cache.php must remain directly under WP_CONTENT_DIR because WordPress only loads those drop-ins from that required location.
+UltraCache writes browser-loaded generated assets under the WordPress uploads directory, in uploads/ultracache/. WordPress drop-ins are the exception: advanced-cache.php and object-cache.php must remain directly in the WordPress content directory because WordPress only loads those drop-ins from that required location.
 
 = Main features =
 
@@ -38,7 +38,7 @@ UltraCache writes browser-loaded generated assets under the WordPress uploads di
 
 = Page cache =
 
-UltraCache manages the WordPress `advanced-cache.php` drop-in, stores page-cache/runtime files under `wp-content/cache/ultracache/`, and stores public generated optimization assets under `wp-content/uploads/ultracache/`.
+UltraCache manages the WordPress `advanced-cache.php` drop-in, stores page-cache, file analytics, diagnostics, and disk-object-cache data below the active WordPress uploads directory in `ultracache/`, while public generated optimization assets use dedicated directories under the same resolved uploads root.
 
 The page cache is intended for anonymous public pages. Logged-in users, admin paths, cart/checkout/account flows, unsafe cookies, unsafe query strings, and configured exclusions are bypassed.
 
@@ -54,6 +54,18 @@ Recommended backend order:
 4. Disk only for advanced/debug use
 
 Redis fallback behavior is shown in the dashboard so the active backend is visible.
+
+
+= Secret constants =
+
+UltraCache does not store Redis or Varnish passwords in plugin settings or generated sidecar files. An administrator with plugin-management permission can enter or remove passwords from the UltraCache dashboard; UltraCache writes them only to its managed constants block in the active `wp-config.php` through the WordPress Filesystem API:
+
+`define( 'WP_REDIS_PASSWORD', 'redis-password' );`
+`define( 'ULTRACACHE_VARNISH_PASSWORD', 'varnish-password' );`
+
+An existing constant defined outside the UltraCache managed block remains externally managed and read-only in the dashboard. Redis ACL credentials are also supported when `WP_REDIS_PASSWORD` is defined externally as an array containing the username and password. Password values are never returned to the browser, stored in plugin options, exposed through REST or WP-CLI output, or written to diagnostics and logs.
+
+UltraCache derives its internal early-runtime control token from the existing WordPress authentication keys and salts. No standalone runtime-secret PHP file is created.
 
 = Media Rewrite =
 
@@ -74,7 +86,7 @@ Warm-up tools can build cache for selected URLs, homepage/menu URLs, or full-sit
 Diagnostics include cache status, storage summaries, object-cache backend truth, CSS bundle summaries, media queue status, Varnish checks, OPcache/APCu visibility, and STORE profiles.
 
 == Installation ==
-1. Upload the `ultracache` folder to `/wp-content/plugins/` or install the ZIP from the WordPress Plugins screen.
+1. Install the ZIP from the WordPress Plugins screen, or place the `ultracache` folder in the active WordPress plugins directory.
 2. Activate UltraCache.
 3. Open the UltraCache dashboard.
 4. Enable Page Cache and save settings.
@@ -85,7 +97,7 @@ Diagnostics include cache status, storage summaries, object-cache backend truth,
 == Frequently Asked Questions ==
 = Where are cache files stored? =
 
-Page-cache and internal runtime files are stored under `wp-content/cache/ultracache/`. Public generated optimization assets are stored under `wp-content/uploads/ultracache/`, including optimized image variants under `wp-content/uploads/ultracache/images/`.
+Page-cache, file analytics, and diagnostics are stored in `ultracache/cache/` below the active WordPress uploads directory; disk object-cache data is stored in `ultracache/object-cache/`. Public generated optimization assets use dedicated directories below the same resolved uploads root, including optimized image variants in `ultracache/images/`.
 
 == WP-CLI ==
 
@@ -136,7 +148,7 @@ UltraCache does not require an external SaaS account and does not send visitor d
 
 Google Fonts
 
-When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request CSS and font files from Google Fonts in order to build local copies under `wp-content/uploads/ultracache/google-fonts/`.
+When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request CSS and font files from Google Fonts in order to build local copies in `ultracache/google-fonts/` below the active WordPress uploads directory.
 
 UltraCache may also add or preserve Google Fonts parameters such as `display=swap` on Google Fonts URLs that already exist on the site. UltraCache does not add Google Fonts to a site by itself unless the administrator has enabled the local Google Fonts optimization feature or the site already uses Google Fonts through the active theme/plugins.
 
@@ -181,8 +193,8 @@ Optional support/donation links
 The dashboard may include optional support/donation links shown only to administrators. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit.
 
 Service provider: PayPal  
-Terms: https://www.paypal.com/legalhub/useragreement-full  
-Privacy: https://www.paypal.com/legalhub/paypal/privacy-full
+Terms: https://www.paypal.com/us/legalhub/paypal/useragreement-full  
+Privacy: https://www.paypal.com/us/legalhub/paypal/privacy-full
 
 == Privacy ==
 

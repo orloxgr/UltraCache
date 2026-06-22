@@ -20,23 +20,23 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
 
         private function get_uploads_public_path_marker()
         {
-            return function_exists('ucwp_uploads_public_path') ? ucwp_uploads_public_path() : '';
+            return function_exists('ultracache_uploads_public_path') ? ultracache_uploads_public_path() : '';
         }
 
         private function get_revslider_uploads_public_path_marker()
         {
-            return function_exists('ucwp_revslider_uploads_public_path') ? ucwp_revslider_uploads_public_path() : trailingslashit($this->get_uploads_public_path_marker() . 'revslider/');
+            return function_exists('ultracache_revslider_uploads_public_path') ? ultracache_revslider_uploads_public_path() : trailingslashit($this->get_uploads_public_path_marker() . 'revslider/');
         }
 
         private function get_revslider_optimized_uploads_public_path_marker()
         {
-            return function_exists('ucwp_revslider_optimized_uploads_public_path') ? ucwp_revslider_optimized_uploads_public_path() : trailingslashit($this->get_uploads_public_path_marker() . 'revslider/o/');
+            return function_exists('ultracache_revslider_optimized_uploads_public_path') ? ultracache_revslider_optimized_uploads_public_path() : trailingslashit($this->get_uploads_public_path_marker() . 'revslider/o/');
         }
 
         private function get_ultracache_optimized_images_public_path_marker($format)
         {
-            if (function_exists('ucwp_optimized_images_storage_url_path')) {
-                return ucwp_optimized_images_storage_url_path($format);
+            if (function_exists('ultracache_optimized_images_storage_url_path')) {
+                return ultracache_optimized_images_storage_url_path($format);
             }
 
             $format = strtolower(trim((string) $format));
@@ -123,8 +123,8 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                 'rs7',
                 'tptools',
                 'tp-tools',
-                '/plugins/revslider/',
-                '/plugins/slider-revolution/',
+                function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('revslider') : '',
+                function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('slider-revolution') : '',
                 $this->get_revslider_uploads_public_path_marker(),
                 'wp-block-themepunch-revslider',
                 'swiper',
@@ -160,7 +160,7 @@ if (!trait_exists('Ultra_Cache_Engine_LCP_Slider_Trait')) {
                 // detection in get_slider_hero_markup_markers().
             );
 
-            $filtered = apply_filters('ucwp_slider_hero_protected_fragments', $fragments);
+            $filtered = apply_filters('ultracache_slider_hero_protected_fragments', $fragments);
             if (is_array($filtered)) {
                 $fragments = $filtered;
             }
@@ -340,8 +340,8 @@ private function get_slider_hero_markup_markers()
                         'loading' => $processor->get_attribute('loading'),
                         'decoding' => $processor->get_attribute('decoding'),
                         'fetchpriority' => $processor->get_attribute('fetchpriority'),
-                        'data-ucwp-lcp' => $processor->get_attribute('data-ucwp-lcp'),
-                        'data-ucwp-sr7-lcp' => $processor->get_attribute('data-ucwp-sr7-lcp'),
+                        'data-ultracache-lcp' => $processor->get_attribute('data-ultracache-lcp'),
+                        'data-ultracache-sr7-lcp' => $processor->get_attribute('data-ultracache-sr7-lcp'),
                         'data-no-lazy' => $processor->get_attribute('data-no-lazy'),
                         'data-skip-lazy' => $processor->get_attribute('data-skip-lazy'),
                     );
@@ -367,8 +367,8 @@ private function get_slider_hero_markup_markers()
                         $changed = true;
                     }
 
-                    if (null === $processor->get_attribute('data-ucwp-lazy-image')) {
-                        $processor->set_attribute('data-ucwp-lazy-image', '1');
+                    if (null === $processor->get_attribute('data-ultracache-lazy-image')) {
+                        $processor->set_attribute('data-ultracache-lazy-image', '1');
                         $changed = true;
                     }
                 }
@@ -396,7 +396,7 @@ private function get_slider_hero_markup_markers()
                 return true;
             }
 
-            if ('' !== trim((string) (isset($attributes['data-ucwp-lcp']) ? $attributes['data-ucwp-lcp'] : '')) || '' !== trim((string) (isset($attributes['data-ucwp-sr7-lcp']) ? $attributes['data-ucwp-sr7-lcp'] : ''))) {
+            if ('' !== trim((string) (isset($attributes['data-ultracache-lcp']) ? $attributes['data-ultracache-lcp'] : '')) || '' !== trim((string) (isset($attributes['data-ultracache-sr7-lcp']) ? $attributes['data-ultracache-sr7-lcp'] : ''))) {
                 return true;
             }
 
@@ -674,11 +674,13 @@ private function get_slider_hero_markup_markers()
                 return false;
             }
 
-            if (false !== strpos($src_lc, '/wp-includes/js/')) {
+            $core_js_path = function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path('js/') : '';
+            if ('' !== $core_js_path && function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($src_lc, $core_js_path)) {
                 return false;
             }
 
-            if (false !== strpos($src_lc, '/plugins/woocommerce/assets/')) {
+            $woocommerce_path = function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('woocommerce') : '';
+            if (('' !== $woocommerce_path && function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($src_lc, $woocommerce_path)) || false !== strpos($src_lc, '/woocommerce/assets/')) {
                 return false;
             }
 
@@ -691,7 +693,7 @@ private function get_slider_hero_markup_markers()
             if ('' === $tag || false === stripos($tag, '<script')) {
                 return $tag;
             }
-            if (false !== stripos($tag, 'type="text/ucwp-delayed-js"') || false !== stripos($tag, "type='text/ucwp-delayed-js'") || false !== stripos($tag, 'data-ucwp-src=')) {
+            if (false !== stripos($tag, 'type="text/ultracache-delayed-js"') || false !== stripos($tag, "type='text/ultracache-delayed-js'") || false !== stripos($tag, 'data-ultracache-src=')) {
                 return $tag;
             }
 
@@ -865,7 +867,7 @@ private function get_slider_hero_markup_markers()
                 // This injects a final-HTML preload discovered after LCP/critical-chain analysis.
                 // It is not an enqueued stylesheet/script, so wp_enqueue_style() / wp_enqueue_script() is not applicable.
                 // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
-                $tags[] = '<link ' . $attrs . ' data-ucwp-critical-chain="1">';
+                $tags[] = '<link ' . $attrs . ' data-ultracache-critical-chain="1">';
             }
 
             if (empty($tags)) {
@@ -1530,7 +1532,7 @@ private function get_slider_hero_markup_markers()
             }
 
             // In a manually scoped hero/slider, prefer a specifically marked SR7 LCP image when present.
-            if (preg_match_all('/<(?:sr7-img|img)\b[^>]*\bdata-ucwp-sr7-lcp\s*=\s*(["\'])1\1[^>]*>/i', $block, $matches)) {
+            if (preg_match_all('/<(?:sr7-img|img)\b[^>]*\bdata-ultracache-sr7-lcp\s*=\s*(["\'])1\1[^>]*>/i', $block, $matches)) {
                 foreach ($matches[0] as $index => $tag_html) {
                     $candidate = $this->extract_lcp_candidate_from_html_tag($tag_html, array(
                         'manual_lcp_hero_selector' => $selector,
@@ -1651,11 +1653,11 @@ private function get_slider_hero_markup_markers()
         {
             $html = (string) $html;
             $limit = max(1, min(5, (int) $limit));
-            if ('' === $html || false === stripos($html, 'data-ucwp-sr7-lcp')) {
+            if ('' === $html || false === stripos($html, 'data-ultracache-sr7-lcp')) {
                 return array();
             }
 
-            if (!preg_match_all('/<(?:sr7-img|img)\b[^>]*\bdata-ucwp-sr7-lcp\s*=\s*(["\'])1\1[^>]*>/i', $html, $matches)) {
+            if (!preg_match_all('/<(?:sr7-img|img)\b[^>]*\bdata-ultracache-sr7-lcp\s*=\s*(["\'])1\1[^>]*>/i', $html, $matches)) {
                 return array();
             }
 
@@ -1797,7 +1799,7 @@ private function set_lcp_marker_on_start_tag($tag, $is_sr7 = false)
                 return $tag;
             }
 
-            $attribute = $is_sr7 ? 'data-ucwp-sr7-lcp' : 'data-ucwp-lcp';
+            $attribute = $is_sr7 ? 'data-ultracache-sr7-lcp' : 'data-ultracache-lcp';
             if (false !== stripos($tag, $attribute . '=')) {
                 return $tag;
             }
@@ -1830,12 +1832,12 @@ public function enqueue_sr7_lcp_priority_runtime_helper()
             }
 
             $selectors = array_values(array_unique($selectors));
-            $handle = 'ucwp-sr7-lcp-priority';
-            if (!$this->ucwp_enqueue_frontend_js_helper($handle, 'sr7-lcp-priority.js', array(), false)) {
+            $handle = 'ultracache-sr7-lcp-priority';
+            if (!$this->ultracache_enqueue_frontend_js_helper($handle, 'sr7-lcp-priority.js', array(), false)) {
                 return;
             }
 
-            $this->ucwp_add_frontend_js_helper_data($handle, 'ucwpSr7LcpPriorityConfig', array(
+            $this->ultracache_add_frontend_js_helper_data($handle, 'ultracacheSr7LcpPriorityConfig', array(
                 'manualSelectors' => $selectors,
             ));
         }
@@ -3357,17 +3359,17 @@ private function inject_sr7_lcp_priority_runtime_script($html)
                 return $url;
             }
 
-            if (defined('UCWP_AVIF_DIR') && defined('UCWP_AVIF_URL')) {
-                $avif_path = trailingslashit(UCWP_AVIF_DIR) . $relative_no_ext . '.avif';
+            if (defined('ULTRACACHE_AVIF_DIR') && defined('ULTRACACHE_AVIF_URL')) {
+                $avif_path = trailingslashit(ULTRACACHE_AVIF_DIR) . $relative_no_ext . '.avif';
                 if ($this->is_generated_image_fresh_for_source($avif_path, $url)) {
-                    return $this->normalize_public_resource_url(trailingslashit(UCWP_AVIF_URL) . $relative_no_ext . '.avif');
+                    return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_AVIF_URL) . $relative_no_ext . '.avif');
                 }
             }
 
-            if (defined('UCWP_WEBP_DIR') && defined('UCWP_WEBP_URL')) {
-                $webp_path = trailingslashit(UCWP_WEBP_DIR) . $relative_no_ext . '.webp';
+            if (defined('ULTRACACHE_WEBP_DIR') && defined('ULTRACACHE_WEBP_URL')) {
+                $webp_path = trailingslashit(ULTRACACHE_WEBP_DIR) . $relative_no_ext . '.webp';
                 if ($this->is_generated_image_fresh_for_source($webp_path, $url)) {
-                    return $this->normalize_public_resource_url(trailingslashit(UCWP_WEBP_URL) . $relative_no_ext . '.webp');
+                    return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_WEBP_URL) . $relative_no_ext . '.webp');
                 }
             }
 
@@ -3623,17 +3625,17 @@ private function prefer_existing_nextgen_revslider_url($url)
                 return $url;
             }
 
-            if (defined('UCWP_AVIF_DIR') && defined('UCWP_AVIF_URL')) {
-                $avif_path = trailingslashit(UCWP_AVIF_DIR) . 'revslider/o/' . $relative_no_ext . '.avif';
+            if (defined('ULTRACACHE_AVIF_DIR') && defined('ULTRACACHE_AVIF_URL')) {
+                $avif_path = trailingslashit(ULTRACACHE_AVIF_DIR) . 'revslider/o/' . $relative_no_ext . '.avif';
                 if ($this->is_generated_image_fresh_for_source($avif_path, $url)) {
-                    return $this->normalize_public_resource_url(trailingslashit(UCWP_AVIF_URL) . 'revslider/o/' . $relative_no_ext . '.avif');
+                    return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_AVIF_URL) . 'revslider/o/' . $relative_no_ext . '.avif');
                 }
             }
 
-            if (defined('UCWP_WEBP_DIR') && defined('UCWP_WEBP_URL')) {
-                $webp_path = trailingslashit(UCWP_WEBP_DIR) . 'revslider/o/' . $relative_no_ext . '.webp';
+            if (defined('ULTRACACHE_WEBP_DIR') && defined('ULTRACACHE_WEBP_URL')) {
+                $webp_path = trailingslashit(ULTRACACHE_WEBP_DIR) . 'revslider/o/' . $relative_no_ext . '.webp';
                 if ($this->is_generated_image_fresh_for_source($webp_path, $url)) {
-                    return $this->normalize_public_resource_url(trailingslashit(UCWP_WEBP_URL) . 'revslider/o/' . $relative_no_ext . '.webp');
+                    return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_WEBP_URL) . 'revslider/o/' . $relative_no_ext . '.webp');
                 }
             }
 
@@ -3882,24 +3884,24 @@ private function prefer_existing_nextgen_revslider_url($url)
                         $changed = true;
                     }
 
-                    $marker_attribute = ('SR7-IMG' === $tag || !empty($candidate['is_sr7'])) ? 'data-ucwp-sr7-lcp' : 'data-ucwp-lcp';
+                    $marker_attribute = ('SR7-IMG' === $tag || !empty($candidate['is_sr7'])) ? 'data-ultracache-sr7-lcp' : 'data-ultracache-lcp';
                     if (null === $processor->get_attribute($marker_attribute)) {
                         $processor->set_attribute($marker_attribute, '1');
                         $changed = true;
                     }
 
-                    if (!empty($candidate['lcp_reason']) && (string) $processor->get_attribute('data-ucwp-lcp-reason') !== (string) $candidate['lcp_reason']) {
-                        $processor->set_attribute('data-ucwp-lcp-reason', (string) $candidate['lcp_reason']);
+                    if (!empty($candidate['lcp_reason']) && (string) $processor->get_attribute('data-ultracache-lcp-reason') !== (string) $candidate['lcp_reason']) {
+                        $processor->set_attribute('data-ultracache-lcp-reason', (string) $candidate['lcp_reason']);
                         $changed = true;
                     }
-                    if (isset($candidate['score']) && (string) $processor->get_attribute('data-ucwp-lcp-score') !== (string) (int) $candidate['score']) {
-                        $processor->set_attribute('data-ucwp-lcp-score', (string) (int) $candidate['score']);
+                    if (isset($candidate['score']) && (string) $processor->get_attribute('data-ultracache-lcp-score') !== (string) (int) $candidate['score']) {
+                        $processor->set_attribute('data-ultracache-lcp-score', (string) (int) $candidate['score']);
                         $changed = true;
                     }
 
                     if (!empty($candidate['is_sr7'])) {
-                        if (!empty($candidate['sr7_role']) && (string) $processor->get_attribute('data-ucwp-sr7-role') !== (string) $candidate['sr7_role']) {
-                            $processor->set_attribute('data-ucwp-sr7-role', (string) $candidate['sr7_role']);
+                        if (!empty($candidate['sr7_role']) && (string) $processor->get_attribute('data-ultracache-sr7-role') !== (string) $candidate['sr7_role']) {
+                            $processor->set_attribute('data-ultracache-sr7-role', (string) $candidate['sr7_role']);
                             $changed = true;
                         }
                     }
@@ -4173,7 +4175,7 @@ private function prefer_existing_nextgen_revslider_url($url)
             if ('' !== $mime_type) {
                 $link .= ' type="' . esc_attr($mime_type) . '"';
             }
-            $link .= ' fetchpriority="high" data-ucwp-lcp-preload="1" data-ucwp-lcp-preload-reason="lcp-image-priority"';
+            $link .= ' fetchpriority="high" data-ultracache-lcp-preload="1" data-ultracache-lcp-preload-reason="lcp-image-priority"';
             if (!$is_same_origin) {
                 $link .= ' crossorigin="anonymous"';
             }
@@ -4222,12 +4224,12 @@ private function prefer_existing_nextgen_revslider_url($url)
                         $processor->set_attribute('type', (string) $mime_type);
                         $changed = true;
                     }
-                    if ('1' !== (string) $processor->get_attribute('data-ucwp-lcp-preload')) {
-                        $processor->set_attribute('data-ucwp-lcp-preload', '1');
+                    if ('1' !== (string) $processor->get_attribute('data-ultracache-lcp-preload')) {
+                        $processor->set_attribute('data-ultracache-lcp-preload', '1');
                         $changed = true;
                     }
-                    if (null === $processor->get_attribute('data-ucwp-lcp-preload-reason')) {
-                        $processor->set_attribute('data-ucwp-lcp-preload-reason', 'lcp-image-priority');
+                    if (null === $processor->get_attribute('data-ultracache-lcp-preload-reason')) {
+                        $processor->set_attribute('data-ultracache-lcp-preload-reason', 'lcp-image-priority');
                         $changed = true;
                     }
 
@@ -4281,9 +4283,9 @@ private function prefer_existing_nextgen_revslider_url($url)
                         continue;
                     }
 
-                    $is_ucwp_preload = null !== $processor->get_attribute('data-ucwp-lcp-preload')
-                        || null !== $processor->get_attribute('data-ucwp-critical-chain');
-                    if (!$is_ucwp_preload) {
+                    $is_ultracache_preload = null !== $processor->get_attribute('data-ultracache-lcp-preload')
+                        || null !== $processor->get_attribute('data-ultracache-critical-chain');
+                    if (!$is_ultracache_preload) {
                         continue;
                     }
 
@@ -4320,9 +4322,9 @@ private function prefer_existing_nextgen_revslider_url($url)
                         'crossorigin',
                         'referrerpolicy',
                         'integrity',
-                        'data-ucwp-lcp-preload',
-                        'data-ucwp-lcp-preload-reason',
-                        'data-ucwp-critical-chain',
+                        'data-ultracache-lcp-preload',
+                        'data-ultracache-lcp-preload-reason',
+                        'data-ultracache-critical-chain',
                     ) as $attribute) {
                         if (null !== $processor->get_attribute($attribute)) {
                             $processor->remove_attribute($attribute);
@@ -4330,9 +4332,9 @@ private function prefer_existing_nextgen_revslider_url($url)
                         }
                     }
 
-                    $processor->set_attribute('data-ucwp-lcp-preload-removed', '1');
-                    $processor->set_attribute('data-ucwp-lcp-preload-removed-reason', $remove_reason);
-                    $processor->set_attribute('data-ucwp-original-preload-href', $normalized);
+                    $processor->set_attribute('data-ultracache-lcp-preload-removed', '1');
+                    $processor->set_attribute('data-ultracache-lcp-preload-removed-reason', $remove_reason);
+                    $processor->set_attribute('data-ultracache-original-preload-href', $normalized);
                     $changed = true;
                 }
 

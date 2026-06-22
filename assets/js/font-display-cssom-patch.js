@@ -1,8 +1,8 @@
 (function () {
-    if (window.__ucwpFontDisplayCssomPatch) {
+    if (window.__ultracacheFontDisplayCssomPatch) {
         return;
     }
-    window.__ucwpFontDisplayCssomPatch = 1;
+    window.__ultracacheFontDisplayCssomPatch = 1;
 
     var RX = /@font-face\s*\{[^}]*\}/gi;
     var MAX_SHEETS = 48;
@@ -18,7 +18,7 @@
         try {
             var r = root();
             if (r) {
-                r.setAttribute('data-ucwp-font-display-' + key, String(value));
+                r.setAttribute('data-ultracache-font-display-' + key, String(value));
             }
         } catch (e) {}
     }
@@ -58,7 +58,7 @@
         var patched = patchText(css);
         if (patched !== css) {
             node.textContent = patched;
-            node.setAttribute('data-ucwp-font-display-patched', '1');
+            node.setAttribute('data-ultracache-font-display-patched', '1');
         }
     }
 
@@ -143,7 +143,7 @@
 
     try {
         var proto = window.CSSStyleSheet && window.CSSStyleSheet.prototype;
-        if (proto && proto.insertRule && !proto.__ucwpFontDisplayPatched) {
+        if (proto && proto.insertRule && !proto.__ultracacheFontDisplayPatched) {
             var insertRule = proto.insertRule;
             proto.insertRule = function (rule, index) {
                 return insertRule.call(this, patchText(rule), index);
@@ -157,7 +157,7 @@
                     return addRule.call(this, selector, style, index);
                 };
             }
-            proto.__ucwpFontDisplayPatched = 1;
+            proto.__ultracacheFontDisplayPatched = 1;
         }
     } catch (e) {}
 

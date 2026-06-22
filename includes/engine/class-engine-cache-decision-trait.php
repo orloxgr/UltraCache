@@ -41,24 +41,24 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 'pay_for_order',
                 'cancel_order',
                 'download_file',
-                'ucwp_revalidate',
-                'ucwp_rt',
-                'ucwp_store_profile',
-                'ucwp_callback_profile',
-                'ucwp_store_profile_verbose',
-                'ucwp_store_profile_verbose_settings',
-                'ucwp_profile_bypass',
-                'ucwp_profile_run',
-                'ucwp_runtime_js_scan',
-                'ucwp_runtime_js_scan_id',
-                'ucwp_runtime_js_scan_nonce',
+                'ultracache_revalidate',
+                'ultracache_rt',
+                'ultracache_store_profile',
+                'ultracache_callback_profile',
+                'ultracache_store_profile_verbose',
+                'ultracache_store_profile_verbose_settings',
+                'ultracache_profile_bypass',
+                'ultracache_profile_run',
+                'ultracache_runtime_js_scan',
+                'ultracache_runtime_js_scan_id',
+                'ultracache_runtime_js_scan_nonce',
             );
         }
 
         private function get_hard_security_excluded_paths()
         {
-            return array(
-                '/wp-admin/',
+            return array_values(array_filter(array(
+                function_exists('ultracache_wordpress_admin_public_path') ? ultracache_wordpress_admin_public_path() : '',
                 '/wp-login.php',
                 '/wp-json/',
                 '/xmlrpc.php',
@@ -72,7 +72,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 '/order-received/',
                 '/add-payment-method/',
                 '/lost-password/',
-            );
+            )));
         }
 
         private function merge_hard_security_excluded_paths(array $excluded_paths)
@@ -178,17 +178,17 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
         private function get_internal_control_query_args()
         {
             return array(
-                'ucwp_revalidate',
-                'ucwp_rt',
-                'ucwp_store_profile',
-                'ucwp_callback_profile',
-                'ucwp_store_profile_verbose',
-                'ucwp_store_profile_verbose_settings',
-                'ucwp_profile_bypass',
-                'ucwp_profile_run',
-                'ucwp_runtime_js_scan',
-                'ucwp_runtime_js_scan_id',
-                'ucwp_runtime_js_scan_nonce',
+                'ultracache_revalidate',
+                'ultracache_rt',
+                'ultracache_store_profile',
+                'ultracache_callback_profile',
+                'ultracache_store_profile_verbose',
+                'ultracache_store_profile_verbose_settings',
+                'ultracache_profile_bypass',
+                'ultracache_profile_run',
+                'ultracache_runtime_js_scan',
+                'ultracache_runtime_js_scan_id',
+                'ultracache_runtime_js_scan_nonce',
             );
         }
 
@@ -230,7 +230,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 'HTTP_X_ULTRACACHE_CALLBACK_PROFILE',
             );
             foreach ($headers as $header) {
-                if ('' !== trim((string) ucwp_server_value($header))) {
+                if ('' !== trim((string) ultracache_server_value($header))) {
                     return true;
                 }
             }
@@ -248,7 +248,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 return false;
             }
 
-            if (function_exists('ucwp_request_profiler_enabled') && ucwp_request_profiler_enabled()) {
+            if (function_exists('ultracache_request_profiler_enabled') && ultracache_request_profiler_enabled()) {
                 return false;
             }
 
@@ -595,29 +595,29 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
 
         private function get_revalidate_secret()
         {
-            return function_exists('ucwp_runtime_control_secret') ? ucwp_runtime_control_secret() : wp_hash('ucwp-revalidate-v1');
+            return function_exists('ultracache_runtime_control_secret') ? ultracache_runtime_control_secret() : wp_hash('ultracache-revalidate-v1');
         }
 
         private function is_valid_revalidate_token($token)
         {
-            if (!function_exists('ucwp_validate_runtime_control_token')) {
+            if (!function_exists('ultracache_validate_runtime_control_token')) {
                 return false;
             }
 
-            return ucwp_validate_runtime_control_token($token, $this->get_revalidate_secret());
+            return ultracache_validate_runtime_control_token($token, $this->get_revalidate_secret());
         }
 
         private function is_internal_revalidate_request()
         {
-            $request_flag = sanitize_text_field(ucwp_query_value('ucwp_revalidate'));
-            $header_flag  = sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_REVALIDATE'));
+            $request_flag = sanitize_text_field(ultracache_query_value('ultracache_revalidate'));
+            $header_flag  = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_REVALIDATE'));
             if ('1' !== $request_flag && '1' !== $header_flag) {
                 return false;
             }
 
-            $token = sanitize_text_field(ucwp_query_value('ucwp_rt'));
+            $token = sanitize_text_field(ultracache_query_value('ultracache_rt'));
             if ('' === $token) {
-                $token = sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_TOKEN'));
+                $token = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_TOKEN'));
             }
 
             if ('' === $token) {
@@ -629,15 +629,15 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
 
         private function is_profile_bypass_request()
         {
-            $header_flag = sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_PROFILE_BYPASS'));
-            $query_flag = sanitize_text_field(ucwp_query_value('ucwp_profile_bypass'));
+            $header_flag = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_PROFILE_BYPASS'));
+            $query_flag = sanitize_text_field(ultracache_query_value('ultracache_profile_bypass'));
             if ('1' !== $header_flag && 'true' !== strtolower((string) $header_flag) && '1' !== $query_flag && 'true' !== strtolower((string) $query_flag)) {
                 return false;
             }
 
-            $token = sanitize_text_field(ucwp_server_value('HTTP_X_ULTRACACHE_TOKEN'));
+            $token = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_TOKEN'));
             if ('' === $token) {
-                $token = sanitize_text_field(ucwp_query_value('ucwp_rt'));
+                $token = sanitize_text_field(ultracache_query_value('ultracache_rt'));
             }
             if ('' === $token) {
                 return false;
@@ -650,7 +650,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
         {
             $lock = $this->get_revalidate_lock_path($url);
             if ($lock && file_exists($lock)) {
-                ucwp_safe_unlink($lock);
+                ultracache_safe_unlink($lock);
             }
         }
 
@@ -720,7 +720,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 $this->profile_request_checkpoint('should_bypass_return', array('reason' => 'internal-revalidate-allowed'));
                 return false;
             }
-            if ($this->has_invalid_internal_control_request(ucwp_server_value('QUERY_STRING'))) {
+            if ($this->has_invalid_internal_control_request(ultracache_server_value('QUERY_STRING'))) {
                 $this->last_bypass_reason = 'invalid-internal-control';
                 $this->profile_request_checkpoint('should_bypass_return', array('reason' => $this->last_bypass_reason));
                 return true;
@@ -780,18 +780,18 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 return true;
             }
             if ('' !== $query) {
-                parse_str($query, $ucwp_query_vars_for_cacheability);
+                parse_str($query, $ultracache_query_vars_for_cacheability);
                 unset(
-                    $ucwp_query_vars_for_cacheability['ucwp_revalidate'],
-                    $ucwp_query_vars_for_cacheability['ucwp_rt'],
-                    $ucwp_query_vars_for_cacheability['ucwp_store_profile'],
-                    $ucwp_query_vars_for_cacheability['ucwp_callback_profile'],
-                    $ucwp_query_vars_for_cacheability['ucwp_store_profile_verbose'],
-                    $ucwp_query_vars_for_cacheability['ucwp_store_profile_verbose_settings'],
-                    $ucwp_query_vars_for_cacheability['ucwp_profile_bypass'],
-                    $ucwp_query_vars_for_cacheability['ucwp_profile_run']
+                    $ultracache_query_vars_for_cacheability['ultracache_revalidate'],
+                    $ultracache_query_vars_for_cacheability['ultracache_rt'],
+                    $ultracache_query_vars_for_cacheability['ultracache_store_profile'],
+                    $ultracache_query_vars_for_cacheability['ultracache_callback_profile'],
+                    $ultracache_query_vars_for_cacheability['ultracache_store_profile_verbose'],
+                    $ultracache_query_vars_for_cacheability['ultracache_store_profile_verbose_settings'],
+                    $ultracache_query_vars_for_cacheability['ultracache_profile_bypass'],
+                    $ultracache_query_vars_for_cacheability['ultracache_profile_run']
                 );
-                $query = !empty($ucwp_query_vars_for_cacheability) ? http_build_query($ucwp_query_vars_for_cacheability) : '';
+                $query = !empty($ultracache_query_vars_for_cacheability) ? http_build_query($ultracache_query_vars_for_cacheability) : '';
             }
             $this->profile_request_checkpoint('should_bypass_after_url_parse', array('path' => substr((string) $path, 0, 160), 'query_length' => strlen($query)));
 
@@ -879,8 +879,8 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 return false;
             }
 
-            if (function_exists('ucwp_is_strict_frontend_loopback_url')) {
-                return ucwp_is_strict_frontend_loopback_url($url);
+            if (function_exists('ultracache_is_strict_frontend_loopback_url')) {
+                return ultracache_is_strict_frontend_loopback_url($url);
             }
 
             $parts = wp_parse_url($url);
@@ -1001,40 +1001,40 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
 
         private function get_current_request_scheme()
         {
-            $is_ssl = ucwp_server_flag_enabled('HTTPS')
-                || ('443' === ucwp_server_value('SERVER_PORT'));
+            $is_ssl = ultracache_server_flag_enabled('HTTPS')
+                || ('443' === ultracache_server_value('SERVER_PORT'));
 
             if ($is_ssl) {
                 return 'https';
             }
 
-            $forwarded_proto_parts = explode(',', ucwp_server_value('HTTP_X_FORWARDED_PROTO'));
+            $forwarded_proto_parts = explode(',', ultracache_server_value('HTTP_X_FORWARDED_PROTO'));
             $forwarded_proto = strtolower(trim((string) reset($forwarded_proto_parts)));
             if ('https' === $forwarded_proto) {
                 return 'https';
             }
 
-            $forwarded_scheme = strtolower(trim((string) ucwp_server_value('HTTP_X_FORWARDED_SCHEME')));
+            $forwarded_scheme = strtolower(trim((string) ultracache_server_value('HTTP_X_FORWARDED_SCHEME')));
             if ('https' === $forwarded_scheme) {
                 return 'https';
             }
 
-            $forwarded_ssl = strtolower(trim((string) ucwp_server_value('HTTP_X_FORWARDED_SSL')));
+            $forwarded_ssl = strtolower(trim((string) ultracache_server_value('HTTP_X_FORWARDED_SSL')));
             if (in_array($forwarded_ssl, array('on', '1', 'true', 'https'), true)) {
                 return 'https';
             }
 
-            $frontend_https = strtolower(trim((string) ucwp_server_value('HTTP_FRONT_END_HTTPS')));
+            $frontend_https = strtolower(trim((string) ultracache_server_value('HTTP_FRONT_END_HTTPS')));
             if (in_array($frontend_https, array('on', '1', 'true'), true)) {
                 return 'https';
             }
 
-            $cloudfront_proto = strtolower(trim((string) ucwp_server_value('HTTP_CLOUDFRONT_FORWARDED_PROTO')));
+            $cloudfront_proto = strtolower(trim((string) ultracache_server_value('HTTP_CLOUDFRONT_FORWARDED_PROTO')));
             if ('https' === $cloudfront_proto) {
                 return 'https';
             }
 
-            $cf_visitor = (string) ucwp_server_value('HTTP_CF_VISITOR');
+            $cf_visitor = (string) ultracache_server_value('HTTP_CF_VISITOR');
             if (false !== stripos($cf_visitor, '"scheme":"https"')) {
                 return 'https';
             }
@@ -1050,12 +1050,12 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
 
             $scheme_value = $this->get_current_request_scheme();
             $scheme = $scheme_value . '://';
-            $host = ucwp_get_validated_http_host(ucwp_server_value('HTTP_HOST'), 'engine_current_request_url');
+            $host = ultracache_get_validated_http_host(ultracache_server_value('HTTP_HOST'), 'engine_current_request_url');
             if ('' === $host) {
                 return '';
             }
 
-            $uri = ucwp_server_value('REQUEST_URI');
+            $uri = ultracache_server_value('REQUEST_URI');
             $url = $scheme . $host . $uri;
             $parts = wp_parse_url($url);
             if (!is_array($parts) || empty($parts['host'])) {
@@ -1066,7 +1066,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             $query = '';
             if (!empty($parts['query'])) {
                 parse_str((string) $parts['query'], $query_vars);
-                unset($query_vars['ucwp_revalidate'], $query_vars['ucwp_rt'], $query_vars['ucwp_store_profile'], $query_vars['ucwp_callback_profile'], $query_vars['ucwp_store_profile_verbose'], $query_vars['ucwp_store_profile_verbose_settings'], $query_vars['ucwp_profile_bypass'], $query_vars['ucwp_profile_run'], $query_vars['ucwp_runtime_js_scan'], $query_vars['ucwp_runtime_js_scan_id'], $query_vars['ucwp_runtime_js_scan_nonce']);
+                unset($query_vars['ultracache_revalidate'], $query_vars['ultracache_rt'], $query_vars['ultracache_store_profile'], $query_vars['ultracache_callback_profile'], $query_vars['ultracache_store_profile_verbose'], $query_vars['ultracache_store_profile_verbose_settings'], $query_vars['ultracache_profile_bypass'], $query_vars['ultracache_profile_run'], $query_vars['ultracache_runtime_js_scan'], $query_vars['ultracache_runtime_js_scan_id'], $query_vars['ultracache_runtime_js_scan_nonce']);
                 if (!empty($query_vars)) {
                     ksort($query_vars);
                     $query = http_build_query($query_vars);

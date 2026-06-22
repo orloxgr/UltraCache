@@ -45,8 +45,20 @@ trait Ultra_Cache_Engine_Media_Image_Trait
 
                 $stats['scanned']++;
 
-                $width = $this->parse_positive_dimension_value($processor->get_attribute('width'));
-                $height = $this->parse_positive_dimension_value($processor->get_attribute('height'));
+                $width_attribute = $this->classify_safe_cls_dimension_attribute($processor->get_attribute('width'));
+                $height_attribute = $this->classify_safe_cls_dimension_attribute($processor->get_attribute('height'));
+
+                if (
+                    ($width_attribute['present'] && !$width_attribute['valid'])
+                    || ($height_attribute['present'] && !$height_attribute['valid'])
+                    || $this->safe_cls_inline_style_disables_responsive_limit($processor->get_attribute('style'))
+                ) {
+                    $stats['skipped']++;
+                    continue;
+                }
+
+                $width = (int) $width_attribute['value'];
+                $height = (int) $height_attribute['value'];
                 if ($width > 0 && $height > 0) {
                     $stats['skipped']++;
                     continue;
@@ -80,11 +92,16 @@ trait Ultra_Cache_Engine_Media_Image_Trait
                 }
 
                 $changed = false;
-                if ($width < 1) {
-                    $processor->set_attribute('width', (string) $resolved_width);
+                if ($width > 0 && $height < 1) {
+                    $proportional_height = max(1, (int) round(($width * $resolved_height) / $resolved_width));
+                    $processor->set_attribute('height', (string) $proportional_height);
                     $changed = true;
-                }
-                if ($height < 1) {
+                } elseif ($height > 0 && $width < 1) {
+                    $proportional_width = max(1, (int) round(($height * $resolved_width) / $resolved_height));
+                    $processor->set_attribute('width', (string) $proportional_width);
+                    $changed = true;
+                } elseif ($width < 1 && $height < 1) {
+                    $processor->set_attribute('width', (string) $resolved_width);
                     $processor->set_attribute('height', (string) $resolved_height);
                     $changed = true;
                 }
@@ -214,8 +231,8 @@ trait Ultra_Cache_Engine_Media_Image_Trait
             }
 
             $cache_prefixes = array(
-                function_exists('ucwp_optimized_images_storage_url_path') ? ucwp_optimized_images_storage_url_path('avif') : '',
-                function_exists('ucwp_optimized_images_storage_url_path') ? ucwp_optimized_images_storage_url_path('webp') : '',
+                function_exists('ultracache_optimized_images_storage_url_path') ? ultracache_optimized_images_storage_url_path('avif') : '',
+                function_exists('ultracache_optimized_images_storage_url_path') ? ultracache_optimized_images_storage_url_path('webp') : '',
             );
 
             $relative = '';
@@ -236,7 +253,7 @@ trait Ultra_Cache_Engine_Media_Image_Trait
                 return '';
             }
 
-            $uploads = wp_get_upload_dir();
+            $uploads = ultracache_uploads_base_info();
             if (empty($uploads['basedir']) || empty($uploads['baseurl'])) {
                 return '';
             }
@@ -275,7 +292,7 @@ trait Ultra_Cache_Engine_Media_Image_Trait
             }
 
             $extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
-            if ('' === $extension || in_array($extension, array('svg', 'php'), true)) {
+            if ('' === $extension || in_array($extension, array('svg', 'svgz', 'php'), true)) {
                 return false;
             }
 
@@ -382,18 +399,49 @@ trait Ultra_Cache_Engine_Media_Image_Trait
             );
         }
 
-        private function parse_positive_dimension_value($value)
+        private function classify_safe_cls_dimension_attribute($value)
         {
-            if (!is_scalar($value)) {
-                return 0;
+            if (null === $value) {
+                return array(
+                    'present' => false,
+                    'valid' => false,
+                    'value' => 0,
+                );
+            }
+
+            if (!is_scalar($value) || true === $value) {
+                return array(
+                    'present' => true,
+                    'valid' => false,
+                    'value' => 0,
+                );
             }
 
             $value = trim((string) $value);
             if ('' === $value || !preg_match('/^\d+$/', $value)) {
-                return 0;
+                return array(
+                    'present' => true,
+                    'valid' => false,
+                    'value' => 0,
+                );
             }
 
-            return max(0, (int) $value);
+            $dimension = max(0, (int) $value);
+
+            return array(
+                'present' => true,
+                'valid' => $dimension > 0,
+                'value' => $dimension,
+            );
+        }
+
+        private function safe_cls_inline_style_disables_responsive_limit($style)
+        {
+            if (!is_scalar($style) || true === $style) {
+                return false;
+            }
+
+            return 1 === preg_match('/(?:^|;)\s*max-width\s*:\s*none(?:\s*!important)?\s*(?:;|$)/i', (string) $style);
         }
 
 }

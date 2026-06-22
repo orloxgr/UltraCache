@@ -107,7 +107,7 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 					return;
 				}
 
-				$batch_size = (int) apply_filters('ucwp_media_queue_batch_size', 1);
+				$batch_size = (int) apply_filters('ultracache_media_queue_batch_size', 1);
 				$batch_size = max(1, min(2, $batch_size));
 
 				$result = $this->process_media_queue_batch(array(

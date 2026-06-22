@@ -5,8 +5,8 @@
 
 defined('ABSPATH') || exit;
 
-if (!trait_exists('UCWP_CLI_Cache_Trait')) {
-    trait UCWP_CLI_Cache_Trait
+if (!trait_exists('ULTRACACHE_CLI_Cache_Trait')) {
+    trait ULTRACACHE_CLI_Cache_Trait
     {
         public function purge($args, $assoc_args)
         {

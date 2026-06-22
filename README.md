@@ -1,12 +1,12 @@
 # UltraCache
 
-Current version: **2.59.06.33**
+Current version: **2.59.06.59**
 
 UltraCache is a WordPress performance plugin with page cache, object-cache integration, AVIF/WebP media rewrite, CSS/font optimization, warm-up tools, Varnish helpers, and diagnostics.
 
 ## Storage and WordPress drop-ins
 
-UltraCache writes browser-loaded generated assets under the WordPress uploads directory, in `uploads/ultracache/`. WordPress drop-ins are the exception: `advanced-cache.php` and `object-cache.php` must remain directly under `WP_CONTENT_DIR` because WordPress only loads those drop-ins from that required location.
+UltraCache writes browser-loaded generated assets under the WordPress uploads directory, in `uploads/ultracache/`. WordPress drop-ins are the exception: `advanced-cache.php` and `object-cache.php` must remain directly in the WordPress content directory because WordPress only loads those drop-ins from that required location.
 
 ## Main features
 
@@ -26,7 +26,7 @@ UltraCache writes browser-loaded generated assets under the WordPress uploads di
 
 ## Page cache
 
-UltraCache manages the WordPress `advanced-cache.php` drop-in, stores page-cache/runtime files under `wp-content/cache/ultracache/`, and stores public generated optimization assets under `wp-content/uploads/ultracache/`.
+UltraCache manages the WordPress `advanced-cache.php` drop-in, stores page-cache, file analytics, diagnostics, and disk-object-cache data below the active WordPress uploads directory in `ultracache/`, while public generated optimization assets use dedicated directories under the same resolved uploads root.
 
 The page cache is for anonymous public pages. Logged-in users, admin paths, cart/checkout/account flows, unsafe cookies, unsafe query strings, and configured exclusions are bypassed.
 
@@ -40,6 +40,20 @@ Recommended backend order:
 4. Disk only for advanced/debug use
 
 Redis fallback behavior is shown in the dashboard so the active backend is visible.
+
+
+## Secret constants
+
+UltraCache does not store Redis or Varnish passwords in plugin settings or generated sidecar files. An administrator with plugin-management permission can enter or remove passwords from the UltraCache dashboard; UltraCache writes them only to its managed constants block in the active `wp-config.php` through the WordPress Filesystem API:
+
+```php
+define( 'WP_REDIS_PASSWORD', 'redis-password' );
+define( 'ULTRACACHE_VARNISH_PASSWORD', 'varnish-password' );
+```
+
+An existing constant defined outside the UltraCache managed block remains externally managed and read-only in the dashboard. Redis ACL credentials are also supported when `WP_REDIS_PASSWORD` is defined externally as an array containing the username and password. Password values are never returned to the browser, stored in plugin options, exposed through REST or WP-CLI output, or written to diagnostics and logs.
+
+UltraCache derives its internal early-runtime control token from the existing WordPress authentication keys and salts. No standalone runtime-secret PHP file is created.
 
 ## Media Rewrite
 
@@ -106,7 +120,7 @@ UltraCache does not require an external SaaS account and does not send visitor d
 
 ### Google Fonts
 
-When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request CSS and font files from Google Fonts in order to build local copies under `wp-content/uploads/ultracache/google-fonts/`.
+When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request CSS and font files from Google Fonts in order to build local copies in `ultracache/google-fonts/` below the active WordPress uploads directory.
 
 UltraCache may also add or preserve Google Fonts parameters such as `display=swap` on Google Fonts URLs that already exist on the site. UltraCache does not add Google Fonts to a site by itself unless the administrator has enabled the local Google Fonts optimization feature or the site already uses Google Fonts through the active theme/plugins.
 
@@ -151,8 +165,8 @@ This endpoint is configured by the site administrator and is not an UltraCache-o
 The dashboard may include optional support/donation links shown only to administrators. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit.
 
 Service provider: PayPal  
-Terms: https://www.paypal.com/legalhub/useragreement-full  
-Privacy: https://www.paypal.com/legalhub/paypal/privacy-full
+Terms: https://www.paypal.com/us/legalhub/paypal/useragreement-full  
+Privacy: https://www.paypal.com/us/legalhub/paypal/privacy-full
 
 ## Privacy
 

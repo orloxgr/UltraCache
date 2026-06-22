@@ -6,11 +6,6 @@ if (!defined('ABSPATH')) {
 if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
     trait Ultra_Cache_Rest_Action_Queue_Trait
     {
-        private function get_action_queue_option_key()
-        {
-            return defined('UCWP_SETTINGS_KEY') ? UCWP_SETTINGS_KEY . '_action_jobs' : 'ultracache_settings_action_jobs';
-        }
-
         private function get_allowed_action_queue_actions()
         {
             return array(
@@ -86,7 +81,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             }
 
             $table = $this->get_action_jobs_table_name();
-            $cache_key = 'action_jobs_table_exists_' . md5((string) $table);
+            $cache_key = 'ultracache_action_jobs_table_exists_' . md5((string) $table);
             $cache_found = false;
             $cached = wp_cache_get($cache_key, 'ultracache', false, $cache_found);
             if ($cache_found && is_bool($cached)) {
@@ -114,7 +109,9 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 return true;
             }
 
-            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
+                return false;
+            }
             $charset_collate = $wpdb->get_charset_collate();
             $sql = "CREATE TABLE {$table} (
                 job_id varchar(64) NOT NULL,
@@ -140,10 +137,10 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             ) {$charset_collate};";
 
             dbDelta($sql);
-            wp_cache_delete('action_jobs_table_exists_' . md5((string) $table), 'ultracache');
+            wp_cache_delete('ultracache_action_jobs_table_exists_' . md5((string) $table), 'ultracache');
             if ($this->action_jobs_table_exists()) {
                 update_option($this->get_action_jobs_db_version_option_key(), $this->get_action_jobs_db_version(), false);
-                wp_cache_delete('action_jobs_table_exists_' . md5((string) $table), 'ultracache');
+                wp_cache_delete('ultracache_action_jobs_table_exists_' . md5((string) $table), 'ultracache');
                 return true;
             }
 
@@ -306,13 +303,12 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function get_action_jobs_rows_cache_key()
         {
-            return 'action_jobs_rows_v2_' . md5((string) $this->get_action_jobs_table_name());
+            return 'ultracache_action_jobs_rows_v2_' . md5((string) $this->get_action_jobs_table_name());
         }
 
         private function flush_action_jobs_rows_cache()
         {
             wp_cache_delete($this->get_action_jobs_rows_cache_key(), 'ultracache');
-            wp_cache_delete('action_jobs_rows_v1', 'ultracache');
         }
 
         private function load_action_jobs()
@@ -577,8 +573,8 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function is_sensitive_action_queue_key($key)
         {
-            if (function_exists('ucwp_is_sensitive_debug_key')) {
-                return (bool) ucwp_is_sensitive_debug_key($key);
+            if (function_exists('ultracache_is_sensitive_debug_key')) {
+                return (bool) ultracache_is_sensitive_debug_key($key);
             }
 
             return 1 === preg_match('/(?:^key$|password|passwd|pwd|secret|token|authorization|cookie|nonce|auth|credential|security|redis[_-]?password|varnish.*key|varnish.*secret|api[_-]?key|access[_-]?key|private[_-]?key|order[_-]?key|client[_-]?secret)/i', (string) $key);
@@ -586,8 +582,8 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function scrub_action_queue_payload($value, $key = '', $depth = 0)
         {
-            if (function_exists('ucwp_redact_sensitive_debug_value')) {
-                return ucwp_redact_sensitive_debug_value($key, $value, $depth);
+            if (function_exists('ultracache_redact_sensitive_debug_value')) {
+                return ultracache_redact_sensitive_debug_value($key, $value, $depth);
             }
 
             if ($this->is_sensitive_action_queue_key($key)) {
@@ -626,8 +622,8 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             }
 
             if (is_string($value)) {
-                if (function_exists('ucwp_redact_sensitive_string')) {
-                    return ucwp_redact_sensitive_string($value);
+                if (function_exists('ultracache_redact_sensitive_string')) {
+                    return ultracache_redact_sensitive_string($value);
                 }
                 if (preg_match('/(?:password|passwd|pwd|secret|token|nonce|auth|credential|security|key)=([^&\s]+)/i', $value)) {
                     return preg_replace('/((?:password|passwd|pwd|secret|token|nonce|auth|credential|security|key)=)([^&\s]+)/i', '$1[redacted]', $value);
@@ -678,7 +674,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
             $params = $this->normalize_action_params($request->get_param('params'));
             $stored_params = $this->scrub_action_queue_payload($params, 'params', 0);
-            $id = 'ucwp_' . wp_generate_password(18, false, false);
+            $id = 'ultracache_' . wp_generate_password(18, false, false);
             $now = time();
             $job = array(
                 'id'        => $id,
