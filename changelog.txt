@@ -1,3 +1,120 @@
+= 2.59.06.78 =
+* Rewords the historical 2.59.06.60 changelog note about removed third-party matcher fragments so automated remote-file scans do not mistake archived domain examples for active plugin behavior.
+* Synchronizes the plugin header, runtime version constant, WordPress.org stable tag, and README current-version marker at 2.59.06.78.
+* Bumps release metadata from 2.59.06.77 to 2.59.06.78. No runtime behavior, files, or directories were added or removed.
+
+= 2.59.06.77 =
+* Rewrites the dashboard info-icon help into plain-language, code-derived explanations that describe what each control changes, why it can improve speed, and what to test before trusting it.
+* Adds specific help coverage for cache delivery, media, JavaScript timing, CSS delivery, font optimization, WooCommerce controls, query/cookie safety lists, object cache, Redis, Varnish, external cache flushing, and warm-up/scheduling controls.
+* Updates the bespoke JS safeguard, Browser Scanner, Console Error Handler, CSS diagnostics, Delayed JS auto-start, Font-Mix CSS, WooCommerce strategy, Apache Static HTML Delivery, and Object Cache Fallback tooltips to match the same explanation style.
+* Regenerates `languages/ultracache.pot` so the new explicit tooltip strings and 2.59.06.77 metadata are reflected in the translation catalog.
+* Bumps release metadata from 2.59.06.76 to 2.59.06.77.
+
+= 2.59.06.76 =
+* Moves "Bundle Generated Font-Mix CSS" from CSS Delivery into Fonts Optimization so the control lives beside the font pipeline it affects.
+* Adds a new opt-in "Async Generated Font-Mix CSS Bundle" control that async-loads only the consolidated `bundle-font-mix-*.css` file while leaving individual `css-font-mix-*` source files untouched.
+* Runs Font-Mix CSS consolidation before the async CSS pass when the new async Font-Mix option is enabled so the consolidated bundle can be classified and rewritten.
+* Adds richer info-icon help for WooCommerce frontend strategy presets, including Off, Safe, Balanced, Aggressive, and Custom behavior.
+* Adds missing info-icon help to the bespoke JS safeguard, Browser Scanner, Console Error Handler, CSS Bundle Exclusions, page URL diagnostic, and Delayed JS auto-start controls.
+* Bumps release metadata from 2.59.06.75 to 2.59.06.76.
+
+= 2.59.06.75 =
+* Adds expanded info-icon help across dashboard option controls while keeping the short descriptions visible below each title.
+* Adds a visible Apache Static HTML Delivery (.htaccess) option that serves conservative queryless anonymous HTML cache aliases before PHP on Apache-compatible hosts.
+* Writes stable `index-orig.html`, `index-webp.html`, and `index-avif.html` aliases beside hashed page-cache files, with source markers so purges do not delete unrelated aliases.
+* Expands Browser Cache Headers .htaccess coverage for web manifests, AVIFS, WASM, EOT, audio/video files, and revalidation-oriented HTML/JSON/XML handling.
+* Keeps Apache Static HTML Delivery separate from Browser Cache Headers and removes its managed rules on deactivation, plugin data cleanup, and uninstall.
+* Removes UltraCache-managed Browser Cache Headers and Apache Static HTML .htaccess blocks during uninstall without touching rules outside those markers.
+* Bumps release metadata from 2.59.06.74 to 2.59.06.75.
+
+= 2.59.06.74 =
+* Adds an opt-in "Bundle Generated Font-Mix CSS" control in CSS Delivery that consolidates UltraCache-generated `optimized-css/css-font-mix-*.css` stylesheet links into one ordered blocking CSS bundle.
+* Keeps the generated font-mix bundle classified as layout-risk CSS so Async CSS diagnostics do not treat it as an async candidate.
+* Adds WooCommerce-box info-icon help as a UI test, moving the individual WooCommerce option descriptions into native hover/focus titles while leaving the rest of the dashboard copy unchanged.
+* Bumps release metadata from 2.59.06.73 to 2.59.06.74.
+
+= 2.59.06.73 =
+* Adds a visible WooCommerce cart-fragments behavior dropdown with Off, Delay request, and Suppress empty-cart execution modes.
+* Adds an empty-cart cart-fragments suppression mode that prevents `wc-cart-fragments` execution on anonymous cacheable pages without WooCommerce cart/session cookies, while keeping cart, checkout, account, logged-in, and active cart/session-cookie contexts on normal WooCommerce behavior.
+* Keeps cart-fragments Delay and Suppress empty-cart execution mutually exclusive during dashboard saves/imports.
+* Bumps release metadata from 2.59.06.72 to 2.59.06.73.
+
+= 2.59.06.72 =
+* Reworks the WooCommerce dashboard card into "WooCommerce Controls" and moves WooCommerce Safe Mode into that section so WooCommerce cache safety, request timing, and cleanup controls live together.
+* Adds a visible WooCommerce frontend strategy dropdown with Off, Safe, Balanced, Aggressive, and Custom presets that write the existing cart-fragments delay and WooCommerce asset-cleanup toggles instead of adding a hidden runtime switch.
+* Renames the cart-fragments timing control to "WooCommerce release timer" to mirror the general Delayed JS timing model.
+* Bumps release metadata from 2.59.06.71 to 2.59.06.72.
+
+= 2.59.06.71 =
+* Renames the "Safe Asset Cleanup" dashboard card to "WooCommerce Asset Timing" so the section matches its WooCommerce-specific controls.
+* Adds visible WooCommerce cart-fragments delay controls that can queue `get_refreshed_fragments` AJAX on anonymous cacheable pages and release it with the Delayed JS timing model or a WooCommerce-specific timer, while skipping logged-in, cart, checkout, account, and active cart/session-cookie contexts.
+* Adds `assets/js/woocommerce-cart-fragments-delay.js` as the frontend helper for the new WooCommerce cart-fragments delay feature and keeps it protected as an UltraCache-owned helper script.
+* Bumps release metadata from 2.59.06.70 to 2.59.06.71.
+
+= 2.59.06.70 =
+* Removes hidden runtime JavaScript safeguards for WordPress inline dependency blocks, GTM bootstrap snippets, and third-party dependency-library delay bypasses so Browser Scanner and Console Error Handler can propose visible "Defer Instead of Delay" or "Do Not Defer or Delay" safeguards from actual detected breakage.
+* Moves inline analytics delay markers such as `gtag(`, `dataLayer`, and `gtm.start` into the visible Safe Third-Party Delay Patterns defaults instead of matching them through a private inline-script list.
+* Removes hidden CSS and asset cleanup safeguards from CSS bundle exclusions, aggressive async CSS admin-asset blocking, frontend authoring asset stripping, and broad icon-font auto-detection; visible lists and scanner output are now authoritative, while UltraCache-owned helper JavaScript remains internally protected.
+* Updates Delay icon fonts UI copy to clarify that only entries in the visible font pattern list are delayed.
+* Bumps release metadata from 2.59.06.69 to 2.59.06.70. No files or directories were added or deleted.
+
+= 2.59.06.69 =
+* Makes the "Defer Instead of Delay" and "Do Not Defer or Delay" JavaScript safeguard lists mutually exclusive: appending to one removes overlapping entries from the other, paired saves send both final lists together, and settings sanitization removes remaining overlaps.
+* Bumps release metadata from 2.59.06.68 to 2.59.06.69. No files or directories were added or deleted.
+
+= 2.59.06.68 =
+* Renames JavaScript safeguard action labels and scan status text so findings are described as appending to "Defer Instead of Delay" or "Do Not Defer or Delay" instead of the ambiguous "fallback exclusion" wording.
+* Bumps release metadata from 2.59.06.67 to 2.59.06.68. No files or directories were added or deleted.
+
+= 2.59.06.67 =
+* Forces the Frontend JavaScript Manipulation safeguard editors for "Defer Instead of Delay" and "Do Not Defer or Delay" into a true two-column, one-row layout instead of relying on utility classes that could stack them vertically.
+* Bumps release metadata from 2.59.06.66 to 2.59.06.67. No files or directories were added or deleted.
+
+= 2.59.06.66 =
+* Changes the Balanced and Aggressive profile default CSS bundle mode from Safe to Aggressive while keeping CSS bundling enabled and user-maintained CSS exclusions preserved.
+* Keeps the Aggressive profile on native Defer as the base JavaScript strategy instead of broad Delay all JS, with targeted delay modules still enabled for speed.
+* Makes the force-defer list act as "Defer Instead of Delay" across Delay all JS, targeted third-party delay, non-critical/local delay, LCP Boundary Delay, and delayed-placeholder restoration.
+* Improves runtime JS diagnostics so missing WordPress/core globals suggest both the provider and the crashing consumer, filters UltraCache helper stack frames, detects duplicate-execution redeclare errors, and recognizes jQuery Migrate shorthand failures.
+* Fixes pasted console parsing for jQuery Migrate shorthand failures where Chrome prefixes the TypeError with `jquery.min.js?...` and appends the `JQMIGRATE: Migrate is installed` notice, so the real error still produces a `jquery-migrate.min.js` suggestion.
+* Lets Browser Scanner and Console Error Handler escalate persistent findings from "Defer Instead of Delay" to the stronger "Do Not Defer or Delay" fallback instead of hiding already-deferred suggestions.
+* Updates the JavaScript safeguard UI to pair "Defer Instead of Delay" with the stronger "Do Not Defer or Delay" fallback and shared save/append controls.
+* Bumps release metadata from 2.59.06.65 to 2.59.06.66. No files or directories were added or deleted.
+
+= 2.59.06.64 =
+* Fixes ordered delayed-JavaScript replay when another runtime removes, replaces, or independently restores an UltraCache placeholder while the loader is processing its original DOM snapshot.
+* Replaces delayed placeholders atomically instead of inserting the executable script while the inert placeholder is still present.
+* Skips detached placeholders and suppresses duplicate execution by preserved script ID or exact source URL plus execution mode; records skipped duplicate/detached counts on the document element for diagnostics.
+* Makes the force-defer list act as "Defer Instead of Delay" across Delay all JS, targeted third-party delay, non-critical/local delay, LCP Boundary Delay, and delayed-placeholder restoration.
+* Improves runtime JS diagnostics so missing WordPress/core globals suggest both the provider and the crashing consumer, filters UltraCache helper stack frames, detects duplicate-execution redeclare errors, and recognizes jQuery Migrate shorthand failures.
+* Lets Browser Scanner and Console Error Handler escalate persistent findings from "Defer Instead of Delay" to the stronger "Do Not Defer or Delay" fallback instead of hiding already-deferred suggestions.
+* Updates the JavaScript safeguard UI to pair "Defer Instead of Delay" with the stronger "Do Not Defer or Delay" fallback, and changes the Aggressive profile to use native Defer instead of broad Delay all JS.
+* Bumps release metadata from 2.59.06.63 to 2.59.06.64. No files or directories were added or deleted.
+
+= 2.59.06.63 =
+* Prevents the CSS bundle source scan and final page warm loopbacks from receiving mod_pagespeed/ngx_pagespeed-rewritten HTML by sending the supported `PageSpeed: off` and backward-compatible `ModPagespeed: off` request headers.
+* Requests unrewritten origin HTML for those internal operations so PageSpeed wrapper URLs such as `A.*.css.pagespeed.cf.*.css` are not passed to UltraCache cache-write validation when the server honors the supported per-request override.
+* Bumps release metadata from 2.59.06.62 to 2.59.06.63. No files or directories were added or deleted.
+
+= 2.59.06.62 =
+* Fixes managed `wp-config.php` block replacement and uninstall removal so only the delimited block is removed while the surrounding line breaks are preserved; `<?php` can no longer be joined to the following `define()` statement.
+* Strengthens candidate `wp-config.php` validation by requiring a normal full PHP opening tag, preventing malformed `<?phpdefine(...)` content from passing as a short opening tag plus an unknown `phpdefine()` call.
+* Applies the same boundary-preserving removal and full-opening-tag validation to WordPress uninstall cleanup.
+* Bumps release metadata from 2.59.06.61 to 2.59.06.62. No files or directories were added or deleted.
+
+= 2.59.06.61 =
+* Removes the standalone Redis manual-test control and its dedicated REST/action-queue surface so unsaved form values are no longer mixed with the already-bootstrapped object-cache runtime.
+* Makes Save Redis Settings perform Redis connection, authentication, and read/write validation before changing wp-config.php, stored settings, or the generated object-cache drop-in; failed validation leaves the previous configuration untouched.
+* Reloads after a verified Redis save, performs a one-time payload probe against the actually active backend, and labels the result with the tested backend.
+* Replaces duplicate object-cache status rows with a concise runtime status, configured backend, Redis connection, PHP extension availability, backend-specific payload probe, and Redis prefix.
+* Bumps release metadata from 2.59.06.60 to 2.59.06.61.
+
+= 2.59.06.60 =
+* Removes redundant Google-hosted Maps tile/static-host and reCAPTCHA static-host matcher fragments while retaining the existing Google Maps and reCAPTCHA entry-point patterns.
+* Replaces the Google Fonts, dashboard heavy-action, and cron warm-up option-based locks with a shared token-guarded `ultracache_locks` table supporting atomic acquisition, expired-lock takeover, renewal, and owner-only release.
+* Replaces the two remaining create-or-update `add_option()` branches with direct non-autoloaded `update_option()` calls, leaving no direct `add_option()` calls in UltraCache.
+* Adds the lock table to activation, validated table handling, bounded expired-row cleanup, Delete All cleanup, and WordPress uninstall cleanup.
+* Bumps release metadata from 2.59.06.59 to 2.59.06.60.
+
 = 2.59.06.59 =
 * Documents the two intentional `var_export( ..., true )` calls used to generate valid PHP string literals for UltraCache-managed `wp-config.php` password constants.
 * Adds narrowly scoped PHPCS exceptions for `WordPress.PHP.DevelopmentFunctions.error_log_var_export`; the calls return strings and do not emit debug output.

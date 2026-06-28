@@ -369,8 +369,8 @@ trait Ultra_Cache_WP_Diagnostics_Trait
                 array('key' => 'cacheExceptionPaths', 'label' => __('Exclude Paths From Caching', 'ultracache'), 'area' => __('Cache bypass', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
                 array('key' => 'cacheExceptionQueryArgs', 'label' => __('Excluded query-string args from Caching', 'ultracache'), 'area' => __('Cache bypass', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
                 array('key' => 'cacheQueryStringAllowlist', 'label' => __('Query-string args whitelist', 'ultracache'), 'area' => __('Cache query strings', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
-                array('key' => 'deferJsForceList', 'label' => __('Defer those scripts', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
-                array('key' => 'deferJsExcludeList', 'label' => __('JS Delay / Defer Exclusions', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Shared final override', 'ultracache'), 'shared' => true),
+                array('key' => 'deferJsForceList', 'label' => __('Defer Instead of Delay', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Speed-first textarea', 'ultracache'), 'shared' => false),
+                array('key' => 'deferJsExcludeList', 'label' => __('Do Not Defer or Delay', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Compatibility exclusion textarea', 'ultracache'), 'shared' => true),
                 array('key' => 'delaySafeThirdPartyJsPatterns', 'label' => __('Safe third-party delay patterns', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
                 array('key' => 'delayFunctionalThirdPartyJsPatterns', 'label' => __('Known functional third-party delay patterns', 'ultracache'), 'area' => __('JavaScript', 'ultracache'), 'kind' => __('Pattern list', 'ultracache'), 'shared' => false),
                 array('key' => 'criticalRequestChainDelayList', 'label' => __('Delay Non-Critical Request Chains', 'ultracache'), 'area' => __('JavaScript/CSS', 'ultracache'), 'kind' => __('Textarea', 'ultracache'), 'shared' => false),
@@ -424,7 +424,7 @@ trait Ultra_Cache_WP_Diagnostics_Trait
             );
 
             $legacy_lists = array(
-                array('key' => 'delayNonCriticalJsExcludeList', 'label' => __('Legacy Delay Non-Critical JS Exclusions', 'ultracache'), 'mappedTo' => 'deferJsExcludeList', 'active' => false, 'message' => __('Legacy values are merged into the visible JS Delay / Defer Exclusions field and then cleared.', 'ultracache')),
+                array('key' => 'delayNonCriticalJsExcludeList', 'label' => __('Legacy Delay Non-Critical JS Exclusions', 'ultracache'), 'mappedTo' => 'deferJsExcludeList', 'active' => false, 'message' => __('Legacy values are merged into the visible Do Not Defer or Delay field and then cleared.', 'ultracache')),
             );
 
             return array(

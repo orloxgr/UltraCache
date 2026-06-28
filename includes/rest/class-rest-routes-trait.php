@@ -79,14 +79,6 @@ if (!trait_exists('Ultra_Cache_Rest_Routes_Trait')) {
                         'permission_callback' => array($this, 'check_permission'),
                     ),
                 ),
-                '/object-cache/redis-test' => array(
-                    array(
-                        'methods'             => WP_REST_Server::CREATABLE,
-                        'callback'            => array($this, 'redis_test'),
-                        'permission_callback' => array($this, 'check_permission'),
-                        'args'                => $this->get_redis_test_args(),
-                    ),
-                ),
                 '/object-cache/backend-test' => array(
                     array(
                         'methods'             => WP_REST_Server::CREATABLE,

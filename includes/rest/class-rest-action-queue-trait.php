@@ -21,7 +21,6 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 'litespeed_flush',
                 'nginx_flush',
                 'external_caches_redetect',
-                'redis_test',
                 'google_fonts_rebuild_cache',
                 'performance_profile',
             );
@@ -51,7 +50,7 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             return 180;
         }
 
-        private function get_action_queue_heavy_lock_option_name()
+        private function get_action_queue_heavy_lock_name()
         {
             return 'ultracache_action_queue_heavy_lock_v1';
         }
@@ -400,10 +399,19 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
             return array();
         }
 
+        private function get_action_queue_lock_record()
+        {
+            if (!function_exists('ultracache_get_lock')) {
+                return array();
+            }
+
+            return ultracache_get_lock($this->get_action_queue_heavy_lock_name());
+        }
+
         private function get_action_queue_lock_payload()
         {
-            $lock = get_option($this->get_action_queue_heavy_lock_option_name(), array());
-            return is_array($lock) ? $lock : array();
+            $record = $this->get_action_queue_lock_record();
+            return isset($record['payload']) && is_array($record['payload']) ? $record['payload'] : array();
         }
 
         private function is_action_queue_job_locked(array $job, $job_id = '')
@@ -428,34 +436,32 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
         {
             $action = sanitize_key((string) $action);
             $job_id = sanitize_text_field((string) $job_id);
+            if (
+                '' === $action
+                || '' === $job_id
+                || !function_exists('ultracache_acquire_lock')
+            ) {
+                return false;
+            }
+
             $now = time();
-            $option_name = $this->get_action_queue_heavy_lock_option_name();
-            $payload = array(
-                'action' => $action,
-                'jobId'  => $job_id,
-                'time'   => $now,
+            return ultracache_acquire_lock(
+                $this->get_action_queue_heavy_lock_name(),
+                $job_id,
+                $this->get_action_queue_stale_seconds(),
+                array(
+                    'action' => $action,
+                    'jobId'  => $job_id,
+                    'time'   => $now,
+                )
             );
-
-            if (add_option($option_name, $payload, '', false)) {
-                return true;
-            }
-
-            $existing = get_option($option_name, array());
-            $existing_time = is_array($existing) ? (int) ($existing['time'] ?? 0) : 0;
-            if ($existing_time > 0 && ($now - $existing_time) > $this->get_action_queue_stale_seconds()) {
-                delete_option($option_name);
-                return add_option($option_name, $payload, '', false);
-            }
-
-            return false;
         }
 
         private function release_action_queue_heavy_lock($job_id)
         {
-            $option_name = $this->get_action_queue_heavy_lock_option_name();
-            $existing = get_option($option_name, array());
-            if (is_array($existing) && (string) ($existing['jobId'] ?? '') === (string) $job_id) {
-                delete_option($option_name);
+            $job_id = sanitize_text_field((string) $job_id);
+            if ('' !== $job_id && function_exists('ultracache_release_lock')) {
+                ultracache_release_lock($this->get_action_queue_heavy_lock_name(), $job_id);
             }
         }
 
@@ -471,20 +477,16 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
 
         private function get_action_queue_lock_age()
         {
-            $existing = get_option($this->get_action_queue_heavy_lock_option_name(), array());
-            if (!is_array($existing)) {
-                return 0;
-            }
-
-            $time = isset($existing['time']) ? (int) $existing['time'] : 0;
-            return $time > 0 ? max(0, time() - $time) : 0;
+            $record = $this->get_action_queue_lock_record();
+            $acquired_at = isset($record['acquiredAt']) ? (int) $record['acquiredAt'] : 0;
+            return $acquired_at > 0 ? max(0, time() - $acquired_at) : 0;
         }
 
         private function reconcile_action_queue_heavy_lock(array $jobs)
         {
-            $option_name = $this->get_action_queue_heavy_lock_option_name();
-            $lock = get_option($option_name, array());
-            if (!is_array($lock) || empty($lock)) {
+            $record = $this->get_action_queue_lock_record();
+            $lock = isset($record['payload']) && is_array($record['payload']) ? $record['payload'] : array();
+            if (empty($record) || empty($lock)) {
                 return $jobs;
             }
 
@@ -514,8 +516,11 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                 $delete_lock = true;
             }
 
-            if ($delete_lock) {
-                delete_option($option_name);
+            if ($delete_lock && function_exists('ultracache_release_lock')) {
+                ultracache_release_lock(
+                    $this->get_action_queue_heavy_lock_name(),
+                    (string) ($record['token'] ?? '')
+                );
             }
 
             return $jobs;
@@ -875,12 +880,6 @@ if (!trait_exists('Ultra_Cache_Rest_Action_Queue_Trait')) {
                         return $this->unwrap_rest_payload($this->nginx_flush());
                     case 'external_caches_redetect':
                         return $this->unwrap_rest_payload($this->external_caches_redetect());
-                    case 'redis_test':
-                        $redis_request = new WP_REST_Request('POST', '/');
-                        foreach ($params as $key => $value) {
-                            $redis_request->set_param($key, $value);
-                        }
-                        return $this->unwrap_rest_payload($this->redis_test($redis_request));
                     case 'google_fonts_rebuild_cache':
                         $engine = $this->get_engine();
                         if (!$engine || !method_exists($engine, 'rebuild_google_fonts_cache_from_scan_urls')) {

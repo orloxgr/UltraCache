@@ -18,6 +18,9 @@
 	var readyHooked = false;
 	var readyQueue = [];
 	var readyOriginal = null;
+	var executedScriptKeys = Object.create(null);
+	var skippedDetached = 0;
+	var skippedDuplicate = 0;
 
 	if (!isFinite(autoDelayMs) || autoDelayMs < 0) {
 		autoDelayMs = 50;
@@ -190,14 +193,142 @@
 		}
 	}
 
-	function insertAndRemove(node, script) {
-		if (node.parentNode) {
-			node.parentNode.insertBefore(script, node);
-			node.parentNode.removeChild(node);
-			return;
+	function nodeIsConnected(node) {
+		if (!node) {
+			return false;
 		}
 
-		(document.head || document.body || document.documentElement).appendChild(script);
+		if (typeof node.isConnected === 'boolean') {
+			return node.isConnected;
+		}
+
+		return !!node.parentNode;
+	}
+
+	function normalizeScriptUrl(value) {
+		value = String(value || '');
+		if (!value) {
+			return '';
+		}
+
+		try {
+			return new URL(value, document.baseURI || window.location.href).href;
+		} catch (e) {
+			return value;
+		}
+	}
+
+	function textFingerprint(value) {
+		value = String(value || '');
+		var hash = 2166136261;
+		for (var i = 0; i < value.length; i++) {
+			hash ^= value.charCodeAt(i);
+			hash = Math.imul(hash, 16777619);
+		}
+		return (hash >>> 0).toString(16);
+	}
+
+	function scriptMode(node, attrs) {
+		attrs = attrs || {};
+		var nodeType = String(node && node.getAttribute ? node.getAttribute('type') || '' : '').toLowerCase();
+		if (nodeType === 'text/ultracache-delayed-js') {
+			nodeType = '';
+		}
+		var type = Object.prototype.hasOwnProperty.call(attrs, 'type') ? String(attrs.type || '').toLowerCase() : nodeType;
+		var noModule = !!(attrs.nomodule || (node && node.hasAttribute && node.hasAttribute('nomodule')));
+		return type + '|nomodule:' + (noModule ? '1' : '0');
+	}
+
+	function scriptExecutionKeys(node) {
+		var keys = [];
+		var attrs = decodeAttrs(node);
+		var id = attrs.id || ultracacheData(node, 'id') || '';
+		var handle = ultracacheData(node, 'handle');
+		var mode = scriptMode(node, attrs);
+
+		if (id) {
+			keys.push('id:' + id);
+		}
+
+		if (isExternalNode(node)) {
+			var src = normalizeScriptUrl(node.getAttribute('data-ultracache-src'));
+			if (src) {
+				keys.push('src:' + src + '|mode:' + mode);
+			}
+		} else if (isInlineNode(node)) {
+			var code = node.textContent || '';
+			var fingerprint = textFingerprint(code);
+			if (handle) {
+				keys.push('inline:' + handle + ':' + fingerprint + '|mode:' + mode);
+			} else if (id) {
+				keys.push('inline-id:' + id + ':' + fingerprint + '|mode:' + mode);
+			}
+		}
+
+		return keys;
+	}
+
+	function hasExecutableDuplicate(node) {
+		var keys = scriptExecutionKeys(node);
+		for (var i = 0; i < keys.length; i++) {
+			if (executedScriptKeys[keys[i]]) {
+				return true;
+			}
+		}
+
+		var attrs = decodeAttrs(node);
+		var id = attrs.id || ultracacheData(node, 'id') || '';
+		var src = isExternalNode(node) ? normalizeScriptUrl(node.getAttribute('data-ultracache-src')) : '';
+		var mode = scriptMode(node, attrs);
+		var scripts = document.querySelectorAll('script:not([type="text/ultracache-delayed-js"])');
+
+		for (var j = 0; j < scripts.length; j++) {
+			var candidate = scripts[j];
+			if (!candidate || candidate === node) {
+				continue;
+			}
+
+			if (id && candidate.id === id) {
+				return true;
+			}
+
+			if (src && normalizeScriptUrl(candidate.getAttribute('src')) === src && scriptMode(candidate, {}) === mode) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	function claimScriptExecution(node) {
+		var keys = scriptExecutionKeys(node);
+		for (var i = 0; i < keys.length; i++) {
+			executedScriptKeys[keys[i]] = 1;
+		}
+	}
+
+	function discardDelayedNode(node, reason) {
+		if ('detached' === reason) {
+			skippedDetached++;
+			mark('skipped-detached', skippedDetached);
+		} else if ('duplicate' === reason) {
+			skippedDuplicate++;
+			mark('skipped-duplicate', skippedDuplicate);
+		}
+
+		if (node && node.parentNode) {
+			node.parentNode.removeChild(node);
+		}
+	}
+
+	function replaceDelayedNode(node, script) {
+		if (!nodeIsConnected(node) || !node.parentNode) {
+			discardDelayedNode(node, 'detached');
+			return false;
+		}
+
+		node.parentNode.replaceChild(script, node);
+		return true;
 	}
 
 	function isInlineNode(node) {
@@ -214,7 +345,20 @@
 			return;
 		}
 
+		if (!nodeIsConnected(node) || !node.parentNode) {
+			discardDelayedNode(node, 'detached');
+			done();
+			return;
+		}
+
+		if (hasExecutableDuplicate(node)) {
+			discardDelayedNode(node, 'duplicate');
+			done();
+			return;
+		}
+
 		node.setAttribute('data-ultracache-loading', '1');
+		claimScriptExecution(node);
 
 		var script = document.createElement('script');
 		applyAttrs(script, node);
@@ -225,9 +369,11 @@
 			script.text = '';
 		}
 
-		insertAndRemove(node, script);
+		if (!replaceDelayedNode(node, script)) {
+			done();
+			return;
+		}
 		tryHookReady();
-		node.setAttribute('data-ultracache-loaded', '1');
 		done();
 	}
 
@@ -257,7 +403,20 @@
 			}
 
 			var node = group[position];
+			if (!nodeIsConnected(node) || !node.parentNode) {
+				discardDelayedNode(node, 'detached');
+				loadOne(position + 1);
+				return;
+			}
+
+			if (hasExecutableDuplicate(node)) {
+				discardDelayedNode(node, 'duplicate');
+				loadOne(position + 1);
+				return;
+			}
+
 			node.setAttribute('data-ultracache-loading', '1');
+			claimScriptExecution(node);
 
 			var src = node.getAttribute('data-ultracache-src');
 			var script = document.createElement('script');
@@ -282,7 +441,9 @@
 			script.onload = finish;
 			script.onerror = finish;
 			script.src = src;
-			insertAndRemove(node, script);
+			if (!replaceDelayedNode(node, script)) {
+				finish();
+			}
 		}
 
 		loadOne(0);

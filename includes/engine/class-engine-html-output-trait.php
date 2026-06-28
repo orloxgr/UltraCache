@@ -347,13 +347,6 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            // Slider/Hero Safe Mode becomes active only when protected hero markup is detected in the rendered HTML.
-            if (!$safe_mode) {
-                $html = $this->apply_html_rewrite_safely($html, 'strip-authoring-assets', function ($html) {
-                    return $this->strip_probable_frontend_authoring_assets($html);
-                });
-            }
-
             if (!empty($settings['homepage_css_bundle'])) {
                 $bundle_mode = isset($settings['homepage_css_bundle_mode']) ? strtolower(trim((string) $settings['homepage_css_bundle_mode'])) : 'safe';
                 $bundle_mode = in_array($bundle_mode, array('safe', 'aggressive', 'full'), true) ? $bundle_mode : 'safe';
@@ -482,15 +475,22 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['async_css']) || !empty($settings['async_external_css']) || !empty($settings['aggressive_async_css'])) {
-                $html = $this->apply_async_css_links_to_html($html);
-            }
-
             if (!empty($font_policy['local_font_css_rewrite'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'final-linked-font-display-normalize', function ($html) {
                     return $this->normalize_linked_local_stylesheet_font_display_in_html($html);
                 });
             }
+
+            if (!empty($settings['font_mix_css_bundle'])) {
+                $html = $this->profile_store_stage('consolidate-font-mix-css-bundle', $html, function ($html) use ($settings) {
+                    return $this->maybe_consolidate_font_mix_stylesheet_links($html, $settings);
+                });
+            }
+
+            if (!empty($settings['async_css']) || !empty($settings['async_external_css']) || !empty($settings['aggressive_async_css']) || !empty($settings['font_mix_css_bundle_async'])) {
+                $html = $this->apply_async_css_links_to_html($html);
+            }
+
             if (!empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js']) || !empty($settings['delay_all_third_party_js'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'delay-third-party-pattern-scripts', function ($html) use ($settings) {
                     return $this->delay_third_party_analytics_scripts_in_html($html, $settings);
@@ -795,29 +795,12 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
 
         private function get_asset_cleanup_exclude_fragments(array $settings = array())
         {
-            $defaults = array(
-                'elementor',
-                'bricks',
-                'oxygen',
-                'wpbakery',
-                'vc_',
-                'revslider',
-                'sr7',
-                'ajaxsearch',
-                'fibosearch',
-                '.dgwt-wcas',
-                'aws-container',
-                'cart',
-                'checkout',
-                'account',
-            );
-
             $user_list = array();
             if (isset($settings['asset_cleanup_exclude_list']) && is_array($settings['asset_cleanup_exclude_list'])) {
                 $user_list = $settings['asset_cleanup_exclude_list'];
             }
 
-            return array_values(array_unique(array_filter(array_map('strval', array_merge($defaults, $user_list)), 'strlen')));
+            return array_values(array_unique(array_filter(array_map('strval', $user_list), 'strlen')));
         }
 
         private function current_request_matches_asset_cleanup_exclusion(array $settings = array())

@@ -219,6 +219,7 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'redisUsername'                        => array('type' => 'string', 'required' => false),
                 'redisPassword'                        => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_secret_constant_param')),
                 'clearRedisPassword'                   => array('type' => 'boolean', 'required' => false),
+                'validateRedisSettings'                => array('type' => 'boolean', 'required' => false),
                 'redisDatabase'                        => array('type' => 'integer', 'required' => false),
                 'redisPrefix'                          => array('type' => 'string', 'required' => false),
                 'redisUseTls'                          => array('type' => 'boolean', 'required' => false),
@@ -255,6 +256,8 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'homepageCssBundleEnabled'             => array('type' => 'boolean', 'required' => false),
                 'homepageCssBundleInlineEnabled'       => array('type' => 'boolean', 'required' => false),
                 'leftoverCssBundleEnabled'           => array('type' => 'boolean', 'required' => false),
+                'fontMixCssBundleEnabled'            => array('type' => 'boolean', 'required' => false),
+                'fontMixCssBundleAsyncEnabled'       => array('type' => 'boolean', 'required' => false),
                 'homepageCssBundleExcludeList'         => array('type' => 'string', 'required' => false),
                 'homepageCssBundleMode'                => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_homepage_css_bundle_mode_param'), 'validate_callback' => array($this, 'validate_homepage_css_bundle_mode_param')),
                 'delayIconFontsEnabled'                => array('type' => 'boolean', 'required' => false),
@@ -285,6 +288,9 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'assetCleanupWooProductAssetsEnabled'   => array('type' => 'boolean', 'required' => false),
                 'assetCleanupProductFilterAssetsEnabled'=> array('type' => 'boolean', 'required' => false),
                 'assetCleanupWooBlocksCssEnabled'       => array('type' => 'boolean', 'required' => false),
+                'woocommerceCartFragmentsSuppressEmptyEnabled' => array('type' => 'boolean', 'required' => false),
+                'woocommerceCartFragmentsDelayEnabled'  => array('type' => 'boolean', 'required' => false),
+                'woocommerceCartFragmentsDelayTiming'   => array('type' => 'string', 'required' => false),
                 'assetCleanupExcludeList'               => array('type' => 'string', 'required' => false),
                 'googleFontsSwapEnabled'               => array('type' => 'boolean', 'required' => false),
                 'googleFontsLocalOptimizationEnabled'  => array('type' => 'boolean', 'required' => false),
@@ -293,6 +299,7 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
                 'selfHostedFontRuntimeRewriteEnabled'  => array('type' => 'boolean', 'required' => false),
                 'speculationRulesEnabled'              => array('type' => 'boolean', 'required' => false),
                 'browserCacheRulesEnabled'             => array('type' => 'boolean', 'required' => false),
+                'apacheStaticHtmlDeliveryEnabled'      => array('type' => 'boolean', 'required' => false),
                 'varnishCliEnabled'                    => array('type' => 'boolean', 'required' => false),
                 'varnishCliMode'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_mode_param'), 'validate_callback' => array($this, 'validate_varnish_mode_param')),
                 'varnishCliServers'                    => array('type' => 'string', 'required' => false),
@@ -370,20 +377,6 @@ if (!trait_exists('Ultra_Cache_Rest_Schemas_Trait')) {
             return in_array($value, array('plugin_only', 'keep_settings', 'keep_settings_tables', 'delete_everything'), true);
         }
 
-        private function get_redis_test_args()
-        {
-            return array(
-                'redisHost'             => array('type' => 'string', 'required' => false),
-                'redisPort'             => array('type' => 'integer', 'required' => false),
-                'redisUsername'         => array('type' => 'string', 'required' => false),
-                'redisDatabase'         => array('type' => 'integer', 'required' => false),
-                'redisPrefix'           => array('type' => 'string', 'required' => false),
-                'redisUseTls'           => array('type' => 'boolean', 'required' => false),
-                'redisPersistent'       => array('type' => 'boolean', 'required' => false),
-                'redisConnectTimeoutMs' => array('type' => 'integer', 'required' => false),
-                'redisReadTimeoutMs'    => array('type' => 'integer', 'required' => false),
-            );
-        }
 
     }
 }

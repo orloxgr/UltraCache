@@ -227,7 +227,9 @@ function ultracache_uninstall_strip_managed_constants_block($contents)
         return false;
     }
 
-    $pattern = '#\\R?/\\* UltraCache managed constants start \\*/\\R.*?/\\* UltraCache managed constants end \\*/\\R?#s';
+    // Remove only the managed block itself. Preserve the surrounding line breaks
+    // so the PHP opening tag cannot be joined to the next statement.
+    $pattern = '#/\\* UltraCache managed constants start \\*/\\R.*?/\\* UltraCache managed constants end \\*/#s';
     $updated = preg_replace($pattern, '', $contents, 1, $replacements);
 
     return is_string($updated) && 1 === $replacements ? $updated : false;
@@ -242,12 +244,20 @@ function ultracache_uninstall_strip_managed_constants_block($contents)
 function ultracache_uninstall_validate_php_contents($contents)
 {
     try {
-        token_get_all((string) $contents, TOKEN_PARSE);
+        $tokens = token_get_all((string) $contents, TOKEN_PARSE);
     } catch (ParseError $error) {
         return false;
     }
 
-    return true;
+    foreach ($tokens as $token) {
+        if (!is_array($token) || T_OPEN_TAG !== $token[0]) {
+            continue;
+        }
+
+        return 1 === preg_match('/^<\?php(?:\s|$)/i', (string) $token[1]);
+    }
+
+    return false;
 }
 
 /**
@@ -344,6 +354,98 @@ function ultracache_uninstall_remove_managed_constants_block()
         $updated_contents,
         $original_contents
     );
+}
+
+function ultracache_uninstall_wordpress_home_path()
+{
+    if (!function_exists('get_home_path')) {
+        $file_api = ultracache_uninstall_wordpress_admin_include_path('file.php');
+        if ('' !== $file_api) {
+            require_once $file_api;
+        }
+    }
+
+    if (function_exists('get_home_path')) {
+        $home_path = get_home_path();
+        if (is_string($home_path) && '' !== trim($home_path)) {
+            return trailingslashit(wp_normalize_path($home_path));
+        }
+    }
+
+    return defined('ABSPATH') ? trailingslashit(wp_normalize_path((string) ABSPATH)) : '';
+}
+
+function ultracache_uninstall_strip_htaccess_managed_blocks($contents)
+{
+    $contents = (string) $contents;
+    foreach (array(
+        array('# BEGIN UltraCache Browser Cache', '# END UltraCache Browser Cache'),
+        array('# BEGIN UltraCache Apache Static HTML', '# END UltraCache Apache Static HTML'),
+    ) as $markers) {
+        $begin = $markers[0];
+        $end = $markers[1];
+        $pattern = '/' . preg_quote($begin, '/') . '.*?' . preg_quote($end, '/') . '\R*/s';
+        $contents = (string) preg_replace($pattern, '', $contents);
+    }
+
+    return '' === trim($contents) ? '' : (rtrim($contents) . "\n");
+}
+
+function ultracache_uninstall_write_text_file($path, $updated_contents, $original_contents)
+{
+    $filesystem = ultracache_uninstall_get_wp_filesystem();
+    if (
+        '' === (string) $path
+        || !$filesystem
+        || !method_exists($filesystem, 'put_contents')
+        || !method_exists($filesystem, 'get_contents')
+    ) {
+        return false;
+    }
+
+    if (method_exists($filesystem, 'is_writable') && !$filesystem->is_writable($path)) {
+        return false;
+    }
+
+    $mode = defined('FS_CHMOD_FILE') ? FS_CHMOD_FILE : 0644;
+    $written = $filesystem->put_contents($path, (string) $updated_contents, $mode);
+    $read_back = false !== $written ? $filesystem->get_contents($path) : false;
+    if (is_string($read_back) && hash_equals(hash('sha256', (string) $updated_contents), hash('sha256', $read_back))) {
+        return true;
+    }
+
+    $filesystem->put_contents($path, (string) $original_contents, $mode);
+    return false;
+}
+
+function ultracache_uninstall_remove_htaccess_managed_blocks()
+{
+    $home_path = ultracache_uninstall_wordpress_home_path();
+    if ('' === $home_path) {
+        return false;
+    }
+
+    $path = trailingslashit($home_path) . '.htaccess';
+    $filesystem = ultracache_uninstall_get_wp_filesystem();
+    if (!$filesystem || !$filesystem->exists($path)) {
+        return true;
+    }
+
+    if (!$filesystem->is_file($path)) {
+        return false;
+    }
+
+    $original_contents = $filesystem->get_contents($path);
+    if (!is_string($original_contents)) {
+        return false;
+    }
+
+    $updated_contents = ultracache_uninstall_strip_htaccess_managed_blocks($original_contents);
+    if ($updated_contents === $original_contents) {
+        return true;
+    }
+
+    return ultracache_uninstall_write_text_file($path, $updated_contents, $original_contents);
 }
 
 function ultracache_uninstall_delete_path($path, array $allowed_roots)
@@ -505,6 +607,7 @@ function ultracache_uninstall_get_cleanup_policy()
 function ultracache_run_uninstall_cleanup()
 {
     ultracache_uninstall_remove_managed_constants_block();
+    ultracache_uninstall_remove_htaccess_managed_blocks();
 
     $ultracache_policy = ultracache_uninstall_get_cleanup_policy();
     $ultracache_keep_settings = in_array($ultracache_policy, array('plugin_only', 'keep_settings', 'keep_settings_tables'), true);
@@ -552,6 +655,7 @@ function ultracache_run_uninstall_cleanup()
             $ultracache_options[] = 'ultracache_analytics_db_version';
             $ultracache_options[] = 'ultracache_cache_asset_refs_db_version';
             $ultracache_options[] = 'ultracache_css_rewrite_map_db_version';
+            $ultracache_options[] = 'ultracache_locks_db_version';
         }
 
         foreach ($ultracache_options as $ultracache_option) {
@@ -599,6 +703,7 @@ function ultracache_run_uninstall_cleanup()
         'ultracache_analytics',
         'ultracache_cache_asset_refs',
         'ultracache_css_rewrite_map',
+        'ultracache_locks',
     );
 
     if (!$ultracache_keep_tables) {
@@ -641,6 +746,7 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_object_cache_last_flush_report',
             'ultracache_cache_asset_refs_db_version',
             'ultracache_css_rewrite_map_db_version',
+            'ultracache_locks_db_version',
         ) as $ultracache_final_option) {
             delete_option($ultracache_final_option);
             delete_site_option($ultracache_final_option);

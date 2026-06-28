@@ -147,6 +147,7 @@ class Ultra_Cache_Engine
         add_action('wp_enqueue_scripts', array($this, 'enqueue_sr7_lcp_priority_runtime_helper'), -996);
         add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_start_checkpoint'), -1000);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_runtime_js_scan_collector'), -999);
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_woocommerce_cart_fragments_delay_helper'), -995);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_mailerlite_lazy_nonce_helper'), 0);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_page_css_bundle_stylesheet'), 9999);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_delayed_icon_font_stylesheets'), 10000);
@@ -166,6 +167,7 @@ class Ultra_Cache_Engine
         add_filter('style_loader_tag', array($this, 'add_page_css_bundle_style_attributes'), 20, 4);
         add_filter('style_loader_tag', array($this, 'add_delayed_icon_font_style_attributes'), 20, 4);
         add_filter('wp_resource_hints', array($this, 'filter_google_fonts_resource_hints'), 20, 2);
+        add_filter('woocommerce_get_script_data', array($this, 'filter_woocommerce_cart_fragments_script_data'), 20, 2);
     }
 
     public function maybe_start_buffering()
@@ -635,8 +637,8 @@ class Ultra_Cache_Engine
         }
 
         $store_write_started_at = microtime(true);
-        $write_ok = $this->profile_store_event('final_cache_write', $html, function ($html) use ($file_path) {
-            return $this->write_cache_file($file_path, $html);
+        $write_ok = $this->profile_store_event('final_cache_write', $html, function ($html) use ($file_path, $url) {
+            return $this->write_cache_file($file_path, $html, $url);
         });
         $store_write_ms = (int) round((microtime(true) - $store_write_started_at) * 1000);
         if (!headers_sent()) {
@@ -1119,4 +1121,3 @@ class Ultra_Cache_Engine
 
 
 }
-

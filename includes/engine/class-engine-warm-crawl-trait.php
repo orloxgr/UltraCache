@@ -524,6 +524,8 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                         'headers'     => array_filter(
                             array(
                                 'Accept'                          => $accept_header,
+                                'PageSpeed'                       => 'off',
+                                'ModPagespeed'                    => 'off',
                                 'X-UltraCache-Warm'               => '1',
                                 'X-UltraCache-Internal-Request'   => '1',
                                 'X-UltraCache-Force-Refresh'      => $force_refresh ? '1' : '',
@@ -571,7 +573,7 @@ trait Ultra_Cache_Engine_Warm_Crawl_Trait
                     continue;
                 }
 
-                $wrote = $this->write_cache_file($file_path, $html);
+                $wrote = $this->write_cache_file($file_path, $html, $url);
                 if (!$wrote || !file_exists($file_path)) {
                     $write_error = method_exists($this, 'get_last_cache_write_error_message') ? $this->get_last_cache_write_error_message() : '';
                     $last_error = '' !== (string) $write_error ? 'Failed to write cache file: ' . (string) $write_error : 'Failed to write cache file.';

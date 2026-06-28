@@ -202,4 +202,121 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
         ));
     }
 
+    private function should_skip_woocommerce_cart_fragments_empty_cart_control()
+    {
+        if ((function_exists('is_user_logged_in') && is_user_logged_in()) || (function_exists('wp_doing_ajax') && wp_doing_ajax()) || (defined('REST_REQUEST') && REST_REQUEST)) {
+            return true;
+        }
+
+        foreach (array('is_cart', 'is_checkout', 'is_account_page') as $conditional) {
+            if (function_exists($conditional) && call_user_func($conditional)) {
+                return true;
+            }
+        }
+
+        $cookie_names = array();
+        if (isset($_COOKIE) && is_array($_COOKIE)) {
+            $cookie_names = array_keys(wp_unslash($_COOKIE));
+        }
+
+        foreach ($cookie_names as $cookie_name) {
+            if ($this->cookie_name_matches_any_pattern($cookie_name, array('woocommerce_items_in_cart', 'woocommerce_cart_hash', 'wp_woocommerce_session_'))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function should_skip_woocommerce_cart_fragments_delay()
+    {
+        return $this->should_skip_woocommerce_cart_fragments_empty_cart_control();
+    }
+
+    public function filter_woocommerce_cart_fragments_script_data($script_data, $handle)
+    {
+        if ('wc-cart-fragments' !== (string) $handle) {
+            return $script_data;
+        }
+
+        if (is_admin()) {
+            return $script_data;
+        }
+
+        $settings = $this->get_settings();
+        if (empty($settings['woocommerce_cart_fragments_suppress_empty'])) {
+            return $script_data;
+        }
+
+        if ($this->should_skip_woocommerce_cart_fragments_empty_cart_control()) {
+            return $script_data;
+        }
+
+        return null;
+    }
+
+    private function get_woocommerce_cart_fragments_delay_ms(array $settings)
+    {
+        $timing = isset($settings['woocommerce_cart_fragments_delay_timing']) ? strtolower(trim((string) $settings['woocommerce_cart_fragments_delay_timing'])) : 'delayed-js';
+        if ('delayed-js' === $timing) {
+            $seconds = isset($settings['delayed_local_js_auto_start_seconds']) ? (float) $settings['delayed_local_js_auto_start_seconds'] : 0.05;
+        } else {
+            $seconds = (float) $timing;
+        }
+
+        $seconds = max(0.05, min(5.0, $seconds));
+        return (int) round(1000 * $seconds);
+    }
+
+    private function get_delayed_js_autostart_event_names(array $settings)
+    {
+        $events = array();
+        if (!empty($settings['delayed_js_autostart_mousemove'])) {
+            $events[] = 'mousemove';
+        }
+        if (!empty($settings['delayed_js_autostart_scroll'])) {
+            $events[] = 'scroll';
+        }
+        if (!empty($settings['delayed_js_autostart_click'])) {
+            $events[] = 'click';
+        }
+        if (!empty($settings['delayed_js_autostart_touch_pointer'])) {
+            $events[] = 'touchstart';
+            $events[] = 'pointerdown';
+        }
+        if (!empty($settings['delayed_js_autostart_keyboard'])) {
+            $events[] = 'keydown';
+        }
+
+        return array_values(array_unique(array_map('sanitize_key', $events)));
+    }
+
+    public function enqueue_woocommerce_cart_fragments_delay_helper()
+    {
+        if (is_admin()) {
+            return;
+        }
+
+        if (!class_exists('WooCommerce') && !defined('WC_VERSION') && !function_exists('WC')) {
+            return;
+        }
+
+        $settings = $this->get_settings();
+        if (empty($settings['woocommerce_cart_fragments_delay']) || $this->should_skip_woocommerce_cart_fragments_delay()) {
+            return;
+        }
+
+        $handle = 'ultracache-woocommerce-cart-fragments-delay';
+        if (!$this->ultracache_enqueue_frontend_js_helper($handle, 'woocommerce-cart-fragments-delay.js', array('jquery'), false)) {
+            return;
+        }
+
+        $this->ultracache_add_frontend_js_helper_data($handle, 'ultracacheWooCartFragmentsDelayConfig', array(
+            'autoEvents'      => $this->get_delayed_js_autostart_event_names($settings),
+            'autoAfterLoad'   => !empty($settings['delayed_js_autostart_after_load']),
+            'autoDelayMs'     => $this->get_woocommerce_cart_fragments_delay_ms($settings),
+            'skipCartCookies' => true,
+        ));
+    }
+
 }

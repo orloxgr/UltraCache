@@ -193,6 +193,9 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                     if ('' !== $role) {
                         $processor->set_attribute('data-ultracache-css-role', $role);
                     }
+                    if (method_exists($processor, 'remove_attribute')) {
+                        $processor->remove_attribute('data-ultracache-css-blocking-reason');
+                    }
                     $processor->set_attribute('data-ultracache-css-async-reason', $this->normalize_css_decision_attribute_value(isset($decision['reason']) ? (string) $decision['reason'] : 'eligible'));
                     $stats['rewritten']++;
                     $this->add_safe_async_css_diagnostic_item($stats, $absolute_url, 'applied', isset($decision['reason']) ? (string) $decision['reason'] : 'eligible', '' !== $role ? ('role=' . $role) : '');
@@ -224,6 +227,7 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 'enabled' => !empty($settings['async_css']),
                 'aggressive_enabled' => !empty($settings['aggressive_async_css']),
                 'external_enabled' => !empty($settings['async_external_css']),
+                'font_mix_bundle_async_enabled' => !empty($settings['font_mix_css_bundle_async']),
                 'safe' => true,
                 'scanned' => 0,
                 'rewritten' => 0,
@@ -443,27 +447,11 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
 
         private function get_builtin_homepage_css_bundle_exclude_fragments()
         {
-            return array(
-                // Keep fragile slider/hero runtime CSS outside generated bundles. These files often
-                // coordinate with JS initialization order and should remain explicit stylesheet links.
-                'revslider',
-                'slider-revolution',
-                'revolution',
-                'sr7',
-                'rs7',
-                'rs6',
-                'tptools',
-                'tp-tools',
-                'rs-module',
-                'swiper',
-                'slick',
-                'splide',
-                'owl.carousel',
-                'smartslider',
-                'n2-ss',
-                'layerslider',
-                'metaslider',
-            );
+            /*
+             * No hidden CSS bundle exclusions. Compatibility exclusions belong
+             * in the visible CSS Bundle Exclusions textarea or scanner output.
+             */
+            return array();
         }
 
         private function get_homepage_css_bundle_exclude_fragments()
@@ -543,6 +531,10 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 return 'delayed-fonts-css';
             }
 
+            if (false !== strpos($path, 'bundle-font-mix-') || false !== strpos($tag, 'data-ultracache-font-mix-css-bundle=') || false !== strpos($tag, 'data-ultracache-css-role="font-mix-bundle"')) {
+                return 'font-mix-bundle';
+            }
+
             if (false !== strpos($path, 'bundle-leftover-') || false !== strpos($tag, 'data-ultracache-leftover-css-bundle=') || false !== strpos($tag, 'data-ultracache-css-role="leftover-bundle"')) {
                 return 'leftover-bundle';
             }
@@ -583,6 +575,13 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
 
                 case 'delayed-fonts-css':
                     return array('eligible' => true, 'reason' => 'delayed-fonts', 'role' => $role);
+
+                case 'font-mix-bundle':
+                    $settings = $this->get_settings();
+                    if (!empty($settings['font_mix_css_bundle']) && !empty($settings['font_mix_css_bundle_async'])) {
+                        return array('eligible' => true, 'reason' => 'font-mix-bundle-async-enabled', 'role' => $role);
+                    }
+                    return array('eligible' => false, 'reason' => 'font-mix-bundle-layout-risk', 'role' => $role);
 
                 case 'safe-bundle':
                 case 'aggressive-bundle':
@@ -638,7 +637,8 @@ private function get_async_css_stylesheet_decision($url, $tag = '')
             $is_generated_css = $this->is_ultracache_generated_stylesheet_url($url);
             if ($is_generated_css) {
                 $generated_decision = $this->get_ultracache_generated_stylesheet_async_decision($url, $tag);
-                if (empty($settings['async_css']) && empty($settings['aggressive_async_css'])) {
+                $is_font_mix_bundle_async = !empty($settings['font_mix_css_bundle_async']) && !empty($generated_decision['role']) && 'font-mix-bundle' === (string) $generated_decision['role'];
+                if (empty($settings['async_css']) && empty($settings['aggressive_async_css']) && !$is_font_mix_bundle_async) {
                     $generated_decision['eligible'] = false;
                     $generated_decision['reason'] = 'async-css-disabled';
                 }
@@ -652,24 +652,7 @@ private function get_async_css_stylesheet_decision($url, $tag = '')
                     return array('eligible' => false, 'reason' => 'aggressive_async_exclude_list');
                 }
 
-                /*
-                 * Aggressive Async CSS means almost all remaining local stylesheet
-                 * links are eligible. CSS Bundle Exclusions must not silently
-                 * disable this pass; use the visible Async CSS
-                 * Exclude List for styles that must remain blocking.
-                 */
-                $hard_block_patterns = array(
-                    '/dashicons/i',
-                    '/admin-bar/i',
-                    '/\/wp-admin\//i',
-                );
-
-                foreach ($hard_block_patterns as $pattern) {
-                    if (preg_match($pattern, $path) || preg_match($pattern, (string) $tag)) {
-                        return array('eligible' => false, 'reason' => 'hard_admin_asset');
-                    }
-                }
-
+                // Aggressive Async CSS uses only the visible Async CSS safeguard list.
                 return array('eligible' => true, 'reason' => 'aggressive_async_css_enabled');
             }
 

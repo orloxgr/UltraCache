@@ -14,4 +14,5 @@ Additional frontend helpers will be migrated in separate staged versions as they
 
 - `runtime-font-css-map.js` — Runtime font CSS href rewrite helper enqueued through `wp_enqueue_scripts`, with mapping configuration passed by `wp_add_inline_script()`.
 - `font-display-cssom-patch.js` — Runtime CSSOM font-display patch helper enqueued through `wp_enqueue_scripts`.
+- `woocommerce-cart-fragments-delay.js` — Optional WooCommerce cart-fragments AJAX delay helper enqueued through `wp_enqueue_scripts`, with timing configuration passed by `wp_add_inline_script()`.
 - `sr7-lcp-priority.js` — Runtime SR7/LCP priority marker helper enqueued through `wp_enqueue_scripts`, with manual selector configuration passed by `wp_add_inline_script()`.

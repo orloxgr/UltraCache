@@ -528,6 +528,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 				'redis_host' => isset($override['redisHost']) ? (string) $override['redisHost'] : (isset($override['redis_host']) ? (string) $override['redis_host'] : null),
 				'redis_port' => isset($override['redisPort']) ? absint($override['redisPort']) : (isset($override['redis_port']) ? absint($override['redis_port']) : null),
 				'redis_username' => isset($override['redisUsername']) ? sanitize_text_field((string) $override['redisUsername']) : (isset($override['redis_username']) ? sanitize_text_field((string) $override['redis_username']) : null),
+				'redis_password' => array_key_exists('redisPassword', $override) ? (string) $override['redisPassword'] : (array_key_exists('redis_password', $override) ? (string) $override['redis_password'] : null),
 				'redis_database' => isset($override['redisDatabase']) ? absint($override['redisDatabase']) : (isset($override['redis_database']) ? absint($override['redis_database']) : null),
 				'redis_prefix' => isset($override['redisPrefix']) ? (string) $override['redisPrefix'] : (isset($override['redis_prefix']) ? (string) $override['redis_prefix'] : null),
 				'redis_use_tls' => isset($override['redisUseTls']) ? (bool) $override['redisUseTls'] : (isset($override['redis_use_tls']) ? (bool) $override['redis_use_tls'] : null),
@@ -568,7 +569,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 
 		$redis = self::connect_redis($settings);
 		if (!$redis instanceof Redis) {
-			$result['message'] = 'Could not connect to Redis with the provided settings.';
+			$result['message'] = '' !== self::$redis_last_error ? self::$redis_last_error : 'Could not connect to Redis with the provided settings.';
 			return $result;
 		}
 
@@ -592,6 +593,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 				'redis_host' => isset($override['redisHost']) ? (string) $override['redisHost'] : (isset($override['redis_host']) ? (string) $override['redis_host'] : null),
 				'redis_port' => isset($override['redisPort']) ? absint($override['redisPort']) : (isset($override['redis_port']) ? absint($override['redis_port']) : null),
 				'redis_username' => isset($override['redisUsername']) ? sanitize_text_field((string) $override['redisUsername']) : (isset($override['redis_username']) ? sanitize_text_field((string) $override['redis_username']) : null),
+				'redis_password' => array_key_exists('redisPassword', $override) ? (string) $override['redisPassword'] : (array_key_exists('redis_password', $override) ? (string) $override['redis_password'] : null),
 				'redis_database' => isset($override['redisDatabase']) ? absint($override['redisDatabase']) : (isset($override['redis_database']) ? absint($override['redis_database']) : null),
 				'redis_prefix' => isset($override['redisPrefix']) ? (string) $override['redisPrefix'] : (isset($override['redis_prefix']) ? (string) $override['redis_prefix'] : null),
 				'redis_use_tls' => isset($override['redisUseTls']) ? (bool) $override['redisUseTls'] : (isset($override['redis_use_tls']) ? (bool) $override['redis_use_tls'] : null),

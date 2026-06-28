@@ -55,6 +55,8 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'homepageCssBundleEnabled'   => false,
                 'homepageCssBundleInlineEnabled' => false,
                 'leftoverCssBundleEnabled'   => false,
+                'fontMixCssBundleEnabled'    => false,
+                'fontMixCssBundleAsyncEnabled' => false,
                 'homepageCssBundleExcludeList' => '',
                 'homepageCssBundleMode'      => 'safe',
                 'delayIconFontsEnabled'      => false,
@@ -85,6 +87,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'assetCleanupWooProductAssetsEnabled' => false,
                 'assetCleanupProductFilterAssetsEnabled' => false,
                 'assetCleanupWooBlocksCssEnabled' => false,
+                'woocommerceCartFragmentsSuppressEmptyEnabled' => false,
+                'woocommerceCartFragmentsDelayEnabled' => false,
+                'woocommerceCartFragmentsDelayTiming' => 'delayed-js',
                 'assetCleanupExcludeList'     => "elementor\nbricks\noxygen\nwpbakery\nvc_\nrevslider\nsr7\najaxsearch\nfibosearch\n.dgwt-wcas\naws-container\ncart\ncheckout\naccount",
                 'googleFontsSwapEnabled'     => false,
                 'googleFontsLocalOptimizationEnabled' => false,
@@ -93,6 +98,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'selfHostedFontRuntimeRewriteEnabled' => false,
                 'speculationRulesEnabled'    => false,
                 'browserCacheRulesEnabled'   => false,
+                'apacheStaticHtmlDeliveryEnabled' => false,
                 'varnishCliEnabled'          => false,
                 'varnishCliMode'             => 'http',
                 'varnishCliServers'          => self::get_default_varnish_http_endpoint(),
@@ -373,6 +379,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'googletagmanager.com',
                 'google-analytics.com',
                 'gtag/js',
+                'gtag(',
+                'dataLayer',
+                'gtm.start',
                 'gtm.js',
                 'googlesitekit-events-provider',
                 'google-site-kit/dist/assets/js',
@@ -408,9 +417,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'recaptcha',
                 'hcaptcha',
                 'google.com/recaptcha',
-                'gstatic.com/recaptcha',
                 'maps.googleapis.com',
-                'maps.gstatic.com',
                 'complianz',
                 'cmplz',
 
@@ -499,6 +506,53 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
         {
             $lines = array_merge(self::parse_textarea_setting($first), self::parse_textarea_setting($second));
             return self::normalize_textarea_setting($lines);
+        }
+
+        private static function is_generic_root_js_safeguard_line($line)
+        {
+            return in_array(
+                strtolower(trim((string) $line)),
+                array('woocommerce', 'wordpress', 'frontend', 'main', 'plugin', 'plugins', 'script', 'scripts', 'data', 'params', 'cart', 'checkout', 'account'),
+                true
+            );
+        }
+
+        private static function js_safeguard_lines_overlap($left, $right)
+        {
+            $left = strtolower(trim((string) $left));
+            $right = strtolower(trim((string) $right));
+            if ('' === $left || '' === $right) {
+                return false;
+            }
+            if (self::is_generic_root_js_safeguard_line($left) || self::is_generic_root_js_safeguard_line($right)) {
+                return $left === $right;
+            }
+            return $left === $right || false !== strpos($right, $left) || false !== strpos($left, $right);
+        }
+
+        private static function remove_overlapping_js_safeguard_lines($value, $winning_value)
+        {
+            $lines = self::parse_textarea_setting($value);
+            $winning_lines = self::parse_textarea_setting($winning_value);
+            if (empty($lines) || empty($winning_lines)) {
+                return self::normalize_textarea_setting($lines);
+            }
+
+            $kept = array();
+            foreach ($lines as $line) {
+                $overlaps = false;
+                foreach ($winning_lines as $winning_line) {
+                    if (self::js_safeguard_lines_overlap($line, $winning_line)) {
+                        $overlaps = true;
+                        break;
+                    }
+                }
+                if (!$overlaps) {
+                    $kept[] = $line;
+                }
+            }
+
+            return self::normalize_textarea_setting($kept);
         }
 
         private static function normalize_multiline_setting_with_callback($value, callable $callback, $limit = 200)
@@ -1402,6 +1456,12 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             return in_array($value, array('off', 'defer', 'delay'), true) ? $value : 'off';
         }
 
+        private static function sanitize_woocommerce_cart_fragments_delay_timing($value)
+        {
+            $value = strtolower(trim((string) $value));
+            return in_array($value, array('delayed-js', '0.5', '1', '2', '3', '5'), true) ? $value : 'delayed-js';
+        }
+
         private static function normalize_boolean_setting_value($value, $default = false)
         {
             if (is_bool($value)) {
@@ -1453,11 +1513,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 }
             }
 
-            // Delay icon fonts is the only visible UI control for both icon-font
-            // delaying and broad icon-font auto-detection. Keep the internal legacy
-            // auto-detect flag synchronized so profiles/imports/direct saves cannot
-            // enable one half of the feature without the other.
-            $settings['delayIconFontsAutoDetectEnabled'] = !empty($settings['delayIconFontsEnabled']);
+            // Broad icon-font auto-detection is no longer a hidden runtime rule.
+            // The scanner can append discovered patterns to the visible font list.
+            $settings['delayIconFontsAutoDetectEnabled'] = false;
 
             // JavaScript Strategy is the canonical UI model for the two base
             // engine booleans. The other local/third-party/LCP delay controls
@@ -1506,6 +1564,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             // Fresh installs receive the visible jQuery safety default in the
             // visible textarea; there are still no hidden safe-stage exclusions.
             $settings['deferJsExcludeList'] = self::normalize_textarea_setting($settings['deferJsExcludeList']);
+            $settings['deferJsForceList'] = self::remove_overlapping_js_safeguard_lines($settings['deferJsForceList'], $settings['deferJsExcludeList']);
             $settings['delayNonCriticalJsExcludeList'] = '';
             $settings['delaySafeThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delaySafeThirdPartyJsPatterns']);
             $settings['delayFunctionalThirdPartyJsPatterns'] = self::normalize_textarea_setting($settings['delayFunctionalThirdPartyJsPatterns']);
@@ -1521,6 +1580,10 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
             $settings['asyncExternalCssExcludeList'] = self::normalize_textarea_setting($settings['asyncExternalCssExcludeList'] ?? '');
             $settings['delayNonCriticalJsExcludeList'] = self::normalize_textarea_setting($settings['delayNonCriticalJsExcludeList']);
             $settings['assetCleanupExcludeList'] = self::normalize_textarea_setting($settings['assetCleanupExcludeList']);
+            $settings['woocommerceCartFragmentsDelayTiming'] = self::sanitize_woocommerce_cart_fragments_delay_timing($settings['woocommerceCartFragmentsDelayTiming'] ?? $defaults['woocommerceCartFragmentsDelayTiming']);
+            if (!empty($settings['woocommerceCartFragmentsSuppressEmptyEnabled'])) {
+                $settings['woocommerceCartFragmentsDelayEnabled'] = false;
+            }
             $settings['googleFontsAdditionalScanUrls'] = self::normalize_textarea_setting($settings['googleFontsAdditionalScanUrls']);
             $settings['manualLcpHeroSelector'] = self::normalize_textarea_setting($settings['manualLcpHeroSelector']);
             unset($settings['lcpImagePriorityOverride']);
@@ -1876,9 +1939,11 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'homepage_css_bundle'         => !empty($ui['homepageCssBundleEnabled']),
                 'homepage_css_bundle_inline'  => !empty($ui['homepageCssBundleInlineEnabled']),
                 'leftover_css_bundle'       => !empty($ui['leftoverCssBundleEnabled']),
+                'font_mix_css_bundle'       => !empty($ui['fontMixCssBundleEnabled']),
+                'font_mix_css_bundle_async' => !empty($ui['fontMixCssBundleAsyncEnabled']) && !empty($ui['fontMixCssBundleEnabled']),
                 'homepage_css_bundle_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['homepageCssBundleExcludeList'])),
                 'delay_icon_fonts'            => !empty($ui['delayIconFontsEnabled']),
-                'delay_icon_fonts_auto_detect' => !empty($ui['delayIconFontsEnabled']),
+                'delay_icon_fonts_auto_detect' => false,
                 'delay_icon_fonts_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsList'])),
                 'delay_icon_fonts_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['delayIconFontsExcludeList'])),
                 'homepage_css_bundle_mode'    => self::sanitize_homepage_css_bundle_mode($ui['homepageCssBundleMode']),
@@ -1908,6 +1973,9 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'asset_cleanup_woo_product_assets' => !empty($ui['assetCleanupWooProductAssetsEnabled']),
                 'asset_cleanup_product_filter_assets' => !empty($ui['assetCleanupProductFilterAssetsEnabled']),
                 'asset_cleanup_woo_blocks_css' => !empty($ui['assetCleanupWooBlocksCssEnabled']),
+                'woocommerce_cart_fragments_suppress_empty' => !empty($ui['woocommerceCartFragmentsSuppressEmptyEnabled']),
+                'woocommerce_cart_fragments_delay' => !empty($ui['woocommerceCartFragmentsDelayEnabled']),
+                'woocommerce_cart_fragments_delay_timing' => self::sanitize_woocommerce_cart_fragments_delay_timing($ui['woocommerceCartFragmentsDelayTiming'] ?? 'delayed-js'),
                 'asset_cleanup_exclude_list'   => self::parse_textarea_setting(self::normalize_textarea_setting($ui['assetCleanupExcludeList'])),
                 'google_fonts_swap'            => !empty($ui['googleFontsSwapEnabled']),
                 'google_fonts_local_optimization' => !empty($ui['googleFontsLocalOptimizationEnabled']),
@@ -1916,6 +1984,7 @@ if (!trait_exists('Ultra_Cache_WP_Settings_Trait')) {
                 'self_hosted_font_runtime_rewrite' => !empty($ui['selfHostedFontRuntimeRewriteEnabled']),
                 'speculation_rules_enabled'    => !empty($ui['speculationRulesEnabled']),
                 'browser_cache_rules'          => !empty($ui['browserCacheRulesEnabled']),
+                'apache_static_html_delivery'  => !empty($ui['apacheStaticHtmlDeliveryEnabled']),
                 'varnish_cli_enabled'          => !empty($ui['varnishCliEnabled']),
                 'varnish_cli_mode'             => self::sanitize_varnish_mode($ui['varnishCliMode']),
                 'varnish_cli_servers'          => self::sanitize_varnish_servers_string($ui['varnishCliServers'], self::sanitize_varnish_mode($ui['varnishCliMode'])),

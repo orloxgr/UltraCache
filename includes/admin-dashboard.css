@@ -218,6 +218,36 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 	font-weight: 500;
 }
 
+#uc-dashboard .uc-label-with-help {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+#uc-dashboard .uc-help-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	border: 1px solid rgba(151, 163, 182, 0.55);
+	border-radius: 999px;
+	color: var(--uc-text-soft);
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 1;
+	cursor: help;
+	flex: 0 0 auto;
+}
+
+#uc-dashboard .uc-help-icon:focus,
+#uc-dashboard .uc-help-icon:hover {
+	color: var(--uc-text);
+	border-color: var(--uc-accent);
+	outline: none;
+}
+
 #uc-dashboard .font-bold {
 	font-weight: 700;
 }

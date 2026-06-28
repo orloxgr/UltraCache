@@ -5,7 +5,7 @@ Donate link: https://iniotakis.com/
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 2.59.06.59
+Stable tag: 2.59.06.78
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -171,10 +171,10 @@ UltraCache includes optional frontend optimization rules that can detect, delay,
 These matching examples may include fragments such as:
 
 * `googletagmanager.com`
+* `gtag(`
+* `dataLayer`
 * `connect.facebook.net`
 * `maps.googleapis.com`
-* `maps.gstatic.com`
-* `gstatic.com/recaptcha`
 
 These are matching examples only. UltraCache does not add Google Tag Manager, Facebook/Meta scripts, Google Maps, reCAPTCHA, ads, analytics pixels, chat widgets, booking widgets, or form widgets to a site by itself, and these pattern lists do not make UltraCache contact those providers.
 

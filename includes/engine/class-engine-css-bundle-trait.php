@@ -945,6 +945,8 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                     'headers' => array(
                         'Cache-Control' => 'no-cache',
                         'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'PageSpeed' => 'off',
+                        'ModPagespeed' => 'off',
                         'X-UltraCache-CSS-Bundle' => '1',
                         'X-UltraCache-Internal-Request' => '1',
                     ),
@@ -1237,50 +1239,12 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
                 return false;
             }
 
-            $auto_patterns = array(
-                ' icon',
-                '-icon',
-                '_icon',
-                'icons',
-                'fontawesome',
-                'font awesome',
-                'dashicons',
-                'eicons',
-                'icomoon',
-                'flaticon',
-                'themify',
-                'simple-line-icons',
-                'linearicons',
-                'material-icons',
-                'materialicons',
-                'ionicons',
-                'feather.ttf',
-                'feather fonts',
-                'star.ttf',
-                'woocommerce star',
-                '/webfonts/',
-                '/icons/',
-                'fa-solid',
-                'fa-regular',
-                'fa-brands',
-            );
-
-            if ($this->icon_font_text_matches_patterns($combined, $auto_patterns, $matched)) {
-                $meta['matchedPattern'] = $matched;
-                $meta['reason'] = 'auto-pattern';
-                return true;
-            }
-
-            if ('' !== $family) {
-                $family_pattern = preg_quote($family, '/');
-                if (preg_match('/font-family\s*:\s*[^;]*' . $family_pattern . '[^;]*;[\s\S]{0,200}?content\s*:\s*[\'"]\\\\[a-f0-9]{3,6}/i', $css_context)
-                    || preg_match('/content\s*:\s*[\'"]\\\\[a-f0-9]{3,6}[\s\S]{0,200}?font-family\s*:\s*[^;]*' . $family_pattern . '[^;]*;/i', $css_context)) {
-                    $meta['matchedPattern'] = 'unicode-content-usage';
-                    $meta['reason'] = 'auto-usage';
-                    return true;
-                }
-            }
-
+            unset($css_context);
+            /*
+             * Hidden broad icon-font auto-detection is disabled. The frontend
+             * scanner can append detected font family/file fragments into the
+             * visible Delay These Fonts / Patterns list.
+             */
             return false;
         }
 
@@ -3007,6 +2971,445 @@ private function get_css_bundle_cached_html_ref_basenames($max_files = 800)
             foreach (array('rel', 'href', 'id', 'media', 'onload', 'disabled', 'as', 'crossorigin', 'integrity', 'type', 'data-href', 'data-src') as $attribute) {
                 $processor->remove_attribute($attribute);
             }
+        }
+
+        private function get_font_mix_css_bundle_default_stats()
+        {
+            return array(
+                'enabled' => true,
+                'success' => false,
+                'candidate_count' => 0,
+                'replaced_link_count' => 0,
+                'skipped_nonlocal_count' => 0,
+                'skipped_unreadable_count' => 0,
+                'skipped_async_count' => 0,
+                'skipped_media_count' => 0,
+                'skipped_existing_bundle_count' => 0,
+                'skipped_reason' => '',
+                'bundle_url' => '',
+                'bundle_file' => '',
+                'bundle_bytes' => 0,
+                'source_bytes_total' => 0,
+                'source_urls' => array(),
+                'source_details' => array(),
+            );
+        }
+
+        private function record_font_mix_css_bundle_profile(array $stats)
+        {
+            if (!$this->is_store_profiler_enabled()) {
+                return;
+            }
+            $this->store_profile['font_mix_css_bundle'] = $stats;
+        }
+
+        private function maybe_consolidate_font_mix_stylesheet_links($html, array $settings = array())
+        {
+            $stats = $this->get_font_mix_css_bundle_default_stats();
+            if (empty($settings['font_mix_css_bundle'])) {
+                $stats['enabled'] = false;
+                $stats['skipped_reason'] = 'disabled';
+                $this->record_font_mix_css_bundle_profile($stats);
+                return $html;
+            }
+
+            if (!is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                $stats['skipped_reason'] = 'no-html-or-links';
+                $this->record_font_mix_css_bundle_profile($stats);
+                return $html;
+            }
+
+            if (false !== stripos($html, 'data-ultracache-font-mix-css-bundle=')) {
+                $stats['skipped_reason'] = 'already-applied';
+                $this->record_font_mix_css_bundle_profile($stats);
+                return $html;
+            }
+
+            $processed = $this->maybe_consolidate_font_mix_stylesheet_links_with_processor($html, $stats);
+            if (is_string($processed) && '' !== $processed) {
+                return $processed;
+            }
+
+            $stats['skipped_reason'] = 'html-api-font-mix-css-consolidation-failed';
+            $this->record_font_mix_css_bundle_profile($stats);
+            return $html;
+        }
+
+        private function maybe_consolidate_font_mix_stylesheet_links_with_processor($html, array &$stats)
+        {
+            if (!$this->html_tag_processor_available() || !is_string($html) || '' === $html || false === stripos($html, '<link')) {
+                return null;
+            }
+
+            try {
+                $page_url = $this->get_current_request_url();
+                $assets = array();
+                $matched_urls = array();
+                $seen = array();
+                $collector = new WP_HTML_Tag_Processor($html);
+
+                while ($collector->next_tag('LINK')) {
+                    $candidate = $this->get_font_mix_css_bundle_candidate_from_link_processor($collector, $page_url);
+                    $asset = isset($candidate['asset']) && is_array($candidate['asset']) ? $candidate['asset'] : array();
+                    $skip = isset($candidate['skip']) ? (string) $candidate['skip'] : '';
+
+                    if (empty($asset)) {
+                        switch ($skip) {
+                            case 'nonlocal':
+                                $stats['skipped_nonlocal_count']++;
+                                break;
+                            case 'unreadable':
+                                $stats['skipped_unreadable_count']++;
+                                break;
+                            case 'async':
+                                $stats['skipped_async_count']++;
+                                break;
+                            case 'media':
+                                $stats['skipped_media_count']++;
+                                break;
+                            case 'existing-bundle':
+                                $stats['skipped_existing_bundle_count']++;
+                                break;
+                        }
+                        continue;
+                    }
+
+                    $url = (string) ($asset['url'] ?? '');
+                    if ('' === $url || isset($seen[$url])) {
+                        continue;
+                    }
+
+                    $seen[$url] = true;
+                    $assets[] = $asset;
+                    $matched_urls[] = $url;
+                }
+
+                $stats['candidate_count'] = count($assets);
+                $stats['source_urls'] = array_values(array_map('strval', array_keys($seen)));
+
+                if (count($assets) < 2 || count($matched_urls) < 2) {
+                    $stats['skipped_reason'] = 'not-enough-font-mix-css';
+                    $this->record_font_mix_css_bundle_profile($stats);
+                    return $html;
+                }
+
+                $bundle = $this->build_font_mix_css_bundle_file($assets);
+                if (empty($bundle['success'])) {
+                    $stats['skipped_reason'] = !empty($bundle['message']) ? (string) $bundle['message'] : 'bundle-build-failed';
+                    $this->record_font_mix_css_bundle_profile($stats);
+                    return $html;
+                }
+
+                $bundle_url = isset($bundle['url']) ? (string) $bundle['url'] : '';
+                $bundle_file = isset($bundle['file']) ? (string) $bundle['file'] : '';
+                if ('' === $bundle_url || '' === $bundle_file || !is_readable($bundle_file)) {
+                    $stats['skipped_reason'] = 'bundle-file-unreadable';
+                    $this->record_font_mix_css_bundle_profile($stats);
+                    return $html;
+                }
+
+                $updated = $this->apply_font_mix_css_bundle_links_with_processor($html, $matched_urls, $bundle_url);
+                if (!is_string($updated) || '' === $updated || $updated === $html) {
+                    $stats['skipped_reason'] = 'html-api-replacement-failed';
+                    $this->record_font_mix_css_bundle_profile($stats);
+                    return $html;
+                }
+
+                $stats['success'] = true;
+                $stats['replaced_link_count'] = count($matched_urls);
+                $stats['bundle_url'] = $bundle_url;
+                $stats['bundle_file'] = $bundle_file;
+                $stats['bundle_bytes'] = is_readable($bundle_file) ? (int) filesize($bundle_file) : 0;
+                $stats['source_bytes_total'] = isset($bundle['sourceBytesTotal']) ? (int) $bundle['sourceBytesTotal'] : 0;
+                $stats['source_details'] = isset($bundle['sourceDetails']) && is_array($bundle['sourceDetails']) ? $bundle['sourceDetails'] : array();
+                $this->record_font_mix_css_bundle_profile($stats);
+
+                return $updated;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        private function get_font_mix_css_bundle_candidate_from_link_processor($processor, $page_url)
+        {
+            $rel = is_object($processor) && method_exists($processor, 'get_attribute') ? $processor->get_attribute('rel') : null;
+            if (!$this->html_rel_attribute_contains_stylesheet($rel)) {
+                return array('asset' => array(), 'skip' => 'not-stylesheet');
+            }
+
+            foreach (array('data-ultracache-frontpage-css', 'data-ultracache-page-css-bundle', 'data-ultracache-leftover-css-bundle', 'data-ultracache-font-mix-css-bundle', 'data-ultracache-async-css') as $attribute) {
+                if (null !== $processor->get_attribute($attribute)) {
+                    return array('asset' => array(), 'skip' => 'existing-bundle');
+                }
+            }
+
+            foreach (array('onload', 'disabled', 'data-href', 'data-src') as $attribute) {
+                if (null !== $processor->get_attribute($attribute)) {
+                    return array('asset' => array(), 'skip' => 'async');
+                }
+            }
+
+            $href = $processor->get_attribute('href');
+            $href = is_string($href) ? html_entity_decode($href, ENT_QUOTES | ENT_HTML5) : '';
+            if ('' === $href) {
+                return array('asset' => array(), 'skip' => 'unresolved');
+            }
+
+            $media = $processor->get_attribute('media');
+            $media = strtolower(trim(is_string($media) ? $media : ''));
+            if (!$this->is_homepage_css_bundle_allowed_media($media, 'leftover')) {
+                return array('asset' => array(), 'skip' => 'media');
+            }
+
+            $absolute_url = $this->absolutize_public_resource_url($href, '' !== (string) $page_url ? (string) $page_url : home_url('/'));
+            if ('' === $absolute_url) {
+                return array('asset' => array(), 'skip' => 'unresolved');
+            }
+
+            $host = (string) wp_parse_url($absolute_url, PHP_URL_HOST);
+            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
+                return array('asset' => array(), 'skip' => 'nonlocal');
+            }
+
+            $url_path = strtolower((string) wp_parse_url($absolute_url, PHP_URL_PATH));
+            if (!$this->is_font_mix_css_bundle_source_url_path($url_path)) {
+                return array('asset' => array(), 'skip' => 'not-font-mix');
+            }
+
+            $local_path = $this->resolve_local_path_from_public_url($absolute_url);
+            $local_path_lc = strtolower(str_replace('\\', '/', (string) $local_path));
+            if ('' === $local_path || !is_readable($local_path) || !function_exists('ultracache_generated_asset_local_path_matches') || !ultracache_generated_asset_local_path_matches($local_path_lc, array('optimized-css'))) {
+                return array('asset' => array(), 'skip' => 'unreadable');
+            }
+
+            return array(
+                'asset' => array(
+                    'url' => $this->normalize_public_resource_url($absolute_url),
+                    'path' => $local_path,
+                    'media' => $media,
+                ),
+                'skip' => '',
+            );
+        }
+
+        private function is_font_mix_css_bundle_source_url_path($path)
+        {
+            $path = strtolower((string) $path);
+            if ('' === $path || '.css' !== substr($path, -4)) {
+                return false;
+            }
+
+            if (!function_exists('ultracache_generated_asset_reference_matches') || !ultracache_generated_asset_reference_matches($path, array('optimized-css'))) {
+                return false;
+            }
+
+            return 0 === strpos((string) basename($path), 'css-font-mix-');
+        }
+
+        private function build_font_mix_css_bundle_file(array $assets)
+        {
+            $dir = $this->get_frontpage_css_dir();
+            if ('' === $dir) {
+                return array('success' => false, 'message' => 'css-bundle-dir-unavailable');
+            }
+            if (!is_dir($dir)) {
+                wp_mkdir_p($dir);
+            }
+
+            $signature_parts = array();
+            $bundle_body = '';
+            $bundle_charset = '';
+            $bundle_imports = array();
+            $bundle_import_keys = array();
+            $source_details = array();
+            $source_bytes_total = 0;
+            $used_urls = array();
+
+            foreach ($assets as $asset) {
+                $path = (string) ($asset['path'] ?? '');
+                $url = (string) ($asset['url'] ?? '');
+                $media = strtolower(trim((string) ($asset['media'] ?? '')));
+                if ('' === $path || '' === $url || !is_readable($path)) {
+                    return array('success' => false, 'message' => __('A generated font-mix stylesheet could not be read.', 'ultracache'));
+                }
+
+                $css = ultracache_guarded_asset_file_get_contents($path, 'css', 'font_mix_css_bundle_asset', true);
+                if (!is_string($css) || '' === trim($css)) {
+                    continue;
+                }
+
+                $original_bytes = strlen($css);
+                $signature_parts[] = $url . '|' . (string) ultracache_safe_filemtime($path, 'font_mix_css_bundle_signature') . '|' . $original_bytes;
+                $prepared_css = $this->prepare_css_asset_for_bundle($css, $url);
+                $prepared_body = isset($prepared_css['body']) ? (string) $prepared_css['body'] : '';
+                if ('' === trim($prepared_body)) {
+                    continue;
+                }
+
+                $source_bytes_total += $original_bytes;
+                $source_details[] = array(
+                    'url' => $url,
+                    'bytes' => $original_bytes,
+                    'preparedBytes' => strlen($prepared_body),
+                    'type' => 'font-mix-css',
+                    'media' => $media,
+                );
+
+                if ('' === $bundle_charset && !empty($prepared_css['charset'])) {
+                    $bundle_charset = (string) $prepared_css['charset'];
+                }
+                foreach ((array) ($prepared_css['imports'] ?? array()) as $import_rule) {
+                    $import_rule = trim((string) $import_rule);
+                    if ('' === $import_rule) {
+                        continue;
+                    }
+                    $import_key = strtolower(preg_replace('/\s+/', ' ', $import_rule));
+                    if (!isset($bundle_import_keys[$import_key])) {
+                        $bundle_import_keys[$import_key] = true;
+                        $bundle_imports[] = $import_rule;
+                    }
+                }
+
+                $bundle_body .= "\n/* UltraCache Font-Mix CSS Bundle Source: " . $url . " */\n";
+                if ('' !== $media && 'all' !== $media && $this->is_css_bundle_media_wrapper_safe($media)) {
+                    $bundle_body .= "@media " . $media . " {\n" . $prepared_body . "\n}\n";
+                } else {
+                    $bundle_body .= $prepared_body . "\n";
+                }
+                $used_urls[] = $url;
+            }
+
+            if (count($used_urls) < 2 || '' === trim($bundle_body)) {
+                return array(
+                    'success' => false,
+                    'skipped' => true,
+                    'message' => 'not-enough-non-empty-font-mix-css',
+                    'sourceUrls' => array_values(array_unique(array_map('strval', $used_urls))),
+                );
+            }
+
+            $bundle_prelude = '';
+            if ('' !== trim($bundle_charset)) {
+                $bundle_prelude .= trim($bundle_charset) . "\n";
+            }
+            if (!empty($bundle_imports)) {
+                $bundle_prelude .= implode("\n", $bundle_imports) . "\n\n";
+            }
+
+            $bundle_content = trim($bundle_prelude . trim($bundle_body)) . "\n";
+            if (function_exists('ultracache_strip_source_mapping_url_comments')) {
+                $bundle_content = trim(ultracache_strip_source_mapping_url_comments($bundle_content)) . "\n";
+            }
+            $content_hash = md5($bundle_content);
+            $signature = md5('font-mix|' . implode('||', $signature_parts) . '|' . $content_hash);
+            $filename = 'bundle-font-mix-' . $signature . '.css';
+            $file = $dir . $filename;
+            clearstatcache(true, $file);
+            $existing_hash = (is_readable($file) && filesize($file) > 0) ? md5_file($file) : '';
+            if ($existing_hash !== $content_hash) {
+                if (!$this->write_cache_variant_atomically($file, $bundle_content)) {
+                    return array('success' => false, 'skipped' => true, 'message' => __('Could not write the generated font-mix CSS bundle file.', 'ultracache'));
+                }
+            }
+
+            clearstatcache(true, $file);
+            $verified_hash = (is_readable($file) && filesize($file) > 0) ? md5_file($file) : '';
+            if ($verified_hash !== $content_hash) {
+                return array('success' => false, 'skipped' => true, 'message' => __('Generated font-mix CSS bundle file failed verification.', 'ultracache'));
+            }
+
+            $bundle_url = ultracache_generated_asset_url('css-bundles', $filename);
+            $bundle_url = $this->normalize_public_resource_url($bundle_url);
+
+            return array(
+                'success' => true,
+                'file' => $file,
+                'url' => $bundle_url,
+                'message' => 'Prepared font-mix CSS bundle.',
+                'signature' => $signature,
+                'contentHash' => $content_hash,
+                'sourceUrls' => array_values(array_unique(array_map('strval', $used_urls))),
+                'sourceDetails' => $this->normalize_css_bundle_source_details($source_details),
+                'sourceBytesTotal' => (int) $source_bytes_total,
+            );
+        }
+
+        private function apply_font_mix_css_bundle_links_with_processor($html, array $source_urls, $bundle_url)
+        {
+            if (!$this->html_tag_processor_available() || empty($source_urls) || !is_string($html) || '' === $html) {
+                return null;
+            }
+
+            $source_map = array();
+            foreach ($source_urls as $url) {
+                $url = (string) $url;
+                if ('' !== $url) {
+                    $source_map[strtolower($url)] = $url;
+                }
+            }
+
+            if (empty($source_map)) {
+                return null;
+            }
+
+            try {
+                $processor = new WP_HTML_Tag_Processor($html);
+                $changed = false;
+                $applied_bundle = false;
+
+                while ($processor->next_tag('LINK')) {
+                    $href = $processor->get_attribute('href');
+                    $href = is_string($href) ? html_entity_decode($href, ENT_QUOTES | ENT_HTML5) : '';
+                    if ('' === $href) {
+                        continue;
+                    }
+
+                    $absolute = $this->normalize_public_resource_url($this->absolutize_public_resource_url($href, home_url('/')));
+                    $key = strtolower((string) $absolute);
+                    if ('' === $key || !isset($source_map[$key])) {
+                        continue;
+                    }
+
+                    if (!$applied_bundle) {
+                        $this->rewrite_link_processor_to_font_mix_css_bundle($processor, $bundle_url);
+                        $applied_bundle = true;
+                        $changed = true;
+                        continue;
+                    }
+
+                    $this->neutralize_link_processor_for_font_mix_css_source($processor, $source_map[$key]);
+                    $changed = true;
+                }
+
+                if (!$changed || !$applied_bundle) {
+                    return null;
+                }
+
+                $updated_html = $processor->get_updated_html();
+                return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        private function rewrite_link_processor_to_font_mix_css_bundle($processor, $bundle_url)
+        {
+            $this->clear_leftover_css_link_processor_attributes($processor);
+            $processor->set_attribute('rel', 'stylesheet');
+            $processor->set_attribute('id', 'ultracache-font-mix-css-bundle');
+            $processor->set_attribute('href', (string) $bundle_url);
+            $processor->set_attribute('media', 'all');
+            $processor->set_attribute('data-ultracache-font-mix-css-bundle', '1');
+            $processor->set_attribute('data-ultracache-css-role', 'font-mix-bundle');
+            $processor->set_attribute('data-ultracache-css-blocking-reason', 'font-mix-bundle-layout-risk');
+        }
+
+        private function neutralize_link_processor_for_font_mix_css_source($processor, $source_url)
+        {
+            $this->clear_leftover_css_link_processor_attributes($processor);
+            $processor->set_attribute('data-ultracache-font-mix-css-source-removed', '1');
+            $processor->set_attribute('data-ultracache-font-mix-css-original-href', (string) $source_url);
         }
 
 

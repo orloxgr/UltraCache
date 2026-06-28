@@ -1377,7 +1377,7 @@ private function decode_google_fonts_html_url($url)
             return 'ultracache_gf_' . strtolower($type) . '_lock_' . substr(strtolower($hash), 0, 64);
         }
 
-        private function get_google_fonts_db_lock_option_name($key)
+        private function get_google_fonts_db_lock_name($key)
         {
             $key = (string) $key;
             if ('' === $key) {
@@ -1401,30 +1401,17 @@ private function decode_google_fonts_html_url($url)
                 return wp_cache_add($key, $token, 'ultracache_google_fonts_locks', $ttl) ? ('cache:' . $token) : '';
             }
 
-            $option_name = $this->get_google_fonts_db_lock_option_name($key);
-            if ('' === $option_name) {
-                return '';
-            }
-
-            $now = time();
-            $existing = get_option($option_name, false);
-            if (is_array($existing)) {
-                $expires_at = isset($existing['expires_at']) ? (int) $existing['expires_at'] : 0;
-                if ($expires_at > $now) {
-                    return '';
-                }
-
-                delete_option($option_name);
-            } elseif (false !== $existing) {
-                delete_option($option_name);
-            }
-
-            $payload = array(
-                'token'      => $token,
-                'expires_at' => $now + $ttl,
-            );
-
-            if (!add_option($option_name, $payload, '', 'no')) {
+            $lock_name = $this->get_google_fonts_db_lock_name($key);
+            if (
+                '' === $lock_name
+                || !function_exists('ultracache_acquire_lock')
+                || !ultracache_acquire_lock(
+                    $lock_name,
+                    $token,
+                    $ttl,
+                    array('keyHash' => md5($key))
+                )
+            ) {
                 return '';
             }
 
@@ -1447,16 +1434,13 @@ private function decode_google_fonts_html_url($url)
                 return;
             }
 
-            $option_name = $this->get_google_fonts_db_lock_option_name($key);
-            if ('' === $option_name) {
+            $lock_name = $this->get_google_fonts_db_lock_name($key);
+            if ('' === $lock_name || !function_exists('ultracache_release_lock')) {
                 return;
             }
 
             $raw_token = (0 === strpos($token, 'db:')) ? substr($token, 3) : $token;
-            $existing = get_option($option_name, false);
-            if (is_array($existing) && isset($existing['token']) && (string) $existing['token'] === (string) $raw_token) {
-                delete_option($option_name);
-            }
+            ultracache_release_lock($lock_name, $raw_token);
         }
 
         private function is_google_fonts_stylesheet_url($url)

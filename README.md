@@ -1,6 +1,6 @@
 # UltraCache
 
-Current version: **2.59.06.59**
+Current version: **2.59.06.78**
 
 UltraCache is a WordPress performance plugin with page cache, object-cache integration, AVIF/WebP media rewrite, CSS/font optimization, warm-up tools, Varnish helpers, and diagnostics.
 
@@ -143,10 +143,10 @@ UltraCache includes optional frontend optimization rules that can detect, delay,
 These matching examples may include fragments such as:
 
 - `googletagmanager.com`
+- `gtag(`
+- `dataLayer`
 - `connect.facebook.net`
 - `maps.googleapis.com`
-- `maps.gstatic.com`
-- `gstatic.com/recaptcha`
 
 These are matching examples only. UltraCache does not add Google Tag Manager, Facebook/Meta scripts, Google Maps, reCAPTCHA, ads, analytics pixels, chat widgets, booking widgets, or form widgets to a site by itself, and these pattern lists do not make UltraCache contact those providers.
 

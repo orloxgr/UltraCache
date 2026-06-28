@@ -178,7 +178,15 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'persist_dashboard_settings')) {
                 $response = Ultra_Cache_WP::persist_dashboard_settings($current);
                 if (is_wp_error($response)) {
-                    return new WP_REST_Response(array('success' => false, 'message' => $response->get_error_message()), 500);
+                    $status = 'ultracache_redis_settings_validation_failed' === $response->get_error_code() ? 400 : 500;
+                    return new WP_REST_Response(
+                        array(
+                            'success' => false,
+                            'code'    => $response->get_error_code(),
+                            'message' => $response->get_error_message(),
+                        ),
+                        $status
+                    );
                 }
 
                 $response['patchKeys'] = array_keys($patch);
@@ -348,35 +356,6 @@ if (!trait_exists('Ultra_Cache_Rest_Cache_Trait')) {
 
             $result = Ultra_Cache_WP::flush_nginx_cache();
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-        }
-
-        public function redis_test(WP_REST_Request $request)
-        {
-            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'test_redis_connection')) {
-                return new WP_REST_Response(array('success' => false, 'message' => __('Redis helper not available.', 'ultracache')), 500);
-            }
-
-            $settings = array();
-            foreach (array('redisHost', 'redisPort', 'redisUsername', 'redisDatabase', 'redisPrefix', 'redisUseTls', 'redisPersistent', 'redisConnectTimeoutMs', 'redisReadTimeoutMs') as $key) {
-                if (null !== $request->get_param($key)) {
-                    $settings[$key] = $request->get_param($key);
-                }
-            }
-
-
-            $result = Ultra_Cache_WP::test_redis_connection($settings);
-            $status = !empty($result['blocked']) ? 400 : (!empty($result['success']) ? 200 : 500);
-            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
-                $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
-            }
-            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
-                $result['settings'] = Ultra_Cache_WP::get_dashboard_settings_for_client();
-            }
-            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
-                $result['stats'] = Ultra_Cache_WP::get_engine_stats();
-            }
-
-            return new WP_REST_Response($result, $status);
         }
 
         public function object_cache_backend_test(WP_REST_Request $request)

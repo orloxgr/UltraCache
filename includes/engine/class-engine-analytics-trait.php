@@ -1114,11 +1114,6 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 'time_mysql' => current_time('mysql'),
             );
 
-            if (false === get_option('ultracache_last_css_bundle_summary', false)) {
-                add_option('ultracache_last_css_bundle_summary', $summary, '', 'no');
-                return;
-            }
-
             update_option('ultracache_last_css_bundle_summary', $summary, false);
         }
 

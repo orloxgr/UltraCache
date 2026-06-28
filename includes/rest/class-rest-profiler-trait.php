@@ -830,22 +830,23 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             return 'ultracache_runtime_js_scan_' . md5($scan_id);
         }
 
-        private function get_runtime_js_scan_current_exclusions()
+        private function get_runtime_js_scan_current_setting_lines($key)
         {
-            $value = '';
+            $values = array();
+            $key = (string) $key;
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
                 $settings = Ultra_Cache_WP::get_dashboard_settings_for_client();
-                if (is_array($settings) && isset($settings['deferJsExcludeList'])) {
-                    $value = (string) $settings['deferJsExcludeList'];
+                if (is_array($settings) && isset($settings[$key])) {
+                    $values[] = (string) $settings[$key];
                 }
             }
-            if ('' === $value) {
+            if (empty($values)) {
                 $raw = get_option(ULTRACACHE_SETTINGS_KEY, array());
-                if (is_array($raw) && isset($raw['deferJsExcludeList'])) {
-                    $value = (string) $raw['deferJsExcludeList'];
+                if (is_array($raw) && isset($raw[$key])) {
+                    $values[] = (string) $raw[$key];
                 }
             }
-            $lines = preg_split('/\r\n|\r|\n/', (string) $value);
+            $lines = preg_split('/\r\n|\r|\n/', implode("\n", $values));
             $out = array();
             foreach ((array) $lines as $line) {
                 $line = trim((string) $line);
@@ -854,6 +855,29 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
             }
             return array_values(array_unique($out));
+        }
+
+        private function get_runtime_js_scan_current_exclusions()
+        {
+            return array(
+                'fallback' => $this->get_runtime_js_scan_current_setting_lines('deferJsExcludeList'),
+                'force'    => $this->get_runtime_js_scan_current_setting_lines('deferJsForceList'),
+            );
+        }
+
+        private function runtime_js_scan_normalize_safeguard_lists(array $safeguards)
+        {
+            if (isset($safeguards['fallback']) || isset($safeguards['force'])) {
+                return array(
+                    'fallback' => isset($safeguards['fallback']) && is_array($safeguards['fallback']) ? $safeguards['fallback'] : array(),
+                    'force'    => isset($safeguards['force']) && is_array($safeguards['force']) ? $safeguards['force'] : array(),
+                );
+            }
+
+            return array(
+                'fallback' => $safeguards,
+                'force'    => array(),
+            );
         }
 
         private function runtime_js_scan_exclusion_already_matches($suggestion, array $exclusions)
@@ -937,10 +961,38 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             return trim((string) $candidate);
         }
 
+        private function runtime_js_scan_is_ultracache_runtime_helper_source($source)
+        {
+            $source = strtolower($this->runtime_js_scan_clean_console_candidate((string) $source));
+            if ('' === $source) {
+                return false;
+            }
+
+            foreach (array(
+                'delayed-js-loader.js',
+                'runtime-js-scan-collector.js',
+                'runtime-font-css-map.js',
+                'font-display-cssom-patch.js',
+                'mailerlite-lazy-nonce.js',
+                'sr7-lcp-priority.js',
+                'ultracache-delayed-js-loader',
+                'ultracache-runtime-js-scan-collector',
+            ) as $marker) {
+                if (false !== strpos($source, $marker)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private function runtime_js_scan_add_suggestion(&$suggestions, &$seen, $suggested_exclusion, $symbol, $source, $message, $reason, array $exclusions, $confidence = 'high')
         {
             $suggested_exclusion = $this->runtime_js_scan_clean_console_candidate($suggested_exclusion);
             if ('' === $suggested_exclusion) {
+                return;
+            }
+            if ($this->runtime_js_scan_is_ultracache_runtime_helper_source($suggested_exclusion) || $this->runtime_js_scan_is_ultracache_runtime_helper_source($source)) {
                 return;
             }
             if ($this->runtime_js_scan_is_generic_token($suggested_exclusion)) {
@@ -949,8 +1001,12 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if (preg_match('/\.js$/i', $suggested_exclusion) && $this->runtime_js_scan_is_generic_script_basename(basename($suggested_exclusion))) {
                 $suggested_lc = strtolower($suggested_exclusion);
                 $has_path_context = false !== strpos($suggested_lc, '/');
-                $is_confirmed_provider_path = $this->runtime_js_scan_is_explicit_missing_global_provider_path($suggested_lc, (string) $symbol);
-                if (!$has_path_context || !$is_confirmed_provider_path) {
+                $symbol_lc = strtolower(trim((string) $symbol));
+                $is_confirmed_provider_path = $this->runtime_js_scan_is_explicit_missing_global_provider_path($suggested_lc, (string) $symbol)
+                    || ('jquery-migrate' === $symbol_lc && false !== strpos($suggested_lc, 'jquery-migrate'));
+                $owner = function_exists('ultracache_plugin_theme_owner_from_public_source') ? ultracache_plugin_theme_owner_from_public_source('/' . ltrim($suggested_lc, '/')) : array();
+                $is_targeted_local_asset = !empty($owner['slug']) || false !== strpos($suggested_lc, 'wp-content/plugins/') || false !== strpos($suggested_lc, 'wp-content/themes/');
+                if (!$has_path_context || (!$is_confirmed_provider_path && !$is_targeted_local_asset)) {
                     return;
                 }
             }
@@ -958,16 +1014,19 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if ('' === $confidence) {
                 $confidence = 'recommended';
             }
-            $ignored = in_array($confidence, array('ignored', 'not-fixable'), true);
-            $already_excluded = $this->runtime_js_scan_exclusion_already_matches($suggested_exclusion, $exclusions);
-            $appendable = !$ignored && !$already_excluded;
+            $ignored = 'ignored' === $confidence;
+            $not_fixable = 'not-fixable' === $confidence;
+            $safeguards = $this->runtime_js_scan_normalize_safeguard_lists($exclusions);
+            $already_excluded = $this->runtime_js_scan_exclusion_already_matches($suggested_exclusion, $safeguards['fallback']);
+            $already_force_deferred = !$already_excluded && $this->runtime_js_scan_exclusion_already_matches($suggested_exclusion, $safeguards['force']);
+            $appendable = !$ignored && !$not_fixable && !$already_excluded;
             $key = strtolower($suggested_exclusion . '|' . (string) $source . '|' . (string) $symbol);
             if (isset($seen[$key])) {
                 return;
             }
             $seen[$key] = true;
-            $category = $ignored ? 'ignored' : ($already_excluded ? 'already-listed' : 'appendable-fix');
-            $category_label = $ignored ? 'Ignored / not fixable by exclusion' : ($already_excluded ? 'Already listed' : 'Appendable fixes');
+            $category = $ignored ? 'ignored' : ($not_fixable ? 'not-fixable' : ($already_excluded ? 'already-listed' : ($already_force_deferred ? 'fallback-candidate' : 'appendable-fix')));
+            $category_label = $ignored ? 'Ignored' : ($not_fixable ? 'Not fixable by exclusion' : ($already_excluded ? 'Already listed in Do Not Defer or Delay' : ($already_force_deferred ? 'Already in Defer Instead; can append to Do Not Defer or Delay' : 'Appendable fixes')));
             $suggestions[] = array(
                 'symbol'             => (string) $symbol,
                 'source'             => 'browser-runtime-error',
@@ -977,9 +1036,12 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 'definingScriptUrl'  => (string) $source,
                 'definingHandle'     => '',
                 'suggestedExclusion' => $suggested_exclusion,
-                'confidence'         => $ignored ? 'ignored' : (string) $confidence,
+                'confidence'         => $ignored ? 'ignored' : ($not_fixable ? 'not-fixable' : (string) $confidence),
                 'reason'             => (string) $reason,
                 'alreadyExcluded'    => $already_excluded,
+                'alreadyForceDeferred' => $already_force_deferred,
+                'alreadySafeguarded' => ($already_excluded || $already_force_deferred),
+                'fallbackRecommended' => ($already_force_deferred && !$already_excluded),
                 'appendable'         => $appendable,
             );
         }
@@ -992,6 +1054,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $push = function ($candidate) use (&$candidates, &$candidate_seen) {
                 $candidate = $this->runtime_js_scan_clean_console_candidate((string) $candidate);
                 if ('' === $candidate) {
+                    return;
+                }
+                if ($this->runtime_js_scan_is_ultracache_runtime_helper_source($candidate)) {
                     return;
                 }
                 $base = $this->runtime_js_scan_basename_from_source($candidate);
@@ -1432,7 +1497,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
         {
             $path = strtolower(trim((string) $path));
             $symbol = strtolower(str_replace(array('window.', 'globalthis.'), '', trim((string) $symbol)));
-            if (false !== strpos($symbol, 'jquery')) {
+            if (false !== strpos($symbol, 'jquery-migrate')) {
+                $symbol = 'jquery-migrate';
+            } elseif (false !== strpos($symbol, 'jquery')) {
                 $symbol = 'jquery';
             } elseif (false !== strpos($symbol, 'underscore')) {
                 $symbol = 'underscore';
@@ -1449,6 +1516,13 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             }
             if ('' === $path || '' === $symbol) {
                 return false;
+            }
+            if ('jquery-migrate' === $symbol) {
+                return false !== strpos($path, 'jquery/jquery-migrate.js')
+                    || false !== strpos($path, 'jquery/jquery-migrate.min.js')
+                    || false !== strpos($path, '/jquery-migrate.js')
+                    || false !== strpos($path, '/jquery-migrate.min.js')
+                    || false !== strpos($path, 'jquery-migrate-js');
             }
             if (in_array($symbol, array('jquery', '$'), true)) {
                 return false !== strpos($path, 'jquery/jquery.js')
@@ -1580,6 +1654,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 $relative = 'js/underscore.min.js';
             } elseif ('$' === $symbol || 'jquery' === $symbol) {
                 $relative = 'js/jquery/jquery.min.js';
+            } elseif ('jquery-migrate' === $symbol) {
+                $relative = 'js/jquery/jquery-migrate.min.js';
             } elseif ('wp.template' === $symbol || 'wp' === $symbol) {
                 $relative = 'js/wp-util.min.js';
             } elseif ('wp.i18n' === $symbol) {
@@ -1643,7 +1719,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     $display_symbol,
                     $provider,
                     (string) $message,
-                    'The browser error explicitly names the missing WordPress dependency "' . sanitize_text_field($display_symbol) . '". UltraCache resolved the exact provider through the WordPress script registry or WordPress core URL helpers. No broad core dependency list was inferred.',
+                    'The browser error explicitly names the missing WordPress dependency "' . sanitize_text_field($display_symbol) . '". UltraCache resolved the exact provider through the WordPress script registry or WordPress core URL helpers. Prefer Defer Instead of Delay for the provider/consumer pair, then use Do Not Defer or Delay as the compatibility fallback.',
                     $exclusions,
                     'recommended'
                 );
@@ -1824,7 +1900,8 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
         private function runtime_js_scan_add_missing_global_provider_suggestions(&$suggestions, &$seen, $symbol, array $direct_sources, array $scripts, $message, array $exclusions)
         {
             $symbol = trim((string) $symbol);
-            if ('' === $symbol || !$this->runtime_js_scan_is_explicit_missing_global($symbol)) {
+            $symbol_lc = strtolower($symbol);
+            if ('' === $symbol || ('jquery-migrate' !== $symbol_lc && !$this->runtime_js_scan_is_explicit_missing_global($symbol))) {
                 return false;
             }
 
@@ -1848,7 +1925,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     sanitize_text_field($symbol),
                     $core_provider_fragment,
                     $message,
-                    'The browser error explicitly says the global "' . sanitize_text_field($symbol) . '" is missing. UltraCache resolved that exact missing dependency through the WordPress script registry. No broad core dependency list was inferred.',
+                    'The browser error explicitly says the global "' . sanitize_text_field($symbol) . '" is missing. UltraCache resolved that exact missing dependency through the WordPress script registry. Prefer Defer Instead of Delay for the dependency pair, then use Do Not Defer or Delay as the compatibility fallback.',
                     $exclusions,
                     'recommended'
                 );
@@ -1883,7 +1960,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                         'explicit missing global provider: ' . sanitize_text_field($symbol),
                         $provider_src,
                         $message,
-                        'The browser error explicitly says the global "' . sanitize_text_field($symbol) . '" is missing. Runtime Scan used ' . sanitize_text_field($evidence_text) . ' and matched the loaded provider script from the final page inventory. Add only this provider script; no other core dependencies were inferred.',
+                        'The browser error explicitly says the global "' . sanitize_text_field($symbol) . '" is missing. Runtime Scan used ' . sanitize_text_field($evidence_text) . ' and matched the loaded provider script from the final page inventory. Prefer Defer Instead of Delay for the matched provider and consumer; no broad core dependency list was inferred.',
                         $exclusions,
                         'recommended'
                     );
@@ -1903,6 +1980,185 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     $added = true;
                 }
             }
+            return $added;
+        }
+
+        private function runtime_js_scan_add_missing_global_consumer_suggestions(&$suggestions, &$seen, $symbol, $source, $message, $detail, array $scripts, array $exclusions)
+        {
+            $symbol = trim((string) $symbol);
+            $symbol_lc = strtolower($symbol);
+            if ('' === $symbol || ('jquery-migrate' !== $symbol_lc && !$this->runtime_js_scan_is_explicit_missing_global($symbol))) {
+                return false;
+            }
+
+            $text = (string) $source . "\n" . (string) $message . "\n" . (string) $detail;
+            $candidates = array();
+            $candidate_seen = array();
+            $push = function ($candidate) use (&$candidates, &$candidate_seen, $symbol, $symbol_lc) {
+                $candidate = $this->runtime_js_scan_clean_console_candidate((string) $candidate);
+                if ('' === $candidate || $this->runtime_js_scan_is_ultracache_runtime_helper_source($candidate)) {
+                    return;
+                }
+                $base = $this->runtime_js_scan_basename_from_source($candidate);
+                if ('' === $base || !preg_match('/\.js$/i', $base)) {
+                    return;
+                }
+                if ($this->runtime_js_scan_is_explicit_missing_global_provider_path($candidate, $symbol) || ('jquery-migrate' === $symbol_lc && false !== stripos($candidate, 'jquery-migrate'))) {
+                    return;
+                }
+                $key = strtolower($candidate);
+                if (isset($candidate_seen[$key])) {
+                    return;
+                }
+                $candidate_seen[$key] = true;
+                $candidates[] = $candidate;
+            };
+
+            foreach ($this->runtime_js_scan_source_candidates_from_error($source, $message, $detail) as $candidate) {
+                $push($candidate);
+            }
+            foreach ($this->runtime_js_scan_console_sources_from_text($text) as $candidate) {
+                $push($candidate);
+            }
+
+            $added = false;
+            foreach ($candidates as $candidate) {
+                $matched_scripts = $this->runtime_js_scan_find_scripts_by_source_hint($candidate, $scripts);
+                if (!empty($matched_scripts)) {
+                    foreach ($matched_scripts as $script) {
+                        $script_src = isset($script['src']) ? (string) $script['src'] : '';
+                        if ('' === $script_src || $this->runtime_js_scan_is_ultracache_runtime_helper_source($script_src) || $this->runtime_js_scan_is_explicit_missing_global_provider_path($script_src, $symbol) || ('jquery-migrate' === $symbol_lc && false !== stripos($script_src, 'jquery-migrate'))) {
+                            continue;
+                        }
+                        $fragment = $this->runtime_js_scan_path_fragment_from_source($script_src, 5);
+                        if ('' === $fragment) {
+                            $fragment = $this->runtime_js_scan_basename_from_source($script_src);
+                        }
+                        if ('' === $fragment) {
+                            continue;
+                        }
+                        $this->runtime_js_scan_add_suggestion(
+                            $suggestions,
+                            $seen,
+                            $fragment,
+                            'missing global consumer: ' . sanitize_text_field($symbol),
+                            $script_src,
+                            $message,
+                            'The browser error says the global "' . sanitize_text_field($symbol) . '" is missing, and this script is the stack-frame consumer that crashed. Keep the provider and this consumer in the same speed-safe execution group; prefer Defer Instead of Delay first, then use full JS exclusions as the compatibility fallback.',
+                            $exclusions,
+                            'recommended'
+                        );
+                        $added = true;
+                    }
+                    continue;
+                }
+
+                $fragment = $this->runtime_js_scan_path_fragment_from_source($candidate, 5);
+                if ('' === $fragment) {
+                    $fragment = $this->runtime_js_scan_basename_from_source($candidate);
+                }
+                if ('' === $fragment || $this->runtime_js_scan_is_explicit_missing_global_provider_path($fragment, $symbol) || ('jquery-migrate' === $symbol_lc && false !== stripos($fragment, 'jquery-migrate'))) {
+                    continue;
+                }
+                $this->runtime_js_scan_add_suggestion(
+                    $suggestions,
+                    $seen,
+                    $fragment,
+                    'missing global consumer: ' . sanitize_text_field($symbol),
+                    $candidate,
+                    $message,
+                    'The browser error says the global "' . sanitize_text_field($symbol) . '" is missing, and this stack-frame script consumed it before the provider was available. Keep both scripts in the same speed-safe execution group.',
+                    $exclusions,
+                    'recommended'
+                );
+                $added = true;
+            }
+
+            return $added;
+        }
+
+        private function runtime_js_scan_add_jquery_migrate_dependency_suggestions(&$suggestions, &$seen, $source, $message, $detail, array $scripts, array $exclusions)
+        {
+            $text = (string) $source . "\n" . (string) $message . "\n" . (string) $detail;
+            if (!preg_match('/indexOf\s+is\s+not\s+a\s+function/i', $text) || !preg_match('/(?:ce|jQuery|\$)\.fn\.load|\.load\s*@|\.load\s*\(/i', $text)) {
+                return false;
+            }
+
+            $added = false;
+            $provider = function_exists('includes_url') ? $this->runtime_js_scan_provider_path_fragment_from_source(includes_url('js/jquery/jquery-migrate.min.js'), 'jquery-migrate') : '';
+            if ('' === $provider) {
+                $provider = 'wp-includes/js/jquery/jquery-migrate.min.js';
+            }
+            if ('' !== $provider) {
+                $this->runtime_js_scan_add_suggestion(
+                    $suggestions,
+                    $seen,
+                    $provider,
+                    'jquery-migrate',
+                    $provider,
+                    $message,
+                    'The error pattern matches old jQuery event shorthand code, commonly $(window).load(function...). jQuery Migrate provides the compatibility layer; keep it in the same speed-safe execution group as the theme/plugin script that uses the old shorthand.',
+                    $exclusions,
+                    'recommended'
+                );
+                $added = true;
+            }
+
+            $added_consumer = $this->runtime_js_scan_add_missing_global_consumer_suggestions(
+                $suggestions,
+                $seen,
+                'jquery-migrate',
+                $source,
+                $message,
+                $detail,
+                $scripts,
+                $exclusions
+            );
+
+            return $added || $added_consumer;
+        }
+
+        private function runtime_js_scan_add_duplicate_execution_warning(&$suggestions, &$seen, $source, $message, $detail, array $exclusions)
+        {
+            $text = (string) $source . "\n" . (string) $message . "\n" . (string) $detail;
+            if (!preg_match('/Identifier\s+[\'"][^\'"]+[\'"]\s+has\s+already\s+been\s+declared/i', $text) && !preg_match('/\bVM\d+\b[\s\S]+?\bVM\d+\b/i', $text)) {
+                return false;
+            }
+
+            $candidates = $this->runtime_js_scan_console_sources_from_text($text);
+            if (empty($candidates) && '' !== trim((string) $source)) {
+                $candidates = array((string) $source);
+            }
+
+            $added = false;
+            foreach ($candidates as $candidate) {
+                if ($this->runtime_js_scan_is_ultracache_runtime_helper_source($candidate)) {
+                    continue;
+                }
+                $fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($candidate, 5);
+                if ('' === $fragment) {
+                    $fragment = $this->runtime_js_scan_path_fragment_from_source($candidate, 5);
+                }
+                if ('' === $fragment) {
+                    $fragment = $this->runtime_js_scan_basename_from_source($candidate);
+                }
+                if ('' === $fragment) {
+                    continue;
+                }
+                $this->runtime_js_scan_add_suggestion(
+                    $suggestions,
+                    $seen,
+                    $fragment,
+                    'duplicate execution',
+                    $candidate,
+                    $message,
+                    'This looks like duplicate execution, not a simple missing dependency. A script or inline block appears to have run twice, often after mixing delayed placeholders, restored scripts, consent rewrites, or stale cached HTML. Purge cache and retest before adding new exclusions; if it persists, keep the whole owner/dependency group in one execution strategy.',
+                    $exclusions,
+                    'not-fixable'
+                );
+                $added = true;
+            }
+
             return $added;
         }
 
@@ -3820,7 +4076,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if (preg_match('/^\s*\d+\s*$/', $text)) {
                 return true;
             }
-            if (false !== strpos($text, 'jqmigrate: migrate is installed')) {
+            if (false !== strpos($text, 'jqmigrate: migrate is installed') && false === strpos($text, 'uncaught') && false === strpos($text, 'typeerror') && false === strpos($text, 'referenceerror') && false === strpos($text, 'syntaxerror') && false === strpos($text, 'cannot read properties')) {
                 return true;
             }
             if (false !== strpos($text, 'google maps javascript api warning') || false !== strpos($text, 'noapikeys')) {
@@ -3909,6 +4165,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             $push = function ($candidate) use (&$sources, &$seen, $scripts) {
                 $candidate = $this->runtime_js_scan_clean_console_candidate((string) $candidate);
                 if ('' === $candidate) {
+                    return;
+                }
+                if ($this->runtime_js_scan_is_ultracache_runtime_helper_source($candidate)) {
                     return;
                 }
                 $base = $this->runtime_js_scan_basename_from_source($candidate);
@@ -4109,6 +4368,14 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 $direct_owners = !empty($direct_sources) ? $this->runtime_js_scan_unique_direct_source_owners($direct_sources) : array();
                 $symbols = $this->runtime_js_scan_extract_missing_symbols_from_error($message, $detail);
 
+                if ($this->runtime_js_scan_add_duplicate_execution_warning($suggestions, $seen, $source, $message, $detail, $exclusions)) {
+                    continue;
+                }
+
+                if ($this->runtime_js_scan_add_jquery_migrate_dependency_suggestions($suggestions, $seen, $source, $message, $detail, $scripts, $exclusions)) {
+                    continue;
+                }
+
                 $explicit_wp_provider_added = $this->runtime_js_scan_add_explicit_wp_dependency_suggestions_from_text($suggestions, $seen, $message, $detail, $exclusions);
 
                 $provider_added = false;
@@ -4119,6 +4386,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                 }
 
                 if ($explicit_wp_provider_added || $provider_added) {
+                    foreach ($symbols as $symbol) {
+                        $this->runtime_js_scan_add_missing_global_consumer_suggestions($suggestions, $seen, $symbol, $source, $message, $detail, $scripts, $exclusions);
+                    }
                     continue;
                 }
 
@@ -4284,6 +4554,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if (preg_match_all('#https?://[^\s\)\]\}"\'<>]+\.js(?:\?[^\s\)\]\}"\'<>]*)?(?::\d+){0,2}#i', $text, $url_matches)) {
                 foreach ((array) $url_matches[0] as $source) {
                     $source = $this->runtime_js_scan_sanitize_source((string) $source);
+                    if ($this->runtime_js_scan_is_ultracache_runtime_helper_source($source)) {
+                        continue;
+                    }
                     $path_fragment = $this->runtime_js_scan_path_fragment_from_source($source, 4);
                     if ('' !== $path_fragment) {
                         $sources[strtolower($path_fragment)] = $path_fragment;
@@ -4306,6 +4579,9 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
             if (preg_match_all('/\b([A-Za-z0-9_.\/-]+\.(?:min\.)?js)(?:\?[^\s\)\]\}"\'<>]*)?(?::\d+(?::\d+)?)?/i', $text, $file_matches)) {
                 foreach ((array) $file_matches[1] as $source) {
                     $source = $this->runtime_js_scan_sanitize_source((string) $source);
+                    if ($this->runtime_js_scan_is_ultracache_runtime_helper_source($source)) {
+                        continue;
+                    }
                     $base = $this->runtime_js_scan_basename_from_source($source);
                     $path_fragment = $this->runtime_js_scan_path_fragment_from_source($source, 4);
                     if ('' !== $path_fragment) {
@@ -4343,7 +4619,7 @@ if (!trait_exists('Ultra_Cache_Rest_Profiler_Trait')) {
                     continue;
                 }
 
-                if (preg_match('/^(?:Understand this (?:error|warning)|JQMIGRATE:\s*Migrate is installed.*|opt-in)$/i', $line)) {
+                if (preg_match('/^(?:Understand this (?:error|warning)|opt-in)$/i', $line) || preg_match('/JQMIGRATE:\s*Migrate is installed/i', $line)) {
                     continue;
                 }
 

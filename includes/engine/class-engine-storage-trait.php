@@ -355,7 +355,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
             return array_values($missing);
         }
 
-        private function write_cache_file($file_path, $html)
+        private function write_cache_file($file_path, $html, $url = '')
         {
             $file_path = (string) $file_path;
             $this->reset_cache_write_error();
@@ -445,11 +445,99 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
                 if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'track_cache_asset_refs_for_file')) {
                     Ultra_Cache_WP::track_cache_asset_refs_for_file($file_path, $html);
                 }
+                $this->write_apache_static_html_alias_for_cache_file($file_path, $html, $url, $settings);
 
                 $this->set_cache_write_error('ok', 'Cache file written successfully.', array('file' => $file_path));
                 return true;
             } finally {
                 $this->release_runtime_lock($write_lock_name);
+            }
+        }
+
+        private function should_write_apache_static_html_alias($url, array $settings)
+        {
+            $url = trim((string) $url);
+            if ('' === $url || empty($settings['apache_static_html_delivery'])) {
+                return false;
+            }
+
+            $original_parts = wp_parse_url($url);
+            if (!is_array($original_parts) || !empty($original_parts['query'])) {
+                return false;
+            }
+
+            if (method_exists($this, 'is_cacheable_local_url') && !$this->is_cacheable_local_url($url)) {
+                return false;
+            }
+
+            $normalized = method_exists($this, 'normalize_url') ? $this->normalize_url($url) : $url;
+            if ('' === $normalized) {
+                return false;
+            }
+
+            $normalized_parts = wp_parse_url($normalized);
+            return is_array($normalized_parts) && empty($normalized_parts['query']);
+        }
+
+        private function get_apache_static_html_alias_path_for_cache_file($file_path)
+        {
+            $file_path = (string) $file_path;
+            $basename = basename($file_path);
+            if (!preg_match('/^index-(orig|webp|avif)-[a-f0-9]{32}\.html$/', $basename, $matches)) {
+                return '';
+            }
+
+            return trailingslashit(dirname($file_path)) . 'index-' . (string) $matches[1] . '.html';
+        }
+
+        private function write_apache_static_html_alias_for_cache_file($file_path, $html, $url, array $settings)
+        {
+            if (!$this->should_write_apache_static_html_alias($url, $settings)) {
+                return false;
+            }
+
+            $alias_path = $this->get_apache_static_html_alias_path_for_cache_file($file_path);
+            if ('' === $alias_path) {
+                return false;
+            }
+
+            ultracache_safe_unlink($alias_path . '.gz');
+            ultracache_safe_unlink($alias_path . '.br');
+
+            if (!$this->write_cache_variant_atomically($alias_path, $html)) {
+                $this->record_cache_event('apache-static-alias-write-failed', array(
+                    'file'  => (string) $file_path,
+                    'alias' => $alias_path,
+                ));
+                return false;
+            }
+
+            $this->write_cache_variant_atomically($alias_path . '.source', basename((string) $file_path));
+            $this->record_cache_event('apache-static-alias-written', array(
+                'file'  => (string) $file_path,
+                'alias' => $alias_path,
+            ));
+
+            return true;
+        }
+
+        private function delete_apache_static_html_aliases_for_cache_file($file)
+        {
+            $alias_path = $this->get_apache_static_html_alias_path_for_cache_file($file);
+            if ('' === $alias_path) {
+                return;
+            }
+
+            $source_path = $alias_path . '.source';
+            $source = file_exists($source_path) ? trim((string) ultracache_safe_file_get_contents($source_path, 'delete_apache_static_html_alias')) : '';
+            if ('' !== $source && $source !== basename((string) $file)) {
+                return;
+            }
+
+            foreach (array($alias_path, $alias_path . '.gz', $alias_path . '.br', $source_path) as $alias_variant) {
+                if (file_exists($alias_variant)) {
+                    ultracache_safe_unlink($alias_variant);
+                }
             }
         }
 
@@ -626,6 +714,7 @@ if (!trait_exists('Ultra_Cache_Engine_Storage_Trait')) {
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'mark_cache_asset_refs_inactive_for_cache_file')) {
                 Ultra_Cache_WP::mark_cache_asset_refs_inactive_for_cache_file($file);
             }
+            $this->delete_apache_static_html_aliases_for_cache_file($file);
 
             foreach (array($file, $file . '.gz', $file . '.br') as $variant) {
                 if (file_exists($variant)) {

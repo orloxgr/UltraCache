@@ -652,6 +652,10 @@ private function get_slider_hero_markup_markers()
                 return false;
             }
 
+            if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+                return false;
+            }
+
             if (!empty($settings['_lcp_boundary_callback_dependency_fragments']) && is_array($settings['_lcp_boundary_callback_dependency_fragments'])) {
                 $exclude_fragments = (array) $settings['_lcp_boundary_callback_dependency_fragments'];
                 if ($this->script_matches_fragment_list($handle, $src, $exclude_fragments) || $this->lcp_boundary_script_tag_matches_fragments($tag, $exclude_fragments)) {
@@ -705,6 +709,10 @@ private function get_slider_hero_markup_markers()
             $handle = $this->infer_script_handle_from_tag($tag, $src);
             if ('' === $handle) {
                 $handle = $src;
+            }
+
+            if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+                return $this->add_defer_attribute_to_script_tag($tag, true);
             }
 
             if ($this->should_delay_lcp_boundary_script($handle, $src, $tag, $settings)) {

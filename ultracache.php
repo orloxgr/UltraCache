@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.59.06.59
+ * Version: 2.59.06.78
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('ULTRACACHE_VERSION')) {
-    define('ULTRACACHE_VERSION', '2.59.06.59');
+    define('ULTRACACHE_VERSION', '2.59.06.78');
 }
 if (!defined('ULTRACACHE_FILE')) {
     define('ULTRACACHE_FILE', __FILE__);
@@ -860,6 +860,7 @@ class Ultra_Cache_WP
         self::ensure_cron_warm_queue_table();
         self::ensure_cache_asset_refs_table();
         self::ensure_css_rewrite_map_table();
+        ultracache_ensure_locks_table();
         if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_analytics_table')) {
             Ultra_Cache_Engine::ensure_analytics_table();
         }
@@ -870,6 +871,17 @@ class Ultra_Cache_WP
                 array(
                     'type'    => 'warning',
                     'message' => self::maybe_translate('UltraCache: Browser Cache Headers are enabled, but .htaccess could not be updated during activation. Check file permissions or disable Browser Cache Headers.'),
+                ),
+                90
+            );
+        }
+        $apache_static_sync = self::sync_apache_static_html_delivery_rules();
+        if (false === $apache_static_sync) {
+            set_transient(
+                'ultracache_admin_notice',
+                array(
+                    'type'    => 'warning',
+                    'message' => self::maybe_translate('UltraCache: Apache Static HTML Delivery is enabled, but .htaccess could not be updated during activation. Check file permissions or disable Apache Static HTML Delivery.'),
                 ),
                 90
             );
@@ -893,6 +905,7 @@ class Ultra_Cache_WP
         self::unschedule_scheduled_events();
         self::unschedule_cron_warm_events();
         self::sync_browser_cache_rules(false);
+        self::sync_apache_static_html_delivery_rules(false);
 
         if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
             if (method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
@@ -1891,6 +1904,7 @@ class Ultra_Cache_WP
             'analytics' => $wpdb->prefix . 'ultracache_analytics',
             'cacheAssetRefs' => self::get_cache_asset_refs_table_name(),
             'cssRewriteMap' => self::get_css_rewrite_map_table_name(),
+            'locks' => ultracache_get_locks_table_name(),
         );
 
         if (self::plugin_custom_table_exists($tables['actionJobs'])) {
@@ -2018,6 +2032,15 @@ class Ultra_Cache_WP
                 $deleted = self::prune_cache_asset_refs_table($limit);
             }
             $summary['tables']['cacheAssetRefs'] = array('deleted' => $deleted, 'expiredInactiveOnly' => true);
+            $summary['deleted'] += $deleted;
+        }
+
+        if (self::plugin_custom_table_exists($tables['locks'])) {
+            $deleted = 0;
+            if (!$dry_run && function_exists('ultracache_prune_expired_locks')) {
+                $deleted = ultracache_prune_expired_locks($limit);
+            }
+            $summary['tables']['locks'] = array('deleted' => $deleted, 'expiredOnly' => true);
             $summary['deleted'] += $deleted;
         }
 
@@ -2600,11 +2623,7 @@ class Ultra_Cache_WP
     private static function save_cron_warm_state(array $state)
     {
         $state = array_merge(self::get_default_cron_warm_state(), $state);
-        if (false === get_option(ULTRACACHE_CRON_WARM_STATE_KEY, false)) {
-            add_option(ULTRACACHE_CRON_WARM_STATE_KEY, $state, '', 'no');
-        } else {
-            update_option(ULTRACACHE_CRON_WARM_STATE_KEY, $state);
-        }
+        update_option(ULTRACACHE_CRON_WARM_STATE_KEY, $state, false);
         return $state;
     }
 
@@ -2786,48 +2805,27 @@ class Ultra_Cache_WP
         );
     }
 
-    private static function get_cron_warm_lock_option_name()
+    private static function get_cron_warm_lock_name()
     {
         return ULTRACACHE_CRON_WARM_LOCK_KEY . '_atomic';
     }
 
-    private static function decode_cron_warm_lock($raw_lock)
-    {
-        if (is_array($raw_lock)) {
-            return $raw_lock;
-        }
-
-        if (!is_string($raw_lock) || '' === $raw_lock) {
-            return array();
-        }
-
-        $decoded = json_decode($raw_lock, true);
-        return is_array($decoded) ? $decoded : array();
-    }
-
     private static function acquire_cron_warm_lock($lock_token, $lock_ttl)
     {
-        $now = time();
         $lock_ttl = max(10, (int) $lock_ttl);
-        $option_name = self::get_cron_warm_lock_option_name();
-        $existing = self::decode_cron_warm_lock(get_option($option_name, ''));
-
-        if (!empty($existing['token']) && !empty($existing['expiresAt']) && (int) $existing['expiresAt'] > $now) {
+        $lock_token = (string) $lock_token;
+        if ('' === $lock_token || !function_exists('ultracache_acquire_lock')) {
             return false;
         }
 
-        if (!empty($existing)) {
-            delete_option($option_name);
-        }
-
+        $now = time();
         $lock = array(
-            'token' => (string) $lock_token,
+            'token'     => $lock_token,
             'startedAt' => $now,
             'expiresAt' => $now + $lock_ttl,
         );
 
-        $payload = function_exists('wp_json_encode') ? wp_json_encode($lock) : json_encode($lock);
-        if (!add_option($option_name, $payload, '', 'no')) {
+        if (!ultracache_acquire_lock(self::get_cron_warm_lock_name(), $lock_token, $lock_ttl, $lock)) {
             return false;
         }
 
@@ -2838,36 +2836,41 @@ class Ultra_Cache_WP
     private static function renew_cron_warm_lock($lock_token, $lock_ttl)
     {
         $lock_ttl = max(10, (int) $lock_ttl);
-        $option_name = self::get_cron_warm_lock_option_name();
-        $existing = self::decode_cron_warm_lock(get_option($option_name, ''));
-
-        if (empty($existing['token']) || !hash_equals((string) $existing['token'], (string) $lock_token)) {
+        $lock_token = (string) $lock_token;
+        if ('' === $lock_token || !function_exists('ultracache_get_lock') || !function_exists('ultracache_renew_lock')) {
             return false;
         }
 
+        $existing = ultracache_get_lock(self::get_cron_warm_lock_name());
+        if (empty($existing['token']) || !hash_equals((string) $existing['token'], $lock_token)) {
+            return false;
+        }
+
+        $now = time();
+        $existing_payload = isset($existing['payload']) && is_array($existing['payload']) ? $existing['payload'] : array();
         $lock = array(
-            'token' => (string) $lock_token,
-            'startedAt' => !empty($existing['startedAt']) ? (int) $existing['startedAt'] : time(),
-            'expiresAt' => time() + $lock_ttl,
+            'token'     => $lock_token,
+            'startedAt' => !empty($existing_payload['startedAt']) ? (int) $existing_payload['startedAt'] : max(0, (int) ($existing['acquiredAt'] ?? $now)),
+            'expiresAt' => $now + $lock_ttl,
         );
 
-        $payload = function_exists('wp_json_encode') ? wp_json_encode($lock) : json_encode($lock);
-        update_option($option_name, $payload, false);
+        if (!ultracache_renew_lock(self::get_cron_warm_lock_name(), $lock_token, $lock_ttl, $lock)) {
+            return false;
+        }
+
         set_transient(ULTRACACHE_CRON_WARM_LOCK_KEY, $lock, $lock_ttl);
         return true;
     }
 
     private static function release_cron_warm_lock($lock_token)
     {
-        $option_name = self::get_cron_warm_lock_option_name();
-        $existing = self::decode_cron_warm_lock(get_option($option_name, ''));
-
-        if (!empty($existing['token']) && hash_equals((string) $existing['token'], (string) $lock_token)) {
-            delete_option($option_name);
+        $lock_token = (string) $lock_token;
+        if ('' !== $lock_token && function_exists('ultracache_release_lock')) {
+            ultracache_release_lock(self::get_cron_warm_lock_name(), $lock_token);
         }
 
         $latest_lock = get_transient(ULTRACACHE_CRON_WARM_LOCK_KEY);
-        if (is_array($latest_lock) && isset($latest_lock['token']) && hash_equals((string) $latest_lock['token'], (string) $lock_token)) {
+        if (is_array($latest_lock) && isset($latest_lock['token']) && hash_equals((string) $latest_lock['token'], $lock_token)) {
             delete_transient(ULTRACACHE_CRON_WARM_LOCK_KEY);
         }
     }
@@ -3174,6 +3177,7 @@ $tables = array(
     $wpdb->prefix . 'ultracache_analytics',
     $wpdb->prefix . 'ultracache_cache_asset_refs',
     $wpdb->prefix . 'ultracache_css_rewrite_map',
+    $wpdb->prefix . 'ultracache_locks',
 );
 
 foreach ($tables as $table) {
@@ -3266,6 +3270,7 @@ if (!$keep_tables) {
     $option_names[] = 'ultracache_analytics_db_version';
     $option_names[] = self::get_cache_asset_refs_db_version_option_key();
     $option_names[] = self::get_css_rewrite_map_db_version_option_key();
+    $option_names[] = ultracache_get_locks_db_version_option_key();
     $option_names[] = 'ultracache_media_queue_build_state_v1';
 }
 
@@ -3336,6 +3341,7 @@ if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
 }
 
 self::sync_browser_cache_rules(false);
+self::sync_apache_static_html_delivery_rules(false);
 self::set_wp_cache_flag(false);
 
 if ($delete_cache_files) {
@@ -3421,6 +3427,9 @@ return array(
 
     public static function persist_dashboard_settings(array $settings)
     {
+        $force_redis_validation = !empty($settings['validateRedisSettings']);
+        unset($settings['validateRedisSettings']);
+
         $previous_settings = self::get_dashboard_settings();
         $secret_patch = self::normalize_secret_constant_patch($settings);
         $secret_change_requested = self::secret_constant_patch_has_changes($secret_patch);
@@ -3440,6 +3449,60 @@ return array(
         $varnish_validation = self::validate_varnish_settings($current_settings);
         if (is_wp_error($varnish_validation)) {
             return $varnish_validation;
+        }
+
+        $redis_validation = null;
+        if ($force_redis_validation && 'redis' === strtolower((string) ($current_settings['objectCacheBackend'] ?? 'redis'))) {
+            $redis_credentials = function_exists('ultracache_get_redis_credentials')
+                ? ultracache_get_redis_credentials()
+                : array('username' => '', 'password' => '');
+            $redis_password = isset($redis_credentials['password']) ? (string) $redis_credentials['password'] : '';
+            $redis_username = (string) ($current_settings['redisUsername'] ?? '');
+
+            if (!empty($secret_patch['redis']['clear'])) {
+                $redis_password = '';
+            } elseif (!empty($secret_patch['redis']['provided'])) {
+                $redis_password = (string) $secret_patch['redis']['value'];
+            } elseif (!empty($redis_credentials['username'])) {
+                // Preserve an existing Redis ACL username embedded in
+                // WP_REDIS_PASSWORD when the password itself is unchanged.
+                $redis_username = (string) $redis_credentials['username'];
+            }
+
+            if (defined('WP_REDIS_USERNAME')) {
+                $external_redis_username = constant('WP_REDIS_USERNAME');
+                if (is_scalar($external_redis_username) && '' !== trim((string) $external_redis_username)) {
+                    $redis_username = trim((string) $external_redis_username);
+                }
+            }
+
+            $redis_validation = self::test_redis_read_write(array(
+                'redisHost'             => (string) ($current_settings['redisHost'] ?? '127.0.0.1'),
+                'redisPort'             => (int) ($current_settings['redisPort'] ?? 6379),
+                'redisUsername'         => $redis_username,
+                'redisPassword'         => $redis_password,
+                'redisDatabase'         => (int) ($current_settings['redisDatabase'] ?? 0),
+                'redisPrefix'           => (string) ($current_settings['redisPrefix'] ?? ''),
+                'redisUseTls'           => !empty($current_settings['redisUseTls']),
+                'redisPersistent'       => !empty($current_settings['redisPersistent']),
+                'redisConnectTimeoutMs' => (int) ($current_settings['redisConnectTimeoutMs'] ?? 200),
+                'redisReadTimeoutMs'    => (int) ($current_settings['redisReadTimeoutMs'] ?? 200),
+            ));
+
+            if (empty($redis_validation['success']) || empty($redis_validation['readWrite'])) {
+                $redis_message = !empty($redis_validation['message'])
+                    ? trim((string) $redis_validation['message'])
+                    : self::maybe_translate('Redis connection or read/write validation failed.');
+
+                return new WP_Error(
+                    'ultracache_redis_settings_validation_failed',
+                    sprintf(
+                        /* translators: %s: Redis connection validation error. */
+                        self::maybe_translate('Redis settings were not saved. %s'),
+                        $redis_message
+                    )
+                );
+            }
         }
 
         $wp_config_transaction = self::update_wp_config_managed_constants(
@@ -3489,6 +3552,14 @@ return array(
                 return $rollback;
             }
             return new WP_Error('ultracache_browser_cache_rules_not_writable', self::maybe_translate('Browser Cache Headers could not be written to .htaccess. Check file permissions or disable Browser Cache Headers.'));
+        }
+        $apache_static_sync = self::sync_apache_static_html_delivery_rules();
+        if (false === $apache_static_sync) {
+            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction);
+            if (is_wp_error($rollback)) {
+                return $rollback;
+            }
+            return new WP_Error('ultracache_apache_static_html_rules_not_writable', self::maybe_translate('Apache Static HTML Delivery rules could not be written to .htaccess. Check file permissions or disable Apache Static HTML Delivery.'));
         }
 
         $object_cache_sync = null;
@@ -3559,6 +3630,11 @@ return array(
         if (is_array($google_fonts_job)) {
             $payload['googleFonts'] = $google_fonts_job;
         }
+        if (is_array($redis_validation)) {
+            unset($redis_validation['probeKey']);
+            $payload['redisValidation'] = $redis_validation;
+            $payload['message'] = self::maybe_translate('Redis settings verified and saved. Reloading to confirm the active runtime backend.');
+        }
 
         return $payload;
     }
@@ -3570,8 +3646,19 @@ return array(
     private static function get_browser_cache_htaccess_block()
     {
         return implode("\n", array(
+            '<IfModule mod_mime.c>',
+            'AddType application/manifest+json .webmanifest',
+            'AddType application/wasm .wasm',
+            'AddType image/avif .avif',
+            'AddType image/avif-sequence .avifs',
+            '</IfModule>',
             '<IfModule mod_expires.c>',
             'ExpiresActive On',
+            'ExpiresByType text/html "access plus 0 seconds"',
+            'ExpiresByType text/xml "access plus 0 seconds"',
+            'ExpiresByType application/xml "access plus 0 seconds"',
+            'ExpiresByType application/json "access plus 0 seconds"',
+            'ExpiresByType application/manifest+json "access plus 1 year"',
             'ExpiresByType text/css "access plus 1 year"',
             'ExpiresByType text/javascript "access plus 1 year"',
             'ExpiresByType application/javascript "access plus 1 year"',
@@ -3581,6 +3668,7 @@ return array(
             'ExpiresByType image/gif "access plus 1 year"',
             'ExpiresByType image/webp "access plus 1 year"',
             'ExpiresByType image/avif "access plus 1 year"',
+            'ExpiresByType image/avif-sequence "access plus 1 year"',
             'ExpiresByType image/svg+xml "access plus 1 year"',
             'ExpiresByType image/x-icon "access plus 1 year"',
             'ExpiresByType font/ttf "access plus 1 year"',
@@ -3589,18 +3677,31 @@ return array(
             'ExpiresByType font/woff2 "access plus 1 year"',
             'ExpiresByType application/font-woff "access plus 1 year"',
             'ExpiresByType application/font-woff2 "access plus 1 year"',
+            'ExpiresByType application/vnd.ms-fontobject "access plus 1 year"',
+            'ExpiresByType application/wasm "access plus 1 year"',
+            'ExpiresByType video/mp4 "access plus 1 year"',
+            'ExpiresByType video/webm "access plus 1 year"',
+            'ExpiresByType video/ogg "access plus 1 year"',
+            'ExpiresByType audio/mpeg "access plus 1 year"',
+            'ExpiresByType audio/mp4 "access plus 1 year"',
+            'ExpiresByType audio/ogg "access plus 1 year"',
+            'ExpiresByType audio/wav "access plus 1 year"',
             '</IfModule>',
             '<IfModule mod_headers.c>',
-            '<FilesMatch "\\.(css|js|mjs|gif|png|jpe?g|webp|avif|svg|ico|woff2?|ttf|otf|eot)$">',
+            '<FilesMatch "\\.(css|js|mjs|gif|png|jpe?g|webp|avif|avifs|svg|ico|woff2?|ttf|otf|eot|webmanifest|wasm|mp4|m4v|webm|ogv|ogg|mp3|m4a|wav)$">',
             'Header set Cache-Control "public, max-age=31536000, immutable"',
+            '</FilesMatch>',
+            '<FilesMatch "\\.(html?|json|xml)$">',
+            'Header set Cache-Control "public, max-age=0, must-revalidate"',
             '</FilesMatch>',
             '</IfModule>',
         ));
     }
 
-    private static function write_browser_cache_rules_with_verification($path, $contents, $original_contents, $original_exists)
+    private static function write_htaccess_rules_with_verification($path, $contents, $original_contents, $original_exists, $context)
     {
-        if (!ultracache_is_allowed_writable_path($path, 'sync_browser_cache_rules')) {
+        $context = (string) $context;
+        if (!ultracache_is_allowed_writable_path($path, $context)) {
             return false;
         }
 
@@ -3644,7 +3745,7 @@ return array(
                 && hash_equals(hash('sha256', (string) $original_contents), hash('sha256', $restored_contents));
 
             if (!$rollback_verified) {
-                ultracache_debug_log('browser cache rules write and rollback failed', array('path' => $path));
+                ultracache_debug_log('htaccess rules write and rollback failed', array('path' => $path, 'context' => $context));
             }
 
             return false;
@@ -3655,10 +3756,15 @@ return array(
         }
 
         if ($filesystem->exists($path)) {
-            ultracache_debug_log('browser cache rules write cleanup failed', array('path' => $path));
+            ultracache_debug_log('htaccess rules write cleanup failed', array('path' => $path, 'context' => $context));
         }
 
         return false;
+    }
+
+    private static function write_browser_cache_rules_with_verification($path, $contents, $original_contents, $original_exists)
+    {
+        return self::write_htaccess_rules_with_verification($path, $contents, $original_contents, $original_exists, 'sync_browser_cache_rules');
     }
 
     public static function sync_browser_cache_rules($enabled = null)
@@ -3700,6 +3806,111 @@ return array(
         }
 
         return self::write_browser_cache_rules_with_verification($path, $updated, $contents, $original_exists);
+    }
+
+    private static function get_apache_static_html_delivery_cache_public_path()
+    {
+        $url = function_exists('ultracache_content_cache_storage_url') ? ultracache_content_cache_storage_url('') : '';
+        $path = is_string($url) ? (string) wp_parse_url($url, PHP_URL_PATH) : '';
+        if ('' === $path) {
+            return '';
+        }
+
+        return trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode($path)), '/'));
+    }
+
+    private static function get_apache_static_html_delivery_htaccess_block()
+    {
+        $cache_path = self::get_apache_static_html_delivery_cache_public_path();
+        if ('' === $cache_path) {
+            return '';
+        }
+
+        $common_conditions = array(
+            'RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$ [NC]',
+            'RewriteCond %{QUERY_STRING} ^$',
+            'RewriteCond %{HTTP:Cookie} !(wordpress_logged_in_|wordpress_sec_|wp-postpass_|comment_author_|woocommerce_items_in_cart|woocommerce_cart_hash|wp_woocommerce_session_) [NC]',
+            'RewriteCond %{REQUEST_URI} !(^|/)(wp-admin|wp-login\\.php|wp-json|xmlrpc\\.php|wp-cron\\.php|wp-comments-post\\.php|admin-ajax\\.php|wc-api|cart|checkout|my-account|order-pay|order-received|add-payment-method|lost-password)(/|$) [NC]',
+            'RewriteCond %{REQUEST_URI} !\\.[A-Za-z0-9]{2,8}$ [NC]',
+            'RewriteCond %{HTTP:Accept} (text/html|\\*/\\*) [NC]',
+        );
+
+        $lines = array(
+            '<IfModule mod_headers.c>',
+            '<FilesMatch "^index-(orig|webp|avif)\\.html$">',
+            'Header set Cache-Control "public, max-age=0, must-revalidate"',
+            'Header set X-Ultra-Cache-Source "apache-static"',
+            'Header merge Vary Accept',
+            '</FilesMatch>',
+            '</IfModule>',
+            '<IfModule mod_rewrite.c>',
+            'RewriteEngine On',
+            '# UltraCache direct static HTML delivery: conservative queryless anonymous page-cache aliases.',
+        );
+
+        $append_rule = static function (array $extra_conditions, $file, $rule_pattern) use (&$lines, $common_conditions, $cache_path) {
+            foreach (array_merge($common_conditions, $extra_conditions) as $condition) {
+                $lines[] = $condition;
+            }
+            $lines[] = 'RewriteCond %{DOCUMENT_ROOT}' . $cache_path . '%{HTTP_HOST}/' . $file . ' -f';
+            $lines[] = 'RewriteRule ' . $rule_pattern . ' ' . $cache_path . '%{HTTP_HOST}/' . $file . ' [L]';
+        };
+
+        $append_rule(array('RewriteCond %{HTTP:Accept} image/avif [NC]'), 'index/index-avif.html', '^$');
+        $append_rule(array('RewriteCond %{HTTP:Accept} image/webp [NC]'), 'index/index-webp.html', '^$');
+        $append_rule(array(), 'index/index-orig.html', '^$');
+        $append_rule(array('RewriteCond %{HTTP:Accept} image/avif [NC]'), '$1/index-avif.html', '^(.+?)/?$');
+        $append_rule(array('RewriteCond %{HTTP:Accept} image/webp [NC]'), '$1/index-webp.html', '^(.+?)/?$');
+        $append_rule(array(), '$1/index-orig.html', '^(.+?)/?$');
+
+        $lines[] = '</IfModule>';
+
+        return implode("\n", $lines);
+    }
+
+    public static function sync_apache_static_html_delivery_rules($enabled = null)
+    {
+        $begin = '# BEGIN UltraCache Apache Static HTML';
+        $end   = '# END UltraCache Apache Static HTML';
+
+        if (null === $enabled) {
+            $settings = self::get_settings();
+            $enabled = !empty($settings['apache_static_html_delivery']) && !empty($settings['page_cache']);
+        }
+
+        $path = self::get_browser_cache_htaccess_path();
+        $original_exists = file_exists($path);
+        $contents = $original_exists ? (string) ultracache_safe_file_get_contents($path, 'sync_apache_static_html_delivery_rules') : '';
+        $has_block = (false !== strpos($contents, $begin) && false !== strpos($contents, $end));
+
+        if ($original_exists && !ultracache_path_is_writable($path)) {
+            return !$enabled && !$has_block;
+        }
+        $pattern = '/' . preg_quote($begin, '/') . '.*?' . preg_quote($end, '/') . '\R*/s';
+        $updated = (string) preg_replace($pattern, '', $contents);
+        $updated = rtrim($updated);
+
+        if ($enabled) {
+            $block_body = self::get_apache_static_html_delivery_htaccess_block();
+            if ('' === $block_body) {
+                return false;
+            }
+            $block = $begin . "\n" . $block_body . "\n" . $end;
+            $updated = '' === $updated ? $block : ($updated . "\n\n" . $block);
+        }
+
+        $updated = '' === trim($updated) ? '' : (rtrim($updated) . "\n");
+
+        if ($updated === $contents) {
+            return true;
+        }
+
+        $dir = dirname($path);
+        if (!file_exists($dir) && !ultracache_safe_mkdir($dir, 0755, true, 'sync_apache_static_html_delivery_rules') && !file_exists($dir)) {
+            return false;
+        }
+
+        return self::write_htaccess_rules_with_verification($path, $updated, $contents, $original_exists, 'sync_apache_static_html_delivery_rules');
     }
 
     private static function get_engine_class()
@@ -3821,7 +4032,10 @@ return array(
 
     private static function strip_managed_constants_block($contents)
     {
-        $pattern = '#\\R?/\\* UltraCache managed constants start \\*/\\R.*?/\\* UltraCache managed constants end \\*/\\R?#s';
+        // Remove only the managed block itself. Keep the surrounding line breaks so
+        // the PHP opening tag can never be joined to the next statement as
+        // `<?phpdefine(...)` when the block is replaced or removed.
+        $pattern = '#/\* UltraCache managed constants start \*/\R.*?/\* UltraCache managed constants end \*/#s';
         return (string) preg_replace($pattern, '', (string) $contents);
     }
 
@@ -4124,12 +4338,28 @@ return array(
     private static function validate_wp_config_contents($contents)
     {
         try {
-            token_get_all((string) $contents, TOKEN_PARSE);
+            $tokens = token_get_all((string) $contents, TOKEN_PARSE);
         } catch (ParseError $error) {
             return new WP_Error('ultracache_wp_config_invalid_php', __('The generated wp-config.php content is not valid PHP.', 'ultracache'));
         }
 
-        return true;
+        // TOKEN_PARSE accepts calls to unknown functions and can therefore accept a
+        // malformed `<?phpdefine(...)` sequence as a short opening tag followed by
+        // `phpdefine(...)` when short_open_tag is enabled. Require the active config
+        // to retain a normal full PHP opening tag before it can be written.
+        foreach ($tokens as $token) {
+            if (!is_array($token) || T_OPEN_TAG !== $token[0]) {
+                continue;
+            }
+
+            if (!preg_match('/^<\?php(?:\s|$)/i', (string) $token[1])) {
+                return new WP_Error('ultracache_wp_config_invalid_php', __('The generated wp-config.php content is not valid PHP.', 'ultracache'));
+            }
+
+            return true;
+        }
+
+        return new WP_Error('ultracache_wp_config_invalid_php', __('The generated wp-config.php content is not valid PHP.', 'ultracache'));
     }
 
     private static function write_wp_config_with_verification($config, $contents, $original_contents)
@@ -5158,6 +5388,20 @@ return array(
             'success' => false,
             'connected' => false,
             'message' => self::maybe_translate('Redis helper not available.'),
+        );
+    }
+
+    public static function test_redis_read_write(array $settings_override = array())
+    {
+        if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_redis_read_write')) {
+            return Ultra_Cache_Object_Cache_Manager::test_redis_read_write($settings_override);
+        }
+
+        return array(
+            'success'   => false,
+            'connected' => false,
+            'readWrite' => false,
+            'message'   => self::maybe_translate('Redis read/write validation helper not available.'),
         );
     }
 

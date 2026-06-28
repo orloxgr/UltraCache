@@ -68,16 +68,6 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     $protected_reason = 'user-visible defer/delay exclusion matched';
                     $reason = $protected_reason;
                     $suggested = 'Review the visible exclusion list before changing.';
-                } elseif ($this->is_script_safe_stage_excluded($handle, $src, $tag, $settings)) {
-                    $protected = true;
-                    $protected_reason = 'safe-stage protected dependency';
-                    $reason = $protected_reason;
-                    $suggested = 'Candidate only for a focused dependency-safe defer test.';
-                } elseif ($this->is_script_force_blocking($handle, $src, $tag, $settings)) {
-                    $protected = true;
-                    $protected_reason = 'force-blocking dependency/core/WooCommerce/Elementor rule';
-                    $reason = $protected_reason;
-                    $suggested = 'Keep blocking unless a dedicated dependency-safe mode is tested.';
                 } elseif ($render_blocking && !empty($settings['lcp_boundary_defer']) && $this->matches_non_critical_delay_patterns($handle, $src, $tag)) {
                     $suggested = 'Candidate for LCP Boundary Defer / critical-chain relief after visual testing.';
                 } elseif ($render_blocking) {
@@ -273,7 +263,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     if (false !== stripos($attrs, 'src=') || false !== stripos($attrs, 'data-ultracache-src=') || false !== stripos($attrs, 'text/ultracache-delayed-js') || false !== stripos($attrs, 'application/ld+json') || false !== stripos($attrs, 'speculationrules')) {
                         continue;
                     }
-                    if (false !== stripos($trimmed_code, '__ultracacheDelayLoader') || false !== stripos($trimmed_code, 'text/ultracache-delayed-js') || false !== stripos($trimmed_code, 'gtm.start') || false !== stripos($trimmed_code, 'googletagmanager.com/gtm.js') || false !== stripos($trimmed_code, 'wp-emoji-settings') || false !== stripos($trimmed_code, '_wpemojiSettings')) {
+                    if (false !== stripos($trimmed_code, '__ultracacheDelayLoader') || false !== stripos($trimmed_code, 'text/ultracache-delayed-js') || false !== stripos($trimmed_code, 'wp-emoji-settings') || false !== stripos($trimmed_code, '_wpemojiSettings')) {
                         continue;
                     }
 
@@ -520,7 +510,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     if (false !== stripos($attrs, 'src=') || false !== stripos($attrs, 'data-ultracache-src=') || false !== stripos($attrs, 'text/ultracache-delayed-js') || false !== stripos($attrs, 'application/ld+json') || false !== stripos($attrs, 'speculationrules')) {
                         continue;
                     }
-                    if (false !== stripos($trimmed_code, '__ultracacheDelayLoader') || false !== stripos($trimmed_code, 'text/ultracache-delayed-js') || false !== stripos($trimmed_code, 'gtm.start') || false !== stripos($trimmed_code, 'googletagmanager.com/gtm.js') || false !== stripos($trimmed_code, 'wp-emoji-settings') || false !== stripos($trimmed_code, '_wpemojiSettings')) {
+                    if (false !== stripos($trimmed_code, '__ultracacheDelayLoader') || false !== stripos($trimmed_code, 'text/ultracache-delayed-js') || false !== stripos($trimmed_code, 'wp-emoji-settings') || false !== stripos($trimmed_code, '_wpemojiSettings')) {
                         continue;
                     }
 
@@ -794,8 +784,8 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'label' => __('Detected component protections', 'ultracache'),
                     'confidence' => 'recommended',
                     'appendable' => true,
-                    'markers' => array('google.com/recaptcha', 'gstatic.com/recaptcha', 'grecaptcha', 'hcaptcha', 'hcaptcha.com', 'turnstile', 'challenges.cloudflare.com', 'cf-turnstile'),
-                    'suggestions' => array('google.com/recaptcha', 'gstatic.com/recaptcha', 'grecaptcha', 'hcaptcha', 'turnstile', 'challenges.cloudflare.com', 'cf-turnstile'),
+                    'markers' => array('google.com/recaptcha', 'grecaptcha', 'hcaptcha', 'hcaptcha.com', 'turnstile', 'challenges.cloudflare.com', 'cf-turnstile'),
+                    'suggestions' => array('google.com/recaptcha', 'grecaptcha', 'hcaptcha', 'turnstile', 'challenges.cloudflare.com', 'cf-turnstile'),
                     'reason' => __('Captcha/anti-bot assets were detected on this page. These are commonly unsafe to delay because forms may need them immediately.', 'ultracache'),
                 ),
                 array(
@@ -805,7 +795,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'appendable' => true,
                     'markers' => array('contact-form-7', 'wpforms', 'gform', 'gravityforms', 'formidable', 'ninja-forms', 'fluentform', 'forminator', 'mailerlite', 'mailchimp', 'mc4wp', 'klaviyo', 'hubspot'),
                     'suggestions' => array('contact-form-7', 'wpforms', 'gform', 'gravityforms', 'formidable', 'ninja-forms', 'fluentform', 'forminator', 'mailerlite', 'validation-messages', 'mailchimp', 'mc4wp', 'klaviyo', 'hubspot'),
-                    'reason' => __('Form, validation, newsletter, or CRM assets were detected on this page. Exclude matching form runtime assets if the form must work before interaction.', 'ultracache'),
+                    'reason' => __('Form, validation, newsletter, or CRM assets were detected on this page. Try Defer Instead of Delay first, then use the fallback list if the form must work before interaction.', 'ultracache'),
                 ),
                 array(
                     'category' => 'detected-component-protection',
@@ -814,7 +804,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'appendable' => true,
                     'markers' => array('js.stripe.com', 'stripe', 'paypal.com/sdk/js', 'paypal', 'braintree', 'klarna', 'afterpay', 'squareup', 'square-web-payments'),
                     'suggestions' => array('js.stripe.com', 'stripe', 'paypal.com/sdk/js', 'paypal', 'braintree', 'klarna', 'afterpay', 'square'),
-                    'reason' => __('Payment gateway assets were detected on this page. Payment/checkout scripts are safer when excluded from Delay JS.', 'ultracache'),
+                    'reason' => __('Payment gateway assets were detected on this page. Payment/checkout scripts are safer when kept out of delayed execution.', 'ultracache'),
                 ),
                 array(
                     'category' => 'detected-elementor-load-order',
@@ -823,7 +813,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     'appendable' => true,
                     'markers' => array('elementorModules', 'elementor/assets/js/common.min.js', 'common.min.js?ver=', 'elementor-admin-bar.min.js', 'frontend-modules.min.js', 'elementor-frontend-modules', 'elementor-webpack-runtime'),
                     'suggestions' => array('elementor', 'elementor-frontend', 'elementor-frontend-modules', 'frontend-modules', 'elementor-webpack-runtime', 'elementor-pro-webpack-runtime', 'elementorModules', 'elementor/assets/js/frontend-modules', 'elementor/assets/js/common.min.js', 'elementor/assets/js/elementor-admin-bar.min.js', 'common.min.js', 'elementor-admin-bar.min.js'),
-                    'reason' => __('Elementor module/runtime scripts were detected. When Defer all JS is enabled, Elementor module providers and dependent common/admin-bar scripts should stay in the visible JS Delay / Defer Exclusions list unless the page has been verified clean.', 'ultracache'),
+                    'reason' => __('Elementor module/runtime scripts were detected. Keep Elementor module providers and dependent common/admin-bar scripts in Defer Instead of Delay, or use the fallback list until the page has been verified clean.', 'ultracache'),
                 ),
                 array(
                     'category' => 'review-only',
@@ -912,7 +902,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                         'suggestedExclusion' => 'jquery',
                         'reason' => sprintf(
 							/* translators: %s: inline script block ID, or no id. */
-							__('Inline script block %s references jQuery. Keep the jQuery handle in the visible JS Delay / Defer Exclusions list unless the inline block is also moved into a delayed/replayed execution group.', 'ultracache'),
+							__('Inline script block %s references jQuery. Keep the jQuery handle in Defer Instead of Delay or the fallback list unless the inline block is also moved into a delayed/replayed execution group.', 'ultracache'),
 							'' !== $id ? $id : '(no id)'
 						),
                     );
@@ -1170,16 +1160,6 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return $this->strip_native_loading_attributes_from_script_tag($tag);
             }
 
-            /*
-             * Avoid splitting WordPress script groups at script_loader_tag time.
-             * If a handle has registered before/after/extra/translation inline
-             * companions, leave the external tag untouched here so later HTML
-             * passes can either keep or delay the whole group consistently.
-             */
-            if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
-                return $this->strip_native_loading_attributes_from_script_tag($tag);
-            }
-
             $defer_stage = $this->get_defer_stage_level($settings);
             $defer_all_js = !empty($settings['defer_all_js']);
             $delay_all_js = !empty($settings['delay_all_js']);
@@ -1192,8 +1172,18 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 return $this->strip_native_loading_attributes_from_script_tag($tag);
             }
 
-            if (!$defer_all_js && 0 < $defer_stage && $this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+            if (!$defer_all_js && $this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
                 return $this->add_defer_attribute_to_script_tag($tag, true);
+            }
+
+            /*
+             * Avoid splitting WordPress script groups at script_loader_tag time.
+             * If a handle has registered before/after/extra/translation inline
+             * companions, leave the external tag untouched here so later HTML
+             * passes can either keep or delay the whole group consistently.
+             */
+            if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
+                return $this->strip_native_loading_attributes_from_script_tag($tag);
             }
 
             /*
@@ -1242,8 +1232,8 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
         private function should_keep_script_blocking_for_defer_all($handle, $src, $tag = '', array $settings = array())
         {
             // Defer all JS is intentionally literal/aggressive: the only scripts
-            // kept blocking are those matching the visible JS Delay / Defer
-            // Exclusions field. WordPress/core/slider protections belong in that
+            // kept blocking are those matching the visible Do Not Defer or Delay
+            // fallback field. WordPress/core/slider protections belong in that
             // editable list via Populate Defaults, not in hidden runtime rules.
             return $this->is_script_user_defer_excluded($handle, $src, $settings, $tag);
         }
@@ -1274,6 +1264,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
             $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
             $protected_indexes = $this->get_user_excluded_script_dependency_indexes($records, $settings);
+            $force_defer_groups = $this->get_user_force_deferred_script_dependency_groups($records, $settings);
             $replacements = array();
 
             foreach ($records as $index => $record) {
@@ -1284,6 +1275,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 $handle = isset($record['handle']) ? (string) $record['handle'] : '';
                 $src = isset($record['src']) ? (string) $record['src'] : '';
                 $group = isset($record['group']) ? (string) $record['group'] : '';
+                $force_defer = $this->script_record_matches_user_force_defer($record, $settings) || ('' !== $group && !empty($force_defer_groups[$group]));
 
                 if ($this->is_ultracache_frontend_js_helper_record($record)) {
                     continue;
@@ -1302,11 +1294,26 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                     if ('' === $src) {
                         continue;
                     }
+                    if ($force_defer) {
+                        $deferred = $this->add_defer_attribute_to_script_tag($source_tag, true);
+                        if (is_string($deferred) && '' !== $deferred && $deferred !== (string) $record['tag']) {
+                            $replacements[(int) $index] = $deferred;
+                        }
+                        continue;
+                    }
                     $replacements[(int) $index] = $this->build_delayed_script_tag($source_tag, $handle, $src, 'all-js');
                     continue;
                 }
 
                 if (!$this->is_delayable_inline_script_tag($source_tag)) {
+                    continue;
+                }
+
+                if ($force_defer) {
+                    $externalized = $this->build_deferred_external_inline_script_tag($record);
+                    if (is_string($externalized) && '' !== $externalized && $externalized !== (string) $record['tag']) {
+                        $replacements[(int) $index] = $externalized;
+                    }
                     continue;
                 }
 
@@ -1505,6 +1512,7 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
             $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
             $protected_indexes = $this->get_user_excluded_script_dependency_indexes($records, $settings);
+            $force_defer_groups = $this->get_user_force_deferred_script_dependency_groups($records, $settings);
             $replacements = array();
 
             foreach ($records as $index => $record) {
@@ -1513,11 +1521,20 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
                 }
 
                 $group = isset($record['group']) ? (string) $record['group'] : '';
-                if (!isset($protected_indexes[(int) $index]) && !$this->script_record_matches_user_defer_exclusion($record, $settings) && ('' === $group || empty($protected_groups[$group]))) {
+                $force_defer = $this->script_record_matches_user_force_defer($record, $settings) || ('' !== $group && !empty($force_defer_groups[$group]));
+                if (!$force_defer && !isset($protected_indexes[(int) $index]) && !$this->script_record_matches_user_defer_exclusion($record, $settings) && ('' === $group || empty($protected_groups[$group]))) {
                     continue;
                 }
 
                 $restored = $this->restore_delayed_script_record_tag($record);
+                if ($force_defer && !empty($record['has_src'])) {
+                    $restored = $this->add_defer_attribute_to_script_tag($restored, true);
+                } elseif ($force_defer && $this->is_delayable_inline_script_tag($restored)) {
+                    $externalized = $this->build_deferred_external_inline_script_tag($record);
+                    if (is_string($externalized) && '' !== $externalized) {
+                        $restored = $externalized;
+                    }
+                }
                 if (is_string($restored) && '' !== $restored && $restored !== $record['tag']) {
                     $replacements[(int) $index] = $restored;
                 }
@@ -1765,6 +1782,24 @@ if (!trait_exists('Ultra_Cache_Engine_JS_Optimization_Trait')) {
 
             foreach ($records as $record) {
                 if (!$this->script_record_matches_user_defer_exclusion($record, $settings)) {
+                    continue;
+                }
+
+                $group = isset($record['group']) ? (string) $record['group'] : '';
+                if ('' !== $group) {
+                    $protected[$group] = true;
+                }
+            }
+
+            return $protected;
+        }
+
+        private function get_user_force_deferred_script_dependency_groups(array $records, array $settings = array())
+        {
+            $protected = array();
+
+            foreach ($records as $record) {
+                if (!$this->script_record_matches_user_force_defer($record, $settings)) {
                     continue;
                 }
 
@@ -2036,6 +2071,18 @@ private function script_record_matches_user_defer_exclusion(array $record, array
             );
         }
 
+        private function script_record_matches_user_force_defer(array $record, array $settings = array())
+        {
+            $tag = isset($record['tag']) ? (string) $record['tag'] : (isset($record['open']) ? (string) $record['open'] : '');
+
+            return $this->is_script_user_force_deferred(
+                isset($record['handle']) ? (string) $record['handle'] : '',
+                isset($record['src']) ? (string) $record['src'] : '',
+                $tag,
+                $settings
+            );
+        }
+
         private function get_nearby_script_dependency_groups(array $records, array $ordered_indexes, $index, $radius = 2)
         {
             $groups = array();
@@ -2094,39 +2141,13 @@ private function script_record_matches_user_defer_exclusion(array $record, array
 
         private function is_wp_inline_dependency_script_record(array $record)
         {
-            if (!empty($record['has_src'])) {
-                return false;
-            }
-
-            $id = strtolower(trim(isset($record['id']) ? (string) $record['id'] : ''));
-            if ('' !== $id && preg_match('/(?:^|-)js-(?:extra|before|after)$/', $id)) {
-                return true;
-            }
-
-            $tag = isset($record['tag']) ? (string) $record['tag'] : '';
-            if ('' === $tag || !$this->is_delayable_inline_script_tag($tag)) {
-                return false;
-            }
-
-            $code = (string) preg_replace('/^<script\b[^>]*>|<\/script>$/is', '', $tag);
-            if ('' === trim($code)) {
-                return false;
-            }
-
-            $markers = array(
-                'var ',
-                'const ',
-                'let ',
-                'window.',
-                'wp.i18n.setLocaleData',
-                'wp_add_inline_script',
-            );
-            foreach ($markers as $marker) {
-                if (false !== stripos($code, $marker)) {
-                    return true;
-                }
-            }
-
+            unset($record);
+            /*
+             * Do not silently protect WordPress/theme/plugin inline blocks.
+             * Browser Scanner and Console Error Handler should discover actual
+             * breakage and propose visible safeguards. UltraCache-owned helper
+             * records are protected separately by is_ultracache_frontend_js_helper_record().
+             */
             return false;
         }
 
@@ -2471,6 +2492,7 @@ private function script_handle_has_inline_before_segments($handle)
                 'ultracache-delayed-js-loader',
                 'ultracache-runtime-font-css-map',
                 'ultracache-font-display-cssom-patch',
+                'ultracache-woocommerce-cart-fragments-delay',
                 'ultracache-sr7-lcp-priority',
             ), true);
         }
@@ -2498,7 +2520,7 @@ private function script_handle_has_inline_before_segments($handle)
 
             $src = isset($record['src']) ? (string) $record['src'] : '';
             if ('' !== $src && false !== strpos($src, '/ultracache/assets/js/')) {
-                return (false !== strpos($src, '/mailerlite-lazy-nonce.js') || false !== strpos($src, '/runtime-js-scan-collector.js') || false !== strpos($src, '/delayed-js-loader.js') || false !== strpos($src, '/runtime-font-css-map.js') || false !== strpos($src, '/font-display-cssom-patch.js') || false !== strpos($src, '/sr7-lcp-priority.js'));
+                return (false !== strpos($src, '/mailerlite-lazy-nonce.js') || false !== strpos($src, '/runtime-js-scan-collector.js') || false !== strpos($src, '/delayed-js-loader.js') || false !== strpos($src, '/runtime-font-css-map.js') || false !== strpos($src, '/font-display-cssom-patch.js') || false !== strpos($src, '/woocommerce-cart-fragments-delay.js') || false !== strpos($src, '/sr7-lcp-priority.js'));
             }
 
             return false;
@@ -2536,7 +2558,7 @@ private function script_handle_has_inline_before_segments($handle)
             /*
              * Absolute dependency recommendations are no longer forced by a
              * hidden runtime list. Populate Defaults places those entries in
-             * the visible JS Delay / Defer Exclusions textarea.
+             * the visible Do Not Defer or Delay fallback textarea.
              */
             return false;
         }
@@ -2545,8 +2567,8 @@ private function script_handle_has_inline_before_segments($handle)
         {
             /*
              * Do not silently force-block core/WooCommerce/Elementor/theme
-             * scripts. The user-visible JS Delay / Defer Exclusions list is the
-             * authoritative safeguard list.
+             * scripts. The user-visible Do Not Defer or Delay list is the
+             * authoritative compatibility fallback.
              */
             return false;
         }
@@ -2625,10 +2647,11 @@ private function script_handle_has_inline_before_segments($handle)
                 return '' !== trim((string) $item);
             })));
 
-            // The visible JS Delay / Defer Exclusions list is the user's final
-            // override for aggressive Defer all JS. Never strip legacy-looking
-            // fragments here; if the user adds validation-messages.js, sr7,
-            // elementor, or any other broad line, it must remain effective.
+            // The visible Do Not Defer or Delay list is the user's final
+            // compatibility fallback for aggressive JS modes. Never strip
+            // legacy-looking fragments here; if the user adds validation-
+            // messages.js, sr7, elementor, or any other broad line, it must
+            // remain effective.
             return $list;
         }
 
@@ -2765,7 +2788,7 @@ private function get_safe_stage_defer_exclude_fragments(array $settings = array(
         {
             /*
              * Former built-in defer fragments are now surfaced through the
-             * existing JS Delay / Defer Exclusions Populate Defaults payload.
+             * Do Not Defer or Delay Populate Defaults payload.
              */
             return $this->get_defer_stage_user_exclude_fragments($settings);
         }
@@ -2780,7 +2803,7 @@ private function get_force_blocking_script_handles(array $settings = array())
         {
             /*
              * No hidden force-blocking handles. Recommended dependency handles
-             * are exposed through JS Delay / Defer Exclusions Populate Defaults.
+             * are exposed through Do Not Defer or Delay Populate Defaults.
              */
             return array();
         }
@@ -2788,8 +2811,8 @@ private function get_force_blocking_script_handles(array $settings = array())
         private function get_safe_stage_excluded_handles(array $settings = array())
         {
             /*
-             * No hidden safe-stage handle list. Use the visible JS Delay /
-             * Defer Exclusions textarea instead.
+             * No hidden safe-stage handle list. Use the visible Do Not Defer
+             * or Delay fallback textarea instead.
              */
             return array();
         }
@@ -3065,6 +3088,10 @@ private function script_handle_is_footer_group($handle)
                 return false;
             }
 
+            if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+                return false;
+            }
+
             if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
                 return false;
             }
@@ -3143,12 +3170,12 @@ private function script_handle_is_footer_group($handle)
                 return array('matched' => false, 'reason' => 'excluded');
             }
 
-            if ($this->should_native_defer_all_local_script($src, $settings)) {
-                return array('matched' => false, 'reason' => 'native-defer-all-local');
+            if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+                return array('matched' => false, 'reason' => 'force-defer');
             }
 
-            if ($this->is_third_party_delay_dependency_library($handle, $src, $tag)) {
-                return array('matched' => false, 'reason' => 'dependency-library');
+            if ($this->should_native_defer_all_local_script($src, $settings)) {
+                return array('matched' => false, 'reason' => 'native-defer-all-local');
             }
 
             if (!empty($settings['delay_safe_third_party_js'])) {
@@ -3227,32 +3254,6 @@ private function script_handle_is_footer_group($handle)
                     }
                 }
 
-                $safe_inline_markers = array(
-                    'gtag(',
-                    'dataLayer',
-                    'gtm.start',
-                    'googletagmanager.com/gtm.js',
-                    'googletagmanager.com/gtag/js',
-                    'google-analytics.com',
-                    'fbq(',
-                    'connect.facebook.net',
-                    'pintrk(',
-                    'clarity(',
-                    'hotjar',
-                );
-
-                foreach ($safe_inline_markers as $marker) {
-                    foreach ($haystacks as $haystack) {
-                        if ('' !== $haystack && false !== strpos($haystack, strtolower($marker))) {
-                            return array(
-                                'matched' => true,
-                                'category' => 'safe-third-party',
-                                'reason' => 'safe-third-party',
-                                'matched_pattern' => strtolower($marker),
-                            );
-                        }
-                    }
-                }
             }
 
             if (!empty($settings['delay_functional_third_party_js'])) {
@@ -3315,30 +3316,13 @@ private function script_handle_is_footer_group($handle)
 
         private function is_third_party_delay_dependency_library($handle, $src, $tag = '')
         {
-            $src_path = strtolower((string) wp_parse_url((string) $src, PHP_URL_PATH));
-            $haystack = strtolower(trim((string) $handle . ' ' . (string) $src . ' ' . $src_path . ' ' . (string) $tag));
-            if ('' === $haystack) {
-                return false;
-            }
-
-            $dependency_patterns = array(
-                'js-cookie',
-                'js.cookie',
-                'jquery.cookie',
-                '/sourcebuster',
-                'sourcebuster-js',
-                'wc-order-attribution',
-                'order-attribution',
-                'wc-cart-fragments',
-                'cart-fragments',
-            );
-
-            foreach ($dependency_patterns as $pattern) {
-                if (false !== strpos($haystack, $pattern)) {
-                    return true;
-                }
-            }
-
+            unset($handle, $src, $tag);
+            /*
+             * Hidden third-party dependency-library bypasses are intentionally
+             * disabled. If a dependency script breaks when delayed, diagnostics
+             * should resolve it into the visible Defer Instead or Do Not Defer
+             * or Delay boxes.
+             */
             return false;
         }
 
@@ -4033,6 +4017,7 @@ private function script_handle_is_footer_group($handle)
 
             $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
             $protected_indexes = $this->get_user_excluded_script_dependency_indexes($records, $settings);
+            $force_defer_groups = $this->get_user_force_deferred_script_dependency_groups($records, $settings);
             $replacements = array();
             foreach ($records as $index => $record) {
                 if (empty($record['has_src']) || '' === $record['src']) {
@@ -4041,6 +4026,14 @@ private function script_handle_is_footer_group($handle)
 
                 $record_group = isset($record['group']) ? (string) $record['group'] : '';
                 if (isset($protected_indexes[(int) $index]) || $this->script_record_matches_user_defer_exclusion($record, $settings) || ('' !== $record_group && !empty($protected_groups[$record_group]))) {
+                    continue;
+                }
+
+                if ($this->script_record_matches_user_force_defer($record, $settings) || ('' !== $record_group && !empty($force_defer_groups[$record_group]))) {
+                    $deferred = $this->add_defer_attribute_to_script_tag($record['tag'], true);
+                    if (is_string($deferred) && '' !== $deferred && $deferred !== $record['tag']) {
+                        $replacements[$index] = $deferred;
+                    }
                     continue;
                 }
 
@@ -4064,6 +4057,13 @@ private function script_handle_is_footer_group($handle)
                     if (isset($protected_indexes[(int) $inline_index]) || ('' !== $inline_group && !empty($protected_groups[$inline_group]))) {
                         continue;
                     }
+                    if ('' !== $inline_group && !empty($force_defer_groups[$inline_group]) && $this->is_delayable_inline_script_tag($inline_record['tag'])) {
+                        $externalized = $this->build_deferred_external_inline_script_tag($inline_record);
+                        if (is_string($externalized) && '' !== $externalized && $externalized !== $inline_record['tag']) {
+                            $replacements[$inline_index] = $externalized;
+                        }
+                        continue;
+                    }
                     if ('' === $inline_record['group'] || $inline_record['group'] !== $record['group']) {
                         continue;
                     }
@@ -4082,18 +4082,17 @@ private function script_handle_is_footer_group($handle)
                 if (isset($protected_indexes[(int) $inline_index]) || $this->script_record_matches_user_defer_exclusion($inline_record, $settings) || ('' !== $inline_group && !empty($protected_groups[$inline_group]))) {
                     continue;
                 }
+                if (($this->script_record_matches_user_force_defer($inline_record, $settings) || ('' !== $inline_group && !empty($force_defer_groups[$inline_group]))) && $this->is_delayable_inline_script_tag($inline_record['tag'])) {
+                    $externalized = $this->build_deferred_external_inline_script_tag($inline_record);
+                    if (is_string($externalized) && '' !== $externalized && $externalized !== $inline_record['tag']) {
+                        $replacements[$inline_index] = $externalized;
+                    }
+                    continue;
+                }
                 if (!$this->is_delayable_inline_script_tag($inline_record['tag'])) {
                     continue;
                 }
 
-                /*
-                 * WordPress attached inline scripts must not be delayed as
-                 * standalone snippets. They are handle-bound config/data blocks
-                 * (for example {handle}-js-before / {handle}-js-after) and must
-                 * follow the parent external script decision. Delaying only the
-                 * inline block while the parent remains parser-loaded breaks
-                 * ordered loaders such as WooCommerce Google Analytics.
-                 */
                 if ($this->is_wp_inline_dependency_script_record($inline_record)) {
                     continue;
                 }
