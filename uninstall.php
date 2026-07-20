@@ -227,10 +227,10 @@ function ultracache_uninstall_strip_managed_constants_block($contents)
         return false;
     }
 
-    // Remove only the managed block itself. Preserve the surrounding line breaks
-    // so the PHP opening tag cannot be joined to the next statement.
-    $pattern = '#/\\* UltraCache managed constants start \\*/\\R.*?/\\* UltraCache managed constants end \\*/#s';
-    $updated = preg_replace($pattern, '', $contents, 1, $replacements);
+    // Remove the managed block and adjacent blank lines. Keep a single newline
+    // so surrounding PHP statements cannot be joined after uninstall cleanup.
+    $pattern = '#(?:[ \t]*\R)*/\* UltraCache managed constants start \*/\R.*?/\* UltraCache managed constants end \*/(?:[ \t]*\R)*#s';
+    $updated = preg_replace($pattern, "\n", $contents, 1, $replacements);
 
     return is_string($updated) && 1 === $replacements ? $updated : false;
 }
@@ -544,6 +544,8 @@ function ultracache_uninstall_generated_runtime_asset_dirs()
         $base . 'google-fonts/',
         $base . 'optimized-css/',
         $base . 'deferred-inline-js/',
+        $base . 'theme-css-temp/',
+        $base . 'theme-css-backups/',
     );
 }
 
@@ -626,13 +628,35 @@ function ultracache_run_uninstall_cleanup()
         wp_clear_scheduled_hook($ultracache_hook);
     }
 
+    delete_option('ultracache_manual_warm_state');
+    delete_site_option('ultracache_manual_warm_state');
+
     if ($ultracache_delete_runtime_options) {
         $ultracache_options = array(
             'ultracache_cron_warm_state',
+            'ultracache_crawl_scope_summary',
             'ultracache_cron_warm_lock_atomic',
             'ultracache_wp_cache_managed',
             'ultracache_media_diagnostics_v1',
+            'ultracache_media_library_conversion_test_v1',
+            'ultracache_media_library_conversion_test_sample_v1',
+            'ultracache_media_file_counts',
+            'ultracache_media_storage_stats_v2',
+            'ultracache_avif_encoder_self_test_v1',
             'ultracache_media_queue_build_state_v1',
+            'ultracache_media_background_paused_v1',
+            'ultracache_media_stale_worker_state_v1',
+            'ultracache_media_queue_rebuild_generation_v1',
+            'ultracache_media_replacement_active_job_v1',
+            'ultracache_media_replacement_active_job_v2',
+            'ultracache_media_replacement_ref_index_scan_v1',
+            'ultracache_media_replacement_ref_index_specs_v1',
+            'ultracache_media_replacement_intermediate_expand_v1',
+            'ultracache_media_replacement_theme_css_scan_state',
+            'ultracache_media_replacement_theme_css_stream_state_v1',
+            'ultracache_media_replacement_theme_css_scan_manifest_v1',
+            'ultracache_media_replacement_readiness_v1',
+            'ultracache_media_replacement_cli_pause_request_v1',
             'ultracache_object_cache_last_flush_report',
             'ultracache_last_css_bundle_summary',
             'ultracache_settings_google_fonts_last_scan',
@@ -640,10 +664,15 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_external_cache_detection',
             'ultracache_action_queue_heavy_lock_v1',
             'ultracache_warmup_generation',
+            'ultracache_varnish_refresh_ahead_state_v1',
+            'ultracache_varnish_metrics_v1',
+            'ultracache_lcp_last_refresh',
+            'ultracache_manual_warm_state',
         );
 
         if (!$ultracache_keep_settings) {
             array_unshift($ultracache_options, 'ultracache_settings');
+            $ultracache_options[] = 'ultracache_varnish_html_ttl_default_migration_v1';
         }
 
         if (!$ultracache_keep_tables) {
@@ -653,6 +682,7 @@ function ultracache_run_uninstall_cleanup()
             $ultracache_options[] = 'ultracache_js_diagnostic_queue_db_version';
             $ultracache_options[] = 'ultracache_cron_warm_queue_db_version';
             $ultracache_options[] = 'ultracache_analytics_db_version';
+            $ultracache_options[] = 'ultracache_lcp_observations_db_version';
             $ultracache_options[] = 'ultracache_cache_asset_refs_db_version';
             $ultracache_options[] = 'ultracache_css_rewrite_map_db_version';
             $ultracache_options[] = 'ultracache_locks_db_version';
@@ -661,6 +691,10 @@ function ultracache_run_uninstall_cleanup()
         foreach ($ultracache_options as $ultracache_option) {
             delete_option($ultracache_option);
             delete_site_option($ultracache_option);
+        }
+
+        if (!$ultracache_keep_settings && function_exists('delete_metadata')) {
+            delete_metadata('user', 0, 'ultracache_admin_theme', '', true);
         }
 
         $ultracache_transients = array(
@@ -677,6 +711,10 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_object_cache_support_status_v1',
             'ultracache_reverse_proxy_status_v2',
             'ultracache_varnish_last_result',
+            'ultracache_varnish_html_flush_capability_v1',
+            'ultracache_varnish_two_stage_refill_v1',
+            'ultracache_varnish_soft_purge_capability_v1',
+            'ultracache_varnish_refresh_ahead_capability_v1',
             'ultracache_runtime_font_css_url_map_v3',
         );
 
@@ -697,10 +735,16 @@ function ultracache_run_uninstall_cleanup()
     $ultracache_custom_table_basenames = array(
         'ultracache_media_queue',
         'ultracache_media_page_refs',
+        'ultracache_media_replacement_items',
+        'ultracache_media_replacement_refs',
+        'ultracache_media_replacement_ref_index',
+        'ultracache_media_replacement_file_refs',
+        'ultracache_media_replacement_theme_css_files',
         'ultracache_action_jobs',
         'ultracache_js_diagnostic_jobs',
         'ultracache_cron_warm_queue',
         'ultracache_analytics',
+        'ultracache_lcp_observations',
         'ultracache_cache_asset_refs',
         'ultracache_css_rewrite_map',
         'ultracache_locks',
@@ -744,9 +788,12 @@ function ultracache_run_uninstall_cleanup()
     if ($ultracache_delete_runtime_options && !$ultracache_keep_tables) {
         foreach (array(
             'ultracache_object_cache_last_flush_report',
+            'ultracache_crawl_scope_summary',
             'ultracache_cache_asset_refs_db_version',
             'ultracache_css_rewrite_map_db_version',
             'ultracache_locks_db_version',
+            'ultracache_media_replacement_db_version',
+            'ultracache_media_replacement_schema_lock_v1',
         ) as $ultracache_final_option) {
             delete_option($ultracache_final_option);
             delete_site_option($ultracache_final_option);

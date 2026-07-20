@@ -14,5 +14,6 @@ Additional frontend helpers will be migrated in separate staged versions as they
 
 - `runtime-font-css-map.js` — Runtime font CSS href rewrite helper enqueued through `wp_enqueue_scripts`, with mapping configuration passed by `wp_add_inline_script()`.
 - `font-display-cssom-patch.js` — Runtime CSSOM font-display patch helper enqueued through `wp_enqueue_scripts`.
+- `dynamic-icon-font-delay.js` — Intercepts matching same-origin dynamically inserted icon-font stylesheets before activation, adds `font-display: swap` through CSSOM, and exposes aggregate timing in `window.ultracacheIconFontDelayTiming`.
 - `woocommerce-cart-fragments-delay.js` — Optional WooCommerce cart-fragments AJAX delay helper enqueued through `wp_enqueue_scripts`, with timing configuration passed by `wp_add_inline_script()`.
-- `sr7-lcp-priority.js` — Runtime SR7/LCP priority marker helper enqueued through `wp_enqueue_scripts`, with manual selector configuration passed by `wp_add_inline_script()`.
+- `lcp-observer.js` — Lightweight frontend LCP discovery helper. It sends one page-scoped observation per eligible visit, skips query-string URLs, expired discovery periods, and locked page/viewport mappings, and supports public or administrator-only discovery periods.

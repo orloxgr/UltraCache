@@ -98,17 +98,87 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			}
 
 			$filesystem = $this->optimized_storage_filesystem();
+			$ready = false;
 			if ($filesystem && method_exists($filesystem, 'is_dir') && $filesystem->is_dir($dir)) {
-				return true;
-			}
-			if (function_exists('wp_mkdir_p') && wp_mkdir_p($dir)) {
-				return true;
-			}
-			if ($filesystem && method_exists($filesystem, 'mkdir')) {
-				return (bool) $filesystem->mkdir($dir, FS_CHMOD_DIR);
+				$ready = true;
+			} elseif (function_exists('wp_mkdir_p') && wp_mkdir_p($dir)) {
+				$ready = true;
+			} elseif ($filesystem && method_exists($filesystem, 'mkdir')) {
+				$ready = (bool) $filesystem->mkdir($dir, defined('FS_CHMOD_DIR') ? FS_CHMOD_DIR : 0755);
 			}
 
-			return false;
+			if ($ready) {
+				$this->optimized_storage_harden_upload_permissions($dir, 'directory');
+			}
+
+			return (bool) $ready;
+		}
+
+		private function optimized_storage_get_uploads_basedir() {
+			$uploads = function_exists('ultracache_uploads_base_info') ? ultracache_uploads_base_info() : wp_upload_dir(null, false);
+			if (empty($uploads['basedir'])) {
+				return '';
+			}
+
+			return untrailingslashit(wp_normalize_path((string) $uploads['basedir']));
+		}
+
+		private function optimized_storage_path_is_inside_uploads($path) {
+			$path = is_string($path) ? wp_normalize_path($path) : '';
+			$base = $this->optimized_storage_get_uploads_basedir();
+			if ('' === $path || '' === $base) {
+				return false;
+			}
+
+			$path = untrailingslashit($path);
+			return $path === $base || 0 === strpos($path . '/', trailingslashit($base));
+		}
+
+		private function optimized_storage_chmod_path($path, $mode) {
+			$path = is_string($path) ? wp_normalize_path($path) : '';
+			$mode = absint($mode);
+			if ('' === $path || $mode <= 0) {
+				return false;
+			}
+
+			$filesystem = $this->optimized_storage_filesystem();
+			if ($filesystem && method_exists($filesystem, 'chmod')) {
+				return (bool) $filesystem->chmod($path, $mode);
+			}
+
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- Fallback only when WP_Filesystem does not expose chmod().
+			return @chmod($path, $mode);
+		}
+
+		private function optimized_storage_harden_upload_permissions($path, $type = 'file') {
+			$path = is_string($path) ? wp_normalize_path($path) : '';
+			$type = ('directory' === $type) ? 'directory' : 'file';
+			if ('' === $path || !$this->optimized_storage_path_is_inside_uploads($path)) {
+				return false;
+			}
+
+			$base = $this->optimized_storage_get_uploads_basedir();
+			$dir = ('directory' === $type) ? untrailingslashit($path) : dirname($path);
+			$dir_mode = defined('FS_CHMOD_DIR') ? FS_CHMOD_DIR : 0755;
+			$file_mode = defined('FS_CHMOD_FILE') ? FS_CHMOD_FILE : 0644;
+
+			if ('' !== $base && $this->optimized_storage_path_is_inside_uploads($dir)) {
+				$current = $base;
+				$this->optimized_storage_chmod_path($current, $dir_mode);
+				$relative_dir = ltrim(substr(untrailingslashit($dir), strlen($base)), '/');
+				foreach (array_filter(explode('/', $relative_dir), 'strlen') as $segment) {
+					$current = trailingslashit($current) . $segment;
+					if (is_dir($current)) {
+						$this->optimized_storage_chmod_path($current, $dir_mode);
+					}
+				}
+			}
+
+			if ('file' === $type && is_file($path)) {
+				$this->optimized_storage_chmod_path($path, $file_mode);
+			}
+
+			return true;
 		}
 
 		private function optimized_storage_forget_path($path) {

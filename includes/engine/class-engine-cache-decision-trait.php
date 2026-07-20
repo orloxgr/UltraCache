@@ -52,6 +52,8 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 'ultracache_runtime_js_scan',
                 'ultracache_runtime_js_scan_id',
                 'ultracache_runtime_js_scan_nonce',
+                'ultracache_probe_compression',
+                'ultracache_sqlite_exposure_probe',
             );
         }
 

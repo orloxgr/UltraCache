@@ -1,0 +1,24 @@
+/* UltraCache - Admin Dashboard */
+
+:root {
+	--uc-bg: #06090f;
+	--uc-panel: #0d1117;
+	--uc-panel-2: #11161d;
+	--uc-border: #202938;
+	--uc-border-strong: #2b3648;
+	--uc-text: #d6deeb;
+	--uc-text-soft: #97a3b6;
+	--uc-text-dim: #6f7b8f;
+	--uc-accent: #47cfff;
+	--uc-accent-2: #7c5cff;
+	--uc-success: #238636;
+	--uc-success-hover: #2ea043;
+	--uc-success-active: #1f883d;
+	--uc-success-border: #2ea043;
+	--uc-success-focus: rgba(35, 134, 54, 0.35);
+	--uc-error: #ff5d73;
+	--uc-warning: #ffbf47;
+	--uc-shadow: none;
+	--uc-radius: 0;
+	--uc-radius-sm: 0;
+}

@@ -496,18 +496,6 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 								return $original_match;
 							}
 
-							if ('auto' === $mode) {
-								$image_set = $this->build_css_image_set_value($avif, $webp, $original);
-								if ('' === $image_set) {
-									$stats['cssImageUrlsSkipped']++;
-									return $original_match;
-								}
-								$changed = true;
-								$used_image_set = true;
-								$stats['cssImageUrlsRewritten']++;
-								$stats['cssImageUrlsImageSet']++;
-								return $image_set;
-							}
 
 							$replacement = ('avif' === $mode) ? $avif : $webp;
 							if (!$replacement) {
@@ -921,18 +909,30 @@ private function can_serve_avif() {
 		private function get_media_output_mode() {
 			if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
 				$settings = Ultra_Cache_WP::get_settings();
-				$mode = isset($settings['media_output_mode']) ? strtolower(trim((string) $settings['media_output_mode'])) : 'auto';
+				$mode = isset($settings['media_output_mode']) ? strtolower(trim((string) $settings['media_output_mode'])) : 'webp';
 			} else {
 				$settings = get_option(defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY : 'ultracache_settings', array());
-				$mode = isset($settings['mediaOutputMode']) ? strtolower(trim((string) $settings['mediaOutputMode'])) : 'auto';
+				$mode = isset($settings['mediaOutputMode']) ? strtolower(trim((string) $settings['mediaOutputMode'])) : 'webp';
 			}
 
-			$mode = in_array($mode, array('auto', 'avif', 'webp'), true) ? $mode : 'auto';
-			if ('avif' === $mode && !$this->supports_avif() && $this->supports_webp()) {
-				return 'webp';
+			return in_array($mode, array('avif', 'webp'), true) ? $mode : 'webp';
+		}
+
+		private function get_media_fallback_format() {
+			$mode = $this->get_media_output_mode();
+			if ('avif' !== $mode) {
+				return 'original';
 			}
 
-			return $mode;
+			if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
+				$settings = Ultra_Cache_WP::get_settings();
+				$fallback = isset($settings['media_fallback_format']) ? strtolower(trim((string) $settings['media_fallback_format'])) : 'webp';
+			} else {
+				$settings = get_option(defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY : 'ultracache_settings', array());
+				$fallback = isset($settings['mediaFallbackFormat']) ? strtolower(trim((string) $settings['mediaFallbackFormat'])) : 'webp';
+			}
+
+			return ('webp' === $fallback) ? 'webp' : 'original';
 		}
 
 		private function is_generate_on_upload_enabled() {
@@ -968,15 +968,20 @@ private function can_serve_avif() {
 		private function media_output_mode_allows($format) {
 			$format = strtolower((string) $format);
 			$mode = $this->get_media_output_mode();
-			if ('auto' === $mode) {
-				return in_array($format, array('avif', 'webp'), true);
+
+			if ('avif' === $format) {
+				return 'avif' === $mode && $this->supports_avif();
 			}
 
-			if ('avif' === $mode) {
-				return in_array($format, array('avif', 'webp'), true);
+			if ('webp' === $format) {
+				if ('webp' === $mode) {
+					return true;
+				}
+
+				return 'avif' === $mode && 'webp' === $this->get_media_fallback_format();
 			}
 
-			return 'webp' === $format;
+			return false;
 		}
 
 		private function get_media_generation_context() {

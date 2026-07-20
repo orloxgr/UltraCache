@@ -12,6 +12,9 @@
 	var autoEvents = Array.isArray(config.autoEvents) ? config.autoEvents : [];
 	var autoAfterLoad = !!config.autoAfterLoad;
 	var autoDelayMs = typeof config.autoDelayMs === 'number' ? config.autoDelayMs : parseInt(config.autoDelayMs || 50, 10);
+	var scriptTimeoutMs = typeof config.scriptTimeoutMs === 'number' ? config.scriptTimeoutMs : parseInt(config.scriptTimeoutMs || 8000, 10);
+	var firstPartyParallelExecution = !!config.firstPartyParallelExecution;
+	var thirdPartyParallelExecution = !!config.thirdPartyParallelExecution;
 	var allDone = false;
 	var started = Date.now ? Date.now() : 0;
 	var readyActive = false;
@@ -24,6 +27,14 @@
 
 	if (!isFinite(autoDelayMs) || autoDelayMs < 0) {
 		autoDelayMs = 50;
+	}
+
+	if (!isFinite(scriptTimeoutMs) || scriptTimeoutMs < 1000) {
+		scriptTimeoutMs = 8000;
+	}
+
+	if (scriptTimeoutMs > 30000) {
+		scriptTimeoutMs = 30000;
 	}
 
 	function root() {
@@ -50,14 +61,42 @@
 		return value || '';
 	}
 
+	function isThirdPartyDelayReason(reason) {
+		return reason === 'safe-third-party' || reason === 'functional-third-party' || reason === 'all-third-party';
+	}
+
+	function isSameOriginScriptSrc(value) {
+		if (!value) {
+			return true;
+		}
+
+		try {
+			return new URL(value, document.baseURI || window.location.href).origin === window.location.origin;
+		} catch (e) {
+			return true;
+		}
+	}
+
+	function isThirdPartyDelayedNode(node) {
+		var reason = ultracacheData(node, 'delay-reason');
+		if (isThirdPartyDelayReason(reason)) {
+			return true;
+		}
+
+		if (isExternalNode(node) && !isSameOriginScriptSrc(node.getAttribute('data-ultracache-src'))) {
+			return true;
+		}
+
+		return false;
+	}
+
 	function counts() {
 		var all = queryDelayedScripts();
 		var thirdParty = 0;
 		var local = 0;
 
 		for (var i = 0; i < all.length; i++) {
-			var reason = ultracacheData(all[i], 'delay-reason');
-			if (reason === 'safe-third-party' || reason === 'functional-third-party' || reason === 'all-third-party') {
+			if (isThirdPartyDelayedNode(all[i])) {
 				thirdParty++;
 			} else {
 				local++;
@@ -161,7 +200,7 @@
 		tryHookReady();
 	}
 
-	function flushReadyHold() {
+	function flushReadyHold(mode) {
 		tryHookReady();
 		readyActive = false;
 
@@ -178,7 +217,7 @@
 
 		var queue = readyQueue.slice(0);
 		readyQueue = [];
-		emit('ultracache:delayed-jquery-ready-flush', { mode: 'all', count: queue.length });
+		emit('ultracache:delayed-jquery-ready-flush', { mode: mode || 'first-party', count: queue.length });
 
 		for (var i = 0; i < queue.length; i++) {
 			try {
@@ -377,7 +416,12 @@
 		done();
 	}
 
-	function loadExternalGroup(list, start, done) {
+	function laneUsesParallelExecution(mode) {
+		return (mode === 'firstparty' && firstPartyParallelExecution) || (mode === 'thirdparty' && thirdPartyParallelExecution);
+	}
+
+	function loadExternalGroup(list, start, done, mode) {
+		mode = mode || 'all';
 		var end = start;
 		var group = [];
 
@@ -392,9 +436,11 @@
 		}
 
 		var completed = 0;
-		mark('parallel-loader', '0');
-		mark('parallel-mode', 'ordered');
-		mark('all-ordered-group-size', group.length);
+		var useParallel = laneUsesParallelExecution(mode);
+		mark('parallel-loader', useParallel ? '1' : '0');
+		mark('parallel-mode', useParallel ? mode : 'ordered');
+		mark('all-' + (useParallel ? 'parallel' : 'ordered') + '-group-size', group.length);
+		mark(mode + '-' + (useParallel ? 'parallel' : 'ordered') + '-group-size', group.length);
 
 		function loadOne(position) {
 			if (position >= group.length) {
@@ -421,6 +467,7 @@
 			var src = node.getAttribute('data-ultracache-src');
 			var script = document.createElement('script');
 			var finished = false;
+			var timeout = null;
 
 			applyAttrs(script, node);
 			script.async = false;
@@ -431,33 +478,119 @@
 				}
 
 				finished = true;
+
+				if (timeout) {
+					clearTimeout(timeout);
+				}
+
 				tryHookReady();
 				node.setAttribute('data-ultracache-loaded', '1');
 				completed++;
 				mark('all-ordered-completed', completed);
+				mark(mode + '-ordered-completed', completed);
 				loadOne(position + 1);
 			}
 
 			script.onload = finish;
 			script.onerror = finish;
+			timeout = setTimeout(function () {
+				mark(mode + '-script-timeout', position + 1);
+				finish();
+			}, scriptTimeoutMs);
 			script.src = src;
 			if (!replaceDelayedNode(node, script)) {
 				finish();
 			}
 		}
 
-		loadOne(0);
+		function loadParallel() {
+			var total = group.length;
+			if (!total) {
+				done(end);
+				return;
+			}
+
+			function oneDone() {
+				completed++;
+				mark('all-parallel-completed', completed);
+				mark(mode + '-parallel-completed', completed);
+				if (completed >= total) {
+					done(end);
+				}
+			}
+
+			group.forEach(function (node, position) {
+				if (!nodeIsConnected(node) || !node.parentNode) {
+					discardDelayedNode(node, 'detached');
+					oneDone();
+					return;
+				}
+
+				if (hasExecutableDuplicate(node)) {
+					discardDelayedNode(node, 'duplicate');
+					oneDone();
+					return;
+				}
+
+				node.setAttribute('data-ultracache-loading', '1');
+				claimScriptExecution(node);
+
+				var src = node.getAttribute('data-ultracache-src');
+				var script = document.createElement('script');
+				var finished = false;
+				var timeout = null;
+
+				applyAttrs(script, node);
+				script.async = true;
+
+				function finish() {
+					if (finished) {
+						return;
+					}
+
+					finished = true;
+
+					if (timeout) {
+						clearTimeout(timeout);
+					}
+
+					tryHookReady();
+					node.setAttribute('data-ultracache-loaded', '1');
+					oneDone();
+				}
+
+				script.onload = finish;
+				script.onerror = finish;
+				timeout = setTimeout(function () {
+					mark(mode + '-parallel-script-timeout', position + 1);
+					finish();
+				}, scriptTimeoutMs);
+				script.src = src;
+				if (!replaceDelayedNode(node, script)) {
+					finish();
+				}
+			});
+		}
+
+		if (useParallel) {
+			loadParallel();
+		} else {
+			loadOne(0);
+		}
 	}
 
-	function load(list, index) {
+	function load(list, index, mode, done) {
+		mode = mode || 'all';
 		while (index < list.length && (list[index].getAttribute('data-ultracache-loaded') === '1' || list[index].getAttribute('data-ultracache-loading') === '1')) {
 			index++;
 		}
 
 		if (index >= list.length) {
-			flushReadyHold();
-			mark('all-done', '1');
-			emit('ultracache:delayed-scripts-done', { mode: 'all', count: list.length });
+			mark(mode + '-done', '1');
+			emit('ultracache:delayed-scripts-lane-done', { mode: mode, count: list.length });
+			if (typeof done === 'function') {
+				done();
+			}
 			return;
 		}
 
@@ -465,7 +598,7 @@
 			idle(function () {
 				loadInline(list[index], function () {
 					wait(relief ? 30 : 0, function () {
-						load(list, index + 1);
+						load(list, index + 1, mode, done);
 					});
 				});
 			});
@@ -476,14 +609,14 @@
 			idle(function () {
 				loadExternalGroup(list, index, function (next) {
 					wait(relief ? 30 : 0, function () {
-						load(list, next);
+						load(list, next, mode, done);
 					});
-				});
+				}, mode);
 			});
 			return;
 		}
 
-		load(list, index + 1);
+		load(list, index + 1, mode, done);
 	}
 
 	function run() {
@@ -498,11 +631,52 @@
 			return;
 		}
 
+		var firstParty = [];
+		var thirdParty = [];
+
+		for (var i = 0; i < list.length; i++) {
+			if (isThirdPartyDelayedNode(list[i])) {
+				thirdParty.push(list[i]);
+			} else {
+				firstParty.push(list[i]);
+			}
+		}
+
 		mark('all-started', '1');
 		mark('all-count', list.length);
+		mark('firstparty-count', firstParty.length);
+		mark('thirdparty-count', thirdParty.length);
+		mark('execution-model', 'firstparty-then-thirdparty');
+		emit('ultracache:delayed-scripts-start', { mode: 'split', count: list.length, firstParty: firstParty.length, thirdParty: thirdParty.length });
+
+		function finishAll() {
+			mark('all-done', '1');
+			emit('ultracache:delayed-scripts-done', { mode: 'split', count: list.length, firstParty: firstParty.length, thirdParty: thirdParty.length });
+		}
+
+		function runThirdPartyLane() {
+			if (!thirdParty.length) {
+				mark('thirdparty-done', 'empty');
+				finishAll();
+				return;
+			}
+
+			mark('thirdparty-started', '1');
+			load(thirdParty, 0, 'thirdparty', finishAll);
+		}
+
+		if (!firstParty.length) {
+			mark('firstparty-done', 'empty');
+			runThirdPartyLane();
+			return;
+		}
+
 		beginReadyHold();
-		emit('ultracache:delayed-scripts-start', { mode: 'all', count: list.length });
-		load(list, 0);
+		mark('firstparty-started', '1');
+		load(firstParty, 0, 'firstparty', function () {
+			flushReadyHold('firstparty');
+			runThirdPartyLane();
+		});
 	}
 
 	function triggerAll() {
@@ -609,10 +783,13 @@
 
 	counts();
 	mark('loader', 'active');
-	mark('policy', 'unified-auto-start');
+	mark('policy', 'split-auto-start');
 	mark('started-ms', started);
-	mark('parallel-mode', 'ordered');
+	mark('parallel-mode', (firstPartyParallelExecution || thirdPartyParallelExecution) ? 'configurable' : 'ordered');
+	mark('firstparty-parallel-enabled', firstPartyParallelExecution ? '1' : '0');
+	mark('thirdparty-parallel-enabled', thirdPartyParallelExecution ? '1' : '0');
 	mark('auto-delay-ms', autoDelayMs);
+	mark('script-timeout-ms', scriptTimeoutMs);
 	mark('auto-after-load', autoAfterLoad);
 	mark('auto-events', autoEvents.join(','));
 

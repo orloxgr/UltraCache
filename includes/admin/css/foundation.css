@@ -1,0 +1,398 @@
+
+body.toplevel_page_ultracache #wpcontent {
+	padding-left: 0;
+}
+
+body.toplevel_page_ultracache #wpbody-content {
+	padding-bottom: 0;
+	background: #06090f;
+}
+
+body.toplevel_page_ultracache #wpbody-content > .wrap {
+	margin: 0;
+	padding: 0;
+}
+
+
+#uc-dashboard {
+	background:
+		radial-gradient(circle at top right, rgba(71, 207, 255, 0.08), transparent 28%),
+		radial-gradient(circle at top left, rgba(124, 92, 255, 0.07), transparent 24%),
+		linear-gradient(180deg, #06090f 0%, #080c13 100%);
+	color: var(--uc-text);
+	min-height: calc(100vh - 32px);
+	margin: 0;
+	padding: 24px;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	overflow: hidden;
+}
+
+#uc-dashboard,
+#uc-dashboard * {
+	box-sizing: border-box;
+}
+
+#uc-dashboard .max-w-6xl {
+	max-width: 1024px;
+	margin-left: auto;
+	margin-right: auto;
+}
+
+#uc-dashboard .mx-auto {
+	margin-left: auto;
+	margin-right: auto;
+}
+
+#uc-dashboard > .max-w-6xl.p-6,
+#uc-dashboard .max-w-6xl.p-6 {
+	padding: 24px;
+}
+
+#uc-dashboard .space-y-8 > * + * {
+	margin-top: 32px;
+}
+
+#uc-dashboard .space-y-1 > * + * {
+	margin-top: 4px;
+}
+
+
+#uc-dashboard .uc-help-box {
+	padding: 24px;
+}
+
+#uc-dashboard .uc-help-box p {
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+#uc-dashboard .grid {
+	display: grid;
+	align-content: start;
+}
+
+#uc-dashboard .grid-cols-1 {
+	grid-template-columns: 1fr;
+}
+
+#uc-dashboard .gap-3 {
+	gap: 12px;
+}
+
+#uc-dashboard .gap-4 {
+	gap: 16px;
+}
+
+#uc-dashboard .gap-8 {
+	gap: 32px;
+}
+
+#uc-dashboard .flex {
+	display: flex;
+}
+
+#uc-dashboard .flex-col {
+	flex-direction: column;
+}
+
+#uc-dashboard .flex-wrap {
+	flex-wrap: wrap;
+}
+
+#uc-dashboard .items-center {
+	align-items: center;
+}
+
+#uc-dashboard .items-end {
+	align-items: flex-end;
+}
+
+#uc-dashboard .justify-between {
+	justify-content: space-between;
+}
+
+#uc-dashboard .justify-end {
+	justify-content: flex-end;
+}
+
+#uc-dashboard .w-full {
+	width: 100%;
+}
+
+#uc-dashboard .m-0 {
+	margin: 0;
+}
+
+#uc-dashboard .mb-0 {
+	margin-bottom: 0;
+}
+
+#uc-dashboard .mb-2 {
+	margin-bottom: 8px;
+}
+
+#uc-dashboard .mb-3 {
+	margin-bottom: 12px;
+}
+
+#uc-dashboard .mb-4 {
+	margin-bottom: 46px;
+}
+
+#uc-dashboard .mb-5 {
+	margin-bottom: 20px;
+}
+
+#uc-dashboard .mt-1 {
+	margin-top: 4px;
+}
+
+#uc-dashboard .mt-2 {
+	margin-top: 8px;
+}
+
+#uc-dashboard .mt-4 {
+	margin-top: 16px;
+}
+
+#uc-dashboard .mt-5 {
+	margin-top: 20px;
+}
+
+#uc-dashboard .pt-4 {
+	padding-top: 16px;
+}
+
+#uc-dashboard .py-3 {
+	padding-top: 12px;
+	padding-bottom: 12px;
+}
+
+#uc-dashboard .text-xs {
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+#uc-dashboard .text-sm {
+	font-size: 14px;
+	line-height: 1.5;
+}
+
+#uc-dashboard .text-lg {
+	font-size: 18px;
+	line-height: 1.35;
+}
+
+#uc-dashboard .text-3xl {
+	font-size: 34px;
+	line-height: 1.05;
+}
+
+#uc-dashboard .font-medium {
+	font-weight: 500;
+}
+
+#uc-dashboard .uc-label-with-help {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+#uc-dashboard .uc-help-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	border: 1px solid rgba(151, 163, 182, 0.55);
+	border-radius: 999px;
+	color: var(--uc-text-soft);
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 1;
+	cursor: help;
+	flex: 0 0 auto;
+}
+
+#uc-dashboard .uc-help-icon:focus,
+#uc-dashboard .uc-help-icon:hover {
+	color: var(--uc-text);
+	border-color: var(--uc-accent);
+	outline: none;
+}
+
+#uc-dashboard .font-bold {
+	font-weight: 700;
+}
+
+#uc-dashboard .font-black {
+	font-weight: 800;
+}
+
+#uc-dashboard .font-mono {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+
+#uc-dashboard .tracking-widest {
+	letter-spacing: 0.16em;
+}
+
+#uc-dashboard .tracking-tight,
+#uc-dashboard .tracking-tighter {
+	letter-spacing: -0.03em;
+}
+
+#uc-dashboard .leading-relaxed {
+	line-height: 1.7;
+}
+
+
+#uc-dashboard .ultracache-stat-card-value {
+	font-size: 24px !important;
+	font-weight: 300 !important;
+	line-height: 1.18;
+	letter-spacing: -0.01em;
+}
+
+#uc-dashboard .rounded,
+#uc-dashboard .rounded-full {
+	border-radius: 0;
+}
+
+#uc-dashboard .overflow-hidden {
+	overflow: hidden;
+}
+
+#uc-dashboard .overflow-y-auto {
+	overflow-y: auto;
+}
+
+#uc-dashboard .border {
+	border: 1px solid var(--uc-border);
+}
+
+#uc-dashboard .border-t {
+	border-top: 1px solid var(--uc-border);
+}
+
+#uc-dashboard .border-white\/5 {
+	border-color: rgba(255, 255, 255, 0.05);
+}
+
+#uc-dashboard .border-zinc-800 {
+	border-color: #1d2430;
+}
+
+#uc-dashboard .border-cyan-500\/20 {
+	border-color: rgba(71, 207, 255, 0.2);
+}
+
+#uc-dashboard .border-emerald-500\/20 {
+	border-color: rgba(35, 134, 54, 0.2);
+}
+
+#uc-dashboard .border-rose-500\/20 {
+	border-color: rgba(255, 93, 115, 0.2);
+}
+
+#uc-dashboard .bg-black\/20 {
+	background: rgba(0, 0, 0, 0.2);
+}
+
+#uc-dashboard .bg-zinc-900\/50 {
+	background: rgba(18, 23, 31, 0.5);
+}
+
+#uc-dashboard .bg-zinc-800 {
+	background: #1a2230;
+}
+
+#uc-dashboard .bg-cyan-500 {
+	background: var(--uc-accent);
+}
+
+#uc-dashboard .bg-cyan-500\/5 {
+	background: transparent !important;
+}
+
+#uc-dashboard .bg-cyan-500\/10 {
+	background: transparent !important;
+}
+
+#uc-dashboard .bg-emerald-500 {
+	background: var(--uc-success);
+}
+
+#uc-dashboard .bg-emerald-500\/5 {
+	background: rgba(35, 134, 54, 0.05);
+}
+
+#uc-dashboard .bg-emerald-500\/10 {
+	background: rgba(35, 134, 54, 0.12);
+}
+
+#uc-dashboard .bg-emerald-500\/5.border.border-emerald-500\/20.p-6.rounded {
+	padding: 24px;
+}
+
+#uc-dashboard .bg-rose-500\/10 {
+	background: rgba(255, 93, 115, 0.1);
+}
+
+#uc-dashboard .text-white {
+	color: #fff;
+}
+
+#uc-dashboard .text-black {
+	color: #0b1017;
+}
+
+#uc-dashboard .text-zinc-300 {
+	color: #c8d1dd;
+}
+
+#uc-dashboard .text-zinc-400 {
+	color: var(--uc-text-soft);
+}
+
+#uc-dashboard .text-zinc-500 {
+	color: var(--uc-text-dim);
+}
+
+#uc-dashboard .text-cyan-400 {
+	color: var(--uc-accent);
+}
+
+#uc-dashboard .text-emerald-400 {
+	color: var(--uc-success);
+}
+
+#uc-dashboard .text-rose-400 {
+	color: var(--uc-error);
+}
+
+#uc-dashboard .transition-all {
+	transition: all 0.22s ease;
+}
+
+#uc-dashboard .duration-300 {
+	transition-duration: 0.3s;
+}
+
+#uc-dashboard .max-h-40 {
+	max-height: 160px;
+}
+
+#uc-dashboard .h-1 {
+	height: 4px;
+}
+
+#uc-dashboard .h-full {
+	height: 100%;
+}
+

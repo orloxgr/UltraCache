@@ -125,7 +125,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
         private static function analytics_payload_encode($value)
         {
-            $encoded = function_exists('wp_json_encode') ? wp_json_encode($value) : json_encode($value);
+            $encoded = wp_json_encode($value);
             return is_string($encoded) ? $encoded : '';
         }
 
@@ -200,7 +200,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 );
             }
 
-            foreach (array('lastPurge', 'lastWarm', 'lastFrontpageCssWarm', 'htmlRewriteLastBailout') as $meta_key) {
+            foreach (array('lastPurge', 'lastWarm', 'lastFrontpageCssWarm', 'htmlRewriteLastBailout', 'hotPages') as $meta_key) {
                 $rows[] = array(
                     'metric_key' => 'meta:' . $meta_key,
                     'metric_type' => 'meta',
@@ -255,7 +255,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                     continue;
                 }
 
-                if ('meta' === $type && in_array($label, array('lastPurge', 'lastWarm', 'lastFrontpageCssWarm', 'htmlRewriteLastBailout'), true)) {
+                if ('meta' === $type && in_array($label, array('lastPurge', 'lastWarm', 'lastFrontpageCssWarm', 'htmlRewriteLastBailout', 'hotPages'), true)) {
                     $analytics[$label] = self::analytics_payload_decode($row['payload'] ?? '', array());
                 }
             }
@@ -773,6 +773,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 'sr7LcpUnresolved' => 0,
                 'htmlRewriteSafetyBailouts' => 0,
                 'htmlRewriteLastBailout' => array(),
+                'hotPages' => array(),
             );
         }
 
@@ -823,6 +824,10 @@ trait Ultra_Cache_Engine_Analytics_Trait
             if (!isset($data['htmlRewriteLastBailout']) || !is_array($data['htmlRewriteLastBailout'])) {
                 $data['htmlRewriteLastBailout'] = array();
             }
+
+            $data['hotPages'] = method_exists(static::class, 'normalize_hot_page_candidates')
+                ? self::normalize_hot_page_candidates($data['hotPages'] ?? array())
+                : array();
 
             return $data;
         }
@@ -940,9 +945,12 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
         private function record_analytics_hit()
         {
-            self::mutate_analytics(function ($analytics) {
+            $url = method_exists($this, 'get_current_request_url') ? (string) $this->get_current_request_url() : '';
+            self::mutate_analytics(function ($analytics) use ($url) {
                 $analytics['pageHits'] = (int) ($analytics['pageHits'] ?? 0) + 1;
-                return $analytics;
+                return method_exists(static::class, 'apply_hot_page_observation')
+                    ? self::apply_hot_page_observation($analytics, $url)
+                    : $analytics;
             });
         }
 
@@ -964,9 +972,12 @@ trait Ultra_Cache_Engine_Analytics_Trait
 
         private function record_analytics_store()
         {
-            self::mutate_analytics(function ($analytics) {
+            $url = method_exists($this, 'get_current_request_url') ? (string) $this->get_current_request_url() : '';
+            self::mutate_analytics(function ($analytics) use ($url) {
                 $analytics['pageStores'] = (int) ($analytics['pageStores'] ?? 0) + 1;
-                return $analytics;
+                return method_exists(static::class, 'apply_hot_page_observation')
+                    ? self::apply_hot_page_observation($analytics, $url)
+                    : $analytics;
             });
         }
 

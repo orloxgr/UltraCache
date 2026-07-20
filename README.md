@@ -1,77 +1,89 @@
 # UltraCache
 
-Current version: **2.59.06.78**
+UltraCache combines WordPress page caching, object-cache integration, AVIF/WebP media rewrite, frontend optimization, warm-up tools, Varnish helpers, and diagnostics in one administrator-controlled plugin.
 
-UltraCache is a WordPress performance plugin with page cache, object-cache integration, AVIF/WebP media rewrite, CSS/font optimization, warm-up tools, Varnish helpers, and diagnostics.
-
-## Storage and WordPress drop-ins
-
-UltraCache writes browser-loaded generated assets under the WordPress uploads directory, in `uploads/ultracache/`. WordPress drop-ins are the exception: `advanced-cache.php` and `object-cache.php` must remain directly in the WordPress content directory because WordPress only loads those drop-ins from that required location.
+Version: `2.59.09.68`
+Requires WordPress: `6.9` or newer  
+Requires PHP: `8.1` or newer  
+License: GPL-2.0-or-later
 
 ## Main features
 
-- HTML page cache for eligible anonymous public requests.
-- Object cache drop-in with Redis, APCu, runtime-only, and advanced Disk options.
-- Media Rewrite for AVIF/WebP URLs according to the selected output policy.
-- Batch media conversion, generate on upload, and missing-media queue discovery.
-- Google Fonts localization and self-hosted font CSS optimization.
-- Optional delayed icon-font loading.
-- CSS bundling with visible exclusions and bundle summaries.
-- LCP image priority and slider/hero support.
-- Lazy image loading, CLS image dimensions, and selected main-thread relief tools.
-- JavaScript defer/delay controls with visible exclusion lists.
-- Cron/manual warm-up for homepage, menu URLs, and full-site cache.
-- Optional Varnish purge/test helpers.
-- Dashboard diagnostics for page cache, object cache, media, CSS, storage, OPcache/APCu, Varnish, and STORE profiles.
+- Anonymous public-page HTML cache with explicit bypass rules and optional Apache Static HTML Delivery.
+- Optional automatic page-cache and frontend-asset invalidation after successful WordPress core, active plugin, and active parent/child theme updates, without flushing object cache or optimized images.
+- Managed `advanced-cache.php` and `object-cache.php` WordPress drop-ins.
+- Redis, APCu, SQLite, runtime-only, and advanced disk object-cache backends.
+- AVIF/WebP generation and frontend media URL rewriting with primary/fallback output policies and a shared compression level.
+- Batch, upload, and background-queue media processing, sample conversion comparisons, and opt-in regeneration of existing optimized images.
+- Resumable Media Library Replacement for attachment originals and generated sizes, including verified metadata, database-reference, and Theme CSS updates.
+- CSS bundling, async CSS, Google Fonts localization, and font CSS optimization.
+- JavaScript defer/delay with editable exclusion controls.
+- LCP priority with exact manual CSS selectors, SVG image support, optional timed browser-based frontend discovery, persistent per-page and per-viewport learning, targeted page-cache refresh through the existing warm queue, lazy loading, and optional CLS dimensions.
+- Homepage, menu, selected-URL, and full-site warm-up.
+- Optional administrator-configured Varnish integration with public cache-behavior tests, topology-aware verified HTML-only flushing, bounded persistent invalidation/refill queues, shared TTL and stale refresh controls, conditional ETag/Last-Modified revalidation, manual Varnish prewarm, and capability-gated hot-page refresh ahead, bounded endpoint health/latency metrics, queue retry counters, and authenticated admin-mode ban-pressure inspection.
+- Dashboard and WP-CLI diagnostics, including persistent browser-observed LCP mapping and warm-refresh inspection.
+
+## Storage and WordPress drop-ins
+
+UltraCache stores generated assets and runtime cache data below the resolved WordPress uploads directory in `uploads/ultracache/`. Browser-observed LCP mappings are stored separately in the WordPress database table `{prefix}ultracache_lcp_observations`. LCP Frontend Discovery can run for public visitors or only administrators for a selected duration. The first valid observation becomes active immediately, while a rolling two-of-three confirmation locks each page and viewport and stops further reporting for that scope. URLs with query parameters are excluded. Exact manual selectors take precedence, confirmed mappings remain active until explicitly relearned or forgotten, one winner per page and viewport can emit a preload, and page-specific refresh jobs remain in the existing cron warm queue table.
+
+WordPress requires `advanced-cache.php` and `object-cache.php` directly in the active content directory. UltraCache manages those files there only when their related features are enabled.
 
 ## Page cache
 
-UltraCache manages the WordPress `advanced-cache.php` drop-in, stores page-cache, file analytics, diagnostics, and disk-object-cache data below the active WordPress uploads directory in `ultracache/`, while public generated optimization assets use dedicated directories under the same resolved uploads root.
+The page cache targets anonymous public requests. Logged-in users, administration paths, cart/checkout/account flows, unsafe cookies, and configured exclusions are bypassed. Query-string variants require an explicit allowlist containing every query key; an empty allowlist bypasses query-string caching.
 
-The page cache is for anonymous public pages. Logged-in users, admin paths, cart/checkout/account flows, unsafe cookies, unsafe query strings, and configured exclusions are bypassed.
+The Cache Engine can purge page HTML and invalidate generated frontend asset maps after successful WordPress core updates, active plugin updates, and updates to the active child or parent theme. Bulk plugin/theme operations trigger at most one purge, inactive plugin/theme updates are ignored, and this path does not flush object cache or optimized-media storage.
 
 ## Object cache
 
-Recommended backend order:
+The recommended object-cache order is Redis, APCu, SQLite for persistent local storage on single-server sites, runtime-only fallback, and Disk only for advanced or diagnostic use. The dashboard reports the configured backend, the backend actually in use, and any active fallback. When SQLite is selected, its main database-file limit is configurable from 32 MB to 2048 MB and defaults to 256 MB.
 
-1. Redis
-2. APCu
-3. Runtime-only fallback
-4. Disk only for advanced/debug use
+## Media Rewrite and conversion
 
-Redis fallback behavior is shown in the dashboard so the active backend is visible.
+Media Rewrite changes frontend image URLs to generated AVIF/WebP variants when those files exist and the selected policy permits them. The Image Output Format selects the primary format, the Fallback Format controls the compatible secondary output, and the shared Image compression level applies across media optimization, upload generation, and Media Library Replacement.
 
+WebP is the default for fresh installations. AVIF is enabled only after UltraCache validates bundled opaque and transparent encode/decode regression tests. Frontend requests remain lookup-only; encoding runs through upload processing, batch conversion, or background queue workers. The dashboard also includes sample WebP/AVIF comparisons and opt-in regeneration of existing optimized images with the current quality setting.
 
-## Secret constants
+## Media Library Replacement
 
-UltraCache does not store Redis or Varnish passwords in plugin settings or generated sidecar files. An administrator with plugin-management permission can enter or remove passwords from the UltraCache dashboard; UltraCache writes them only to its managed constants block in the active `wp-config.php` through the WordPress Filesystem API:
-
-```php
-define( 'WP_REDIS_PASSWORD', 'redis-password' );
-define( 'ULTRACACHE_VARNISH_PASSWORD', 'varnish-password' );
-```
-
-An existing constant defined outside the UltraCache managed block remains externally managed and read-only in the dashboard. Redis ACL credentials are also supported when `WP_REDIS_PASSWORD` is defined externally as an array containing the username and password. Password values are never returned to the browser, stored in plugin options, exposed through REST or WP-CLI output, or written to diagnostics and logs.
-
-UltraCache derives its internal early-runtime control token from the existing WordPress authentication keys and salts. No standalone runtime-secret PHP file is created.
-
-## Media Rewrite
-
-Media Rewrite changes frontend image URLs to AVIF/WebP variants when those files exist and match the selected output policy.
-
-Actual media files are generated by batch conversion, generate on upload, or the missing-media queue. Normal frontend requests stay lookup-only and do not encode images.
+Media Library Replacement promotes verified UltraCache-generated AVIF/WebP rewrite files into the WordPress Media Library. It covers attachment originals and registered intermediate sizes, updates attachment metadata, and can replace matched media references in current-install database tables and active parent/child theme CSS files.
 
 ## CSS, JavaScript, and fonts
 
-UltraCache includes CSS bundling, async CSS controls, JavaScript defer/delay tools, Google Fonts localization, self-hosted font CSS optimization, optional delayed icon-font loading, and an advanced runtime font CSS rewrite switch.
+The plugin includes CSS bundling, async CSS controls, JavaScript defer/delay, Google Fonts localization, self-hosted font CSS optimization, delayed icon-font loading, and optional runtime font CSS rewriting. Features that can affect layout or timing have visible controls and exclusions.
 
-Riskier features are controlled by visible switches and exclusion lists.
+## Installation
 
-## Warm-up and diagnostics
+1. Upload and activate UltraCache.
+2. Open the dashboard from the WordPress admin menu or admin bar.
+3. Select the **Aggressive** profile and save the settings.
+4. Run the **HTML Compression** check under Cache Engine.
+5. In **Warm Cache**, select the main frontend menu and the required depth. First-level menu URLs suit most websites.
+6. Select the required **Full-site warm-up sources**. Homepage / blog index, Selected menu URLs, Pages, Posts, and Categories cover most sites.
+7. In **Media Library Replacement**, enable **Convert new uploads**, set **Maximum upload image side** to `1920` unless larger source images are required, and choose the image output/fallback formats.
+8. Select **Compact** under Image compression level. When using AVIF, run **Image conversion test** and then **Check test**.
+9. In **Fonts Optimization**, enable **Local Google Fonts Optimization**, **Bundle Generated Font-Mix CSS**, and **Delay icon fonts**.
+10. For WooCommerce, enable **Suppress empty-cart execution**. For MailerLite, enable **Lazy MailerLite nonce refresh**.
+11. Confirm the detected Object Cache backend and configure Varnish when present.
+12. In **Automation & Scheduling**, enable **Cron Warm Up** and **Start Cron Warm Up after Scheduled Cleanup**.
+13. Save the settings and run **Flush All Cache**.
 
-Warm-up tools can build cache for selected URLs, homepage/menu URLs, or full-site queues. Warm-up media buckets follow the current Media Rewrite/output policy.
+For the first full preparation, run **Warm Up Menu HTML Cache + Separate CSS Bundles**, then use **Start / Resume Conversion** under AVIF / WebP Batch Conversion for existing Media Library images. Run Full-site warm-up when the complete selected URL set should be cached.
 
-Diagnostics include cache status, storage summaries, object-cache backend truth, CSS bundle summaries, media queue status, Varnish checks, OPcache/APCu visibility, and STORE profiles.
+### Must-do post-install check
+
+1. Open the public website in a private window: `Ctrl+Shift+N` in Chrome or Edge, or `Ctrl+Shift+P` in Firefox.
+2. Press `F12`, open the Console, and reload the page.
+3. If no JavaScript errors appear, the check is complete. If errors appear, copy the red error lines and stack traces.
+4. Open **JS Defer / Delay Safeguards & Diagnostics** in UltraCache.
+5. Paste the errors into **Console Error Handler** and click **Extract Console Error Suggestions**.
+6. Append the proposed fixes to **Defer Instead** or **Do Not Defer or Delay**, then click **Save Both Lists**.
+7. Run **Flush All Cache** and warm the front page again. Front-page warm-up is enough while testing.
+8. Repeat the check until the Console loads without JavaScript errors.
+
+The fixed **Help for the installed version** button in the lower-right corner of the dashboard opens the detailed setup, post-install guide, and complete FAQ for the installed release.
+
 
 ## WP-CLI examples
 
@@ -83,93 +95,35 @@ wp ultracache media status --media-format=both --format=json
 wp ultracache flush_object_cache
 ```
 
-## Source code and build process
-
-UltraCache ships its JavaScript and CSS as human-readable source files. The plugin does not use a compiled JavaScript or CSS build step for the distributed admin dashboard assets.
-
-The source files are included directly in the plugin package:
-
-- `includes/admin-dashboard.js`
-- `includes/admin-dashboard.css`
-- `assets/js/mailerlite-lazy-nonce.js`
-- `assets/js/runtime-js-scan-collector.js`
-- `assets/js/delayed-js-loader.js`
-- `assets/js/runtime-font-css-map.js`
-- `assets/js/font-display-cssom-patch.js`
-- `assets/js/sr7-lcp-priority.js`
-
-These files are not minified, not bundled from a separate source tree, and not generated by npm, webpack, Vite, Babel, Composer, or another build tool. No build command is required to recreate them.
-
-## Frontend JavaScript helper status
-
-The frontend helper assets listed above are UltraCache-owned browser helpers, kept as human-readable source files under `assets/js/`. They are registered/enqueued through WordPress script APIs when their related feature is active, and feature-specific runtime data is passed through WordPress inline-script APIs before the registered helper.
-
-Currently registered frontend helpers include MailerLite lazy nonce refresh, runtime JavaScript scan collection, delayed JavaScript release, runtime font CSS mapping, CSSOM font-display patching, and SR7/LCP priority marking. Future helper migrations should follow the same rule: keep the helper as a readable `assets/js/` source file, enqueue it through WordPress APIs, and pass dynamic data through WordPress APIs rather than creating a new root documentation file or raw helper output path.
-
-`<script type="speculationrules">` output is browser data markup, not a JavaScript helper source file. It is documented separately from registered helper assets because browsers consume it as structured page data.
-
-## Optimizer HTML rewriting
-
-UltraCache uses WordPress enqueue APIs for plugin-owned dashboard assets and registered frontend helper assets. Some performance features also process the final rendered frontend HTML after WordPress has rendered the page. This is used for page-cache output, JavaScript delay/defer, LCP image priority, CSS bundle replacement, async CSS, and font optimization.
-
-Those final HTML transformations may create or modify `<script>`, `<link>`, `<style>`, and `<noscript>` tags for already-rendered frontend output. They are not plugin admin assets and cannot always be represented as normal `wp_enqueue_script()` / `wp_enqueue_style()` calls because the optimizer is transforming existing site/theme/plugin markup before the optimized HTML is stored or served.
-
 ## External services
 
 UltraCache does not require an external SaaS account and does not send visitor data to an UltraCache-owned service.
 
 ### Google Fonts
 
-When Local Google Fonts Optimization is enabled by an administrator, UltraCache may request CSS and font files from Google Fonts in order to build local copies in `ultracache/google-fonts/` below the active WordPress uploads directory.
+When Local Google Fonts Optimization is enabled, the WordPress server may request configured CSS and font resources from `fonts.googleapis.com` and `fonts.gstatic.com` to create local copies.
 
-UltraCache may also add or preserve Google Fonts parameters such as `display=swap` on Google Fonts URLs that already exist on the site. UltraCache does not add Google Fonts to a site by itself unless the administrator has enabled the local Google Fonts optimization feature or the site already uses Google Fonts through the active theme/plugins.
+- Service: https://fonts.google.com/
+- Terms: https://policies.google.com/terms
+- Privacy: https://policies.google.com/privacy
+- Privacy FAQ: https://developers.google.com/fonts/faq/privacy
 
-This may contact:
+### Third-party matching rules
 
-- `fonts.googleapis.com`
-- `fonts.gstatic.com`
+Editable matching examples can identify scripts already added by a site, theme, or another plugin. They control delay, defer, or exclusion behavior only; they do not install or contact those services.
 
-Data sent: the server makes HTTP requests for the configured Google Fonts CSS/font files. UltraCache does not intentionally send visitor personal data to Google Fonts.
+### PayPal support link
 
-Service provider: Google LLC  
-Terms: https://policies.google.com/terms  
-Privacy: https://policies.google.com/privacy  
-Google Fonts privacy FAQ: https://developers.google.com/fonts/faq/privacy
+PayPal is contacted only when an administrator chooses to open the optional dashboard support link.
 
-### Third-party script matching examples
+- Service: https://www.paypal.com/
+- Terms: https://www.paypal.com/us/legalhub/paypal/useragreement-full
+- Privacy: https://www.paypal.com/us/legalhub/paypal/privacy-full
 
-UltraCache includes optional frontend optimization rules that can detect, delay, defer, or exclude third-party scripts already present on the site. The default pattern lists are user-editable text fragments matched against script URLs, handles, or inline script content that the site, active theme, or another plugin has already printed.
+## Deactivation and cleanup
 
-These matching examples may include fragments such as:
-
-- `googletagmanager.com`
-- `gtag(`
-- `dataLayer`
-- `connect.facebook.net`
-- `maps.googleapis.com`
-
-These are matching examples only. UltraCache does not add Google Tag Manager, Facebook/Meta scripts, Google Maps, reCAPTCHA, ads, analytics pixels, chat widgets, booking widgets, or form widgets to a site by itself, and these pattern lists do not make UltraCache contact those providers.
-
-Data sent by UltraCache: none for these pattern examples. If the site owner, active theme, or another plugin has already installed a third-party script, the visitor's browser may contact that provider according to the site's own configuration and that provider's behavior. UltraCache only changes how already-present matching assets are delayed, deferred, or excluded.
-
-### Varnish / reverse proxy integration
-
-If Varnish integration is configured by an administrator, UltraCache may send purge/test requests to the administrator-configured Varnish or reverse proxy endpoint.
-
-Data sent: cache purge/test requests may include the configured site URL, host, path, and purge-related headers needed by the reverse proxy. Varnish admin secrets should not be exposed to frontend HTML, JavaScript, REST responses, or logs.
-
-This endpoint is configured by the site administrator and is not an UltraCache-owned external service.
-
-### Optional support/donation links
-
-The dashboard may include optional support/donation links shown only to administrators. If an administrator opens a PayPal link, PayPal receives the normal browser request for that visit.
-
-Service provider: PayPal  
-Terms: https://www.paypal.com/us/legalhub/paypal/useragreement-full  
-Privacy: https://www.paypal.com/us/legalhub/paypal/privacy-full
+Before individual deactivation from the standard WordPress Plugins screen, UltraCache lets an administrator select the cleanup policy that will apply if the plugin is later deleted. Policies can retain settings and custom tables or remove plugin runtime/cache data. Converted media files are retained by design.
 
 ## Privacy
 
-UltraCache stores cache files, generated assets, settings, queue records, and diagnostics locally on the WordPress installation.
-
-UltraCache does not track visitors through an external UltraCache service.
+UltraCache stores cache files, generated assets, settings, queue records, and diagnostics locally on the WordPress installation. It does not track visitors through an external UltraCache service.

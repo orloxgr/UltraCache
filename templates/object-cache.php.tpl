@@ -4,7 +4,7 @@
  * Marker: UltraCache generated object-cache drop-in
  * Drop-in Build: __ULTRACACHE_DROPIN_BUILD__
  * Safe to overwrite.
- * Storage format: redis-apcu-runtime-v4 with explicit disk-only mode and signed-payload-v1 metrics.
+ * Storage format: redis-apcu-sqlite-disk-runtime-v5 with signed-payload-v1 metrics.
  */
 
 defined('ABSPATH') || exit;
@@ -75,11 +75,11 @@ function ultracache_object_cache_safe_file_put_contents($file, $data, $flags = 0
     }
     $dir = dirname($file);
     if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
-        ultracache_object_cache_safe_mkdir($dir, 0755, true);
+        ultracache_object_cache_safe_mkdir($dir, 0700, true);
     }
     if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !is_writable($dir))) {
         if (is_dir($dir)) {
-            @chmod($dir, 0755);
+            @chmod($dir, 0700);
         }
         if (!is_dir($dir) || !is_writable($dir)) {
             return false;
@@ -101,7 +101,7 @@ function ultracache_object_cache_safe_rename($from, $to) {
 	return @rename($from, $to);
 }
 
-function ultracache_object_cache_safe_mkdir($dir, $mode = 0755, $recursive = true) {
+function ultracache_object_cache_safe_mkdir($dir, $mode = 0700, $recursive = true) {
     $dir = is_string($dir) ? trim($dir) : '';
     if ('' === $dir || !ultracache_object_cache_is_allowed_file_path($dir, false)) {
         return false;
@@ -144,6 +144,8 @@ function ultracache_object_cache_safe_rmdir($dir) {
 	return @rmdir($dir) || !file_exists($dir);
 }
 
+__ULTRACACHE_OBJECT_CACHE_BACKEND_CLASSES__
+
 if (!class_exists('WP_Object_Cache')) {
 	class WP_Object_Cache {
 		private $cache = array();
@@ -160,10 +162,21 @@ if (!class_exists('WP_Object_Cache')) {
 		private $fallback_backend_policy = __ULTRACACHE_FALLBACK_BACKEND__;
 		private $metrics_enabled = __ULTRACACHE_CACHE_STATS_ENABLED__;
 		private $active_backend = 'runtime';
+		private $backend_adapter = null;
 		private $redis = null;
 		private $redis_enabled = false;
 		private $apcu_enabled = false;
 		private $apcu_prefix = '';
+		private $sqlite = null;
+		private $sqlite_enabled = false;
+		private $sqlite_path = __ULTRACACHE_SQLITE_PATH__;
+		private $sqlite_error = '';
+		private $sqlite_journal_mode = '';
+		private $sqlite_database_max_bytes = __ULTRACACHE_SQLITE_DATABASE_MAX_BYTES__;
+		private $sqlite_journal_target_bytes = 16777216;
+		private $sqlite_last_checkpoint_at = 0;
+		private $sqlite_cleanup_high_watermark = 0.90;
+		private $sqlite_cleanup_low_watermark = 0.80;
 		private $redis_host = __ULTRACACHE_REDIS_HOST__;
 		private $redis_port = __ULTRACACHE_REDIS_PORT__;
 		private $redis_username = __ULTRACACHE_REDIS_USERNAME__;
@@ -189,6 +202,7 @@ if (!class_exists('WP_Object_Cache')) {
 			$this->ensure_base_dir();
 			$this->load_redis_credentials_from_constants();
 			$this->bootstrap_backend();
+			$this->initialize_backend_adapter();
 			if ($this->metrics_enabled) {
 				register_shutdown_function(array($this, 'persist_metrics'));
 			}
@@ -206,18 +220,21 @@ if (!class_exists('WP_Object_Cache')) {
 			if ($fallback_active) {
 				$fallback_backend = (string) $this->active_backend;
 			}
-			$fallback_persistent = $fallback_active && in_array((string) $this->active_backend, array('redis', 'apcu', 'disk'), true);
+			$fallback_persistent = $fallback_active && in_array((string) $this->active_backend, array('redis', 'apcu', 'sqlite', 'disk'), true);
 			$active_runtime_only = ('runtime' === (string) $this->active_backend);
 			$fallback_reason = '';
 			$fallback_message = '';
 			if ($fallback_active) {
-				$fallback_label = 'apcu' === $fallback_backend ? 'APCu' : ('runtime' === $fallback_backend ? 'runtime-only' : strtoupper($fallback_backend));
+				$fallback_label = $this->get_backend_label($fallback_backend);
+				$selected_label = $this->get_backend_label($this->selected_backend);
 				if ('redis' === (string) $this->selected_backend && '' !== (string) $this->redis_error) {
 					$fallback_reason = (string) $this->redis_error;
+				} elseif ('sqlite' === (string) $this->selected_backend && '' !== (string) $this->sqlite_error) {
+					$fallback_reason = (string) $this->sqlite_error;
 				} else {
-					$fallback_reason = strtoupper((string) $this->selected_backend) . ' was selected but did not become active during drop-in bootstrap.';
+					$fallback_reason = $selected_label . ' was selected but did not become active during drop-in bootstrap.';
 				}
-				$fallback_message = strtoupper((string) $this->selected_backend) . ' selected, ' . $fallback_label . ' fallback active.' . ('' !== $fallback_reason ? ' Reason: ' . $fallback_reason : '');
+				$fallback_message = $selected_label . ' selected, ' . $fallback_label . ' fallback active.' . ('' !== $fallback_reason ? ' Reason: ' . $fallback_reason : '');
 			}
 
 			return array(
@@ -237,6 +254,18 @@ if (!class_exists('WP_Object_Cache')) {
 					'available' => (bool) $this->apcu_available(),
 					'fallback_active' => (bool) ($fallback_active && 'apcu' === $fallback_backend),
 				),
+				'sqlite'   => array(
+					'enabled'   => (bool) $this->sqlite_enabled,
+					'available' => class_exists('SQLite3'),
+					'path'      => (string) $this->sqlite_path,
+					'journalMode' => (string) $this->sqlite_journal_mode,
+					'databaseMaxBytes' => $this->sqlite_database_max_bytes,
+					'databaseMaxMb' => (int) round(((float) $this->sqlite_database_max_bytes) / 1048576),
+					'journalTargetBytes' => $this->sqlite_journal_target_bytes,
+					'journalTargetMb' => (int) round(((float) $this->sqlite_journal_target_bytes) / 1048576),
+					'error'     => (string) $this->sqlite_error,
+					'fallback_active' => (bool) ($fallback_active && 'sqlite' === $fallback_backend),
+				),
 				'redis'    => array(
 					'enabled'  => (bool) $this->redis_enabled,
 					'available' => class_exists('Redis'),
@@ -251,6 +280,155 @@ if (!class_exists('WP_Object_Cache')) {
 			);
 		}
 
+
+		private function initialize_backend_adapter() {
+			$context = new Ultra_Cache_Object_Cache_Backend_Context(array(
+				'normalize_group' => function ($group) {
+					return $this->normalize_group($group);
+				},
+				'normalize_key' => function ($key) {
+					return $this->normalize_key($key);
+				},
+				'should_suspend_cache_addition' => function () {
+					return $this->should_suspend_cache_addition();
+				},
+				'is_non_persistent_group' => function ($group) {
+					return $this->is_non_persistent_group($group);
+				},
+				'runtime_has' => function ($key, $group) {
+					return $this->runtime_has($key, $group);
+				},
+				'runtime_get' => function ($key, $group) {
+					$scope = $this->get_runtime_scope($group);
+					return $this->copy_value($this->cache[$scope][$group][$key]);
+				},
+				'runtime_set' => function ($key, $group, $value) {
+					$this->set_runtime_value($key, $group, $value);
+					return true;
+				},
+				'runtime_delete' => function ($key, $group) {
+					$scope = $this->get_runtime_scope($group);
+					if (isset($this->cache[$scope][$group]) && array_key_exists($key, $this->cache[$scope][$group])) {
+						unset($this->cache[$scope][$group][$key]);
+					}
+					return true;
+				},
+				'runtime_clear' => function () {
+					$this->cache = array();
+					return true;
+				},
+				'runtime_clear_group' => function ($group) {
+					$scope = $this->get_runtime_scope($group);
+					unset($this->cache[$scope][$group]);
+					return true;
+				},
+				'build_payload' => function ($key, $group, $data, $expire) {
+					return $this->build_payload($key, $group, $data, (int) $expire);
+				},
+				'record_hit' => function () {
+					$this->stats['hits']++;
+				},
+				'record_miss' => function () {
+					$this->stats['misses']++;
+				},
+				'delete_persistent_payload' => function ($key, $group) {
+					if ($this->is_redis_backend()) {
+						$this->delete_redis_payload($key, $group);
+					}
+					if ($this->apcu_enabled) {
+						$this->delete_apcu_payload($key, $group);
+					}
+					if ($this->sqlite_enabled) {
+						$this->delete_sqlite_payload($key, $group);
+					}
+					if ('disk' === $this->active_backend) {
+						$this->delete_disk_payload($key, $group);
+					}
+					return true;
+				},
+				'flush_persistent_cache' => function () {
+					$this->flush_redis_cache();
+					$this->flush_apcu_cache();
+					$this->flush_sqlite_cache();
+					if ('disk' === $this->active_backend) {
+						$this->flush_disk_cache();
+					}
+					return true;
+				},
+				'flush_persistent_group' => function ($group) {
+					if ($this->is_redis_backend()) {
+						$this->flush_redis_group($group);
+					}
+					if ($this->apcu_enabled) {
+						$this->flush_apcu_group($group);
+					}
+					if ($this->sqlite_enabled) {
+						$this->flush_sqlite_group($group);
+					}
+					if ('disk' === $this->active_backend) {
+						$path = $this->get_group_dir($group);
+						if ($path && is_dir($path)) {
+							$this->recursive_delete($path);
+						}
+					}
+					return true;
+				},
+				'after_flush' => function () {
+					if ('disk' === $this->active_backend) {
+						$this->ensure_base_dir();
+					}
+				},
+				'health' => function () {
+					return $this->get_backend_status();
+				},
+				'read_redis_payload' => function ($key, $group) {
+					return $this->read_redis_payload($key, $group);
+				},
+				'write_redis_payload' => function ($key, $group, $payload, $expire) {
+					return $this->write_redis_payload($key, $group, $payload, (int) $expire);
+				},
+				'delete_redis_payload' => function ($key, $group) {
+					return $this->delete_redis_payload($key, $group);
+				},
+				'read_apcu_payload' => function ($key, $group) {
+					return $this->read_apcu_payload($key, $group);
+				},
+				'write_apcu_payload' => function ($key, $group, $payload, $expire) {
+					return $this->write_apcu_payload($key, $group, $payload, (int) $expire);
+				},
+				'read_sqlite_payload' => function ($key, $group) {
+					return $this->read_sqlite_payload($key, $group);
+				},
+				'write_sqlite_payload' => function ($key, $group, $payload) {
+					return $this->write_sqlite_payload($key, $group, $payload);
+				},
+				'add_sqlite_payload' => function ($key, $group, $payload) {
+					return $this->add_sqlite_payload($key, $group, $payload);
+				},
+				'replace_sqlite_payload' => function ($key, $group, $payload) {
+					return $this->replace_sqlite_payload($key, $group, $payload);
+				},
+				'mutate_sqlite_numeric_payload' => function ($key, $group, $offset, $decrement) {
+					return $this->mutate_sqlite_numeric_payload($key, $group, (int) $offset, (bool) $decrement);
+				},
+				'read_disk_payload' => function ($key, $group) {
+					return $this->read_disk_payload($key, $group);
+				},
+				'write_disk_payload' => function ($key, $group, $payload) {
+					return $this->write_disk_payload_for_key($key, $group, $payload);
+				},
+			));
+
+			$classes = array(
+				'redis' => 'Ultra_Cache_Object_Cache_Redis_Backend',
+				'sqlite' => 'Ultra_Cache_Object_Cache_SQLite_Backend',
+				'apcu' => 'Ultra_Cache_Object_Cache_APCu_Backend',
+				'disk' => 'Ultra_Cache_Object_Cache_Disk_Backend',
+				'runtime' => 'Ultra_Cache_Object_Cache_Runtime_Backend',
+			);
+			$class_name = isset($classes[$this->active_backend]) ? $classes[$this->active_backend] : $classes['runtime'];
+			$this->backend_adapter = new $class_name($context);
+		}
 
 		private function load_redis_credentials_from_constants() {
 			if (!defined('WP_REDIS_PASSWORD')) {
@@ -291,7 +469,19 @@ if (!class_exists('WP_Object_Cache')) {
 			if ('none' === $value || 'runtime' === $value || '' === $value) {
 				return 'none';
 			}
-			return in_array($value, array('apcu', 'disk'), true) ? $value : 'apcu';
+			return in_array($value, array('apcu', 'sqlite', 'disk'), true) ? $value : 'apcu';
+		}
+
+		private function get_backend_label($backend) {
+			$labels = array(
+				'redis' => 'Redis',
+				'apcu' => 'APCu',
+				'sqlite' => 'SQLite',
+				'disk' => 'Disk',
+				'runtime' => 'runtime-only',
+			);
+			$backend = strtolower(trim((string) $backend));
+			return $labels[$backend] ?? $backend;
 		}
 
 		private function bootstrap_backend() {
@@ -304,15 +494,7 @@ if (!class_exists('WP_Object_Cache')) {
 				if ($this->is_redis_backend()) {
 					return;
 				}
-
-				if ('apcu' === $this->fallback_backend_policy && $this->bootstrap_apcu_backend()) {
-					return;
-				}
-				if ('disk' === $this->fallback_backend_policy) {
-					$this->active_backend = 'disk';
-					return;
-				}
-				// None/runtime fallback keeps only request-local runtime cache.
+				$this->bootstrap_configured_fallback();
 				return;
 			}
 
@@ -320,16 +502,38 @@ if (!class_exists('WP_Object_Cache')) {
 				if ($this->bootstrap_apcu_backend()) {
 					return;
 				}
-				if ('disk' === $this->fallback_backend_policy) {
-					$this->active_backend = 'disk';
+				$this->bootstrap_configured_fallback();
+				return;
+			}
+
+			if ('sqlite' === $this->selected_backend) {
+				if ($this->bootstrap_sqlite_backend()) {
 					return;
 				}
+				$this->bootstrap_configured_fallback();
 				return;
 			}
 
 			if ('disk' === $this->selected_backend) {
 				$this->active_backend = 'disk';
 			}
+		}
+
+		private function bootstrap_configured_fallback() {
+			if ($this->fallback_backend_policy === $this->selected_backend) {
+				return false;
+			}
+			if ('apcu' === $this->fallback_backend_policy && $this->bootstrap_apcu_backend()) {
+				return true;
+			}
+			if ('sqlite' === $this->fallback_backend_policy && $this->bootstrap_sqlite_backend()) {
+				return true;
+			}
+			if ('disk' === $this->fallback_backend_policy) {
+				$this->active_backend = 'disk';
+				return true;
+			}
+			return false;
 		}
 
 		private function bootstrap_redis_backend() {
@@ -441,7 +645,293 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 			$this->apcu_enabled = true;
 			$this->active_backend = 'apcu';
+			$this->add_apcu_non_persistent_option_groups();
 			return true;
+		}
+
+		private function add_apcu_non_persistent_option_groups() {
+			// APCu is per PHP process, so persistent option/alloptions caching can
+			// return stale dashboard settings from another PHP-FPM worker after saves.
+			$this->add_non_persistent_groups(array('options', 'site-options'));
+		}
+
+		private function harden_sqlite_file_permissions() {
+			foreach (array($this->sqlite_path, $this->sqlite_path . '-wal', $this->sqlite_path . '-shm') as $path) {
+				if (is_string($path) && '' !== $path && file_exists($path) && $this->is_cache_path($path)) {
+					@chmod($path, 0600);
+				}
+			}
+		}
+
+		private function get_sqlite_file_size($path) {
+			if (!is_string($path) || '' === $path || !file_exists($path)) {
+				return 0;
+			}
+			clearstatcache(true, $path);
+			$size = filesize($path);
+			return false === $size ? 0 : max(0, (int) $size);
+		}
+
+		private function acquire_sqlite_maintenance_lock() {
+			$lock_path = $this->sqlite_path . '.maintenance.lock';
+			if (!$this->is_cache_path($lock_path)) {
+				return false;
+			}
+
+			$handle = @fopen($lock_path, 'c+');
+			if (!is_resource($handle)) {
+				return false;
+			}
+			@chmod($lock_path, 0600);
+			if (!@flock($handle, LOCK_EX | LOCK_NB)) {
+				@fclose($handle);
+				return false;
+			}
+
+			return $handle;
+		}
+
+		private function release_sqlite_maintenance_lock($handle) {
+			if (!is_resource($handle)) {
+				return;
+			}
+			@flock($handle, LOCK_UN);
+			@fclose($handle);
+		}
+
+		private function run_sqlite_checkpoint(SQLite3 $sqlite, $mode = 'PASSIVE') {
+			$mode = strtoupper(trim((string) $mode));
+			if (!in_array($mode, array('PASSIVE', 'TRUNCATE'), true)) {
+				$mode = 'PASSIVE';
+			}
+			$result = $sqlite->querySingle('PRAGMA wal_checkpoint(' . $mode . ')', true);
+			$this->sqlite_last_checkpoint_at = time();
+			$this->harden_sqlite_file_permissions();
+			return is_array($result);
+		}
+
+		private function checkpoint_sqlite_wal($mode = 'PASSIVE', $maintenance_lock = null) {
+			if (!$this->sqlite_enabled || !($this->sqlite instanceof SQLite3)) {
+				return false;
+			}
+
+			$owns_lock = !is_resource($maintenance_lock);
+			$lock = $owns_lock ? $this->acquire_sqlite_maintenance_lock() : $maintenance_lock;
+			if (!is_resource($lock)) {
+				return false;
+			}
+
+			try {
+				return $this->run_sqlite_checkpoint($this->sqlite, $mode);
+			} catch (Throwable $e) {
+				return false;
+			} finally {
+				if ($owns_lock) {
+					$this->release_sqlite_maintenance_lock($lock);
+				}
+			}
+		}
+
+		private function get_sqlite_page_usage(SQLite3 $sqlite) {
+			$page_size = max(512, (int) $sqlite->querySingle('PRAGMA page_size'));
+			$page_count = max(0, (int) $sqlite->querySingle('PRAGMA page_count'));
+			$free_pages = max(0, (int) $sqlite->querySingle('PRAGMA freelist_count'));
+			$max_pages = max(1.0, floor(((float) $this->sqlite_database_max_bytes) / $page_size));
+
+			return array(
+				'page_size' => $page_size,
+				'page_count' => $page_count,
+				'free_pages' => min($page_count, $free_pages),
+				'used_pages' => max(0, $page_count - $free_pages),
+				'max_pages' => $max_pages,
+			);
+		}
+
+		private function apply_sqlite_max_page_count(SQLite3 $sqlite) {
+			$usage = $this->get_sqlite_page_usage($sqlite);
+			$requested = sprintf('%.0f', (float) $usage['max_pages']);
+			$applied = (float) $sqlite->querySingle('PRAGMA max_page_count=' . $requested);
+			return $applied > 0 && $applied <= ((float) $usage['max_pages'] + 1.0);
+		}
+
+		private function ensure_sqlite_database_limit(SQLite3 $sqlite) {
+			$usage = $this->get_sqlite_page_usage($sqlite);
+			if ((float) $usage['page_count'] <= (float) $usage['max_pages']) {
+				return $this->apply_sqlite_max_page_count($sqlite);
+			}
+
+			$lock = $this->acquire_sqlite_maintenance_lock();
+			if (!is_resource($lock)) {
+				$this->sqlite_error = 'SQLite database resize maintenance is already in progress.';
+				return false;
+			}
+
+			try {
+				if (!$sqlite->exec('DELETE FROM ultracache_object_cache')) {
+					throw new RuntimeException('SQLite cache entries could not be cleared before reducing the database limit.');
+				}
+				$this->run_sqlite_checkpoint($sqlite, 'TRUNCATE');
+				if (!$sqlite->exec('VACUUM')) {
+					throw new RuntimeException('SQLite database could not be rebuilt for the reduced size limit.');
+				}
+				if (!$this->apply_sqlite_max_page_count($sqlite)) {
+					throw new RuntimeException('SQLite maximum database size could not be applied after rebuilding the cache database.');
+				}
+				return true;
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			} finally {
+				$this->release_sqlite_maintenance_lock($lock);
+			}
+		}
+
+		private function maintain_sqlite_capacity_before_write($incoming_bytes = 0) {
+			if (!$this->is_sqlite_backend()) {
+				return false;
+			}
+
+			$journal_size = $this->get_sqlite_file_size($this->sqlite_path . '-wal');
+			if (
+				$journal_size > (float) $this->sqlite_journal_target_bytes
+				&& (time() - (int) $this->sqlite_last_checkpoint_at) >= 5
+			) {
+				$this->checkpoint_sqlite_wal('PASSIVE');
+			}
+
+			$usage = $this->get_sqlite_page_usage($this->sqlite);
+			$incoming_pages = max(0.0, ceil(max(0.0, (float) $incoming_bytes) / max(1, (int) $usage['page_size']))) + 8.0;
+			$high_watermark = max(1.0, floor((float) $usage['max_pages'] * (float) $this->sqlite_cleanup_high_watermark));
+			if (((float) $usage['used_pages'] + $incoming_pages) < $high_watermark) {
+				return true;
+			}
+
+			$lock = $this->acquire_sqlite_maintenance_lock();
+			if (!is_resource($lock)) {
+				return true;
+			}
+
+			try {
+				$now = time();
+				$this->sqlite->exec('DELETE FROM ultracache_object_cache WHERE expires_at > 0 AND expires_at < ' . $now);
+				$usage = $this->get_sqlite_page_usage($this->sqlite);
+				$ratio_low_watermark = max(1.0, floor((float) $usage['max_pages'] * (float) $this->sqlite_cleanup_low_watermark));
+				$write_safe_watermark = max(1.0, floor((float) $usage['max_pages'] - $incoming_pages - 8.0));
+				$low_watermark = min($ratio_low_watermark, $write_safe_watermark);
+				$batches = 0;
+
+				while ((float) $usage['used_pages'] > $low_watermark && $batches < 20) {
+					if (!$this->sqlite->exec('DELETE FROM ultracache_object_cache WHERE cache_id IN (SELECT cache_id FROM ultracache_object_cache ORDER BY updated_at ASC LIMIT 500)')) {
+						break;
+					}
+					if ($this->sqlite->changes() < 1) {
+						break;
+					}
+					$batches++;
+					$usage = $this->get_sqlite_page_usage($this->sqlite);
+				}
+
+				$this->run_sqlite_checkpoint($this->sqlite, 'PASSIVE');
+				$usage = $this->get_sqlite_page_usage($this->sqlite);
+				if (((float) $usage['used_pages'] + $incoming_pages) >= (float) $usage['max_pages']) {
+					$this->sqlite_error = 'SQLite object-cache database capacity reached after cleanup.';
+					return false;
+				}
+
+				$this->sqlite_error = '';
+				return true;
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			} finally {
+				$this->release_sqlite_maintenance_lock($lock);
+			}
+		}
+
+		private function configure_sqlite_runtime(SQLite3 $sqlite) {
+			if (
+				!$sqlite->exec('PRAGMA synchronous=NORMAL')
+				|| !$sqlite->exec('PRAGMA temp_store=MEMORY')
+				|| !$sqlite->exec('PRAGMA secure_delete=ON')
+				|| !$sqlite->exec('PRAGMA wal_autocheckpoint=1000')
+			) {
+				return false;
+			}
+
+			$sqlite->querySingle('PRAGMA journal_size_limit=' . sprintf('%.0f', (float) $this->sqlite_journal_target_bytes));
+			return true;
+		}
+
+		private function bootstrap_sqlite_backend() {
+			$this->sqlite = null;
+			$this->sqlite_enabled = false;
+			$this->sqlite_journal_mode = '';
+
+			if (!class_exists('SQLite3')) {
+				$this->sqlite_error = 'PHP SQLite3 extension not loaded.';
+				return false;
+			}
+			if (!$this->is_cache_path($this->sqlite_path)) {
+				$this->sqlite_error = 'SQLite database path is outside the UltraCache object-cache directory.';
+				return false;
+			}
+
+			$this->ensure_base_dir();
+			if (!is_dir($this->cache_dir) || !is_writable($this->cache_dir)) {
+				$this->sqlite_error = 'UltraCache object-cache directory is not writable.';
+				return false;
+			}
+
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- Scoped handler converts SQLite open warnings into exceptions and is restored immediately.
+			set_error_handler(function ($severity, $message, $file = null, $line = null) {
+				// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception context is not rendered as HTML output.
+				throw new ErrorException($message, 0, $severity, (string) $file, (int) $line);
+			});
+			try {
+				$sqlite = new SQLite3($this->sqlite_path, SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE);
+				$sqlite->enableExceptions(true);
+				$sqlite->busyTimeout(100);
+				$journal_mode = strtolower((string) $sqlite->querySingle('PRAGMA journal_mode=WAL'));
+				if ('wal' !== $journal_mode) {
+					throw new RuntimeException('SQLite WAL journal mode could not be enabled.');
+				}
+				if (!$this->configure_sqlite_runtime($sqlite)) {
+					throw new RuntimeException('SQLite runtime configuration failed.');
+				}
+				$schema_version = (int) $sqlite->querySingle('PRAGMA user_version');
+				if ($schema_version < 1) {
+					if (!$sqlite->exec('CREATE TABLE IF NOT EXISTS ultracache_object_cache (cache_id TEXT PRIMARY KEY NOT NULL, cache_scope TEXT NOT NULL, cache_group TEXT NOT NULL, payload BLOB NOT NULL, expires_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)')) {
+						throw new RuntimeException('SQLite object-cache table creation failed.');
+					}
+					if (!$sqlite->exec('CREATE INDEX IF NOT EXISTS ultracache_object_cache_scope_group ON ultracache_object_cache (cache_scope, cache_group)') || !$sqlite->exec('CREATE INDEX IF NOT EXISTS ultracache_object_cache_expiry ON ultracache_object_cache (expires_at)')) {
+						throw new RuntimeException('SQLite object-cache index creation failed.');
+					}
+					if (!$sqlite->exec('PRAGMA user_version=1')) {
+						throw new RuntimeException('SQLite object-cache schema version could not be stored.');
+					}
+				}
+				if (!$this->ensure_sqlite_database_limit($sqlite)) {
+					throw new RuntimeException('' !== (string) $this->sqlite_error ? (string) $this->sqlite_error : 'SQLite maximum database size could not be applied.');
+				}
+				$this->sqlite = $sqlite;
+				$this->sqlite_enabled = true;
+				$this->sqlite_journal_mode = $journal_mode;
+				$this->sqlite_error = '';
+				$this->active_backend = 'sqlite';
+				$this->harden_sqlite_file_permissions();
+				return true;
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+				if (isset($sqlite) && $sqlite instanceof SQLite3) {
+					$sqlite->close();
+				}
+				$this->sqlite = null;
+				$this->sqlite_enabled = false;
+				$this->active_backend = 'runtime';
+				return false;
+			} finally {
+				restore_error_handler();
+			}
 		}
 
 		private function get_redis_connection_host() {
@@ -512,7 +1002,7 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 			$dir = dirname($this->metrics_file);
 			if (!file_exists($dir)) {
-				ultracache_object_cache_safe_mkdir($dir, 0755, true);
+				ultracache_object_cache_safe_mkdir($dir, 0700, true);
 			}
 			ultracache_object_cache_safe_file_put_contents($this->metrics_file, json_encode($data), LOCK_EX);
 		}
@@ -533,191 +1023,58 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		public function add($key, $data, $group = 'default', $expire = 0) {
-			if ($this->_exists($key, $group)) {
-				return false;
-			}
-			return $this->set($key, $data, $group, (int) $expire);
+			return $this->backend_adapter->add($key, $data, $group, $expire);
 		}
 
 		public function replace($key, $data, $group = 'default', $expire = 0) {
-			if (!$this->_exists($key, $group)) {
-				return false;
-			}
-			return $this->set($key, $data, $group, (int) $expire);
+			return $this->backend_adapter->replace($key, $data, $group, $expire);
 		}
+
+		public function set($key, $data, $group = 'default', $expire = 0) {
+			return $this->backend_adapter->set($key, $data, $group, $expire);
+		}
+
+		public function get($key, $group = 'default', $force = false, &$found = null) {
+			return $this->backend_adapter->get($key, $group, $force, $found);
+		}
+
+		public function delete($key, $group = 'default', $deprecated = false) {
+			return $this->backend_adapter->delete($key, $group);
+		}
+
+		public function flush() {
+			return $this->backend_adapter->flush();
+		}
+
+		public function flush_group($group) {
+			return $this->backend_adapter->flush_group($group);
+		}
+
+		public function incr($key, $offset = 1, $group = 'default') {
+			return $this->backend_adapter->incr($key, $offset, $group);
+		}
+
+		public function decr($key, $offset = 1, $group = 'default') {
+			return $this->backend_adapter->decr($key, $offset, $group);
+		}
+
+
 
 		private function should_suspend_cache_addition() {
 			return function_exists('wp_suspend_cache_addition') && wp_suspend_cache_addition();
 		}
 
-		public function set($key, $data, $group = 'default', $expire = 0) {
-			$group = $this->normalize_group($group);
-			$key   = $this->normalize_key($key);
-			if ($this->should_suspend_cache_addition()) {
-				return true;
-			}
 
-			$this->set_runtime_value($key, $group, $data);
 
-			if ($this->is_non_persistent_group($group)) {
-				return true;
-			}
 
-			$payload = $this->build_payload($key, $group, $data, (int) $expire);
-			if (!is_array($payload)) {
-				return false;
-			}
-
-			if ($this->is_redis_backend()) {
-				if ($this->write_redis_payload($key, $group, $payload, (int) $expire)) {
-					return true;
-				}
-				$this->delete_redis_payload($key, $group);
-			}
-
-			if ($this->is_apcu_backend() && $this->write_apcu_payload($key, $group, $payload, (int) $expire)) {
-				return true;
-			}
-
-			if ('disk' === $this->active_backend) {
-				return $this->write_disk_payload_for_key($key, $group, $payload);
-			}
-
-			// Runtime-only fallback: keep the value in memory for this request,
-			// but do not create disk object-cache files automatically.
-			return true;
-		}
-
-		public function get($key, $group = 'default', $force = false, &$found = null) {
-			$group = $this->normalize_group($group);
-			$key   = $this->normalize_key($key);
-
-			if (!$force && $this->runtime_has($key, $group)) {
-				$found = true;
-				$this->stats['hits']++;
-				return $this->copy_value($this->cache[$group][$key]);
-			}
-
-			if ($this->is_non_persistent_group($group)) {
-				$found = false;
-				$this->stats['misses']++;
-				return false;
-			}
-
-			$payload = false;
-			if ($this->is_redis_backend()) {
-				$payload = $this->read_redis_payload($key, $group);
-			}
-			if ((!is_array($payload) || !array_key_exists('value', $payload)) && $this->is_apcu_backend()) {
-				$payload = $this->read_apcu_payload($key, $group);
-			}
-			if ((!is_array($payload) || !array_key_exists('value', $payload)) && 'disk' === $this->active_backend) {
-				$payload = $this->read_disk_payload($key, $group);
-			}
-
-			if (!is_array($payload) || !array_key_exists('value', $payload)) {
-				$found = false;
-				$this->stats['misses']++;
-				return false;
-			}
-
-			if (!empty($payload['expires_at']) && (int) $payload['expires_at'] < time()) {
-				$this->delete($key, $group);
-				$found = false;
-				$this->stats['misses']++;
-				return false;
-			}
-
-			$found = true;
-			$this->stats['hits']++;
-			$this->set_runtime_value($key, $group, $payload['value']);
-			return $this->copy_value($payload['value']);
-		}
-
-		public function delete($key, $group = 'default', $deprecated = false) {
-			$group = $this->normalize_group($group);
-			$key   = $this->normalize_key($key);
-
-			if (isset($this->cache[$group]) && array_key_exists($key, $this->cache[$group])) {
-				unset($this->cache[$group][$key]);
-			}
-
-			if ($this->is_non_persistent_group($group)) {
-				return true;
-			}
-
-			if ($this->is_redis_backend()) {
-				$this->delete_redis_payload($key, $group);
-			}
-			if ($this->apcu_enabled) {
-				$this->delete_apcu_payload($key, $group);
-			}
-			if ('disk' === $this->active_backend) {
-				$this->delete_disk_payload($key, $group);
-			}
-			return true;
-		}
-
-		public function flush() {
-			$this->cache = array();
-			$this->flush_redis_cache();
-			$this->flush_apcu_cache();
-			if ('disk' === $this->active_backend) {
-				$this->flush_disk_cache();
-				$this->ensure_base_dir();
-			}
-			return true;
-		}
 
 		public function flush_runtime() {
 			$this->cache = array();
 			return true;
 		}
 
-		public function flush_group($group) {
-			$group = $this->normalize_group($group);
-			unset($this->cache[$group]);
 
-			if ($this->is_redis_backend()) {
-				$this->flush_redis_group($group);
-			}
-			if ($this->apcu_enabled) {
-				$this->flush_apcu_group($group);
-			}
-			if ('disk' === $this->active_backend) {
-				$path = $this->get_group_dir($group);
-				if ($path && is_dir($path)) {
-					$this->recursive_delete($path);
-				}
-			}
 
-			return true;
-		}
-
-		public function incr($key, $offset = 1, $group = 'default') {
-			$found = false;
-			$value = $this->get($key, $group, true, $found);
-			if (!$found || !is_numeric($value)) {
-				return false;
-			}
-			$value += (int) $offset;
-			$this->set($key, $value, $group);
-			return $value;
-		}
-
-		public function decr($key, $offset = 1, $group = 'default') {
-			$found = false;
-			$value = $this->get($key, $group, true, $found);
-			if (!$found || !is_numeric($value)) {
-				return false;
-			}
-			$value -= (int) $offset;
-			if ($value < 0) {
-				$value = 0;
-			}
-			$this->set($key, $value, $group);
-			return $value;
-		}
 
 		public function reset() {
 			return $this->flush_runtime();
@@ -856,7 +1213,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!$this->is_cache_path($dir)) {
 				return false;
 			}
-			if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
+			if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0700, true) && !is_dir($dir)) {
 				return false;
 			}
 			return $dir . '/' . sha1($key) . '.cache';
@@ -918,24 +1275,40 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function ensure_base_dir() {
 			if (!is_dir($this->cache_dir)) {
-				ultracache_object_cache_safe_mkdir($this->cache_dir, 0755, true);
+				ultracache_object_cache_safe_mkdir($this->cache_dir, 0700, true);
 			}
 			$index = rtrim($this->cache_dir, '/\\') . '/index.php';
 			if (!file_exists($index)) {
 				ultracache_object_cache_safe_file_put_contents($index, "<?php\n// Silence is golden.\n");
 			}
+			$htaccess = rtrim($this->cache_dir, '/\\') . '/.htaccess';
+			if (!file_exists($htaccess)) {
+				ultracache_object_cache_safe_file_put_contents($htaccess, "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\nOrder allow,deny\nDeny from all\n</IfModule>\n");
+			}
+			$web_config = rtrim($this->cache_dir, '/\\') . '/web.config';
+			if (!file_exists($web_config)) {
+				ultracache_object_cache_safe_file_put_contents($web_config, '<?xml version="1.0" encoding="UTF-8"?><configuration><system.webServer><security><authorization><remove users="*" roles="" verbs=""/><add accessType="Deny" users="*"/></authorization></security></system.webServer></configuration>');
+			}
 		}
 
 		private function set_runtime_value($key, $group, $value) {
-			if (!isset($this->cache[$group]) || !is_array($this->cache[$group])) {
-				$this->cache[$group] = array();
+			$scope = $this->get_runtime_scope($group);
+			if (!isset($this->cache[$scope]) || !is_array($this->cache[$scope])) {
+				$this->cache[$scope] = array();
 			}
-			$this->cache[$group][$key] = $this->copy_value($value);
+			if (!isset($this->cache[$scope][$group]) || !is_array($this->cache[$scope][$group])) {
+				$this->cache[$scope][$group] = array();
+			}
+			$this->cache[$scope][$group][$key] = $this->copy_value($value);
 		}
 
+		private function get_runtime_scope($group) {
+			return $this->get_redis_scope($group);
+		}
 
 		private function runtime_has($key, $group) {
-			return isset($this->cache[$group]) && array_key_exists($key, $this->cache[$group]);
+			$scope = $this->get_runtime_scope($group);
+			return isset($this->cache[$scope][$group]) && array_key_exists($key, $this->cache[$scope][$group]);
 		}
 
 		private function copy_value($value) {
@@ -948,6 +1321,10 @@ if (!class_exists('WP_Object_Cache')) {
 
 		private function is_apcu_backend() {
 			return 'apcu' === $this->active_backend && $this->apcu_enabled && $this->apcu_available();
+		}
+
+		private function is_sqlite_backend() {
+			return 'sqlite' === $this->active_backend && $this->sqlite_enabled && $this->sqlite instanceof SQLite3;
 		}
 
 		private function build_apcu_prefix() {
@@ -1121,6 +1498,383 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 
+		private function get_sqlite_cache_id($key, $group) {
+			$scope = $this->get_redis_scope($group);
+			$material = $scope . "\0" . $group . "\0" . $key;
+			return function_exists('hash') ? hash('sha256', $material) : md5($material);
+		}
+
+		private function prepare_sqlite_payload_data($payload) {
+			if (!$this->is_sqlite_backend() || !is_array($payload)) {
+				return false;
+			}
+			if ($this->payload_contains_complex_types($payload['value'] ?? null)) {
+				$this->sqlite_error = 'SQLite payload skipped: unsupported resource/closure or excessive nesting.';
+				return false;
+			}
+			try {
+				$serialized = serialize($payload);
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			}
+			if (!is_string($serialized) || '' === $serialized || strlen($serialized) > $this->disk_payload_max_bytes) {
+				$this->sqlite_error = 'SQLite payload skipped: value too large.';
+				return false;
+			}
+			$envelope = $this->build_signed_envelope($serialized);
+			if (!is_array($envelope)) {
+				$this->sqlite_error = 'SQLite payload skipped: envelope signing failed.';
+				return false;
+			}
+			$data = serialize($envelope);
+			if (!is_string($data) || '' === $data || strlen($data) > $this->signed_envelope_max_bytes) {
+				$this->sqlite_error = 'SQLite payload skipped: signed value too large.';
+				return false;
+			}
+
+			return array(
+				'data'       => $data,
+				'expires_at' => (int) ($payload['expires_at'] ?? 0),
+			);
+		}
+
+		private function write_sqlite_payload($key, $group, $payload) {
+			$prepared = $this->prepare_sqlite_payload_data($payload);
+			if (!is_array($prepared)) {
+				return false;
+			}
+
+			if (!$this->maintain_sqlite_capacity_before_write(strlen($prepared['data']))) {
+				return false;
+			}
+
+			$statement = null;
+			$result = null;
+			try {
+				$statement = $this->sqlite->prepare('INSERT OR REPLACE INTO ultracache_object_cache (cache_id, cache_scope, cache_group, payload, expires_at, updated_at) VALUES (:cache_id, :cache_scope, :cache_group, :payload, :expires_at, :updated_at)');
+				$statement->bindValue(':cache_id', $this->get_sqlite_cache_id($key, $group), SQLITE3_TEXT);
+				$statement->bindValue(':cache_scope', $this->get_redis_scope($group), SQLITE3_TEXT);
+				$statement->bindValue(':cache_group', $group, SQLITE3_TEXT);
+				$statement->bindValue(':payload', $prepared['data'], SQLITE3_BLOB);
+				$statement->bindValue(':expires_at', (int) $prepared['expires_at'], SQLITE3_INTEGER);
+				$statement->bindValue(':updated_at', time(), SQLITE3_INTEGER);
+				$result = $statement->execute();
+				$stored = false !== $result && $this->sqlite->changes() > 0;
+				if (!$stored) {
+					throw new RuntimeException('SQLite object-cache write did not persist the cache entry.');
+				}
+				$this->sqlite_error = '';
+				$this->harden_sqlite_file_permissions();
+				return true;
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			} finally {
+				if ($result instanceof SQLite3Result) {
+					$result->finalize();
+				}
+				if ($statement instanceof SQLite3Stmt) {
+					$statement->close();
+				}
+			}
+		}
+
+		private function add_sqlite_payload($key, $group, $payload) {
+			$prepared = $this->prepare_sqlite_payload_data($payload);
+			if (!is_array($prepared)) {
+				return false;
+			}
+
+			if (!$this->maintain_sqlite_capacity_before_write(strlen($prepared['data']))) {
+				return false;
+			}
+
+			$delete_statement = null;
+			$delete_result = null;
+			$insert_statement = null;
+			$insert_result = null;
+			try {
+				if (!$this->sqlite->exec('BEGIN IMMEDIATE')) {
+					throw new RuntimeException('SQLite object-cache add transaction could not start.');
+				}
+
+				$cache_id = $this->get_sqlite_cache_id($key, $group);
+				$delete_statement = $this->sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_id = :cache_id AND expires_at > 0 AND expires_at < :now');
+				$delete_statement->bindValue(':cache_id', $cache_id, SQLITE3_TEXT);
+				$delete_statement->bindValue(':now', time(), SQLITE3_INTEGER);
+				$delete_result = $delete_statement->execute();
+				if ($delete_result instanceof SQLite3Result) {
+					$delete_result->finalize();
+					$delete_result = null;
+				}
+				$delete_statement->close();
+				$delete_statement = null;
+
+				$insert_statement = $this->sqlite->prepare('INSERT OR IGNORE INTO ultracache_object_cache (cache_id, cache_scope, cache_group, payload, expires_at, updated_at) VALUES (:cache_id, :cache_scope, :cache_group, :payload, :expires_at, :updated_at)');
+				$insert_statement->bindValue(':cache_id', $cache_id, SQLITE3_TEXT);
+				$insert_statement->bindValue(':cache_scope', $this->get_redis_scope($group), SQLITE3_TEXT);
+				$insert_statement->bindValue(':cache_group', $group, SQLITE3_TEXT);
+				$insert_statement->bindValue(':payload', $prepared['data'], SQLITE3_BLOB);
+				$insert_statement->bindValue(':expires_at', (int) $prepared['expires_at'], SQLITE3_INTEGER);
+				$insert_statement->bindValue(':updated_at', time(), SQLITE3_INTEGER);
+				$insert_result = $insert_statement->execute();
+				$stored = false !== $insert_result && $this->sqlite->changes() > 0;
+				if ($insert_result instanceof SQLite3Result) {
+					$insert_result->finalize();
+					$insert_result = null;
+				}
+				$insert_statement->close();
+				$insert_statement = null;
+
+				if (!$this->sqlite->exec('COMMIT')) {
+					throw new RuntimeException('SQLite object-cache add transaction could not commit.');
+				}
+
+				$this->sqlite_error = '';
+				$this->harden_sqlite_file_permissions();
+				return $stored;
+			} catch (Throwable $e) {
+				try {
+					$this->sqlite->exec('ROLLBACK');
+				} catch (Throwable $rollback_error) {
+					// The original SQLite exception remains the actionable error.
+				}
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			} finally {
+				if ($delete_result instanceof SQLite3Result) {
+					$delete_result->finalize();
+				}
+				if ($delete_statement instanceof SQLite3Stmt) {
+					$delete_statement->close();
+				}
+				if ($insert_result instanceof SQLite3Result) {
+					$insert_result->finalize();
+				}
+				if ($insert_statement instanceof SQLite3Stmt) {
+					$insert_statement->close();
+				}
+			}
+		}
+
+		private function replace_sqlite_payload($key, $group, $payload) {
+			$prepared = $this->prepare_sqlite_payload_data($payload);
+			if (!is_array($prepared)) {
+				return false;
+			}
+
+			if (!$this->maintain_sqlite_capacity_before_write(strlen($prepared['data']))) {
+				return false;
+			}
+
+			$statement = null;
+			$result = null;
+			try {
+				$statement = $this->sqlite->prepare('UPDATE ultracache_object_cache SET cache_scope = :cache_scope, cache_group = :cache_group, payload = :payload, expires_at = :expires_at, updated_at = :updated_at WHERE cache_id = :cache_id AND (expires_at = 0 OR expires_at >= :now)');
+				$statement->bindValue(':cache_scope', $this->get_redis_scope($group), SQLITE3_TEXT);
+				$statement->bindValue(':cache_group', $group, SQLITE3_TEXT);
+				$statement->bindValue(':payload', $prepared['data'], SQLITE3_BLOB);
+				$statement->bindValue(':expires_at', (int) $prepared['expires_at'], SQLITE3_INTEGER);
+				$statement->bindValue(':updated_at', time(), SQLITE3_INTEGER);
+				$statement->bindValue(':cache_id', $this->get_sqlite_cache_id($key, $group), SQLITE3_TEXT);
+				$statement->bindValue(':now', time(), SQLITE3_INTEGER);
+				$result = $statement->execute();
+				$stored = false !== $result && $this->sqlite->changes() > 0;
+				$this->sqlite_error = '';
+				$this->harden_sqlite_file_permissions();
+				return $stored;
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			} finally {
+				if ($result instanceof SQLite3Result) {
+					$result->finalize();
+				}
+				if ($statement instanceof SQLite3Stmt) {
+					$statement->close();
+				}
+			}
+		}
+
+		private function mutate_sqlite_numeric_payload($key, $group, $offset, $decrement) {
+			if (!$this->maintain_sqlite_capacity_before_write()) {
+				return false;
+			}
+
+			$statement = null;
+			$result = null;
+			try {
+				if (!$this->sqlite->exec('BEGIN IMMEDIATE')) {
+					throw new RuntimeException('SQLite numeric mutation transaction could not start.');
+				}
+
+				$payload = $this->read_sqlite_payload($key, $group);
+				if (!is_array($payload) || !array_key_exists('value', $payload) || !is_numeric($payload['value'])) {
+					$this->sqlite->exec('ROLLBACK');
+					return false;
+				}
+
+				$value = $decrement
+					? max(0, $payload['value'] - (int) $offset)
+					: $payload['value'] + (int) $offset;
+				$payload['value'] = $value;
+				$prepared = $this->prepare_sqlite_payload_data($payload);
+				if (!is_array($prepared)) {
+					$this->sqlite->exec('ROLLBACK');
+					return false;
+				}
+
+				$statement = $this->sqlite->prepare('UPDATE ultracache_object_cache SET payload = :payload, expires_at = :expires_at, updated_at = :updated_at WHERE cache_id = :cache_id');
+				$statement->bindValue(':payload', $prepared['data'], SQLITE3_BLOB);
+				$statement->bindValue(':expires_at', (int) $prepared['expires_at'], SQLITE3_INTEGER);
+				$statement->bindValue(':updated_at', time(), SQLITE3_INTEGER);
+				$statement->bindValue(':cache_id', $this->get_sqlite_cache_id($key, $group), SQLITE3_TEXT);
+				$result = $statement->execute();
+				if (false === $result || $this->sqlite->changes() < 1) {
+					throw new RuntimeException('SQLite numeric mutation did not update the cache entry.');
+				}
+				if ($result instanceof SQLite3Result) {
+					$result->finalize();
+					$result = null;
+				}
+				$statement->close();
+				$statement = null;
+				if (!$this->sqlite->exec('COMMIT')) {
+					throw new RuntimeException('SQLite numeric mutation transaction could not commit.');
+				}
+
+				$this->sqlite_error = '';
+				$this->harden_sqlite_file_permissions();
+				$this->set_runtime_value($key, $group, $value);
+				return $value;
+			} catch (Throwable $e) {
+				try {
+					$this->sqlite->exec('ROLLBACK');
+				} catch (Throwable $rollback_error) {
+					// The original SQLite exception remains the actionable error.
+				}
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			} finally {
+				if ($result instanceof SQLite3Result) {
+					$result->finalize();
+				}
+				if ($statement instanceof SQLite3Stmt) {
+					$statement->close();
+				}
+			}
+		}
+
+		private function read_sqlite_payload($key, $group) {
+			if (!$this->is_sqlite_backend()) {
+				return false;
+			}
+			$statement = null;
+			$result = null;
+			try {
+				$statement = $this->sqlite->prepare('SELECT payload, expires_at FROM ultracache_object_cache WHERE cache_id = :cache_id LIMIT 1');
+				$statement->bindValue(':cache_id', $this->get_sqlite_cache_id($key, $group), SQLITE3_TEXT);
+				$result = $statement->execute();
+				$row = $result->fetchArray(SQLITE3_ASSOC);
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			} finally {
+				if ($result instanceof SQLite3Result) {
+					$result->finalize();
+				}
+				if ($statement instanceof SQLite3Stmt) {
+					$statement->close();
+				}
+			}
+			if (!is_array($row)) {
+				return false;
+			}
+			if (!empty($row['expires_at']) && (int) $row['expires_at'] < time()) {
+				$this->delete_sqlite_payload($key, $group);
+				return false;
+			}
+			$data = $row['payload'] ?? '';
+			if (!is_string($data) || '' === $data) {
+				return false;
+			}
+			$envelope = $this->deserialize_signed_envelope($data, $this->signed_envelope_max_bytes);
+			if (!is_array($envelope)) {
+				return false;
+			}
+			$serialized = $this->decode_envelope_payload($envelope, $this->disk_payload_max_bytes);
+			if (false === $serialized || !$this->verify_signature($serialized, (string) $envelope['sig'])) {
+				return false;
+			}
+			$payload = $this->deserialize_cache_payload($serialized, true);
+			return (is_array($payload) && $this->is_valid_cache_payload($payload, $key, $group)) ? $payload : false;
+		}
+
+		private function delete_sqlite_payload($key, $group) {
+			if (!$this->sqlite_enabled || !($this->sqlite instanceof SQLite3)) {
+				return true;
+			}
+			$statement = null;
+			$result = null;
+			try {
+				$statement = $this->sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_id = :cache_id');
+				$statement->bindValue(':cache_id', $this->get_sqlite_cache_id($key, $group), SQLITE3_TEXT);
+				$result = $statement->execute();
+				$this->sqlite_error = '';
+				return true;
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+				return false;
+			} finally {
+				if ($result instanceof SQLite3Result) {
+					$result->finalize();
+				}
+				if ($statement instanceof SQLite3Stmt) {
+					$statement->close();
+				}
+			}
+		}
+
+		private function flush_sqlite_group($group) {
+			if (!$this->sqlite_enabled || !($this->sqlite instanceof SQLite3)) {
+				return;
+			}
+			$statement = null;
+			$result = null;
+			try {
+				$statement = $this->sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_scope = :cache_scope AND cache_group = :cache_group');
+				$statement->bindValue(':cache_scope', $this->get_redis_scope($group), SQLITE3_TEXT);
+				$statement->bindValue(':cache_group', $group, SQLITE3_TEXT);
+				$result = $statement->execute();
+				$this->sqlite_error = '';
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+			} finally {
+				if ($result instanceof SQLite3Result) {
+					$result->finalize();
+				}
+				if ($statement instanceof SQLite3Stmt) {
+					$statement->close();
+				}
+			}
+		}
+
+		private function flush_sqlite_cache() {
+			if (!$this->sqlite_enabled || !($this->sqlite instanceof SQLite3)) {
+				return;
+			}
+			try {
+				$this->sqlite->exec('DELETE FROM ultracache_object_cache');
+				$this->sqlite->exec('PRAGMA wal_checkpoint(TRUNCATE)');
+				$this->sqlite->exec('PRAGMA optimize');
+				$this->sqlite_error = '';
+				$this->harden_sqlite_file_permissions();
+			} catch (Throwable $e) {
+				$this->sqlite_error = $e->getMessage();
+			}
+		}
+
 		private function write_disk_payload_for_key($key, $group, $payload) {
 			$path = $this->get_file_path($key, $group);
 			if (!$path) {
@@ -1283,7 +2037,7 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 			$dir = dirname($path);
-			if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0755, true) && !is_dir($dir)) {
+			if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0700, true) && !is_dir($dir)) {
 				return false;
 			}
 			$tmp = $path . '.tmp-' . uniqid('', true);
@@ -1567,7 +2321,8 @@ if (!class_exists('WP_Object_Cache')) {
 			if ('' === $item) {
 				return false;
 			}
-			return 'index.php' === $item;
+			$sqlite_name = basename($this->sqlite_path);
+			return in_array($item, array('index.php', '.htaccess', 'web.config', 'object-cache-metrics.json', $sqlite_name, $sqlite_name . '-wal', $sqlite_name . '-shm', $sqlite_name . '.maintenance.lock'), true);
 		}
 
 		private function recursive_delete($dir, $remove_root = true) {

@@ -14,6 +14,8 @@ final class Ultra_Cache_Object_Cache_Manager {
 	private const REDIS_APCU_PAYLOAD_MAX_BYTES = 1048576;
 	private const DISK_PAYLOAD_MAX_BYTES = 8388608;
 	private const DIAGNOSTIC_PAYLOAD_PROBE_MAX_BYTES = 262144;
+	private const SQLITE_DATABASE_DEFAULT_MB = 256;
+	private const SQLITE_WAL_TARGET_BYTES = 16777216;
 
 	public static function sync_dropin() {
 		self::reset_plugin_settings_cache();
@@ -49,7 +51,10 @@ final class Ultra_Cache_Object_Cache_Manager {
 	public static function get_unavailable_reason() {
 		$settings = self::get_plugin_settings();
 		if (!empty($settings['object_cache_enabled']) && 'redis' === self::get_selected_backend() && !self::redis_supported()) {
-			return __('Redis backend selected, but the PHP Redis extension is not loaded. UltraCache will use APCu when available, otherwise runtime-only object caching.', 'ultracache');
+			return __('Redis backend selected, but the PHP Redis extension is not loaded.', 'ultracache');
+		}
+		if (!empty($settings['object_cache_enabled']) && 'sqlite' === self::get_selected_backend() && !self::sqlite_supported()) {
+			return __('SQLite backend selected, but the PHP SQLite3 extension is not loaded.', 'ultracache');
 		}
 
 		return '';
@@ -63,7 +68,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 	public static function get_selected_backend() {
 		$settings = self::get_plugin_settings();
 		$backend = isset($settings['object_cache_backend']) ? strtolower(trim((string) $settings['object_cache_backend'])) : 'redis';
-		return in_array($backend, array('redis', 'apcu', 'disk'), true) ? $backend : 'redis';
+		return in_array($backend, array('redis', 'apcu', 'sqlite', 'disk'), true) ? $backend : 'redis';
 	}
 
 	private static function sanitize_fallback_backend($value) {
@@ -71,7 +76,30 @@ final class Ultra_Cache_Object_Cache_Manager {
 		if ('none' === $value || 'runtime' === $value || '' === $value) {
 			return 'none';
 		}
-		return in_array($value, array('apcu', 'disk'), true) ? $value : 'apcu';
+		return in_array($value, array('apcu', 'sqlite', 'disk'), true) ? $value : 'apcu';
+	}
+
+	private static function sanitize_sqlite_database_size_mb($value) {
+		$value = absint($value);
+		return in_array($value, array(32, 64, 128, 256, 512, 1024, 2048), true) ? $value : self::SQLITE_DATABASE_DEFAULT_MB;
+	}
+
+	private static function get_sqlite_database_max_bytes($settings = null) {
+		$settings = is_array($settings) ? $settings : self::get_plugin_settings();
+		$size_mb = self::sanitize_sqlite_database_size_mb($settings['sqlite_database_size_mb'] ?? self::SQLITE_DATABASE_DEFAULT_MB);
+		return $size_mb * MB_IN_BYTES;
+	}
+
+	private static function get_backend_label($backend) {
+		$labels = array(
+			'redis' => 'Redis',
+			'apcu' => 'APCu',
+			'sqlite' => 'SQLite',
+			'disk' => 'Disk',
+			'runtime' => 'runtime-only',
+		);
+		$backend = strtolower(trim((string) $backend));
+		return $labels[$backend] ?? $backend;
 	}
 
 	public static function get_selected_fallback_backend() {
@@ -100,6 +128,18 @@ final class Ultra_Cache_Object_Cache_Manager {
 			'apcu' => array(
 				'enabled' => false,
 				'available' => function_exists('apcu_fetch') && function_exists('apcu_store') && (!function_exists('apcu_enabled') || apcu_enabled()),
+			),
+			'sqlite' => array(
+				'enabled' => false,
+				'available' => self::sqlite_supported(),
+				'version' => self::get_sqlite_version(),
+				'path' => self::get_sqlite_path(),
+				'journalMode' => '',
+				'databaseMaxMb' => self::sanitize_sqlite_database_size_mb(self::get_plugin_settings()['sqlite_database_size_mb'] ?? self::SQLITE_DATABASE_DEFAULT_MB),
+				'databaseMaxBytes' => self::get_sqlite_database_max_bytes(),
+				'journalTargetMb' => (int) round(self::SQLITE_WAL_TARGET_BYTES / MB_IN_BYTES),
+				'journalTargetBytes' => self::SQLITE_WAL_TARGET_BYTES,
+				'error' => '',
 			),
 			'redis' => array(
 				'enabled' => false,
@@ -140,13 +180,24 @@ final class Ultra_Cache_Object_Cache_Manager {
 
 		$status['runtimeStatusUsed'] = $runtime_status_used;
 		$status['selected'] = $selected;
-		$status['active'] = in_array((string) ($status['active'] ?? ''), array('redis', 'apcu', 'disk', 'runtime'), true) ? (string) $status['active'] : $selected;
+		$status['active'] = in_array((string) ($status['active'] ?? ''), array('redis', 'apcu', 'sqlite', 'disk', 'runtime'), true) ? (string) $status['active'] : $selected;
 		if (!$runtime_status_used) {
 			$status['active'] = $selected;
-			if ('apcu' === $selected && empty($status['apcu']['available'])) {
-				$status['active'] = ('disk' === $selected_fallback) ? 'disk' : 'runtime';
-			} elseif ('redis' === $selected && empty($status['redis']['available'])) {
-				$status['active'] = ('apcu' === $selected_fallback && !empty($status['apcu']['available'])) ? 'apcu' : (('disk' === $selected_fallback) ? 'disk' : 'runtime');
+			$selected_available = 'redis' === $selected
+				? !empty($status['redis']['available'])
+				: ('apcu' === $selected
+					? !empty($status['apcu']['available'])
+					: ('sqlite' === $selected ? !empty($status['sqlite']['available']) : true));
+			if (!$selected_available) {
+				if ('apcu' === $selected_fallback && !empty($status['apcu']['available'])) {
+					$status['active'] = 'apcu';
+				} elseif ('sqlite' === $selected_fallback && !empty($status['sqlite']['available'])) {
+					$status['active'] = 'sqlite';
+				} elseif ('disk' === $selected_fallback) {
+					$status['active'] = 'disk';
+				} else {
+					$status['active'] = 'runtime';
+				}
 			}
 		}
 		$configured_fallback = self::sanitize_fallback_backend($status['configuredFallback'] ?? $selected_fallback);
@@ -157,15 +208,17 @@ final class Ultra_Cache_Object_Cache_Manager {
 		$status['fallback'] = $status['fallbackActive'] ? $active_backend : $standby_fallback;
 		$status['activeFallbackBackend'] = $status['fallbackActive'] ? $active_backend : '';
 		$status['activeFallbackKind'] = $status['fallbackActive'] ? ('runtime' === $active_backend ? 'runtime-only' : 'persistent') : '';
-		$status['fallbackPersistent'] = $status['fallbackActive'] && in_array($active_backend, array('redis', 'apcu', 'disk'), true);
+		$status['fallbackPersistent'] = $status['fallbackActive'] && in_array($active_backend, array('redis', 'apcu', 'sqlite', 'disk'), true);
 		$status['activeBackendRuntimeOnly'] = ('runtime' === $active_backend);
 		if ($status['fallbackActive']) {
 			$backend_error = '';
 			if ('redis' === $status['selected']) {
 				$backend_error = isset($status['redis']['error']) ? trim((string) $status['redis']['error']) : '';
+			} elseif ('sqlite' === $status['selected']) {
+				$backend_error = isset($status['sqlite']['error']) ? trim((string) $status['sqlite']['error']) : '';
 			}
-			$fallback_label = 'apcu' === (string) $status['fallback'] ? 'APCu' : ('runtime' === (string) $status['fallback'] ? 'runtime-only' : strtoupper((string) $status['fallback']));
-			$selected_label = 'apcu' === (string) $status['selected'] ? 'APCu' : strtoupper((string) $status['selected']);
+			$fallback_label = self::get_backend_label($status['fallback']);
+			$selected_label = self::get_backend_label($status['selected']);
 			$status['fallbackReason'] = '' !== $backend_error ? $backend_error : $selected_label . ' was selected but did not become active during drop-in bootstrap.';
 			$status['fallbackMessage'] = $selected_label . ' selected, ' . $fallback_label . ' fallback active.' . ('' !== $status['fallbackReason'] ? ' Reason: ' . $status['fallbackReason'] : '');
 		}
@@ -191,6 +244,21 @@ final class Ultra_Cache_Object_Cache_Manager {
 		$index = trailingslashit(ULTRACACHE_OBJECT_CACHE_DIR) . 'index.php';
 		if (!file_exists($index)) {
 			ultracache_safe_file_put_contents($index, "<?php\n// Silence is golden.\n");
+		}
+
+		$htaccess = trailingslashit(ULTRACACHE_OBJECT_CACHE_DIR) . '.htaccess';
+		if (!file_exists($htaccess)) {
+			ultracache_safe_file_put_contents($htaccess, "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\nOrder allow,deny\nDeny from all\n</IfModule>\n");
+		}
+
+		$web_config = trailingslashit(ULTRACACHE_OBJECT_CACHE_DIR) . 'web.config';
+		if (!file_exists($web_config)) {
+			ultracache_safe_file_put_contents($web_config, '<?xml version="1.0" encoding="UTF-8"?><configuration><system.webServer><security><authorization><remove users="*" roles="" verbs=""/><add accessType="Deny" users="*"/></authorization></security></system.webServer></configuration>');
+		}
+
+		$filesystem = function_exists('ultracache_get_wp_filesystem') ? ultracache_get_wp_filesystem() : null;
+		if (is_object($filesystem) && method_exists($filesystem, 'chmod')) {
+			$filesystem->chmod(ULTRACACHE_OBJECT_CACHE_DIR, 0700);
 		}
 	}
 
@@ -247,6 +315,40 @@ final class Ultra_Cache_Object_Cache_Manager {
 		return $status;
 	}
 
+	private static function get_dropin_backend_classes_source() {
+		$files = array(
+			'includes/object-cache/backends/class-object-cache-backend-interface.php',
+			'includes/object-cache/backends/class-object-cache-backend-context.php',
+			'includes/object-cache/backends/class-object-cache-abstract-backend.php',
+			'includes/object-cache/backends/class-object-cache-runtime-backend.php',
+			'includes/object-cache/backends/class-object-cache-redis-backend.php',
+			'includes/object-cache/backends/class-object-cache-sqlite-backend.php',
+			'includes/object-cache/backends/class-object-cache-apcu-backend.php',
+			'includes/object-cache/backends/class-object-cache-disk-backend.php',
+		);
+		$source = array();
+
+		foreach ($files as $relative_file) {
+			$file = ultracache_plugin_dir($relative_file);
+			if (!file_exists($file) || !is_readable($file)) {
+				return '';
+			}
+
+			$contents = (string) ultracache_safe_file_get_contents($file, 'object_cache_backend_source');
+			if ('' === trim($contents)) {
+				return '';
+			}
+
+			$contents = preg_replace('/^(?:\xEF\xBB\xBF)?\s*<\?php\s*/', '', $contents, 1);
+			if (!is_string($contents) || false !== strpos($contents, '?>')) {
+				return '';
+			}
+			$source[] = trim($contents);
+		}
+
+		return implode("\n\n", $source) . "\n";
+	}
+
 	public static function setup_dropin() {
 		self::ensure_cache_directory();
 
@@ -257,12 +359,19 @@ final class Ultra_Cache_Object_Cache_Manager {
 		}
 
 		$settings = self::get_plugin_settings();
+		$backend_classes_source = self::get_dropin_backend_classes_source();
+		if ('' === $backend_classes_source) {
+			return false;
+		}
 
 		$placeholders = array(
+			'__ULTRACACHE_OBJECT_CACHE_BACKEND_CLASSES__' => $backend_classes_source,
 			'__ULTRACACHE_DROPIN_BUILD__' => ULTRACACHE_VERSION,
 			'__ULTRACACHE_OBJECT_CACHE_DIR__' => ultracache_php_string_literal(ULTRACACHE_OBJECT_CACHE_DIR),
+			'__ULTRACACHE_SQLITE_PATH__' => ultracache_php_string_literal(self::get_sqlite_path()),
 			'__ULTRACACHE_SELECTED_BACKEND__' => ultracache_php_string_literal(self::get_selected_backend()),
 			'__ULTRACACHE_FALLBACK_BACKEND__' => ultracache_php_string_literal(self::get_selected_fallback_backend()),
+			'__ULTRACACHE_SQLITE_DATABASE_MAX_BYTES__' => (string) self::get_sqlite_database_max_bytes($settings),
 			'__ULTRACACHE_CACHE_STATS_ENABLED__' => !empty($settings['cache_stats_enabled']) ? 'true' : 'false',
 			'__ULTRACACHE_REDIS_HOST__'       => ultracache_php_string_literal((string) ($settings['redis_host'] ?? '127.0.0.1')),
 			'__ULTRACACHE_REDIS_PORT__'       => (string) max(1, absint($settings['redis_port'] ?? 6379)),
@@ -350,10 +459,13 @@ final class Ultra_Cache_Object_Cache_Manager {
 			$report['dropinFlushResult'] = self::flush_apcu_namespace(self::get_apcu_prefix());
 			$report['success'] = (bool) $report['dropinFlushResult'];
 			$report['semanticStatus'] = $report['success'] ? 'apcu_namespace_flushed' : 'apcu_flush_failed';
+		} elseif ('sqlite' === $target_backend) {
+			$report['dropinFlushCalled'] = false;
+			$report['dropinFlushResult'] = self::flush_sqlite_object_cache();
+			$report['success'] = (bool) $report['dropinFlushResult'];
+			$report['semanticStatus'] = $report['success'] ? 'sqlite_cache_flushed' : 'sqlite_flush_failed';
 		} elseif ('disk' === $target_backend) {
-			if ($force_hard || is_dir(ULTRACACHE_OBJECT_CACHE_DIR)) {
-				self::recursive_delete(ULTRACACHE_OBJECT_CACHE_DIR);
-			}
+			self::flush_disk_cache_files();
 			self::ensure_cache_directory();
 			$report['dropinFlushResult'] = true;
 			$report['success'] = true;
@@ -394,7 +506,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 		if ('' === $backend) {
 			return 'active';
 		}
-		return in_array($backend, array('active', 'selected', 'redis', 'apcu', 'disk', 'runtime'), true) ? $backend : 'active';
+		return in_array($backend, array('active', 'selected', 'redis', 'apcu', 'sqlite', 'disk', 'runtime'), true) ? $backend : 'active';
 	}
 
 	private static function resolve_flush_backend($backend) {
@@ -402,18 +514,18 @@ final class Ultra_Cache_Object_Cache_Manager {
 		$status = self::get_backend_status();
 		if ('selected' === $backend) {
 			$selected = isset($status['selected']) ? strtolower((string) $status['selected']) : self::get_selected_backend();
-			return in_array($selected, array('redis', 'apcu', 'disk'), true) ? $selected : 'runtime';
+			return in_array($selected, array('redis', 'apcu', 'sqlite', 'disk'), true) ? $selected : 'runtime';
 		}
 		if ('active' === $backend) {
 			$active = isset($status['active']) ? strtolower((string) $status['active']) : self::get_active_backend();
-			return in_array($active, array('redis', 'apcu', 'disk', 'runtime'), true) ? $active : 'runtime';
+			return in_array($active, array('redis', 'apcu', 'sqlite', 'disk', 'runtime'), true) ? $active : 'runtime';
 		}
 		return $backend;
 	}
 
 	private static function build_backend_flush_report_message($report) {
 		$backend = isset($report['targetBackend']) ? strtolower((string) $report['targetBackend']) : 'object';
-		$label = 'redis' === $backend ? 'Redis' : ('apcu' === $backend ? 'APCu' : ('disk' === $backend ? 'Disk' : 'Runtime'));
+		$label = 'redis' === $backend ? 'Redis' : ('apcu' === $backend ? 'APCu' : ('sqlite' === $backend ? 'SQLite' : ('disk' === $backend ? 'Disk' : 'Runtime')));
 		if (empty($report['success'])) {
 			return sprintf(
 				/* translators: %s: object cache backend label, for example Redis. */
@@ -449,6 +561,9 @@ final class Ultra_Cache_Object_Cache_Manager {
 		if ('apcu' === $backend) {
 			return self::test_apcu_connection();
 		}
+		if ('sqlite' === $backend) {
+			return self::test_sqlite_object_cache();
+		}
 		if ('disk' === $backend) {
 			return self::test_disk_object_cache();
 		}
@@ -482,6 +597,184 @@ final class Ultra_Cache_Object_Cache_Manager {
 			$result['message'] = $result['success'] ? 'APCu read/write probe passed.' : 'APCu is available, but the read/write probe failed.';
 		} catch (Throwable $e) {
 			$result['message'] = $e->getMessage();
+		}
+		return $result;
+	}
+
+	public static function test_sqlite_object_cache() {
+		$result = array(
+			'success' => false,
+			'backend' => 'sqlite',
+			'available' => self::sqlite_supported(),
+			'version' => self::get_sqlite_version(),
+			'path' => self::get_sqlite_path(),
+			'journalMode' => '',
+			'checks' => array(
+				'write' => false,
+				'read' => false,
+				'delete' => false,
+				'expiration' => false,
+			),
+			'message' => '',
+		);
+		if (!$result['available']) {
+			$result['message'] = __('PHP SQLite3 is not available for this runtime.', 'ultracache');
+			return $result;
+		}
+
+		$sqlite = self::open_sqlite_database();
+		if (!$sqlite instanceof SQLite3) {
+			$result['message'] = __('SQLite object-cache database could not be opened.', 'ultracache');
+			return $result;
+		}
+
+		$live_key = 'probe-live-' . md5(uniqid('ultracache-sqlite', true));
+		$expired_key = 'probe-expired-' . md5(uniqid('ultracache-sqlite', true));
+		$value = 'ultracache:' . md5($live_key . microtime(true));
+		try {
+			$result['journalMode'] = strtolower((string) $sqlite->querySingle('PRAGMA journal_mode'));
+
+			$write_statement = $sqlite->prepare('INSERT OR REPLACE INTO ultracache_object_cache (cache_id, cache_scope, cache_group, payload, expires_at, updated_at) VALUES (:cache_id, :cache_scope, :cache_group, :payload, :expires_at, :updated_at)');
+			if (!$write_statement) {
+				throw new RuntimeException((string) $sqlite->lastErrorMsg());
+			}
+			$write_statement->bindValue(':cache_id', $live_key, SQLITE3_TEXT);
+			$write_statement->bindValue(':cache_scope', 'diagnostic', SQLITE3_TEXT);
+			$write_statement->bindValue(':cache_group', 'diagnostic', SQLITE3_TEXT);
+			$write_statement->bindValue(':payload', $value, SQLITE3_BLOB);
+			$write_statement->bindValue(':expires_at', time() + 30, SQLITE3_INTEGER);
+			$write_statement->bindValue(':updated_at', time(), SQLITE3_INTEGER);
+			$write_result = $write_statement->execute();
+			$result['checks']['write'] = $write_result instanceof SQLite3Result;
+			if ($write_result instanceof SQLite3Result) {
+				$write_result->finalize();
+			}
+			$write_statement->close();
+
+			$read_statement = $sqlite->prepare('SELECT payload FROM ultracache_object_cache WHERE cache_id = :cache_id LIMIT 1');
+			if (!$read_statement) {
+				throw new RuntimeException((string) $sqlite->lastErrorMsg());
+			}
+			$read_statement->bindValue(':cache_id', $live_key, SQLITE3_TEXT);
+			$read_result = $read_statement->execute();
+			$row = $read_result ? $read_result->fetchArray(SQLITE3_ASSOC) : false;
+			if ($read_result instanceof SQLite3Result) {
+				$read_result->finalize();
+			}
+			$read_statement->close();
+			$result['checks']['read'] = is_array($row) && isset($row['payload']) && (string) $row['payload'] === $value;
+
+			$delete_statement = $sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_id = :cache_id');
+			if (!$delete_statement) {
+				throw new RuntimeException((string) $sqlite->lastErrorMsg());
+			}
+			$delete_statement->bindValue(':cache_id', $live_key, SQLITE3_TEXT);
+			$delete_result = $delete_statement->execute();
+			if ($delete_result instanceof SQLite3Result) {
+				$delete_result->finalize();
+			}
+			$delete_statement->close();
+
+			$verify_delete_statement = $sqlite->prepare('SELECT COUNT(*) FROM ultracache_object_cache WHERE cache_id = :cache_id');
+			if (!$verify_delete_statement) {
+				throw new RuntimeException((string) $sqlite->lastErrorMsg());
+			}
+			$verify_delete_statement->bindValue(':cache_id', $live_key, SQLITE3_TEXT);
+			$verify_delete_result = $verify_delete_statement->execute();
+			$delete_count_row = $verify_delete_result ? $verify_delete_result->fetchArray(SQLITE3_NUM) : false;
+			$remaining = is_array($delete_count_row) ? (int) ($delete_count_row[0] ?? 1) : 1;
+			if ($verify_delete_result instanceof SQLite3Result) {
+				$verify_delete_result->finalize();
+			}
+			$verify_delete_statement->close();
+			$result['checks']['delete'] = (0 === $remaining);
+
+			$expiry_statement = $sqlite->prepare('INSERT OR REPLACE INTO ultracache_object_cache (cache_id, cache_scope, cache_group, payload, expires_at, updated_at) VALUES (:cache_id, :cache_scope, :cache_group, :payload, :expires_at, :updated_at)');
+			if (!$expiry_statement) {
+				throw new RuntimeException((string) $sqlite->lastErrorMsg());
+			}
+			$expiry_statement->bindValue(':cache_id', $expired_key, SQLITE3_TEXT);
+			$expiry_statement->bindValue(':cache_scope', 'diagnostic', SQLITE3_TEXT);
+			$expiry_statement->bindValue(':cache_group', 'diagnostic', SQLITE3_TEXT);
+			$expiry_statement->bindValue(':payload', $value, SQLITE3_BLOB);
+			$expiry_statement->bindValue(':expires_at', time() - 1, SQLITE3_INTEGER);
+			$expiry_statement->bindValue(':updated_at', time(), SQLITE3_INTEGER);
+			$expiry_result = $expiry_statement->execute();
+			if ($expiry_result instanceof SQLite3Result) {
+				$expiry_result->finalize();
+			}
+			$expiry_statement->close();
+
+			$expiry_read_statement = $sqlite->prepare('SELECT expires_at FROM ultracache_object_cache WHERE cache_id = :cache_id LIMIT 1');
+			if (!$expiry_read_statement) {
+				throw new RuntimeException((string) $sqlite->lastErrorMsg());
+			}
+			$expiry_read_statement->bindValue(':cache_id', $expired_key, SQLITE3_TEXT);
+			$expiry_read_result = $expiry_read_statement->execute();
+			$expiry_row = $expiry_read_result ? $expiry_read_result->fetchArray(SQLITE3_ASSOC) : false;
+			if ($expiry_read_result instanceof SQLite3Result) {
+				$expiry_read_result->finalize();
+			}
+			$expiry_read_statement->close();
+			$expired = is_array($expiry_row) && !empty($expiry_row['expires_at']) && (int) $expiry_row['expires_at'] < time();
+			if ($expired) {
+				$expire_delete_statement = $sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_id = :cache_id');
+				if (!$expire_delete_statement) {
+					throw new RuntimeException((string) $sqlite->lastErrorMsg());
+				}
+				$expire_delete_statement->bindValue(':cache_id', $expired_key, SQLITE3_TEXT);
+				$expire_delete_result = $expire_delete_statement->execute();
+				if ($expire_delete_result instanceof SQLite3Result) {
+					$expire_delete_result->finalize();
+				}
+				$expire_delete_statement->close();
+			}
+			$expired_remaining_statement = $sqlite->prepare('SELECT COUNT(*) FROM ultracache_object_cache WHERE cache_id = :cache_id');
+			if (!$expired_remaining_statement) {
+				throw new RuntimeException((string) $sqlite->lastErrorMsg());
+			}
+			$expired_remaining_statement->bindValue(':cache_id', $expired_key, SQLITE3_TEXT);
+			$expired_remaining_result = $expired_remaining_statement->execute();
+			$expired_count_row = $expired_remaining_result ? $expired_remaining_result->fetchArray(SQLITE3_NUM) : false;
+			$expired_remaining = is_array($expired_count_row) ? (int) ($expired_count_row[0] ?? 1) : 1;
+			if ($expired_remaining_result instanceof SQLite3Result) {
+				$expired_remaining_result->finalize();
+			}
+			$expired_remaining_statement->close();
+			$result['checks']['expiration'] = $expired && 0 === $expired_remaining;
+
+			$result['success'] = !in_array(false, $result['checks'], true);
+			$result['message'] = $result['success']
+				? __('SQLite object cache functional test passed.', 'ultracache')
+				: __('SQLite object cache functional test failed.', 'ultracache');
+		} catch (Throwable $e) {
+			$result['message'] = $e->getMessage();
+		} finally {
+			try {
+				$cleanup_statement = $sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_id IN (:live_key, :expired_key)');
+				if ($cleanup_statement) {
+					$cleanup_statement->bindValue(':live_key', $live_key, SQLITE3_TEXT);
+					$cleanup_statement->bindValue(':expired_key', $expired_key, SQLITE3_TEXT);
+					$cleanup_result = $cleanup_statement->execute();
+					if ($cleanup_result instanceof SQLite3Result) {
+						$cleanup_result->finalize();
+					}
+					$cleanup_statement->close();
+				}
+			} catch (Throwable $e) {
+				if ('' === (string) $result['message']) {
+					$result['message'] = $e->getMessage();
+				}
+			}
+			$sqlite->close();
+		}
+
+		$exposure = self::get_sqlite_public_exposure_status();
+		$result['publicExposure'] = $exposure;
+		$result['checks']['publicAccessBlocked'] = !empty($exposure['checked']) && empty($exposure['exposed']);
+		$result['success'] = !in_array(false, $result['checks'], true);
+		if (empty($exposure['checked']) || !empty($exposure['exposed'])) {
+			$result['message'] = (string) $exposure['message'];
 		}
 		return $result;
 	}
@@ -651,7 +944,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 
 	private static function get_diagnostic_payload_limit_bytes($backend) {
 		$backend = strtolower((string) $backend);
-		if ('disk' === $backend) {
+		if (in_array($backend, array('sqlite', 'disk'), true)) {
 			return self::DISK_PAYLOAD_MAX_BYTES;
 		}
 		return self::REDIS_APCU_PAYLOAD_MAX_BYTES;
@@ -676,7 +969,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 
 		if (!empty($backend_status['runtimeConfigStale'])) {
 			$fresh_backend = isset($backend_status['active']) ? strtolower((string) $backend_status['active']) : self::get_selected_backend();
-			if (!in_array($fresh_backend, array('redis', 'apcu', 'disk'), true)) {
+			if (!in_array($fresh_backend, array('redis', 'apcu', 'sqlite', 'disk'), true)) {
 				$fresh_backend = self::get_selected_backend();
 			}
 
@@ -685,7 +978,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 			$result['staleRuntimeSkipped'] = true;
 			$result['freshBackendProbe'] = $fresh_probe;
 			$result['probes']['fresh_backend'] = $fresh_probe;
-			$label = 'apcu' === $fresh_backend ? 'APCu' : ('disk' === $fresh_backend ? 'Disk' : strtoupper($fresh_backend));
+			$label = self::get_backend_label($fresh_backend);
 			$result['message'] = !empty($fresh_probe['success'])
 				? $label . ' backend read/write probe passed. Runtime object-cache payload probe is waiting for the next WordPress bootstrap after the backend switch.'
 				: $label . ' backend read/write probe failed after the backend switch.';
@@ -908,7 +1201,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 		$active_backend = isset($backend_status['active']) ? (string) $backend_status['active'] : $selected_backend;
 		$fallback_active = !empty($backend_status['fallbackActive']);
 		$fallback_backend = isset($backend_status['fallback']) ? strtolower(trim((string) $backend_status['fallback'])) : '';
-		if (!in_array($fallback_backend, array('redis', 'apcu', 'disk', 'runtime'), true)) {
+		if (!in_array($fallback_backend, array('redis', 'apcu', 'sqlite', 'disk', 'runtime'), true)) {
 			$fallback_backend = $fallback_active ? $active_backend : (!empty($backend_status['apcu']['available']) ? 'apcu' : 'runtime');
 		}
 		$fallback_message = isset($backend_status['fallbackMessage']) ? (string) $backend_status['fallbackMessage'] : '';
@@ -919,6 +1212,8 @@ final class Ultra_Cache_Object_Cache_Manager {
 		$redis_bytes = 0;
 		$apcu_entries = 0;
 		$apcu_bytes = 0;
+		$sqlite_entries = 0;
+		$sqlite_bytes = 0;
 		$partial = false;
 		$partial_reason = '';
 		$stats_limit = 0;
@@ -961,6 +1256,17 @@ final class Ultra_Cache_Object_Cache_Manager {
 			$stats_limit = (int) ($apcu_stats['limit'] ?? 0);
 		}
 
+		$should_collect_sqlite_stats = in_array('sqlite', array($selected_backend, $active_backend, $fallback_backend), true);
+		if ($should_collect_sqlite_stats) {
+			$sqlite_stats = self::collect_sqlite_cache_stats();
+			$sqlite_entries = (int) ($sqlite_stats['entries'] ?? 0);
+			$sqlite_bytes = (int) ($sqlite_stats['bytes'] ?? 0);
+			if ('sqlite' === $active_backend) {
+				$partial = !empty($sqlite_stats['partial']);
+				$partial_reason = (string) ($sqlite_stats['partialReason'] ?? '');
+			}
+		}
+
 		$entry_count = 0;
 		$bytes = 0;
 		if ('redis' === $active_backend) {
@@ -969,6 +1275,9 @@ final class Ultra_Cache_Object_Cache_Manager {
 		} elseif ('apcu' === $active_backend) {
 			$entry_count = $apcu_entries;
 			$bytes = $apcu_bytes;
+		} elseif ('sqlite' === $active_backend) {
+			$entry_count = $sqlite_entries;
+			$bytes = $sqlite_bytes;
 		} elseif ('disk' === $active_backend) {
 			$entry_count = $disk_entries;
 			$bytes = $disk_bytes;
@@ -1002,6 +1311,10 @@ final class Ultra_Cache_Object_Cache_Manager {
 			'objectCacheApcuEntries' => $apcu_entries,
 			'objectCacheApcuSizeBytes' => $apcu_bytes,
 			'objectCacheApcuSizeHuman' => function_exists('size_format') ? size_format($apcu_bytes, 2) : (string) $apcu_bytes,
+			'objectCacheSqliteEntries' => $sqlite_entries,
+			'objectCacheSqliteSizeBytes' => $sqlite_bytes,
+			'objectCacheSqliteSizeHuman' => function_exists('size_format') ? size_format($sqlite_bytes, 2) : (string) $sqlite_bytes,
+			'objectCacheSqliteStatsCollected' => (bool) $should_collect_sqlite_stats,
 			'objectCacheDiskEntries' => $disk_entries,
 			'objectCacheDiskSizeBytes' => $disk_bytes,
 			'objectCacheDiskSizeHuman' => function_exists('size_format') ? size_format($disk_bytes, 2) : (string) $disk_bytes,
@@ -1072,6 +1385,41 @@ final class Ultra_Cache_Object_Cache_Manager {
 			$stats['partialReason'] = 'error';
 		}
 
+		return $stats;
+	}
+
+	private static function collect_sqlite_cache_stats() {
+		$stats = array(
+			'entries' => 0,
+			'bytes' => 0,
+			'partial' => false,
+			'partialReason' => '',
+		);
+		if (!file_exists(self::get_sqlite_path())) {
+			return $stats;
+		}
+		$sqlite = self::open_sqlite_database();
+		if (!$sqlite instanceof SQLite3) {
+			$stats['partial'] = true;
+			$stats['partialReason'] = 'SQLite database could not be opened.';
+			return $stats;
+		}
+		try {
+			$statement = $sqlite->prepare('SELECT COUNT(*) AS entries, COALESCE(SUM(LENGTH(payload)), 0) AS bytes FROM ultracache_object_cache WHERE expires_at = 0 OR expires_at >= :now');
+			$statement->bindValue(':now', time(), SQLITE3_INTEGER);
+			$query_result = $statement->execute();
+			$row = $query_result->fetchArray(SQLITE3_ASSOC);
+			$query_result->finalize();
+			$statement->close();
+			if (is_array($row)) {
+				$stats['entries'] = (int) ($row['entries'] ?? 0);
+				$stats['bytes'] = (int) ($row['bytes'] ?? 0);
+			}
+		} catch (Throwable $e) {
+			$stats['partial'] = true;
+			$stats['partialReason'] = $e->getMessage();
+		}
+		$sqlite->close();
 		return $stats;
 	}
 
@@ -1214,7 +1562,40 @@ final class Ultra_Cache_Object_Cache_Manager {
 
 	public static function cleanup_expired_entries() {
 		$removed = self::cleanup_expired_directory(ULTRACACHE_OBJECT_CACHE_DIR);
+		$removed += self::cleanup_expired_sqlite_entries();
 		self::flush_stale_temp_files(ULTRACACHE_OBJECT_CACHE_DIR);
+		return $removed;
+	}
+
+	private static function cleanup_expired_sqlite_entries() {
+		if (!file_exists(self::get_sqlite_path())) {
+			return 0;
+		}
+		$sqlite = self::open_sqlite_database();
+		if (!$sqlite instanceof SQLite3) {
+			return 0;
+		}
+		$removed = 0;
+		try {
+			$statement = $sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_id IN (SELECT cache_id FROM ultracache_object_cache WHERE expires_at > 0 AND expires_at < :now LIMIT 500)');
+			$statement->bindValue(':now', time(), SQLITE3_INTEGER);
+			$query_result = $statement->execute();
+			if (false === $query_result) {
+				throw new RuntimeException((string) $sqlite->lastErrorMsg());
+			}
+			if ($query_result instanceof SQLite3Result) {
+				$query_result->finalize();
+			}
+			$statement->close();
+			$removed = max(0, (int) $sqlite->changes());
+			if ($removed > 0) {
+				$sqlite->exec('PRAGMA wal_checkpoint(PASSIVE)');
+			}
+			self::harden_sqlite_storage_permissions();
+		} catch (Throwable $e) {
+			$removed = 0;
+		}
+		$sqlite->close();
 		return $removed;
 	}
 
@@ -1376,6 +1757,35 @@ final class Ultra_Cache_Object_Cache_Manager {
 		ultracache_safe_rmdir_empty($dir, 'object_cache_recursive_delete empty root rmdir');
 	}
 
+	private static function flush_disk_cache_files() {
+		foreach (self::collect_cache_files(ULTRACACHE_OBJECT_CACHE_DIR, 'cache') as $file) {
+			ultracache_safe_unlink($file, 'object_cache_disk_flush');
+		}
+		self::remove_empty_cache_directories(ULTRACACHE_OBJECT_CACHE_DIR, false);
+	}
+
+	private static function remove_empty_cache_directories($dir, $remove_root = true) {
+		if (!is_dir($dir) || is_link($dir)) {
+			return;
+		}
+		$items = ultracache_safe_scandir($dir, 'object_cache_remove_empty_directories scandir');
+		if (!is_array($items)) {
+			return;
+		}
+		foreach ($items as $item) {
+			if ('.' === $item || '..' === $item) {
+				continue;
+			}
+			$path = $dir . DIRECTORY_SEPARATOR . $item;
+			if (is_dir($path) && !is_link($path)) {
+				self::remove_empty_cache_directories($path, true);
+			}
+		}
+		if ($remove_root) {
+			ultracache_safe_rmdir_empty($dir, 'object_cache_remove_empty_directories rmdir');
+		}
+	}
+
 
 	private static function prune_cache_directory() {
 		if (!is_dir(ULTRACACHE_OBJECT_CACHE_DIR)) {
@@ -1384,7 +1794,12 @@ final class Ultra_Cache_Object_Cache_Manager {
 
 		$preserve = array(
 			'index.php',
+			'.htaccess',
+			'web.config',
 			'object-cache-metrics.json',
+			basename(self::get_sqlite_path()),
+			basename(self::get_sqlite_path()) . '-wal',
+			basename(self::get_sqlite_path()) . '-shm',
 		);
 
 		$items = ultracache_safe_scandir(ULTRACACHE_OBJECT_CACHE_DIR, 'object_cache_prune_root scandir');
@@ -1434,6 +1849,214 @@ final class Ultra_Cache_Object_Cache_Manager {
 		return class_exists('Redis') || extension_loaded('redis');
 	}
 
+	private static function sqlite_supported() {
+		return class_exists('SQLite3') && extension_loaded('sqlite3');
+	}
+
+	private static function get_sqlite_version() {
+		if (!self::sqlite_supported()) {
+			return '';
+		}
+		$version = SQLite3::version();
+		return is_array($version) && isset($version['versionString']) ? (string) $version['versionString'] : '';
+	}
+
+	private static function get_sqlite_path() {
+		$seed = function_exists('ultracache_site_namespace_seed') ? ultracache_site_namespace_seed() : home_url('/');
+		$hash = hash('sha256', 'ultracache-sqlite-object-cache|' . (string) $seed);
+		return trailingslashit(ULTRACACHE_OBJECT_CACHE_DIR) . '.ht.object-cache-' . substr($hash, 0, 20) . '.sqlite';
+	}
+
+	private static function harden_sqlite_storage_permissions() {
+		$filesystem = function_exists('ultracache_get_wp_filesystem') ? ultracache_get_wp_filesystem() : null;
+		if (!is_object($filesystem) || !method_exists($filesystem, 'chmod')) {
+			return;
+		}
+
+		$filesystem->chmod(ULTRACACHE_OBJECT_CACHE_DIR, 0700);
+		$path = self::get_sqlite_path();
+		foreach (array($path, $path . '-wal', $path . '-shm') as $sqlite_file) {
+			if (file_exists($sqlite_file)) {
+				$filesystem->chmod($sqlite_file, 0600);
+			}
+		}
+	}
+
+	private static function configure_sqlite_database(SQLite3 $sqlite) {
+		if (
+			!$sqlite->exec('PRAGMA synchronous=NORMAL')
+			|| !$sqlite->exec('PRAGMA temp_store=MEMORY')
+			|| !$sqlite->exec('PRAGMA secure_delete=ON')
+			|| !$sqlite->exec('PRAGMA wal_autocheckpoint=1000')
+		) {
+			return false;
+		}
+
+		$sqlite->querySingle('PRAGMA journal_size_limit=' . self::SQLITE_WAL_TARGET_BYTES);
+		return true;
+	}
+
+	private static function apply_sqlite_database_limit(SQLite3 $sqlite) {
+		$page_size = max(512, (int) $sqlite->querySingle('PRAGMA page_size'));
+		$max_pages = max(1.0, floor(((float) self::get_sqlite_database_max_bytes()) / $page_size));
+		$page_count = max(0, (int) $sqlite->querySingle('PRAGMA page_count'));
+
+		if ((float) $page_count > $max_pages) {
+			if (!$sqlite->exec('DELETE FROM ultracache_object_cache')) {
+				return false;
+			}
+			$sqlite->querySingle('PRAGMA wal_checkpoint(TRUNCATE)', true);
+			if (!$sqlite->exec('VACUUM')) {
+				return false;
+			}
+		}
+
+		$applied = (float) $sqlite->querySingle('PRAGMA max_page_count=' . sprintf('%.0f', $max_pages));
+		return $applied > 0 && $applied <= ($max_pages + 1.0);
+	}
+
+	private static function get_sqlite_public_url() {
+		if (!function_exists('ultracache_object_cache_storage_url')) {
+			return '';
+		}
+		return ultracache_object_cache_storage_url(basename(self::get_sqlite_path()));
+	}
+
+	public static function get_sqlite_public_exposure_status() {
+		$status = array(
+			'checked' => false,
+			'exposed' => false,
+			'httpStatus' => 0,
+			'message' => '',
+		);
+
+		$url = self::get_sqlite_public_url();
+		if (!file_exists(self::get_sqlite_path())) {
+			$sqlite = self::open_sqlite_database();
+			if ($sqlite instanceof SQLite3) {
+				$sqlite->close();
+			}
+		}
+		if ('' === $url || !file_exists(self::get_sqlite_path())) {
+			$status['message'] = __('SQLite public exposure test could not resolve the database URL.', 'ultracache');
+			return $status;
+		}
+
+		$probe_url = add_query_arg('ultracache_sqlite_exposure_probe', wp_generate_password(16, false, false), $url);
+		$response = ultracache_safe_loopback_remote_request(
+			$probe_url,
+			array(
+				'method'              => 'GET',
+				'timeout'             => 5,
+				'redirection'         => 0,
+				'decompress'          => false,
+				'limit_response_size' => 32,
+				'headers'             => array(
+					'Accept-Encoding' => 'identity',
+					'Cache-Control'   => 'no-cache, no-store',
+					'Pragma'          => 'no-cache',
+					'Range'           => 'bytes=0-31',
+				),
+			),
+			'sqlite_public_exposure_probe'
+		);
+
+		if (is_wp_error($response)) {
+			$status['message'] = __('SQLite public exposure test could not complete the loopback request.', 'ultracache');
+			return $status;
+		}
+
+		$status['checked'] = true;
+		$status['httpStatus'] = (int) wp_remote_retrieve_response_code($response);
+		$body = (string) wp_remote_retrieve_body($response);
+		$status['exposed'] = in_array($status['httpStatus'], array(200, 206), true) && 0 === strpos($body, 'SQLite format 3');
+		$status['message'] = $status['exposed']
+			? __('The SQLite object-cache database is publicly readable and cannot be used safely.', 'ultracache')
+			: __('The SQLite object-cache database was not exposed by the web server.', 'ultracache');
+		return $status;
+	}
+
+	private static function open_sqlite_database() {
+		if (!self::sqlite_supported()) {
+			return false;
+		}
+		self::ensure_cache_directory();
+		$path = self::get_sqlite_path();
+		$root = trailingslashit(wp_normalize_path(ULTRACACHE_OBJECT_CACHE_DIR));
+		if (0 !== strpos(wp_normalize_path($path), $root)) {
+			return false;
+		}
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- Scoped handler converts SQLite open warnings into exceptions and is restored immediately.
+		set_error_handler(
+			static function ($severity, $message, $file = null, $line = null) {
+				// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception context is not rendered as HTML output.
+				throw new ErrorException($message, 0, $severity, (string) $file, (int) $line);
+			}
+		);
+		try {
+			$sqlite = new SQLite3($path, SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE);
+			$sqlite->enableExceptions(true);
+			$sqlite->busyTimeout(250);
+			$journal_mode = strtolower((string) $sqlite->querySingle('PRAGMA journal_mode=WAL'));
+			if ('wal' !== $journal_mode) {
+				$sqlite->close();
+				return false;
+			}
+			if (!self::configure_sqlite_database($sqlite)) {
+				$sqlite->close();
+				return false;
+			}
+			$schema_version = (int) $sqlite->querySingle('PRAGMA user_version');
+			if ($schema_version < 1) {
+				if (!$sqlite->exec('CREATE TABLE IF NOT EXISTS ultracache_object_cache (cache_id TEXT PRIMARY KEY NOT NULL, cache_scope TEXT NOT NULL, cache_group TEXT NOT NULL, payload BLOB NOT NULL, expires_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)')) {
+					$sqlite->close();
+					return false;
+				}
+				if (!$sqlite->exec('CREATE INDEX IF NOT EXISTS ultracache_object_cache_scope_group ON ultracache_object_cache (cache_scope, cache_group)') || !$sqlite->exec('CREATE INDEX IF NOT EXISTS ultracache_object_cache_expiry ON ultracache_object_cache (expires_at)')) {
+					$sqlite->close();
+					return false;
+				}
+				if (!$sqlite->exec('PRAGMA user_version=1')) {
+					$sqlite->close();
+					return false;
+				}
+			}
+			if (!self::apply_sqlite_database_limit($sqlite)) {
+				$sqlite->close();
+				return false;
+			}
+			self::harden_sqlite_storage_permissions();
+			return $sqlite;
+		} catch (Throwable $e) {
+			if (isset($sqlite) && $sqlite instanceof SQLite3) {
+				$sqlite->close();
+			}
+			return false;
+		} finally {
+			restore_error_handler();
+		}
+	}
+
+	private static function flush_sqlite_object_cache() {
+		$sqlite = self::open_sqlite_database();
+		if (!$sqlite instanceof SQLite3) {
+			return false;
+		}
+		$success = false;
+		try {
+			$success = (bool) $sqlite->exec('DELETE FROM ultracache_object_cache');
+			if ($success) {
+				$sqlite->exec('PRAGMA wal_checkpoint(TRUNCATE)');
+				$sqlite->exec('PRAGMA optimize');
+				self::harden_sqlite_storage_permissions();
+			}
+		} catch (Throwable $e) {
+			$success = false;
+		}
+		$sqlite->close();
+		return $success;
+	}
+
 	public static function reset_settings_cache() {
 		self::$plugin_settings_cache = null;
 	}
@@ -1456,6 +2079,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 			'object_cache_enabled' => !empty($saved['objectCacheEnabled']),
 			'object_cache_backend' => !empty($saved['objectCacheBackend']) ? (string) $saved['objectCacheBackend'] : 'redis',
 			'object_cache_fallback_backend' => isset($saved['objectCacheFallbackBackend']) ? self::sanitize_fallback_backend($saved['objectCacheFallbackBackend']) : 'apcu',
+			'sqlite_database_size_mb' => self::sanitize_sqlite_database_size_mb($saved['sqliteDatabaseSizeMb'] ?? self::SQLITE_DATABASE_DEFAULT_MB),
 			'cache_stats_enabled'  => !empty($saved['cacheStatsEnabled']),
 			'redis_host'           => !empty($saved['redisHost']) ? (string) $saved['redisHost'] : '127.0.0.1',
 			'redis_port'           => isset($saved['redisPort']) ? absint($saved['redisPort']) : 6379,

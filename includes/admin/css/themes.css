@@ -1,0 +1,632 @@
+/* UltraCache dashboard themes. WordPress-native is the per-user default. */
+
+#uc-dashboard {
+	--uc-wp-accent: var(--wp-admin-theme-color, #2271b1);
+	--uc-wp-accent-hover: var(--wp-admin-theme-color-darker-10, #135e96);
+	--uc-wp-accent-active: var(--wp-admin-theme-color-darker-20, #0a4b78);
+}
+
+.uc-admin-theme-control {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 38px;
+	padding: 0 4px;
+}
+
+.uc-admin-theme-control__label {
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 1.3;
+	white-space: nowrap;
+}
+
+/* WordPress-native theme */
+body.toplevel_page_ultracache.ultracache-admin-theme-native #wpbody-content {
+	background: #f0f0f1;
+}
+
+#uc-dashboard[data-uc-theme="native"] {
+	--uc-bg: #f0f0f1;
+	--uc-panel: #ffffff;
+	--uc-panel-2: #f6f7f7;
+	--uc-border: #c3c4c7;
+	--uc-border-strong: #8c8f94;
+	--uc-text: #1d2327;
+	--uc-text-soft: #50575e;
+	--uc-text-dim: #646970;
+	--uc-accent: var(--uc-wp-accent);
+	--uc-accent-2: var(--uc-wp-accent);
+	--uc-success: var(--uc-wp-accent);
+	--uc-success-hover: var(--uc-wp-accent-hover);
+	--uc-success-active: var(--uc-wp-accent-active);
+	--uc-success-border: var(--uc-wp-accent);
+	--uc-success-focus: rgba(34, 113, 177, 0.22);
+	--uc-error: #b32d2e;
+	--uc-warning: #996800;
+	--uc-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+	--uc-radius: 0;
+	--uc-radius-sm: 0;
+	background: #f0f0f1;
+	color: var(--uc-text);
+}
+
+#uc-dashboard[data-uc-theme="native"] .text-white,
+#uc-dashboard[data-uc-theme="native"] .text-zinc-300 {
+	color: var(--uc-text);
+}
+
+#uc-dashboard[data-uc-theme="native"] .text-zinc-400 {
+	color: var(--uc-text-soft);
+}
+
+#uc-dashboard[data-uc-theme="native"] .text-zinc-500 {
+	color: var(--uc-text-dim);
+}
+
+#uc-dashboard[data-uc-theme="native"] .text-black {
+	color: #ffffff;
+}
+
+#uc-dashboard[data-uc-theme="native"] .text-cyan-400,
+#uc-dashboard[data-uc-theme="native"] .text-emerald-400 {
+	color: var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .text-rose-400 {
+	color: #b32d2e;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-card,
+#uc-dashboard[data-uc-theme="native"] .uc-accordion,
+#uc-dashboard[data-uc-theme="native"] .uc-proxy-box {
+	background: #ffffff;
+	border-color: #c3c4c7;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-card:hover {
+	border-color: #8c8f94;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-accordion__body {
+	border-top-color: #dcdcde;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn {
+	min-height: 36px;
+	padding: 8px 14px;
+	border-color: #8c8f94;
+	border-radius: 3px;
+	background: #f6f7f7;
+	color: #2c3338;
+	box-shadow: 0 1px 0 #c3c4c7;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn:hover:not(:disabled) {
+	transform: none;
+	border-color: #50575e;
+	background: #f0f0f1;
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn:active:not(:disabled) {
+	transform: none;
+	background: #dcdcde;
+	box-shadow: none;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn--primary {
+	border-color: var(--uc-wp-accent);
+	background: var(--uc-wp-accent);
+	color: #ffffff;
+	box-shadow: 0 1px 0 var(--uc-wp-accent-active);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn--primary:hover:not(:disabled) {
+	border-color: var(--uc-wp-accent-hover);
+	background: var(--uc-wp-accent-hover);
+	color: #ffffff;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn--primary:active:not(:disabled) {
+	border-color: var(--uc-wp-accent-active);
+	background: var(--uc-wp-accent-active);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn:focus-visible,
+#uc-dashboard[data-uc-theme="native"] .uc-btn--primary:focus-visible {
+	outline: 2px solid transparent;
+	box-shadow: 0 0 0 1px #ffffff, 0 0 0 3px var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toggle .slider {
+	border-color: #8c8f94;
+	border-radius: 11px;
+	background: #dcdcde;
+	box-shadow: none;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toggle .slider:before {
+	border-radius: 50%;
+	background: #646970;
+	box-shadow: none;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toggle input:checked + .slider {
+	border-color: var(--uc-wp-accent);
+	background: var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toggle input:checked + .slider:before {
+	background: #ffffff;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toggle input:focus + .slider {
+	box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-field-label,
+#uc-dashboard[data-uc-theme="native"] .uc-accordion__title,
+#uc-dashboard[data-uc-theme="native"] .uc-inline-diagnostic-state,
+#uc-dashboard[data-uc-theme="native"] .uc-switch-dropdown-text {
+	color: var(--uc-text);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-field-input,
+#uc-dashboard[data-uc-theme="native"] .uc-field-select,
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-button {
+	border-color: #8c8f94;
+	border-radius: 4px;
+	background: #ffffff;
+	background-image: none;
+	color: #2c3338;
+	color-scheme: light;
+	box-shadow: 0 0 0 transparent;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-field-input:focus,
+#uc-dashboard[data-uc-theme="native"] .uc-field-select:focus,
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-button:focus {
+	border-color: var(--uc-wp-accent);
+	box-shadow: 0 0 0 1px var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-field-select option,
+#uc-dashboard[data-uc-theme="native"] .uc-field-select optgroup,
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-menu,
+#uc-dashboard[data-uc-theme="native"] .uc-switch-dropdown-panel {
+	background: #ffffff;
+	color: #2c3338;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-menu,
+#uc-dashboard[data-uc-theme="native"] .uc-switch-dropdown-panel {
+	border-color: #8c8f94;
+	border-radius: 4px;
+	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-option {
+	border-radius: 2px;
+	color: #2c3338;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-option:hover,
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-option:focus,
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-option.is-selected,
+#uc-dashboard[data-uc-theme="native"] .uc-switch-dropdown-row:hover {
+	background: #f0f6fc;
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-option.is-disabled,
+#uc-dashboard[data-uc-theme="native"] .uc-custom-select-option:disabled {
+	background: transparent;
+	color: #8c8f94;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-switch-dropdown-summary {
+	border-color: #8c8f94;
+	border-radius: 4px;
+	background: #ffffff;
+	color: #2c3338;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-switch-dropdown[open] .uc-switch-dropdown-summary {
+	border-color: var(--uc-wp-accent);
+	box-shadow: 0 0 0 1px var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .bg-black\/20,
+#uc-dashboard[data-uc-theme="native"] .bg-zinc-900\/50,
+#uc-dashboard[data-uc-theme="native"] .bg-zinc-800 {
+	background: #f6f7f7;
+}
+
+#uc-dashboard[data-uc-theme="native"] .border-white\/5,
+#uc-dashboard[data-uc-theme="native"] .border-zinc-800 {
+	border-color: #dcdcde;
+}
+
+#uc-dashboard[data-uc-theme="native"] .bg-cyan-500\/5,
+#uc-dashboard[data-uc-theme="native"] .bg-cyan-500\/10 {
+	background: #f0f6fc !important;
+}
+
+#uc-dashboard[data-uc-theme="native"] .bg-emerald-500\/5,
+#uc-dashboard[data-uc-theme="native"] .bg-emerald-500\/10 {
+	background: #edfaef;
+}
+
+#uc-dashboard[data-uc-theme="native"] .bg-rose-500\/10 {
+	background: #fcf0f1;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-inline-diagnostic {
+	border-color: #c3c4c7;
+	background: #f6f7f7;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-inline-diagnostic.is-disabled {
+	border-color: #dba617;
+	background: #fcf9e8;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-inline-diagnostic-code {
+	border-color: #dcdcde;
+	background: #ffffff;
+	color: #2c3338;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toast {
+	border-color: #c3c4c7;
+	background: #ffffff;
+	box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toast__title,
+#uc-dashboard[data-uc-theme="native"] .uc-toast__action {
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toast__action {
+	border-color: #8c8f94;
+	background: #f6f7f7;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toast--success .uc-toast__text {
+	color: #008a20;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toast--error .uc-toast__text,
+#uc-dashboard[data-uc-theme="native"] .uc-toast__action--danger {
+	color: #b32d2e;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toast--warning .uc-toast__text {
+	color: #996800;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-toast--info .uc-toast__text {
+	color: var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-support-inline,
+#uc-dashboard[data-uc-theme="native"] .uc-support-modal__dialog,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__dialog {
+	border-color: #c3c4c7 !important;
+	background: #ffffff !important;
+	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14) !important;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-support-inline__title,
+#uc-dashboard[data-uc-theme="native"] .uc-support-modal__title,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__section-title,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__steps strong {
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-section {
+	border-color: #c3c4c7;
+	background: #ffffff;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-section-summary,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-question {
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-items,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-item {
+	border-color: #dcdcde;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-answer,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-count {
+	color: #50575e;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-count {
+	border-color: #c3c4c7;
+	background: #f6f7f7;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-section-summary::after,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-question::after {
+	color: #2271b1;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-section-summary:focus-visible,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-question:focus-visible {
+	outline-color: #2271b1;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__note {
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__intro,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__section-copy,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__steps > li,
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__actions {
+	color: #50575e;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__section {
+	border-top-color: #dcdcde;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__note {
+	border-color: #c3c4c7;
+	background: #f6f7f7;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__support {
+	border-color: #c3c4c7;
+	background: #ffffff;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__support-text {
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__support-link {
+	border-color: #2271b1;
+	background: #2271b1;
+	color: #ffffff;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__support-link:hover {
+	border-color: #135e96;
+	background: #135e96;
+	color: #ffffff;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__support-link:focus-visible {
+	outline-color: #2271b1;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-support-inline__group-label,
+#uc-dashboard[data-uc-theme="native"] .uc-support-modal__section-label,
+#uc-dashboard[data-uc-theme="native"] .uc-support-modal__eyebrow,
+#uc-dashboard[data-uc-theme="native"] .uc-support-link__amount {
+	color: var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-support-link,
+#uc-dashboard[data-uc-theme="native"] .uc-support-modal__hire-link,
+#uc-dashboard[data-uc-theme="native"] .uc-support-inline__hire-link,
+#uc-dashboard[data-uc-theme="native"] .uc-support-inline__mobile-button {
+	border-color: #c3c4c7;
+	background: #f6f7f7;
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-support-link:hover,
+#uc-dashboard[data-uc-theme="native"] .uc-support-link:focus,
+#uc-dashboard[data-uc-theme="native"] .uc-support-modal__hire-link:hover,
+#uc-dashboard[data-uc-theme="native"] .uc-support-modal__hire-link:focus,
+#uc-dashboard[data-uc-theme="native"] .uc-support-inline__hire-link:hover,
+#uc-dashboard[data-uc-theme="native"] .uc-support-inline__hire-link:focus {
+	border-color: var(--uc-wp-accent);
+	background: #f0f6fc;
+	transform: none;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-test-modal {
+	--uc-media-modal-overlay: rgba(0, 0, 0, 0.35);
+	--uc-media-modal-dialog-bg: #ffffff;
+	--uc-media-modal-dialog-border: #c3c4c7;
+	--uc-media-modal-row-bg: #f6f7f7;
+	--uc-media-modal-variant-bg: #ffffff;
+	--uc-media-modal-preview-bg: #f0f0f1;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-test-modal__dialog {
+	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-test-variant:hover:not(:disabled),
+#uc-dashboard[data-uc-theme="native"] .uc-media-test-variant:focus-visible:not(:disabled) {
+	border-color: var(--uc-wp-accent);
+	box-shadow: 0 0 0 1px var(--uc-wp-accent);
+	outline: none;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-modal {
+	background: rgba(0, 0, 0, 0.35);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-modal__dialog {
+	background: #ffffff !important;
+	border-color: #c3c4c7 !important;
+	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14) !important;
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-summary__item,
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-row,
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-row--head {
+	background: #ffffff;
+	border-color: #dcdcde;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-row--head,
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-summary__item span {
+	color: #50575e;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-summary__item strong,
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-row strong {
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-row code {
+	background: #f6f7f7;
+	border-color: #dcdcde;
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-row.is-skipped,
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-row.is-failed {
+	background: #f6f7f7;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-warning {
+	color: #996800 !important;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-media-replacement-preview-note {
+	color: #007017 !important;
+}
+
+body.ultracache-admin-theme-native .ultracache-version-badge {
+	border-color: #c3c4c7;
+	background: #ffffff;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+	color: #50575e;
+}
+
+body.ultracache-admin-theme-native .ultracache-version-badge:hover {
+	border-color: #2271b1;
+	background: #f0f6fc;
+	color: #135e96;
+}
+
+body.ultracache-admin-theme-native .ultracache-version-badge:focus-visible {
+	outline-color: #2271b1;
+}
+
+#uc-dashboard[data-uc-theme="native"] *::-webkit-scrollbar-thumb {
+	background: #c3c4c7;
+}
+
+#uc-dashboard[data-uc-theme="native"] *::-webkit-scrollbar-thumb:hover {
+	background: #8c8f94;
+}
+
+/* Existing UltraCache theme */
+body.toplevel_page_ultracache.ultracache-admin-theme-ultracache #wpbody-content {
+	background: #06090f;
+}
+
+@media (max-width: 782px) {
+	.uc-admin-theme-control {
+		width: 100%;
+		justify-content: space-between;
+		padding: 6px 0;
+	}
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn--danger {
+	border-color: #b32d2e;
+	background: #ffffff;
+	color: #b32d2e;
+	box-shadow: none;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-btn--danger:hover:not(:disabled) {
+	border-color: #8a2424;
+	background: #fcf0f1;
+	color: #8a2424;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-stat-card-action {
+	border-color: var(--uc-wp-accent);
+	background: #f0f6fc;
+	color: var(--uc-wp-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-stat-card-action:hover:not(:disabled) {
+	border-color: var(--uc-wp-accent-hover);
+	background: #e5f1fb;
+}
+
+/* Theme stabilization: header layout, complete admin canvas, and accessibility. */
+body.toplevel_page_ultracache.ultracache-admin-theme-native #wpcontent,
+body.toplevel_page_ultracache.ultracache-admin-theme-native #wpbody {
+	background: #f0f0f1;
+}
+
+body.toplevel_page_ultracache.ultracache-admin-theme-ultracache #wpcontent,
+body.toplevel_page_ultracache.ultracache-admin-theme-ultracache #wpbody {
+	background: #06090f;
+}
+
+#uc-dashboard[data-uc-theme="native"] {
+	color-scheme: light;
+}
+
+#uc-dashboard[data-uc-theme="ultracache"] {
+	color-scheme: dark;
+}
+
+#uc-dashboard .uc-dashboard-header-actions {
+	align-items: center;
+	justify-content: flex-end;
+}
+
+#uc-dashboard .uc-admin-theme-control__label {
+	cursor: pointer;
+	user-select: none;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-admin-theme-control__label {
+	color: #1d2327;
+}
+
+#uc-dashboard .uc-admin-theme-control .uc-toggle input:focus-visible + .slider {
+	outline: 2px solid transparent;
+	box-shadow: 0 0 0 2px var(--uc-bg), 0 0 0 4px var(--uc-accent);
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-admin-theme-control .uc-toggle input:focus-visible + .slider {
+	box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px var(--uc-wp-accent);
+}
+
+@media (max-width: 782px) {
+	#uc-dashboard .uc-dashboard-header,
+	#uc-dashboard .uc-dashboard-header-actions {
+		width: 100%;
+	}
+
+	#uc-dashboard .uc-dashboard-header-actions {
+		align-items: stretch;
+	}
+
+	#uc-dashboard .uc-admin-theme-control {
+		min-height: 40px;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	#uc-dashboard *,
+	#uc-dashboard *::before,
+	#uc-dashboard *::after {
+		scroll-behavior: auto !important;
+		transition-duration: 0.01ms !important;
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+	}
+}

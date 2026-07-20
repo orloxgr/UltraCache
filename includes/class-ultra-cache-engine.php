@@ -3,6 +3,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/core/html-variant-functions.php';
+require_once __DIR__ . '/engine/class-engine-response-headers-trait.php';
+require_once __DIR__ . '/engine/class-engine-conditional-response-trait.php';
 require_once __DIR__ . '/engine/class-engine-storage-trait.php';
 require_once __DIR__ . '/engine/class-engine-css-bundle-trait.php';
 require_once __DIR__ . '/engine/class-engine-font-optimization-trait.php';
@@ -14,12 +17,16 @@ require_once __DIR__ . '/engine/class-engine-cache-decision-trait.php';
 require_once __DIR__ . '/engine/class-engine-warm-crawl-trait.php';
 require_once __DIR__ . '/engine/class-engine-profiling-metrics-trait.php';
 require_once __DIR__ . '/engine/class-engine-dropin-lifecycle-trait.php';
+require_once __DIR__ . '/engine/class-engine-hot-page-analytics-trait.php';
 require_once __DIR__ . '/engine/class-engine-analytics-trait.php';
 require_once __DIR__ . '/engine/class-engine-async-css-trait.php';
 require_once __DIR__ . '/engine/class-engine-frontend-assets-trait.php';
+require_once __DIR__ . '/maintenance/class-update-cache-purge-trait.php';
 
 class Ultra_Cache_Engine
 {
+    use Ultra_Cache_Engine_Response_Headers_Trait;
+    use Ultra_Cache_Engine_Conditional_Response_Trait;
     use Ultra_Cache_Engine_Storage_Trait;
     use Ultra_Cache_Engine_CSS_Bundle_Trait;
     use Ultra_Cache_Engine_Font_Optimization_Trait;
@@ -31,9 +38,11 @@ class Ultra_Cache_Engine
     use Ultra_Cache_Engine_Warm_Crawl_Trait;
     use Ultra_Cache_Engine_Profiling_Metrics_Trait;
     use Ultra_Cache_Engine_Dropin_Lifecycle_Trait;
+    use Ultra_Cache_Engine_Hot_Page_Analytics_Trait;
     use Ultra_Cache_Engine_Analytics_Trait;
     use Ultra_Cache_Engine_Async_CSS_Trait;
     use Ultra_Cache_Engine_Frontend_Assets_Trait;
+    use Ultra_Cache_Engine_Update_Cache_Purge_Trait;
 
     /** @var Ultra_Cache_Engine|null */
     private static $instance = null;
@@ -55,6 +64,15 @@ class Ultra_Cache_Engine
 
     /** @var bool */
     private $diagnostic_fallback_output_buffer_used = false;
+
+    /** @var bool */
+    private $translatepress_final_output_buffer_active = false;
+
+    /** @var int */
+    private $translatepress_final_output_buffer_level = 0;
+
+    /** @var bool */
+    private $translatepress_final_output_buffer_used = false;
 
     /** @var bool */
     private $cache_output_callback_ran = false;
@@ -113,13 +131,14 @@ class Ultra_Cache_Engine
 
     private function register_hooks()
     {
-        add_action('init', array($this, 'maybe_apply_runtime_js_scan_anonymous_context'), -999);
-        add_action('init', array($this, 'profile_init_checkpoint'), 0);
-        add_action('wp_loaded', array($this, 'profile_wp_loaded_checkpoint'), 0);
-        add_action('template_redirect', array($this, 'profile_template_redirect_checkpoint'), -1000);
-        add_action('template_redirect', array($this, 'maybe_start_buffering'), 0);
-        add_filter('wp_should_output_buffer_template_for_enhancement', array($this, 'should_force_template_enhancement_output_buffer'), PHP_INT_MAX);
-        add_action('wp_template_enhancement_output_buffer_started', array($this, 'template_enhancement_output_buffer_started_checkpoint'), 0);
+        $is_admin_request = function_exists('is_admin') && is_admin();
+        $is_ajax_request = function_exists('wp_doing_ajax') && wp_doing_ajax();
+        $is_cron_request = function_exists('wp_doing_cron') && wp_doing_cron();
+        $is_rest_request = defined('REST_REQUEST') && REST_REQUEST;
+        $is_frontend_request = !$is_admin_request && !$is_ajax_request && !$is_cron_request && !$is_rest_request;
+
+        // Cache invalidation hooks are required in both frontend and admin
+        // contexts. They do not mutate rendered admin assets or output.
         add_action('save_post', array($this, 'handle_post_update'), 20);
         add_action('delete_post', array($this, 'handle_post_deletion'), 20);
         add_action('trashed_post', array($this, 'handle_post_deletion'), 20);
@@ -141,10 +160,29 @@ class Ultra_Cache_Engine
         add_action('update_option_page_for_posts', array($this, 'handle_front_page_option_change'), 20, 2);
         add_action('update_option_posts_per_page', array($this, 'handle_front_page_option_change'), 20, 2);
         add_action('update_option_permalink_structure', array($this, 'handle_global_frontend_change'), 20, 2);
+        add_action('wp_ajax_ultracache_lcp_observation', array($this, 'handle_lcp_observation_ajax'));
+        add_action('wp_ajax_nopriv_ultracache_lcp_observation', array($this, 'handle_lcp_observation_ajax'));
+
+        if (!$is_frontend_request) {
+            return;
+        }
+
+        // Frontend rendering/optimization hooks must never participate in
+        // wp-admin, REST, AJAX, or cron responses. This prevents the frontend
+        // engine from affecting third-party admin script dependency graphs or
+        // partially generated admin output.
+        add_action('init', array($this, 'maybe_start_translatepress_final_output_buffer'), -1000);
+        add_action('init', array($this, 'maybe_apply_runtime_js_scan_anonymous_context'), -999);
+        add_action('init', array($this, 'profile_init_checkpoint'), 0);
+        add_action('wp_loaded', array($this, 'profile_wp_loaded_checkpoint'), 0);
+        add_action('template_redirect', array($this, 'profile_template_redirect_checkpoint'), -1000);
+        add_action('template_redirect', array($this, 'maybe_start_buffering'), 0);
+        add_filter('wp_should_output_buffer_template_for_enhancement', array($this, 'should_force_template_enhancement_output_buffer'), PHP_INT_MAX);
+        add_action('wp_template_enhancement_output_buffer_started', array($this, 'template_enhancement_output_buffer_started_checkpoint'), 0);
         add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_live_google_fonts_output_cleanup'), 90);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_delayed_script_loader'), -998);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_runtime_font_helpers'), -997);
-        add_action('wp_enqueue_scripts', array($this, 'enqueue_sr7_lcp_priority_runtime_helper'), -996);
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_lcp_observer_runtime_helper'), -996);
         add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_start_checkpoint'), -1000);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_runtime_js_scan_collector'), -999);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_woocommerce_cart_fragments_delay_helper'), -995);
@@ -156,6 +194,7 @@ class Ultra_Cache_Engine
         add_filter('wp_speculation_rules_href_exclude_paths', array($this, 'filter_speculation_rules_href_exclude_paths'), 20, 2);
         add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_end_checkpoint'), PHP_INT_MAX);
         add_action('wp_enqueue_scripts', array($this, 'cleanup_asset_chain_enqueue_assets'), 9999);
+        add_action('shutdown', array($this, 'flush_translatepress_final_output_buffer_on_shutdown'), PHP_INT_MAX - 5);
         add_action('shutdown', array($this, 'flush_diagnostic_fallback_output_buffer_on_shutdown'), PHP_INT_MAX - 4);
         add_action('shutdown', array($this, 'finalize_missing_output_buffer_store_profile'), PHP_INT_MAX - 3);
         add_action('shutdown', array($this, 'run_deferred_store_post_response_actions'), PHP_INT_MAX - 2);
@@ -168,6 +207,216 @@ class Ultra_Cache_Engine
         add_filter('style_loader_tag', array($this, 'add_delayed_icon_font_style_attributes'), 20, 4);
         add_filter('wp_resource_hints', array($this, 'filter_google_fonts_resource_hints'), 20, 2);
         add_filter('woocommerce_get_script_data', array($this, 'filter_woocommerce_cart_fragments_script_data'), 20, 2);
+    }
+
+    private function is_translatepress_active_for_output_buffer()
+    {
+        if (defined('TRP_PLUGIN_DIR') || defined('TRP_PLUGIN_BASE') || class_exists('TRP_Translate_Press') || class_exists('TRP_Translation_Render')) {
+            return true;
+        }
+
+        $active_plugins = (array) get_option('active_plugins', array());
+        foreach ($active_plugins as $active_plugin) {
+            $active_plugin = is_scalar($active_plugin) ? strtolower((string) $active_plugin) : '';
+            if (0 === strpos($active_plugin, 'translatepress-multilingual/')) {
+                return true;
+            }
+        }
+
+        if (is_multisite()) {
+            $sitewide_plugins = (array) get_site_option('active_sitewide_plugins', array());
+            foreach (array_keys($sitewide_plugins) as $active_plugin) {
+                $active_plugin = is_scalar($active_plugin) ? strtolower((string) $active_plugin) : '';
+                if (0 === strpos($active_plugin, 'translatepress-multilingual/')) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function get_translatepress_buffer_request_method()
+    {
+        if (empty($_SERVER['REQUEST_METHOD']) || !is_scalar($_SERVER['REQUEST_METHOD'])) {
+            return '';
+        }
+
+        return strtoupper(sanitize_key(wp_unslash($_SERVER['REQUEST_METHOD'])));
+    }
+
+    private function get_translatepress_buffer_request_uri_parts()
+    {
+        if (empty($_SERVER['REQUEST_URI']) || !is_scalar($_SERVER['REQUEST_URI'])) {
+            return array('', array());
+        }
+
+        $request_uri = sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI']));
+        $path = (string) wp_parse_url($request_uri, PHP_URL_PATH);
+        $query_string = (string) wp_parse_url($request_uri, PHP_URL_QUERY);
+        $query_args = array();
+
+        if ('' !== $query_string) {
+            wp_parse_str($query_string, $query_args);
+        }
+
+        return array(strtolower(trim($path, '/')), is_array($query_args) ? $query_args : array());
+    }
+
+    private function should_skip_translatepress_buffer_for_non_html_request()
+    {
+        $method = $this->get_translatepress_buffer_request_method();
+        if (!in_array($method, array('GET', 'HEAD'), true)) {
+            return true;
+        }
+
+        if (function_exists('wp_is_json_request') && wp_is_json_request()) {
+            return true;
+        }
+
+        if (function_exists('wp_is_serving_rest_request') && wp_is_serving_rest_request()) {
+            return true;
+        }
+
+        list($path, $query_args) = $this->get_translatepress_buffer_request_uri_parts();
+
+        if ('' !== $path) {
+            if ('robots.txt' === $path || 'favicon.ico' === $path) {
+                return true;
+            }
+
+            if (0 === strpos($path, 'wp-json') || false !== strpos($path, '/wp-json/')) {
+                return true;
+            }
+
+            if (0 === strpos($path, 'wp-sitemap') || false !== strpos($path, '/wp-sitemap') || 1 === preg_match('#(?:^|/)(?:wp-sitemap[^/]*\.xml|sitemap[^/]*\.xml|feed|rss|rss2|rdf|atom)(?:/|$)#', $path)) {
+                return true;
+            }
+        }
+
+        if (isset($query_args['rest_route']) || isset($query_args['feed']) || isset($query_args['wc-ajax'])) {
+            return true;
+        }
+
+        $accept_header = '';
+        if (!empty($_SERVER['HTTP_ACCEPT']) && is_scalar($_SERVER['HTTP_ACCEPT'])) {
+            $accept_header = strtolower(sanitize_text_field(wp_unslash($_SERVER['HTTP_ACCEPT'])));
+        }
+
+        if ('' !== $accept_header && false === strpos($accept_header, 'text/html') && 1 === preg_match('/(?:application\/json|application\/xml|text\/xml)/', $accept_header)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function should_start_translatepress_final_output_buffer()
+    {
+        if ($this->translatepress_final_output_buffer_active || $this->translatepress_final_output_buffer_level > 0) {
+            return false;
+        }
+
+        if (is_admin() || wp_doing_ajax() || wp_doing_cron() || (defined('REST_REQUEST') && REST_REQUEST) || (defined('WP_CLI') && WP_CLI)) {
+            return false;
+        }
+
+        if ($this->should_skip_translatepress_buffer_for_non_html_request()) {
+            return false;
+        }
+
+        if (!defined('WP_CACHE') || !WP_CACHE) {
+            return false;
+        }
+
+        $settings = $this->get_settings();
+        if (empty($settings['enabled'])) {
+            return false;
+        }
+
+        return $this->is_translatepress_active_for_output_buffer();
+    }
+
+    public function maybe_start_translatepress_final_output_buffer()
+    {
+        if (!$this->should_start_translatepress_final_output_buffer()) {
+            return;
+        }
+
+        $this->translatepress_final_output_buffer_active = true;
+        $this->translatepress_final_output_buffer_used = false;
+        ob_start(array($this, 'translatepress_final_output_buffer_callback'));
+        $this->translatepress_final_output_buffer_level = (int) ob_get_level();
+        $this->profile_request_checkpoint('translatepress_final_output_buffer_started', array(
+            'level' => (string) $this->translatepress_final_output_buffer_level,
+        ));
+    }
+
+    public function translatepress_final_output_buffer_callback($html)
+    {
+        $this->translatepress_final_output_buffer_active = false;
+        $this->translatepress_final_output_buffer_level = 0;
+        $this->translatepress_final_output_buffer_used = true;
+
+        if (!$this->buffering || $this->cache_output_callback_ran) {
+            return $html;
+        }
+
+        $this->profile_request_checkpoint('translatepress_final_output_buffer_store_start', array(
+            'html_bytes' => is_string($html) ? strlen($html) : 0,
+        ));
+
+        return $this->cache_output_callback($html);
+    }
+
+    public function flush_translatepress_final_output_buffer_on_shutdown()
+    {
+        if (!$this->translatepress_final_output_buffer_active || $this->translatepress_final_output_buffer_level <= 0) {
+            return;
+        }
+
+        $current_level = (int) ob_get_level();
+        if ($current_level < $this->translatepress_final_output_buffer_level) {
+            $this->translatepress_final_output_buffer_active = false;
+            $this->profile_request_checkpoint('translatepress_final_output_buffer_missing_on_shutdown', array(
+                'current_level' => (string) $current_level,
+                'expected_level' => (string) $this->translatepress_final_output_buffer_level,
+            ));
+            return;
+        }
+
+        $this->profile_request_checkpoint('translatepress_final_output_buffer_flush_start', array(
+            'current_level' => (string) $current_level,
+            'target_level' => (string) $this->translatepress_final_output_buffer_level,
+        ));
+
+        while ((int) ob_get_level() >= $this->translatepress_final_output_buffer_level) {
+            $level_before = (int) ob_get_level();
+            $status = ob_get_status(false);
+            $removable = true;
+            if (is_array($status) && isset($status['flags']) && defined('PHP_OUTPUT_HANDLER_REMOVABLE')) {
+                $removable = (bool) ((int) $status['flags'] & PHP_OUTPUT_HANDLER_REMOVABLE);
+            }
+
+            if (!$removable) {
+                $this->profile_request_checkpoint('translatepress_final_output_buffer_flush_step', array(
+                    'level_before' => (string) $level_before,
+                    'flushed' => 'no',
+                    'reason' => 'buffer-not-removable',
+                ));
+                break;
+            }
+
+            $flushed = ob_end_flush();
+            $this->profile_request_checkpoint('translatepress_final_output_buffer_flush_step', array(
+                'level_before' => (string) $level_before,
+                'flushed' => $flushed ? 'yes' : 'no',
+                'buffering' => $this->buffering ? 'yes' : 'no',
+            ));
+
+            if (!$flushed || !$this->translatepress_final_output_buffer_active) {
+                break;
+            }
+        }
     }
 
     public function maybe_start_buffering()
@@ -223,6 +472,10 @@ class Ultra_Cache_Engine
         $this->buffering = true;
         $this->template_enhancement_buffer_required = true;
         $this->profile_request_checkpoint('buffer_start');
+        if ($this->translatepress_final_output_buffer_active) {
+            $this->profile_request_checkpoint('translatepress_final_output_buffer_store_deferred');
+            return;
+        }
         add_filter('wp_template_enhancement_output_buffer', array($this, 'cache_output_callback'), 100);
         $this->maybe_start_diagnostic_fallback_output_buffer();
     }
@@ -665,6 +918,7 @@ class Ultra_Cache_Engine
                 header('X-Ultra-Cache-Revalidate: refreshed');
             }
         }
+        $this->send_varnish_shared_html_headers(true);
         $this->send_debug_headers('STORE');
         if (!headers_sent()) {
             header('X-Ultra-Cache-Store-Post-Response: deferred');
@@ -721,6 +975,9 @@ class Ultra_Cache_Engine
             $html = $this->profile_store_stage('final-generated-asset-root-relative-urls', $html, function ($html) use ($context) {
                 return $this->normalize_generated_asset_urls_to_root_relative($html, $context);
             });
+            $html = $this->profile_store_stage('strip-internal-control-query-args', $html, function ($html) {
+                return $this->strip_internal_control_query_args_from_cached_html($html);
+            });
             $html = $this->profile_store_stage('remove-hrefless-link-placeholders', $html, function ($html) {
                 return $this->remove_hrefless_ultracache_link_placeholders($html);
             });
@@ -733,9 +990,83 @@ class Ultra_Cache_Engine
         $html = $this->apply_final_font_display_rewrite_before_cache_store($html);
         $html = $this->apply_final_media_html_rewrite($html, $context);
         $html = $this->normalize_generated_asset_urls_to_root_relative($html, $context);
+        $html = $this->strip_internal_control_query_args_from_cached_html($html);
         $html = $this->remove_hrefless_ultracache_link_placeholders($html);
 
         return is_string($html) ? $html : '';
+    }
+
+    /**
+     * Remove UltraCache internal request parameters from public cached URLs.
+     *
+     * Internal warm-up, profiler and stale revalidation requests may carry
+     * control query arguments so reverse proxies cannot serve an old cached
+     * document to the loopback request. Multilingual plugins can build
+     * language-switcher links from the active request URI, so those private
+     * arguments must be removed from frontend URL attributes before the HTML
+     * is stored as public page cache.
+     *
+     * @param string $html Full frontend HTML.
+     * @return string
+     */
+    private function strip_internal_control_query_args_from_cached_html($html)
+    {
+        if (!is_string($html) || '' === $html || false === stripos($html, 'ultracache_')) {
+            return $html;
+        }
+
+        $control_args = array(
+            'ultracache_revalidate',
+            'ultracache_rt',
+            'ultracache_store_profile',
+            'ultracache_callback_profile',
+            'ultracache_store_profile_verbose',
+            'ultracache_store_profile_verbose_settings',
+            'ultracache_profile_bypass',
+            'ultracache_profile_run',
+            'ultracache_runtime_js_scan',
+            'ultracache_runtime_js_scan_id',
+            'ultracache_runtime_js_scan_nonce',
+            'ultracache_runtime_js_scan_context',
+        );
+
+        $charset = function_exists('get_bloginfo') ? (string) get_bloginfo('charset') : '';
+        if ('' === $charset) {
+            $charset = 'UTF-8';
+        }
+
+        $cleaned = preg_replace_callback(
+            '/\b(href|src|action|formaction|poster|data-[a-z0-9_-]*(?:url|href|src))\s*=\s*(["\'])(.*?)\2/is',
+            function ($matches) use ($control_args, $charset) {
+                $attribute = isset($matches[1]) ? (string) $matches[1] : '';
+                $quote = isset($matches[2]) ? (string) $matches[2] : '"';
+                $value = isset($matches[3]) ? (string) $matches[3] : '';
+
+                if ('' === $attribute || '' === $value || false === stripos($value, 'ultracache_')) {
+                    return isset($matches[0]) ? (string) $matches[0] : '';
+                }
+
+                $decoded = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, $charset);
+                if ('' === $decoded || false === stripos($decoded, 'ultracache_')) {
+                    return isset($matches[0]) ? (string) $matches[0] : '';
+                }
+
+                $clean_url = remove_query_arg($control_args, $decoded);
+                if (!is_string($clean_url) || $clean_url === $decoded) {
+                    return isset($matches[0]) ? (string) $matches[0] : '';
+                }
+
+                $escaped_url = esc_url($clean_url);
+                if ('' === $escaped_url) {
+                    return isset($matches[0]) ? (string) $matches[0] : '';
+                }
+
+                return $attribute . '=' . $quote . $escaped_url . $quote;
+            },
+            $html
+        );
+
+        return is_string($cleaned) ? $cleaned : $html;
     }
 
     /**
@@ -999,8 +1330,11 @@ class Ultra_Cache_Engine
                 return 'set-cookie';
             }
 
-            if (0 === stripos($header, 'Cache-Control:') && false !== stripos($header, 'no-cache')) {
-                return 'cache-control-no-cache';
+            if (0 === stripos($header, 'Cache-Control:')) {
+                $cache_control_value = strtolower(trim(substr((string) $header, strlen('Cache-Control:'))));
+                if (1 === preg_match('/(?:^|[,\s])(private|no-store|no-cache)(?:$|[,=\s])/', $cache_control_value, $cache_control_match)) {
+                    return 'cache-control-' . sanitize_key((string) $cache_control_match[1]);
+                }
             }
         }
 
@@ -1070,7 +1404,7 @@ class Ultra_Cache_Engine
             header('X-Ultra-Cache: ' . $status);
         }
 
-        header('Vary: Accept, Accept-Encoding', false);
+        $this->send_html_variant_headers();
 
         if ('' !== $reason) {
             $reason = substr((string) preg_replace('/[^A-Za-z0-9_. -]/', '-', (string) $reason), 0, 120);
@@ -1100,24 +1434,6 @@ class Ultra_Cache_Engine
         return $settings;
     }
 
-
-    private function get_request_image_bucket($accept_header = null)
-    {
-        if (null === $accept_header) {
-            $accept_header = ultracache_server_value('HTTP_ACCEPT');
-        }
-
-        $accept_header = strtolower((string) $accept_header);
-        if (false !== strpos($accept_header, 'image/avif')) {
-            return 'avif';
-        }
-
-        if (false !== strpos($accept_header, 'image/webp')) {
-            return 'webp';
-        }
-
-        return 'orig';
-    }
 
 
 }

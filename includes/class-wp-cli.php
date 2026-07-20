@@ -8,15 +8,17 @@ defined('ABSPATH') || exit;
 require_once __DIR__ . '/cli/class-wp-cli-helpers-trait.php';
 require_once __DIR__ . '/cli/class-wp-cli-cache-trait.php';
 require_once __DIR__ . '/cli/class-wp-cli-media-trait.php';
+require_once __DIR__ . '/cli/class-wp-cli-media-replacement-trait.php';
 require_once __DIR__ . '/cli/class-wp-cli-settings-stats-trait.php';
 require_once __DIR__ . '/cli/class-wp-cli-integrations-trait.php';
 
-if (!class_exists('ULTRACACHE_CLI_Command') && defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
+if (defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
     class ULTRACACHE_CLI_Command extends WP_CLI_Command
     {
         use ULTRACACHE_CLI_Helpers_Trait;
         use ULTRACACHE_CLI_Cache_Trait;
         use ULTRACACHE_CLI_Media_Trait;
+        use ULTRACACHE_CLI_Media_Replacement_Trait;
         use ULTRACACHE_CLI_Settings_Stats_Trait;
         use ULTRACACHE_CLI_Integrations_Trait;
 
@@ -70,6 +72,15 @@ if (!class_exists('ULTRACACHE_CLI_Command') && defined('WP_CLI') && WP_CLI && cl
          * [--max-batches=<number>]
          * : Stop media processing after N internal chunks.
          *
+         * [--stage=<stage>]
+         * : Media Library replacement stage. One of readiness, prepare, do, verify, or delete.
+         *
+         * [--reset]
+         * : Restart the Media Library replacement readiness inventory before scanning.
+         *
+         * [--yes]
+         * : Confirm destructive Media Library replacement Do/Delete actions or plan restart.
+         *
          * [--ids=<ids>]
          * : Comma-separated media attachment IDs.
          *
@@ -116,6 +127,8 @@ if (!class_exists('ULTRACACHE_CLI_Command') && defined('WP_CLI') && WP_CLI && cl
                 'cleanup' => 'cleanup',
                 'cleanup_artifacts' => 'cleanup_artifacts',
                 'media' => 'media',
+                'media-replace' => 'media_replace',
+                'media_replace' => 'media_replace',
                 'settings' => 'settings',
                 'stats' => 'stats',
                 'self_test' => 'self_test',
@@ -152,7 +165,7 @@ if (!class_exists('ULTRACACHE_CLI_Command') && defined('WP_CLI') && WP_CLI && cl
             $commands = $this->get_ultracache_cli_command_reference();
 
             if ('json' === $format) {
-                WP_CLI::line(function_exists('wp_json_encode') ? wp_json_encode($commands, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : json_encode($commands, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                WP_CLI::line((string) wp_json_encode($commands, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
                 return;
             }
 
@@ -344,6 +357,26 @@ if (!class_exists('ULTRACACHE_CLI_Command') && defined('WP_CLI') && WP_CLI && cl
                         array(
                             'command' => 'wp ultracache media process-batch [--batch-size=25] [--time-budget=20]',
                             'description' => __('Advanced diagnostic action: process one internal chunk only.', 'ultracache'),
+                        ),
+                        array(
+                            'command' => 'wp ultracache media-replace status [--format=table|json|yaml]',
+                            'description' => __('Show the server-authoritative Media Library replacement stage, lease, and resumable progress.', 'ultracache'),
+                        ),
+                        array(
+                            'command' => 'wp ultracache media-replace run --stage=readiness|prepare|do|verify|delete [--yes] [--batch-size=50] [--time-budget=15] [--max-batches=<number>]',
+                            'description' => __('Run one Media Library replacement approval stage through the same server-backed state machine used by the dashboard.', 'ultracache'),
+                        ),
+                        array(
+                            'command' => 'wp ultracache media-replace resume [--yes]',
+                            'description' => __('Resume the paused replacement stage reported by the server without advancing into the next approval stage.', 'ultracache'),
+                        ),
+                        array(
+                            'command' => 'wp ultracache media-replace pause',
+                            'description' => __('Request the active CLI replacement runner to pause after its current server chunk.', 'ultracache'),
+                        ),
+                        array(
+                            'command' => 'wp ultracache media-replace restart --yes',
+                            'description' => __('Clear the current non-destructive replacement plan through the same server restart guard; restart remains blocked after Do begins.', 'ultracache'),
                         ),
                     ),
                 ),

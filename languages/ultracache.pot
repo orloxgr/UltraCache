@@ -2,56 +2,56 @@
 # This file is distributed under the GPL-2.0-or-later.
 msgid ""
 msgstr ""
-"Project-Id-Version: UltraCache 2.59.06.78\n"
+"Project-Id-Version: UltraCache 2.59.09.55\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/UltraCache\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-06-28T14:19:29+00:00\n"
+"POT-Creation-Date: 2026-07-19 03:00+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.10.0\n"
 "X-Domain: ultracache\n"
 
 #. Plugin Name of the plugin
-#: D:\Users\Byron\Documents\GitHub\UltraCache\ultracache.php
+#: ultracache.php
+#: includes/admin/class-admin-trait.php:11
 #: includes/admin/class-admin-trait.php:12
-#: includes/admin/class-admin-trait.php:13
-#: includes/admin/class-admin-trait.php:263
-#: includes/admin/class-admin-trait.php:265
+#: includes/admin/class-admin-trait.php:262
+#: includes/admin/class-admin-trait.php:264
 #: ultracache.php:344
 msgid "UltraCache"
 msgstr ""
 
 #. Plugin URI of the plugin
-#: D:\Users\Byron\Documents\GitHub\UltraCache\ultracache.php
+#: ultracache.php
 msgid "https://github.com/orloxgr/ultracache"
 msgstr ""
 
 #. Description of the plugin
-#: D:\Users\Byron\Documents\GitHub\UltraCache\ultracache.php
+#: ultracache.php
 msgid "WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics."
 msgstr ""
 
 #. Author of the plugin
-#: D:\Users\Byron\Documents\GitHub\UltraCache\ultracache.php
+#: ultracache.php
 msgid "Byron Iniotakis"
 msgstr ""
 
-#: includes/admin/class-admin-trait.php:273
+#: includes/admin/class-admin-trait.php:272
 msgid "Clear All Cache"
 msgstr ""
 
-#: includes/admin/class-admin-trait.php:283
+#: includes/admin/class-admin-trait.php:282
 msgid "Clear This Page"
 msgstr ""
 
-#: includes/admin/class-admin-trait.php:308
+#: includes/admin/class-admin-trait.php:307
 msgid "UltraCache: all cache cleared."
 msgstr ""
 
-#: includes/admin/class-admin-trait.php:318
+#: includes/admin/class-admin-trait.php:317
 msgid "UltraCache: current page cache cleared."
 msgstr ""
 
@@ -583,235 +583,235 @@ msgstr ""
 msgid "Security diagnostics are read-only. Sensitive query args are enforced as an engine safety floor even if not present in the visible exclusion list."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:666
+#: includes/engine/class-engine-css-bundle-trait.php:665
 msgid "Final HTML warm skipped because the caller will warm the page after the CSS bundle is available."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:674
+#: includes/engine/class-engine-css-bundle-trait.php:673
 msgid "Final HTML warm skipped; caller must verify after writing cached HTML."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:967
+#: includes/engine/class-engine-css-bundle-trait.php:966
 msgid "Remote page did not return an HTML Content-Type."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:981
+#: includes/engine/class-engine-css-bundle-trait.php:980
 msgid "No stylesheet links were found on the page."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:986
+#: includes/engine/class-engine-css-bundle-trait.php:985
 msgid "No <head> element was found on the page."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:990
+#: includes/engine/class-engine-css-bundle-trait.php:989
 msgid "No <link> tags were found on the page."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:1015
+#: includes/engine/class-engine-css-bundle-trait.php:1014
 msgid "Not enough eligible local stylesheets were found for CSS bundling."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:1520
+#: includes/engine/class-engine-css-bundle-trait.php:1519
 msgid "A stylesheet could not be read."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:1599
+#: includes/engine/class-engine-css-bundle-trait.php:1598
 msgid "Not enough non-empty stylesheets were eligible for bundling."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:1641
+#: includes/engine/class-engine-css-bundle-trait.php:1640
 msgid "Could not write the generated CSS bundle file."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:1652
+#: includes/engine/class-engine-css-bundle-trait.php:1651
 msgid "Generated CSS bundle file failed verification."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:1685
+#: includes/engine/class-engine-css-bundle-trait.php:1684
 msgid "Could not write the delayed icon-font CSS companion file."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:1696
+#: includes/engine/class-engine-css-bundle-trait.php:1695
 msgid "Delayed icon-font CSS companion file failed verification."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:2610
-#: includes/engine/class-engine-css-bundle-trait.php:2835
+#: includes/engine/class-engine-css-bundle-trait.php:2609
+#: includes/engine/class-engine-css-bundle-trait.php:2834
 msgid "CSS Bundle Exclusions matched"
 msgstr ""
 
 #. translators: %s: matched slider/hero stylesheet fragment.
-#: includes/engine/class-engine-css-bundle-trait.php:2617
-#: includes/engine/class-engine-css-bundle-trait.php:2843
+#: includes/engine/class-engine-css-bundle-trait.php:2616
+#: includes/engine/class-engine-css-bundle-trait.php:2842
 msgid "slider/hero stylesheet fragment: %s"
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:3234
+#: includes/engine/class-engine-css-bundle-trait.php:3233
 msgid "A generated font-mix stylesheet could not be read."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:3312
+#: includes/engine/class-engine-css-bundle-trait.php:3311
 msgid "Could not write the generated font-mix CSS bundle file."
 msgstr ""
 
-#: includes/engine/class-engine-css-bundle-trait.php:3319
+#: includes/engine/class-engine-css-bundle-trait.php:3318
 msgid "Generated font-mix CSS bundle file failed verification."
 msgstr ""
 
-#: includes/engine/class-engine-font-optimization-trait.php:570
+#: includes/engine/class-engine-font-optimization-trait.php:569
 msgid "Local Google Fonts Optimization is disabled."
 msgstr ""
 
-#: includes/engine/class-engine-font-optimization-trait.php:582
+#: includes/engine/class-engine-font-optimization-trait.php:581
 msgid "Google Fonts rebuild is already running."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:622
-#: includes/engine/class-engine-js-optimization-trait.php:631
-#: includes/engine/class-engine-js-optimization-trait.php:640
-#: includes/engine/class-engine-js-optimization-trait.php:649
-#: includes/engine/class-engine-js-optimization-trait.php:658
-#: includes/engine/class-engine-js-optimization-trait.php:667
-#: includes/engine/class-engine-js-optimization-trait.php:676
-#: includes/engine/class-engine-js-optimization-trait.php:685
-#: includes/engine/class-engine-js-optimization-trait.php:694
-#: includes/engine/class-engine-js-optimization-trait.php:703
-#: includes/engine/class-engine-js-optimization-trait.php:712
-#: includes/engine/class-engine-js-optimization-trait.php:721
-#: includes/engine/class-engine-js-optimization-trait.php:730
-#: includes/engine/class-engine-js-optimization-trait.php:739
-#: includes/engine/class-engine-js-optimization-trait.php:748
-#: includes/engine/class-engine-js-optimization-trait.php:757
-#: includes/engine/class-engine-js-optimization-trait.php:766
-#: includes/engine/class-engine-js-optimization-trait.php:775
-#: includes/engine/class-engine-js-optimization-trait.php:784
-#: includes/engine/class-engine-js-optimization-trait.php:793
-#: includes/engine/class-engine-js-optimization-trait.php:802
+#: includes/engine/class-engine-js-optimization-trait.php:621
+#: includes/engine/class-engine-js-optimization-trait.php:630
+#: includes/engine/class-engine-js-optimization-trait.php:639
+#: includes/engine/class-engine-js-optimization-trait.php:648
+#: includes/engine/class-engine-js-optimization-trait.php:657
+#: includes/engine/class-engine-js-optimization-trait.php:666
+#: includes/engine/class-engine-js-optimization-trait.php:675
+#: includes/engine/class-engine-js-optimization-trait.php:684
+#: includes/engine/class-engine-js-optimization-trait.php:693
+#: includes/engine/class-engine-js-optimization-trait.php:702
+#: includes/engine/class-engine-js-optimization-trait.php:711
+#: includes/engine/class-engine-js-optimization-trait.php:720
+#: includes/engine/class-engine-js-optimization-trait.php:729
+#: includes/engine/class-engine-js-optimization-trait.php:738
+#: includes/engine/class-engine-js-optimization-trait.php:747
+#: includes/engine/class-engine-js-optimization-trait.php:756
+#: includes/engine/class-engine-js-optimization-trait.php:765
+#: includes/engine/class-engine-js-optimization-trait.php:774
+#: includes/engine/class-engine-js-optimization-trait.php:783
+#: includes/engine/class-engine-js-optimization-trait.php:792
+#: includes/engine/class-engine-js-optimization-trait.php:801
 msgid "Detected component protections"
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:627
+#: includes/engine/class-engine-js-optimization-trait.php:626
 msgid "Slider Revolution / SR7 assets or markup were detected on this page. Keep slider runtime assets out of Delay JS unless visually tested."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:636
+#: includes/engine/class-engine-js-optimization-trait.php:635
 msgid "Swiper slider/carousel assets or markup were detected on this page. Keep these runtime assets protected unless visually tested."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:645
+#: includes/engine/class-engine-js-optimization-trait.php:644
 msgid "Slick carousel assets or markup were detected on this page. Keep carousel runtime assets protected unless visually tested."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:654
+#: includes/engine/class-engine-js-optimization-trait.php:653
 msgid "Splide slider assets or markup were detected on this page. Keep slider runtime assets protected unless visually tested."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:663
+#: includes/engine/class-engine-js-optimization-trait.php:662
 msgid "Owl Carousel assets or markup were detected on this page. Keep carousel runtime assets protected unless visually tested."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:672
+#: includes/engine/class-engine-js-optimization-trait.php:671
 msgid "Smart Slider / Nextend assets or markup were detected on this page. Keep slider runtime assets protected unless visually tested."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:681
+#: includes/engine/class-engine-js-optimization-trait.php:680
 msgid "Known slider/carousel assets or markup were detected on this page. Keep matching runtime assets protected unless visually tested."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:690
+#: includes/engine/class-engine-js-optimization-trait.php:689
 msgid "Elementor assets or widgets were detected on this page. Keep core Elementor runtime dependencies protected unless dependency-safe testing passes."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:699
+#: includes/engine/class-engine-js-optimization-trait.php:698
 msgid "Divi builder assets or markup were detected on this page. Keep Divi runtime dependencies protected unless dependency-safe testing passes."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:708
+#: includes/engine/class-engine-js-optimization-trait.php:707
 msgid "WPBakery/Visual Composer assets or markup were detected on this page. Keep builder runtime dependencies protected unless dependency-safe testing passes."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:717
+#: includes/engine/class-engine-js-optimization-trait.php:716
 msgid "Bricks Builder assets or markup were detected on this page. Keep builder runtime dependencies protected unless dependency-safe testing passes."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:726
+#: includes/engine/class-engine-js-optimization-trait.php:725
 msgid "Oxygen Builder assets or markup were detected on this page. Keep builder runtime dependencies protected unless dependency-safe testing passes."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:735
+#: includes/engine/class-engine-js-optimization-trait.php:734
 msgid "Beaver Builder assets or markup were detected on this page. Keep builder runtime dependencies protected unless dependency-safe testing passes."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:744
+#: includes/engine/class-engine-js-optimization-trait.php:743
 msgid "Avada/Fusion Builder assets or markup were detected on this page. Keep builder runtime dependencies protected unless dependency-safe testing passes."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:753
+#: includes/engine/class-engine-js-optimization-trait.php:752
 msgid "Thrive builder assets or markup were detected on this page. Keep builder runtime dependencies protected unless dependency-safe testing passes."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:762
+#: includes/engine/class-engine-js-optimization-trait.php:761
 msgid "Known block/page-builder assets or markup were detected on this page. Keep matching runtime assets protected unless visually tested."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:771
+#: includes/engine/class-engine-js-optimization-trait.php:770
 msgid "Complianz consent assets were detected on this page. Consent/cookie scripts should stay out of Delay JS to avoid banner or consent-state issues."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:780
+#: includes/engine/class-engine-js-optimization-trait.php:779
 msgid "Cookie/consent-management assets were detected on this page. Consent scripts are safer when excluded from Delay JS."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:789
+#: includes/engine/class-engine-js-optimization-trait.php:788
 msgid "Captcha/anti-bot assets were detected on this page. These are commonly unsafe to delay because forms may need them immediately."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:798
+#: includes/engine/class-engine-js-optimization-trait.php:797
 msgid "Form, validation, newsletter, or CRM assets were detected on this page. Try Defer Instead of Delay first, then use the fallback list if the form must work before interaction."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:807
+#: includes/engine/class-engine-js-optimization-trait.php:806
 msgid "Payment gateway assets were detected on this page. Payment/checkout scripts are safer when kept out of delayed execution."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:811
+#: includes/engine/class-engine-js-optimization-trait.php:810
 msgid "Elementor load-order protections"
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:816
+#: includes/engine/class-engine-js-optimization-trait.php:815
 msgid "Elementor module/runtime scripts were detected. Keep Elementor module providers and dependent common/admin-bar scripts in Defer Instead of Delay, or use the fallback list until the page has been verified clean."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:820
-#: includes/engine/class-engine-js-optimization-trait.php:829
+#: includes/engine/class-engine-js-optimization-trait.php:819
+#: includes/engine/class-engine-js-optimization-trait.php:828
 msgid "Review-only candidates"
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:825
+#: includes/engine/class-engine-js-optimization-trait.php:824
 msgid "WooCommerce/cart/account markers were detected. Review these before excluding broadly because shop pages vary by site."
 msgstr ""
 
-#: includes/engine/class-engine-js-optimization-trait.php:834
+#: includes/engine/class-engine-js-optimization-trait.php:833
 msgid "Tracking/ads scripts were detected. These are review-only because delaying them often improves performance but may affect analytics/ads timing."
 msgstr ""
 
 #. translators: %s: inline script block ID, or no id.
-#: includes/engine/class-engine-js-optimization-trait.php:905
+#: includes/engine/class-engine-js-optimization-trait.php:904
 msgid "Inline script block %s references jQuery. Keep the jQuery handle in Defer Instead of Delay or the fallback list unless the inline block is also moved into a delayed/replayed execution group."
 msgstr ""
 
 #. translators: %s: inline script block ID, or no id.
-#: includes/engine/class-engine-js-optimization-trait.php:917
+#: includes/engine/class-engine-js-optimization-trait.php:916
 msgid "Inline WordPress translations/i18n block %s references wp.i18n. Keep wp-i18n and its core dependency chain visible/excluded before using Defer all JS."
 msgstr ""
 
 #. translators: %s: inline script block ID, or no id.
-#: includes/engine/class-engine-js-optimization-trait.php:929
+#: includes/engine/class-engine-js-optimization-trait.php:928
 msgid "Inline wp-api-fetch configuration block %s references wp.apiFetch. Keep wp-api-fetch/core WP globals visible/excluded unless the inline block is also deferred with its dependency group."
 msgstr ""
 
 #. translators: %s: inline script block ID, or no id.
-#: includes/engine/class-engine-js-optimization-trait.php:941
+#: includes/engine/class-engine-js-optimization-trait.php:940
 msgid "Inline script block %s references wp.hooks. Keep wp-hooks visible/excluded for Defer all JS safety."
 msgstr ""
 
@@ -832,31 +832,31 @@ msgid "Existing CSS bundle manifest entry found for this URL."
 msgstr ""
 
 #: includes/engine/class-engine-warm-crawl-trait.php:1554
-#: includes/settings/class-settings-trait.php:458
+#: includes/settings/class-settings-trait.php:457
 #: includes/admin-dashboard.js:1164
 msgid "Select depth"
 msgstr ""
 
 #: includes/engine/class-engine-warm-crawl-trait.php:1555
-#: includes/settings/class-settings-trait.php:459
+#: includes/settings/class-settings-trait.php:458
 #: includes/admin-dashboard.js:1165
 msgid "Depth 1"
 msgstr ""
 
 #: includes/engine/class-engine-warm-crawl-trait.php:1556
-#: includes/settings/class-settings-trait.php:460
+#: includes/settings/class-settings-trait.php:459
 #: includes/admin-dashboard.js:1166
 msgid "Depth 2"
 msgstr ""
 
 #: includes/engine/class-engine-warm-crawl-trait.php:1557
-#: includes/settings/class-settings-trait.php:461
+#: includes/settings/class-settings-trait.php:460
 #: includes/admin-dashboard.js:1167
 msgid "Depth 3"
 msgstr ""
 
 #: includes/engine/class-engine-warm-crawl-trait.php:1558
-#: includes/settings/class-settings-trait.php:462
+#: includes/settings/class-settings-trait.php:461
 #: includes/admin-dashboard.js:1168
 msgid "All depths"
 msgstr ""
@@ -937,10 +937,6 @@ msgstr ""
 msgid "Unable to create GD WebP probe canvas"
 msgstr ""
 
-#: includes/media/class-media-queue-trait.php:178
-msgid "Optimized storage health is passive. Use Refresh Storage Stats or Verify / Repair Queue to run the capped filesystem scan."
-msgstr ""
-
 #: includes/media/class-media-queue-trait.php:862
 msgid "Media queue table could not be created."
 msgstr ""
@@ -961,108 +957,108 @@ msgstr ""
 msgid "Queue row unavailable."
 msgstr ""
 
-#: includes/rest/class-rest-action-queue-trait.php:677
-#: includes/rest/class-rest-action-queue-trait.php:902
+#: includes/rest/class-rest-action-queue-trait.php:676
+#: includes/rest/class-rest-action-queue-trait.php:901
 msgid "Unsupported dashboard processing action."
 msgstr ""
 
-#: includes/rest/class-rest-action-queue-trait.php:689
+#: includes/rest/class-rest-action-queue-trait.php:688
 msgid "Processing dashboard action."
 msgstr ""
 
-#: includes/rest/class-rest-action-queue-trait.php:737
-#: includes/rest/class-rest-action-queue-trait.php:769
+#: includes/rest/class-rest-action-queue-trait.php:736
+#: includes/rest/class-rest-action-queue-trait.php:768
 msgid "Dashboard processing action not found."
 msgstr ""
 
-#: includes/rest/class-rest-action-queue-trait.php:886
+#: includes/rest/class-rest-action-queue-trait.php:885
 msgid "Google Fonts rebuild helper is not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:18
+#: includes/rest/class-rest-cache-trait.php:17
 #: ultracache.php:593
 msgid "Cache stats are disabled."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:37
+#: includes/rest/class-rest-cache-trait.php:36
 msgid "Storage diagnostics helper is not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:43
+#: includes/rest/class-rest-cache-trait.php:42
 #: includes/admin-dashboard.js:9321
 msgid "Storage diagnostics refreshed."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:55
-#: includes/rest/class-rest-cache-trait.php:535
-#: includes/rest/class-rest-cache-trait.php:555
-#: includes/rest/class-rest-cache-trait.php:574
-#: includes/rest/class-rest-cache-trait.php:590
-#: includes/rest/class-rest-cache-trait.php:611
+#: includes/rest/class-rest-cache-trait.php:54
+#: includes/rest/class-rest-cache-trait.php:534
+#: includes/rest/class-rest-cache-trait.php:554
+#: includes/rest/class-rest-cache-trait.php:573
+#: includes/rest/class-rest-cache-trait.php:589
+#: includes/rest/class-rest-cache-trait.php:610
 msgid "Cache engine not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:155
+#: includes/rest/class-rest-cache-trait.php:201
 msgid "This UltraCache action changes plugin drop-ins, wp-config.php, .htaccess, or plugin activation state. It requires a full administrator with plugin activation permissions."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:214
+#: includes/rest/class-rest-cache-trait.php:213
 msgid "Confirmation failed. Type DELETE to remove UltraCache data and deactivate the plugin."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:221
+#: includes/rest/class-rest-cache-trait.php:220
 msgid "Cleanup helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:236
-#: includes/rest/class-rest-cache-trait.php:250
-#: includes/rest/class-rest-cache-trait.php:262
+#: includes/rest/class-rest-cache-trait.php:235
+#: includes/rest/class-rest-cache-trait.php:249
+#: includes/rest/class-rest-cache-trait.php:261
 msgid "Cron warm helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:278
-#: includes/rest/class-rest-cache-trait.php:301
+#: includes/rest/class-rest-cache-trait.php:277
+#: includes/rest/class-rest-cache-trait.php:300
 msgid "Varnish helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:311
+#: includes/rest/class-rest-cache-trait.php:310
 msgid "OPcache helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:321
+#: includes/rest/class-rest-cache-trait.php:320
 msgid "APCu helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:331
+#: includes/rest/class-rest-cache-trait.php:330
 msgid "External cache detection helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:344
+#: includes/rest/class-rest-cache-trait.php:343
 msgid "LiteSpeed Cache helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:354
+#: includes/rest/class-rest-cache-trait.php:353
 msgid "Nginx Cache helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:364
+#: includes/rest/class-rest-cache-trait.php:363
 msgid "Object cache backend test helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:424
+#: includes/rest/class-rest-cache-trait.php:423
 #: ultracache.php:395
 msgid "Object cache helper not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:440
+#: includes/rest/class-rest-cache-trait.php:439
 msgid "Cache helper cleanup is not available."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:454
+#: includes/rest/class-rest-cache-trait.php:453
 msgid "Full object-cache count completed."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:471
+#: includes/rest/class-rest-cache-trait.php:470
 #: includes/admin-dashboard.js:7822
 #: includes/admin-dashboard.js:7838
 #: includes/admin-dashboard.js:7858
@@ -1072,248 +1068,253 @@ msgstr ""
 msgid "Please enable Page Caching first or select a profile before warming cache."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:483
+#: includes/rest/class-rest-cache-trait.php:482
 msgid "Please enable CSS Bundling before using CSS bundle actions."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:518
-#: includes/rest/class-rest-cache-trait.php:550
+#: includes/rest/class-rest-cache-trait.php:517
+#: includes/rest/class-rest-cache-trait.php:549
 msgid "No URL provided."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:539
+#: includes/rest/class-rest-cache-trait.php:538
 msgid "Only local site URLs can be crawled."
 msgstr ""
 
-#: includes/rest/class-rest-cache-trait.php:559
+#: includes/rest/class-rest-cache-trait.php:558
 msgid "Only local site URLs can be inspected."
 msgstr ""
 
-#: includes/rest/class-rest-media-trait.php:39
+#: includes/rest/class-rest-media-trait.php:38
 msgid "No valid media ID."
 msgstr ""
 
-#: includes/rest/class-rest-media-trait.php:44
-#: includes/rest/class-rest-media-trait.php:53
-#: includes/rest/class-rest-media-trait.php:64
-#: includes/rest/class-rest-media-trait.php:72
+#: includes/rest/class-rest-media-trait.php:43
+#: includes/rest/class-rest-media-trait.php:52
+#: includes/rest/class-rest-media-trait.php:63
+#: includes/rest/class-rest-media-trait.php:71
 msgid "Media converter not available."
 msgstr ""
 
-#: includes/rest/class-rest-media-trait.php:89
+#: includes/rest/class-rest-media-trait.php:88
 msgid "Media queue is not available."
 msgstr ""
 
-#: includes/rest/class-rest-media-trait.php:105
+#: includes/rest/class-rest-media-trait.php:104
 msgid "Media queue rebuild is not available."
 msgstr ""
 
-#: includes/rest/class-rest-media-trait.php:118
+#: includes/rest/class-rest-media-trait.php:117
 msgid "Media queue processing is not available."
 msgstr ""
 
-#: includes/rest/class-rest-media-trait.php:135
+#: includes/rest/class-rest-media-trait.php:134
 msgid "Media queue repair is not available."
 msgstr ""
 
-#: includes/rest/class-rest-media-trait.php:145
+#: includes/rest/class-rest-media-trait.php:144
 msgid "Media queue retry is not available."
 msgstr ""
 
-#: includes/rest/class-rest-media-trait.php:155
+#: includes/rest/class-rest-media-trait.php:154
 msgid "Media queue cleanup is not available."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:33
+#: includes/rest/class-rest-routes-trait.php
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "Applying prepared Theme CSS replacements requires manage_options and activate_plugins permissions."
+msgstr ""
+
+#: includes/rest/class-rest-profiler-trait.php:32
 msgid "Only same-site URLs can be scanned."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:37
+#: includes/rest/class-rest-profiler-trait.php:36
 msgid "Only same-site frontend URLs on the site port can be scanned."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:603
-#: includes/rest/class-rest-profiler-trait.php:623
-#: includes/rest/class-rest-profiler-trait.php:681
+#: includes/rest/class-rest-profiler-trait.php:602
+#: includes/rest/class-rest-profiler-trait.php:622
+#: includes/rest/class-rest-profiler-trait.php:680
 msgid "Speed diagnostics helper is not available."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:608
+#: includes/rest/class-rest-profiler-trait.php:607
 msgid "No speed timing breakdown found yet."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:613
+#: includes/rest/class-rest-profiler-trait.php:612
 msgid "Last speed timing breakdown loaded."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:630
+#: includes/rest/class-rest-profiler-trait.php:629
 msgid "Last speed timing breakdown cleared."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:630
+#: includes/rest/class-rest-profiler-trait.php:629
 msgid "No speed timing breakdown was present."
 msgstr ""
 
 #. translators: %s: WordPress HTTP API error message.
-#: includes/rest/class-rest-profiler-trait.php:748
+#: includes/rest/class-rest-profiler-trait.php:747
 msgid "Profiler request failed: %s"
 msgstr ""
 
 #. translators: 1: cache status returned by the diagnostic request, 2: profile response header, 3: profile reason header.
-#: includes/rest/class-rest-profiler-trait.php:770
+#: includes/rest/class-rest-profiler-trait.php:769
 msgid "The diagnostic request reached cache status %1$s, but no STORE profile JSON was saved. Profile header: %2$s. Reason: %3$s."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:811
+#: includes/rest/class-rest-profiler-trait.php:810
 msgid "The diagnostic request reached MISS, but UltraCache did not receive the final STORE output-buffer callback. A diagnostic profile was saved with reason: output-buffer-callback-not-run."
 msgstr ""
 
 #. translators: %s: speed diagnostic profile mode, for example COMPACT or VERBOSE.
-#: includes/rest/class-rest-profiler-trait.php:820
+#: includes/rest/class-rest-profiler-trait.php:819
 msgid "%s performance profile completed."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:4713
+#: includes/rest/class-rest-profiler-trait.php:4712
 msgid "Missing console error text."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:4747
-#: includes/rest/class-rest-profiler-trait.php:5326
+#: includes/rest/class-rest-profiler-trait.php:4746
+#: includes/rest/class-rest-profiler-trait.php:5325
 msgid "Missing runtime JS scan id."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:4788
+#: includes/rest/class-rest-profiler-trait.php:4787
 msgid "Browser runtime JS diagnostic queue completed."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:4788
+#: includes/rest/class-rest-profiler-trait.php:4787
 msgid "Browser runtime JS diagnostic queue received an interim report."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5202
+#: includes/rest/class-rest-profiler-trait.php:5201
 msgid "JS diagnostic queue job not found."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5225
+#: includes/rest/class-rest-profiler-trait.php:5224
 msgid "Browser runtime JS diagnostic queue started."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5225
+#: includes/rest/class-rest-profiler-trait.php:5224
 msgid "Console JS diagnostic queue started."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5230
+#: includes/rest/class-rest-profiler-trait.php:5229
 msgid "Could not create JS diagnostic queue job."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5237
+#: includes/rest/class-rest-profiler-trait.php:5236
 msgid "Console diagnostic queue needs pasted console text."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5266
+#: includes/rest/class-rest-profiler-trait.php:5265
 msgid "Console JS diagnostic queue completed."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5283
+#: includes/rest/class-rest-profiler-trait.php:5282
 msgid "No JS diagnostic queue job is stored yet."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5296
+#: includes/rest/class-rest-profiler-trait.php:5295
 msgid "Missing JS diagnostic queue job id."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5309
+#: includes/rest/class-rest-profiler-trait.php:5308
 msgid "JS diagnostic queue paused."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5314
+#: includes/rest/class-rest-profiler-trait.php:5313
 msgid "JS diagnostic queue resumed."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:5319
+#: includes/rest/class-rest-profiler-trait.php:5318
 msgid "JS diagnostic queue cancelled."
 msgstr ""
 
 #. translators: %s: WordPress HTTP API error message.
-#: includes/rest/class-rest-routes-trait.php:916
+#: includes/rest/class-rest-routes-trait.php:915
 msgid "Front page font scan failed: %s"
 msgstr ""
 
-#: includes/rest/class-rest-routes-trait.php:928
+#: includes/rest/class-rest-routes-trait.php:927
 msgid "Front page font scan returned empty HTML."
 msgstr ""
 
 #. translators: 1: number of detected icon font patterns, 2: number of detected non-icon font patterns.
-#: includes/rest/class-rest-routes-trait.php:961
+#: includes/rest/class-rest-routes-trait.php:960
 msgid "Detected %1$d likely icon font pattern(s) and %2$d non-icon font pattern(s) on the front page."
 msgstr ""
 
 #. translators: %d: number of detected taxonomy or product attribute query-string keys.
-#: includes/rest/class-rest-routes-trait.php:983
+#: includes/rest/class-rest-routes-trait.php:982
 msgid "Detected %d taxonomy/attribute query-string keys."
 msgstr ""
 
-#: includes/rest/class-rest-routes-trait.php:985
+#: includes/rest/class-rest-routes-trait.php:984
 #: includes/admin-dashboard.js:8236
 msgid "No taxonomy/attribute query-string keys were detected."
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1076
+#: includes/settings/class-settings-trait.php:1075
 msgid "W3 Total Cache"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1077
+#: includes/settings/class-settings-trait.php:1076
 msgid "WP Rocket"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1078
+#: includes/settings/class-settings-trait.php:1077
 msgid "WP Super Cache"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1079
+#: includes/settings/class-settings-trait.php:1078
 #: ultracache.php:4946
 #: includes/admin-dashboard.js:5888
 #: includes/admin-dashboard.js:10819
 msgid "LiteSpeed Cache"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1080
+#: includes/settings/class-settings-trait.php:1079
 msgid "SiteGround Optimizer"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1081
+#: includes/settings/class-settings-trait.php:1080
 msgid "WP Fastest Cache"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1082
+#: includes/settings/class-settings-trait.php:1081
 msgid "Breeze"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1083
+#: includes/settings/class-settings-trait.php:1082
 msgid "Redis Object Cache"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1084
+#: includes/settings/class-settings-trait.php:1083
 msgid "Docket Cache"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1085
+#: includes/settings/class-settings-trait.php:1084
 msgid "Object Cache Pro"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1086
+#: includes/settings/class-settings-trait.php:1085
 msgid "Memcached Object Cache"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1087
+#: includes/settings/class-settings-trait.php:1086
 msgid "Powered Cache"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1088
+#: includes/settings/class-settings-trait.php:1087
 msgid "Cache Enabler"
 msgstr ""
 
-#: includes/settings/class-settings-trait.php:1089
+#: includes/settings/class-settings-trait.php:1088
 msgid "Autoptimize"
 msgstr ""
 
@@ -1712,7 +1713,7 @@ msgid "Safe"
 msgstr ""
 
 #: includes/admin-dashboard.js:289
-msgid "Safe baseline with frontend JavaScript manipulation disabled. Object Cache is enabled automatically with Redis/APCu/Disk detection. User-maintained exclusions and visible lists are preserved."
+msgid "Safe baseline with frontend JavaScript manipulation disabled. Object Cache is enabled automatically with Redis/APCu/SQLite/Disk detection. User-maintained exclusions and visible lists are preserved."
 msgstr ""
 
 #: includes/admin-dashboard.js:392
@@ -1721,7 +1722,7 @@ msgid "Balanced"
 msgstr ""
 
 #: includes/admin-dashboard.js:392
-msgid "Balanced profile enables selected delayed JavaScript features without Delay all JS, uses aggressive CSS bundling for better speed, and auto-detects Object Cache with Redis/APCu/Disk. User-maintained exclusions and visible lists are preserved."
+msgid "Balanced profile enables selected delayed JavaScript features without Delay all JS, uses aggressive CSS bundling for better speed, and auto-detects Object Cache with Redis/APCu/SQLite/Disk. User-maintained exclusions and visible lists are preserved."
 msgstr ""
 
 #: includes/admin-dashboard.js:495
@@ -1731,7 +1732,7 @@ msgid "Aggressive"
 msgstr ""
 
 #: includes/admin-dashboard.js:495
-msgid "Aggressive profile enables Balanced JavaScript with native Defer as the base strategy, targeted delay modules, aggressive CSS bundling, and the unified 0.05 second fallback. Scan Browser Runtime Errors is recommended to build speed-first Defer Instead fixes before compatibility exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved."
+msgid "Aggressive profile enables Balanced JavaScript with native Defer as the base strategy, targeted delay modules, aggressive CSS bundling, Warm affected pages after save, Apache Static HTML Delivery, and the unified 0.05 second fallback. Scan Browser Runtime Errors is recommended to build speed-first Defer Instead fixes before compatibility exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved."
 msgstr ""
 
 #: includes/admin-dashboard.js:661
@@ -1784,10 +1785,6 @@ msgstr ""
 
 #: includes/admin-dashboard.js:1313
 msgid "Cached Pages"
-msgstr ""
-
-#: includes/admin-dashboard.js:1319
-msgid "Optimized Images"
 msgstr ""
 
 #: includes/admin-dashboard.js:1325
@@ -2644,7 +2641,7 @@ msgid "Conflicting WordPress cache helpers detected"
 msgstr ""
 
 #: includes/admin-dashboard.js:5506
-msgid "UltraCache can back up and remove these conflicting WordPress drop-ins. It will not delete plugin folders or settings from other plugins."
+msgid "UltraCache can remove these conflicting WordPress cache drop-ins immediately."
 msgstr ""
 
 #: includes/admin-dashboard.js:5551
@@ -2719,10 +2716,6 @@ msgstr ""
 
 #: includes/admin-dashboard.js:5671
 msgid "Last result"
-msgstr ""
-
-#: includes/admin-dashboard.js:5680
-msgid "Security warning: Varnish admin mode uses a plain TCP socket. Local/private endpoints are safest, but external infrastructure endpoints are allowed when intentionally configured and firewalled. The saved secret is never shown in diagnostics or REST settings."
 msgstr ""
 
 #: includes/admin-dashboard.js:5712
@@ -2819,9 +2812,9 @@ msgstr ""
 msgid ""
 "What it does: chooses what UltraCache tries if the selected object-cache backend cannot be used.\n"
 "\n"
-"Why it helps: the site can keep running with APCu, disk, or runtime-only cache instead of failing hard.\n"
+"Why it helps: the site can keep running with APCu, SQLite, Disk, or runtime-only cache instead of failing hard.\n"
 "\n"
-"Watch for: fallback is a safety net, not the main plan. APCu is local memory for one server, disk can add filesystem work, and runtime-only is safest but usually slower on cache misses."
+"Watch for: APCu is local memory for one server, SQLite is persistent local storage, Disk can add filesystem work, and runtime-only persists only for the current request."
 msgstr ""
 
 #: includes/admin-dashboard.js:6037
@@ -3334,11 +3327,11 @@ msgid "Store public pages as static HTML files."
 msgstr ""
 
 #: includes/admin-dashboard.js:9880
-msgid "Pre-render on Save"
+msgid "Warm affected pages after save"
 msgstr ""
 
 #: includes/admin-dashboard.js:9881
-msgid "Warm the updated page after content changes."
+msgid "Automatically warm only affected public pages after a real content save. Autosaves, revisions, admin AJAX, and feeds are skipped; non-200 responses are not cached or retried."
 msgstr ""
 
 #: includes/admin-dashboard.js:9888
@@ -3443,7 +3436,7 @@ msgid "AVIF is preferred first, with WebP kept as the compatibility fallback."
 msgstr ""
 
 #: includes/admin-dashboard.js:9974
-msgid "Generate on Upload"
+msgid "Rewrite on upload"
 msgstr ""
 
 #: includes/admin-dashboard.js:9975
@@ -3451,11 +3444,11 @@ msgid "When enabled, newly uploaded images and their registered thumbnail sizes 
 msgstr ""
 
 #: includes/admin-dashboard.js:9982
-msgid "Queue Missing Media on Demand"
+msgid "Queue Missing Media During Page Generation"
 msgstr ""
 
 #: includes/admin-dashboard.js:9983
-msgid "When enabled, UltraCache queues missing AVIF/WebP variants discovered during frontend, warm-up, cron warm, or stale rewrites. The current request never performs image conversion; the existing background media queue handles generation."
+msgid "When enabled, UltraCache queues missing AVIF/WebP variants while WordPress generates or regenerates page HTML, including uncached requests, warm-up, cron warm, and stale regeneration. Conversion runs separately in the background."
 msgstr ""
 
 #: includes/admin-dashboard.js:9990
@@ -3978,11 +3971,11 @@ msgid "Enable query-string args caching"
 msgstr ""
 
 #: includes/admin-dashboard.js:10441
-msgid "Allow UltraCache to cache URL variants that include query-string args. Excluded query-string args always bypass cache. If the whitelist below is empty, all non-excluded query-string variants can be cached."
+msgid "Allow UltraCache to cache URL variants that include query-string args. Excluded query-string args always bypass cache. The whitelist below must contain every query key; an empty whitelist bypasses query-string caching."
 msgstr ""
 
 #: includes/admin-dashboard.js:10450
-msgid "Optional. One query key per line. When query-string caching is enabled, UltraCache caches a query-string URL only when every query arg is listed here. Populate appends detected attributes, taxonomies, categories and tags without removing custom entries."
+msgid "Required when query-string caching is enabled. Add one query key per line. UltraCache caches a query-string URL only when every query arg is listed here; an empty whitelist bypasses query-string caching. Populate appends detected attributes, taxonomies, categories and tags without removing custom entries."
 msgstr ""
 
 #: includes/admin-dashboard.js:10456
@@ -4400,3 +4393,1904 @@ msgstr ""
 #: includes/admin-dashboard.js:10990
 msgid "After major changes, test the homepage, key landing pages, product pages, cart, checkout, account pages, search/filter pages, forms, mobile menu, sliders, and hero sections."
 msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:383
+msgid "The image conversion unit could not be generated."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php:1136
+msgid "Another media conversion is already running."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php:1182
+msgid "This media queue item must be retried before it can run again."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php:1204
+msgid "This media item is already being processed."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php
+msgid "Media conversion failed."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:44
+msgid "The bundled AVIF self-test PNG is missing or unreadable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:136
+msgid "Imagick is unavailable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:140
+msgid "Imagick AVIF format detection is unavailable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:150
+msgid "Imagick reports no AVIF encoder."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:155
+msgid "Unable to create the Imagick AVIF self-test file."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:175
+msgid "Imagick did not create a valid AVIF container."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:197
+msgid "Imagick AVIF encode/decode failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:224
+msgid "GD AVIF encode/decode support is unavailable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:230
+msgid "Unable to create the GD AVIF self-test file."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:241
+msgid "GD could not decode the bundled AVIF self-test PNG."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:261
+msgid "GD AVIF encoding failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:262
+msgid "GD did not create a valid AVIF container."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:279
+msgid "GD AVIF decoding failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:280
+msgid "GD could not decode its generated AVIF file."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:302
+msgid "GD AVIF encode/decode failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:389
+msgid "The decoded AVIF dimensions do not match the 16x16 test source."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:399
+msgid "The decoded AVIF is missing the expected %s sample."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:420
+msgid "AVIF pixel validation failed for the %s test region."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:431
+msgid "AVIF alpha validation failed for the transparent or semi-transparent test pixels."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:438
+msgid "AVIF encode, full decode, RGB, and alpha validation passed."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:491
+msgid "AVIF encoder self-test passed with: %s."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:494
+msgid "No AVIF encoder with matching decode support is available."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:499
+msgid "Every available AVIF encoder failed pixel validation."
+msgstr ""
+
+#: includes/admin-dashboard.js:10262
+msgid "Choose the format used for generated media and frontend rewrites. WebP is the recommended default; Automatic enables AVIF only when its encoder self-test passes."
+msgstr ""
+
+#: includes/admin-dashboard.js:10267
+msgid "WebP Format (Recommended)"
+msgstr ""
+
+#: includes/admin-dashboard.js:10269
+msgid "AVIF Format (Self-Test Failed)"
+msgstr ""
+
+#: includes/admin-dashboard.js:10277
+msgid "Automatic uses AVIF only after the encoder self-test passes; otherwise it uses WebP."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "A bundled AVIF self-test image is missing or unreadable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "Imagick failed the opaque JPEG AVIF regression test."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "Imagick passed both the opaque JPEG and transparent PNG AVIF tests."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "GD failed the opaque JPEG AVIF regression test."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "GD passed both the opaque JPEG and transparent PNG AVIF tests."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "Unable to create the Imagick opaque AVIF self-test file."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "The bundled opaque JPEG unexpectedly contains an active alpha channel."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "Imagick did not create a valid AVIF from the opaque JPEG."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "Imagick opaque JPEG AVIF test failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "GD JPEG decoding is unavailable for the opaque AVIF test."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "Unable to create the GD opaque AVIF self-test file."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "GD could not decode the bundled opaque JPEG."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "GD opaque JPEG AVIF encoding failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "GD did not create a valid AVIF from the opaque JPEG."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "GD could not decode the opaque JPEG AVIF test output."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "GD opaque JPEG AVIF test failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "The opaque JPEG AVIF dimensions do not match the 300x169 source."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "The opaque JPEG AVIF test is missing the %s sample."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "Opaque JPEG AVIF pixel validation failed for the %1$s %2$s channel."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "The opaque JPEG AVIF output contains unexpected transparency."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "The opaque JPEG AVIF output differs too much from the source pixels."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+msgid "Opaque JPEG AVIF encode, full decode, and sampled pixel validation passed."
+msgstr ""
+
+#: includes/media/class-media-diagnostics-trait.php
+msgid "Persistent media counters have not been reconciled yet."
+msgstr ""
+
+#: includes/media/class-media-diagnostics-trait.php
+msgid "Persistent media counters were seeded from the latest complete storage scan."
+msgstr ""
+
+#: includes/media/class-media-diagnostics-trait.php
+msgid "Persistent media counters were seeded from an incomplete storage scan and need reconciliation."
+msgstr ""
+
+#: includes/media/class-media-diagnostics-trait.php
+msgid "Persistent media counters are current."
+msgstr ""
+
+#: includes/media/class-media-diagnostics-trait.php
+msgid "Persistent media counters were reconciled with the filesystem."
+msgstr ""
+
+#: includes/media/class-media-diagnostics-trait.php
+msgid "The storage scan was incomplete. Last known persistent counters remain visible and reconciliation is still needed."
+msgstr ""
+
+#: includes/media/class-media-diagnostics-trait.php
+msgid "Showing persistent media counters."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php
+msgid "This media queue item reached the retry limit and must be retried manually."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+#, php-format
+msgid "GD could not decode the bundled opaque JPEG: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php
+#, php-format
+msgid "GD could not decode the opaque JPEG AVIF test output: %s"
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php
+msgid "Another media queue rebuild chunk is still running. UltraCache will retry after it finishes."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php
+msgid "This media queue rebuild request belongs to an older run and was ignored."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php
+msgid "Media queue rebuild could not be initialized."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php
+msgid "Media background worker is unavailable."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php
+msgid "Invalid or expired media background worker request."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php
+msgid "Media generation is paused by an administrator."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php
+msgid "Media background control is not available."
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Queue-based conversion and maintenance for existing uploads."
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Media generation is stopped. Pending queue rows and existing optimized files are preserved."
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Stops upload, page-generation, cron, immediate-worker, and dashboard media conversion after the current physical file finishes."
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Scans the Media Library, adds missing queue rows, and requeues attachments whose required optimized files are missing or older than their source images."
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Starts the rebuild and repair scan from the beginning instead of resuming the saved offset."
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Media queue rebuild/repair paused. You can resume it later."
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Media Queue Rebuild / Repair complete"
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Media queue rebuilt and repaired."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php
+msgid "Another media conversion or queue rebuild is still running. UltraCache will retry after it finishes."
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Recount Optimized Image Files"
+msgstr ""
+
+#: includes/admin-dashboard.js
+msgid "Scans uploads/ultracache/images and corrects the AVIF/WebP file counter."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php
+msgid "Optimized storage health is passive. Use Recount Optimized Image Files or Rebuild / Repair Media Queue to reconcile it."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:75
+msgid "The source image is missing or unreadable."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:80
+msgid "The source image type is not supported for this conversion."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:85
+msgid "No verified AVIF encoder is available."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:92
+msgid "The optimized destination path could not be resolved."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:99
+msgid "The optimized media directory could not be created or is not writable."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:119
+msgid "All available encoders failed to generate the requested image format."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:130
+msgid "The generated AVIF file failed the final file validation."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:158
+msgid "The source image type is not supported for WebP conversion."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:163
+msgid "No WebP encoder is available."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:196
+msgid "All available encoders failed to generate WebP."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:207
+msgid "The generated WebP file failed the final file validation."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:980
+msgid "The WordPress image editor API is unavailable."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:990
+msgid "WordPress could not create an image editor for the source file."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:1015
+msgid "The WordPress image editor did not produce a valid WebP file."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:1041
+msgid "Imagick wrote a file that failed format validation."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:1044
+msgid "Imagick could not write the generated image."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:1085
+msgid "GD could not determine the source image type."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:1106
+msgid "GD could not decode the source image."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php:1167
+msgid "GD did not produce a valid generated image."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php:150
+msgid "The dashboard media-conversion lock is unavailable."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php:164
+#: includes/media/class-media-background-queue-trait.php:183
+msgid "Another dashboard media conversion is already running."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php:222
+#: includes/media/class-media-queue-trait.php:1476
+msgid "The dashboard media-conversion session expired or changed owner."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php:247
+msgid "The dashboard media-conversion session could not be renewed."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php:1466
+#: includes/media/class-media-queue-trait.php:1755
+msgid "Dashboard media conversion currently has exclusive queue ownership."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:241
+msgid "Dashboard media-session control is not available."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php:253
+msgid "Invalid dashboard media-session action."
+msgstr ""
+
+#: includes/admin/js/theme.js
+msgid "UltraCache Theme"
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php
+msgid "Invalid UltraCache admin theme."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php
+msgid "The current administrator could not be resolved."
+msgstr ""
+
+#: includes/admin/js/app.js includes/rest/class-rest-cache-trait.php
+msgid "The UltraCache admin theme could not be saved."
+msgstr ""
+
+#: includes/admin/js/cache.js:545
+msgid "Persistent local database backend for WordPress object caching."
+msgstr ""
+
+#: includes/admin/js/cache.js:767
+msgid "PHP SQLite3 extension"
+msgstr ""
+
+#: includes/admin/js/cache.js:771
+msgid "SQLite journal mode"
+msgstr ""
+
+#: includes/class-object-cache-manager.php:55
+msgid "SQLite backend selected, but the PHP SQLite3 extension is not loaded."
+msgstr ""
+
+#: includes/class-object-cache-manager.php:553
+msgid "PHP SQLite3 is not available for this runtime."
+msgstr ""
+
+#: includes/class-object-cache-manager.php:559
+msgid "SQLite object-cache database could not be opened."
+msgstr ""
+
+#: includes/admin/js/cache.js:525
+msgid "Write"
+msgstr ""
+
+#: includes/admin/js/cache.js:526
+msgid "Read"
+msgstr ""
+
+#: includes/admin/js/cache.js:527
+msgid "Delete"
+msgstr ""
+
+#: includes/admin/js/cache.js:528
+msgid "Expiration"
+msgstr ""
+
+#: includes/admin/js/cache.js:799
+msgid "Functional test"
+msgstr ""
+
+#: includes/admin/js/cache.js:802
+#: includes/admin/js/cache.js:811
+msgid "PASS"
+msgstr ""
+
+#: includes/admin/js/cache.js:802
+#: includes/admin/js/cache.js:811
+msgid "FAIL"
+msgstr ""
+
+#: includes/class-object-cache-manager.php:686
+msgid "SQLite object cache functional test passed."
+msgstr ""
+
+#: includes/class-object-cache-manager.php:687
+msgid "SQLite object cache functional test failed."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:53
+msgid "HTML compression capability probe is not available."
+msgstr ""
+
+#: includes/admin/js/app.js:2133
+msgid "Please wait… Checking server compression support."
+msgstr ""
+
+#: includes/admin/js/app.js:2148
+msgid "The selected HTML compression mode is not available and was switched off."
+msgstr ""
+
+#: includes/admin/js/app.js:2154
+msgid "Unable to check server compression support."
+msgstr ""
+
+#: includes/admin/js/app.js:2191
+msgid "Gzip compression is not available on this server."
+msgstr ""
+
+#: includes/admin/js/app.js:2195
+msgid "Brotli compression is not available on this server."
+msgstr ""
+
+#: includes/admin/js/app.js:3677
+msgid "Server managed"
+msgstr ""
+
+#: includes/admin/js/app.js:3672
+#: includes/admin/js/ui.js:612
+msgid "Please wait…"
+msgstr ""
+
+#: ultracache.php:315
+msgid "Server-managed HTML compression is active."
+msgstr ""
+
+#: ultracache.php:319
+msgid "Gzip and Brotli compression are available."
+msgstr ""
+
+#: ultracache.php:322
+msgid "Brotli compression is available."
+msgstr ""
+
+#: ultracache.php:325
+msgid "Gzip compression is available."
+msgstr ""
+
+#: ultracache.php:328
+msgid "No supported HTML compression encoder is available."
+msgstr ""
+
+#: ultracache.php:331
+msgid "The existing HTML page cache could not be cleared before changing the delivery mode. Please retry the setting change."
+msgstr ""
+
+#: includes/class-object-cache-manager.php:1865
+msgid "SQLite public exposure test could not resolve the database URL."
+msgstr ""
+
+#: includes/class-object-cache-manager.php:1889
+msgid "SQLite public exposure test could not complete the loopback request."
+msgstr ""
+
+#: includes/class-object-cache-manager.php:1898
+msgid "The SQLite object-cache database is publicly readable and cannot be used safely."
+msgstr ""
+
+#: includes/class-object-cache-manager.php:1899
+msgid "The SQLite object-cache database was not exposed by the web server."
+msgstr ""
+
+#: includes/settings/class-settings-trait.php:1691
+msgid "SQLite object cache cannot be enabled until database access protection is verified."
+msgstr ""
+
+#: ultracache.php:420
+msgid "Cron warm up is blocked while a manual warm-up is active or paused."
+msgstr ""
+
+#: ultracache.php:423
+msgid "Cron warm up stopped because a manual warm-up has priority."
+msgstr ""
+
+#: ultracache.php:426
+msgid "Cron warm up skipped because a manual warm-up has priority."
+msgstr ""
+
+#: ultracache.php:429
+msgid "Scheduled cache cleanup was skipped because a manual warm-up has priority."
+msgstr ""
+
+#: ultracache.php:432
+msgid "Invalid manual warm-up job type."
+msgstr ""
+
+#: ultracache.php:435
+msgid "Another administrator has an active or paused manual warm-up."
+msgstr ""
+
+#: ultracache.php:438
+msgid "Manual warm-up started with priority over cron warm-up."
+msgstr ""
+
+#: ultracache.php:441
+msgid "Manual warm-up ownership could not be verified."
+msgstr ""
+
+#: ultracache.php:444
+msgid "Manual warm-up paused. Cron warm-up remains blocked."
+msgstr ""
+
+#: ultracache.php:447
+msgid "Manual warm-up ownership released."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:290
+msgid "Manual warm-up control is not available."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:313
+msgid "Invalid manual warm-up action."
+msgstr ""
+
+#: includes/admin/js/app.js:2887
+msgid "Could not acquire manual warm-up priority."
+msgstr ""
+
+#: includes/admin/js/app.js:3029
+msgid "Manual warm-up finished, but its priority state could not be released immediately."
+msgstr ""
+
+#: includes/admin/js/app.js:750
+msgid "Blocked by manual warm-up"
+msgstr ""
+
+#: includes/engine/class-engine-warm-crawl-trait.php
+msgid "Could not authenticate the internal cache refresh request."
+msgstr ""
+
+#. translators: 1: cache response status, 2: cache bypass reason.
+#: includes/engine/class-engine-warm-crawl-trait.php
+#, php-format
+msgid "Frontend request did not allow page caching: %1$s (%2$s)."
+msgstr ""
+
+#. translators: %s: cache response status.
+#: includes/engine/class-engine-warm-crawl-trait.php
+#, php-format
+msgid "Frontend request did not allow page caching: %s."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php:45
+#: includes/media/class-media-queue-trait.php:837
+msgid "Automatic media generation was paused because a worker exceeded its processing lease. Restart the PHP handler if necessary, inspect the failed item, and resume explicitly."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php:506
+msgid "A background media worker is still processing an item. Manual conversion can start after that claim completes or its expired lease is recovered automatically."
+msgstr ""
+
+#: includes/media/queue/class-media-queue-runner-trait.php:614
+msgid "The media worker lost its processing lease. Its delayed result was not allowed to overwrite queue state and will be recovered automatically."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php:1780
+msgid "The media queue claim changed before the result could be saved."
+msgstr ""
+
+#: includes/media/class-media-queue-trait.php:1820
+msgid "The media worker lost its claim before the exception could be saved."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php
+#: includes/media/class-media-queue-trait.php
+#: includes/admin/js/app.js
+msgid "Automatic media generation was paused after repeated stale workers. Quarantined items remain failed; inspect the server and resume explicitly."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php
+#: includes/media/class-media-queue-trait.php
+#: includes/admin/js/app.js
+msgid "Media conversion is cooling down after a stale worker was quarantined. It will resume automatically when the quiet period ends."
+msgstr ""
+
+#: includes/media/class-media-background-queue-trait.php
+#: includes/media/class-media-queue-trait.php
+#: includes/admin/js/app.js
+msgid "A stale media item was quarantined. Automatic work resumes after the cooldown."
+msgstr ""
+
+#: includes/settings/class-settings-trait.php:24
+msgid "UltraCache plugin settings."
+msgstr ""
+
+#: includes/settings/class-settings-trait.php:44
+msgid "UltraCache settings must be submitted as an array. Safe defaults were used."
+msgstr ""
+
+#: includes/settings/class-settings-trait.php:57
+msgid "Pause after stale workers must be a whole number greater than zero. The default value of 3 was used."
+msgstr ""
+
+#: includes/admin/js/app.js:3852
+msgid "Pause after stale workers"
+msgstr ""
+
+#: includes/admin/js/app.js:3853
+msgid "Pause automatic media generation after this many stale worker incidents are detected within the rolling safety window."
+msgstr ""
+
+#: includes/settings/class-settings-trait.php:57
+msgid "Maximum SQLite database size must be one of the available choices. The default value of 256 MB was used."
+msgstr ""
+
+#: includes/admin/js/cache.js:600
+msgid "Maximum SQLite database size"
+msgstr ""
+
+#: includes/admin/js/cache.js:601
+msgid "Automatically saved. Limits the main SQLite object-cache database file. UltraCache removes expired and then oldest cache entries before the limit; lowering the limit below the current file size rebuilds this disposable cache database."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "General Inclusions"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Manual LCP targets, priority preloads, and request-chain delay entries."
+msgstr ""
+
+#: includes/admin/js/app.js
+#: includes/admin/js/help.js
+#: includes/diagnostics/class-diagnostics-trait.php
+msgid "Delay These Fonts / Icon Font"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Newline-separated font-family, filename, or URL fragments. Matching @font-face blocks from bundled or standalone CSS are moved into the delayed font stylesheet. Commonly used for icon fonts, but it can match any font you choose to delay."
+msgstr ""
+
+#: includes/engine/class-engine-warm-crawl-trait.php
+msgid "Page is not cacheable (%s)."
+msgstr ""
+
+#: includes/engine/class-engine-warm-crawl-trait.php
+msgid "Page is not cacheable."
+msgstr ""
+
+#: includes/engine/class-engine-warm-crawl-trait.php
+msgid "Cached + CSS."
+msgstr ""
+
+#: includes/engine/class-engine-warm-crawl-trait.php
+msgid "Cached."
+msgstr ""
+
+#: includes/engine/class-engine-warm-crawl-trait.php
+msgid "Cache write failed."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Media settings & Media Library replacement"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Upload format, new-upload conversion, and Media Library replacement controls."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Controls frontend AVIF/WebP URL rewriting, missing-media queueing, and image frontend handling."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Image compression level"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Choose the quality/file-size target used for generated AVIF/WebP variants and converted uploads."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Original-like quality — minimal loss, largest files"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "High quality — slight loss, smaller files"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Balanced — default quality and file-size tradeoff"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Compact — visible compression, smaller files"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Smallest files — strongest compression loss"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Closest visual match to the source image; expect the largest generated files."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Small visual loss with better file savings than original-like quality."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Smaller files with visible compression on detailed images."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Maximum size reduction; use only when file size matters more than image fidelity."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Balanced keeps the previous UltraCache defaults: AVIF 60 and WebP 82."
+msgstr ""
+
+#: includes/rest/class-rest-media-trait.php
+msgid "Image conversion test is not available."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php
+msgid "Not supported"
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php
+msgid "Failed"
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php
+msgid "Generated"
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php
+msgid "No image conversion test has been run yet."
+msgstr ""
+
+#: includes/media/class-media-conversion-trait.php
+msgid "No readable JPG or PNG images were found in the Media Library."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Testing images…"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Loading…"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Close image conversion test"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Media Library replacement"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Image conversion test"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "No preview"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Run Image conversion test first, then open Check test again."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Check test"
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Runs a 10-image Media Library sample through the existing AVIF/WebP converter and stores the latest result for review. The sample uses up to 3 PNG images and fills the rest with JPG images; if no PNG exists, it uses JPG images only."
+msgstr ""
+
+#: includes/admin/js/app.js
+msgid "Close image preview"
+msgstr ""
+
+msgid "Fallback Format"
+msgstr ""
+
+msgid "Choose the primary format used for generated media and frontend rewrites. Older Automatic settings are migrated to WebP."
+msgstr ""
+
+msgid "Choose what UltraCache should use when AVIF is unavailable or not accepted by the browser."
+msgstr ""
+
+msgid "WebP output falls back to the original JPEG/PNG file."
+msgstr ""
+
+msgid "WebP fallback"
+msgstr ""
+
+msgid "JPEG/PNG fallback"
+msgstr ""
+
+msgid "Generate and prefer AVIF variants, with WebP as the optimized fallback."
+msgstr ""
+
+msgid "Generate and prefer AVIF variants, with the original JPEG/PNG file as fallback."
+msgstr ""
+
+msgid "Generate and prefer WebP variants, with the original JPEG/PNG file as fallback."
+msgstr ""
+
+#: includes/media/class-media-replacement-trait.php
+msgid "Invalid database replacement value validation request."
+msgstr ""
+
+#: includes/media/class-media-replacement-trait.php
+msgid "The old image reference is still present in the built database replacement value."
+msgstr ""
+
+#: includes/media/class-media-replacement-trait.php
+msgid "The new image reference is missing from the built database replacement value."
+msgstr ""
+
+#: includes/media/class-media-replacement-trait.php
+msgid "The built serialized database replacement value could not be decoded before writing."
+msgstr ""
+
+#: includes/media/class-media-replacement-trait.php
+msgid "The built serialized database replacement value required string-length repair before writing."
+msgstr ""
+
+#: includes/media/class-media-replacement-trait.php
+msgid "The built JSON-like database replacement value could not be decoded before writing."
+msgstr ""
+
+#: includes/media/class-media-replacement-trait.php
+msgid "The built database replacement value failed pre-write validation."
+msgstr ""
+
+#: includes/admin/class-admin-trait.php
+msgid "Rate us!"
+msgstr ""
+
+#: includes/admin/class-admin-trait.php
+msgid "Open UltraCache reviews on WordPress.org"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Still having questions?"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Ask on forums"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:383
+msgid "A Theme CSS file changed while it was being scanned. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:387
+msgid "A Theme CSS file could not be read during the resumable scan."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:408
+msgid "Theme CSS stream scan progress could not be persisted."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:374 includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:617
+msgid "A Theme CSS file changed during Prepare. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:420
+msgid "A Theme CSS file could not be read during file-set validation."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:434
+msgid "A Theme CSS file changed during Prepare. Restart Prepare to build a consistent plan."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:447
+msgid "Theme CSS validation progress could not be persisted."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:413 includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:913 includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1084
+msgid "Media Library replacement registry tables are not available."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:460
+msgid "Complete database replacement planning before scanning theme CSS references."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:463
+msgid "No Media Library replacement registry rows are available for theme CSS scanning."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:476
+msgid "Theme CSS scan storage could not be reset for this job."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:502
+msgid "Theme CSS reference scan is already complete with %1$d planned replacements across %2$d files."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:461 includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:645
+msgid "Continue Prepare with the Theme CSS replacement preview."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:506
+msgid "The Theme CSS scan is in a failed state. Restart Prepare to rebuild it."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:530
+msgid "Theme CSS discovery could not persist its file inventory."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:551
+msgid "Theme CSS discovery completed with %d files. The resumable content scan is ready to continue."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:554
+msgid "Theme CSS discovery is continuing. %d CSS files have been found so far."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:556
+msgid "Continue with the persisted Theme CSS inventory scan."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:556
+msgid "Continue discovering Theme CSS files from the saved directory cursor."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:572
+msgid "Theme CSS stream scanning failed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:599
+msgid "The active Theme CSS roots changed during Prepare. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:602
+msgid "Theme CSS validation state could not be initialized."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:614
+msgid "Theme CSS scan: %1$d of %2$d files completed, %3$d planned replacements found."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:616
+msgid "Theme CSS content scan is complete. Prepare is validating the same file set with resumable checksums."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:618
+msgid "Continue the current CSS file from its saved byte offset."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:618
+msgid "Continue validating the Theme CSS file set."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:629
+msgid "Theme CSS validation failed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:656
+msgid "A new Theme CSS file appeared during Prepare. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:668
+msgid "One or more Theme CSS files disappeared during Prepare. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:682
+msgid "Theme CSS scan and file-set validation completed with %1$d planned replacements across %2$d files."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:685
+msgid "Theme CSS file-set validation: %1$d of %2$d files confirmed unchanged."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:687
+msgid "Continue the current validation file from its saved byte offset."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:690
+msgid "The Theme CSS scan reached an unsupported phase. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:770
+msgid "Theme CSS was prepared with an older checksum format. Restart Prepare before applying replacements."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:776
+msgid "Theme CSS file could not be opened for replacement."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:793
+msgid "Theme CSS temporary replacement files could not be initialized."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:792 includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:805 includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:876
+msgid "Theme CSS changed after Prepare and was not overwritten."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:931
+msgid "Theme CSS no longer matches every prepared replacement. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:935
+msgid "Theme CSS replacement files could not be committed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:942
+msgid "Theme CSS backup could not be committed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:816
+msgid "Theme CSS changed before the transformed file could be committed and was not overwritten."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:822
+msgid "Theme CSS transformed output is missing and the active file does not match the completed output size. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:826
+msgid "Theme CSS backup was committed, but the transformed file still needs to be committed. Resume Do."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:847
+msgid "Theme CSS was committed, but registry rows could not be updated. Resume Do to reconcile."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:850
+msgid "Theme CSS was committed, but its inventory checksum could not be updated. Resume Do to reconcile."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:873
+msgid "Theme CSS registry reconciliation is still required."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:978
+msgid "Theme CSS file could not be read during replacement."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:983
+msgid "Theme CSS backup could not be written."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:992
+msgid "Theme CSS temporary output could not be written."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1016
+msgid "Run Scan Theme CSS References before applying theme CSS replacements."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1036
+msgid "Theme CSS apply could not start."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1043
+msgid "Theme CSS apply failed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1060
+msgid "Theme CSS replacement apply is in progress: %1$d of %2$d replacements applied."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1063
+msgid "Theme CSS replacement apply completed for %1$d replacements. Failed: %2$d."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1081
+msgid "Continue the current Theme CSS file from its saved byte offset."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1081
+msgid "Next step: Verify Theme CSS Replacements before Cleanup Preview."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1089
+msgid "Theme CSS inventory row is missing during verification."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1095
+msgid "Theme CSS verification could not initialize its resumable state."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1037
+msgid "Theme CSS verification found an old fragment or could not find a new fragment."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1148
+msgid "Theme CSS verification results could not be persisted."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1156
+msgid "Theme CSS changed while verification was running."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1160
+msgid "Theme CSS file could not be read during verification."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1190
+msgid "Run Apply Theme CSS Replacements before verifying theme CSS replacements."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1207
+msgid "Theme CSS verification could not start."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1213
+msgid "Theme CSS verification failed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1234
+msgid "Theme CSS replacement verification is in progress: %1$d verified, %2$d still pending."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1237
+msgid "Theme CSS replacement verification complete. Verified: %1$d. Failed: %2$d."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1257
+msgid "Continue the current Theme CSS verification file from its saved byte offset."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1257
+msgid "Theme CSS replacements are verified. Next step: Cleanup Preview."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:1140
+msgid "Theme CSS verification found a checksum mismatch, an old fragment, or a missing new fragment."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:350
+msgid "Theme CSS commit verification could not be initialized."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:356
+msgid "Theme CSS commit verification found a missing file or unexpected output size. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:866
+msgid "Theme CSS commit verification detected that the file changed while it was being checked. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:875
+msgid "Theme CSS commit verification could not read the file."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:891
+msgid "Theme CSS commit verification found content that does not match the prepared transformed checksum. Restart Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:896
+msgid "Theme CSS changed before the verified transformed file could be committed and was not overwritten."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:900
+msgid "Theme CSS backup was committed, but the verified transformed file still needs to be committed. Resume Do."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:904
+msgid "Theme CSS target verification could not start after the file commit. Resume Do."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:950
+msgid "Theme CSS changed before the transformed file could be verified and was not overwritten."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-theme-css-stream-trait.php:965
+msgid "Theme CSS apply state could not be reconciled."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php
+msgid "Invalid LCP observation payload."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php
+msgid "Invalid LCP resource URL."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Why does automatic LCP detection require more than one observation?"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3423
+msgid "LCP Frontend Discovery"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3424
+msgid "Adds a lightweight browser discovery layer on top of LCP Image Priority. It observes the actual browser LCP for more accurate page-specific priority. The frontend cost is very small, and discovery stops for each page and viewport after the same result is confirmed in two of the last three visits."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3431
+msgid "Only enable LCP frontend discovery for administrators"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3432
+msgid "Limits discovery to logged-in administrators. You will need to visit pages while logged in for UltraCache to learn them."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3439
+msgid "Run LCP frontend discovery for"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3440
+msgid "Choose how long discovery remains active. Indefinitely is the default; each page and viewport still stops reporting as soon as its result is locked."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3445
+msgid "1 hour"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3446
+msgid "4 hours"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3447
+msgid "8 hours"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3448
+msgid "1 day"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3449
+msgid "3 days"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3450
+msgid "1 week"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3451
+msgid "Indefinitely"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:705
+msgid "LCP Frontend Discovery learns cacheable pages without query parameters and locks each page/viewport after a two-of-three confirmation."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:709
+msgid "Learning mappings"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:786
+msgid "Learning"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:786
+msgid "Locked"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:800
+msgid "Confirmations"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:800
+msgid "locked"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:800
+msgid "learning"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:828
+msgid "The current mapping remains active as a fallback, but its confirmation evidence is cleared. New eligible visits will relearn and lock this viewport again."
+msgstr ""
+
+#: includes/admin/js/ui.js:383
+msgid "When LCP Frontend Discovery is enabled and no manual selector is configured, UltraCache observes the actual browser LCP on eligible cacheable pages without query parameters. The first result is used immediately, and the mapping locks when the same candidate appears in two of the last three visits."
+msgstr ""
+
+#: includes/admin/js/ui.js:387
+msgid "The first observation is used immediately. A two-of-three rolling confirmation then locks the result and stops discovery for that page and viewport, reducing the chance that a temporary slider or timing variation becomes permanent."
+msgstr ""
+
+#: includes/admin/js/ui.js:399
+msgid "No. LCP Frontend Discovery learns from normal eligible visits while it is enabled. Lighthouse or PageSpeed can be used afterward to measure the result."
+msgstr ""
+
+#: includes/admin/js/ui.js:411
+msgid "Relearn keeps the current mapping active as a fallback, clears its confirmation evidence, and allows new eligible visits to learn and lock a replacement for the same viewport."
+msgstr ""
+
+#: includes/admin/js/ui.js:415
+msgid "It removes the stored mapping and refreshes the page cache without it. The next eligible visit can start learning a replacement while LCP Frontend Discovery is active."
+msgstr ""
+
+#: includes/admin/js/ui.js:423
+msgid "When administrator-only discovery is enabled, only logged-in administrators contribute. Otherwise anonymous public visits and full administrators can contribute while the configured discovery period is active."
+msgstr ""
+
+#: includes/admin/js/ui.js:575
+msgid "Use an anonymous or incognito window for public Page Cache testing. LCP Frontend Discovery can learn from anonymous visits while public discovery is active, or only from administrators when the administrator-only option is enabled."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-storage-trait.php:1340
+msgid "No browser-observed LCP mappings have been recorded yet. Enable LCP Frontend Discovery and visit cacheable public pages without query parameters."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-storage-trait.php:1343
+msgid "Browser-observed LCP mappings are stored persistently; each page and viewport stops discovery after a two-of-three confirmation."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-storage-trait.php:1419
+msgid "The selected LCP mapping has an invalid discovery scope."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-storage-trait.php:1463
+msgid "LCP discovery was reset for this viewport. The current mapping remains active until new visits confirm a replacement."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:757
+msgid "LCP frontend discovery is disabled or expired."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:760
+msgid "LCP frontend discovery is limited to administrators."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:765
+msgid "LCP frontend discovery does not accept URLs with query parameters."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:784
+msgid "Invalid LCP observation origin."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:788
+msgid "Invalid LCP observation token."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:791
+msgid "LCP frontend discovery requires a cacheable URL without query parameters."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:805
+msgid "Manual LCP selectors take precedence over automatic discovery."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:814
+msgid "Unknown manual LCP selector."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:819
+msgid "Invalid automatic LCP discovery scope."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-trait.php:901
+msgid "Unable to store the LCP discovery result."
+msgstr ""
+
+#: includes/settings/class-settings-persistence-trait.php:200
+msgid "The existing frontend page cache could not be cleared before changing LCP Frontend Discovery. Please retry the setting change."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:523
+msgid "LCP Diagnostics & Settings"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:524
+msgid "Configure frontend discovery and load discovered URLs only when this section is opened."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:566
+msgid "Disabled"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:569
+msgid "Expired"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:571
+msgid "Active until"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:573
+msgid "Active indefinitely"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:588
+msgid "Needs attention"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:617
+msgid "The LCP URL list could not be loaded."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:634
+#: includes/admin/js/dashboard-application.js:883
+msgid "The selected LCP URL details could not be loaded."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:738
+msgid "Not learned"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:749
+msgid "Frontend discovery settings"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:751
+msgid "Effective status"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:764
+msgid "Choose how long discovery remains active. Indefinitely is the default; each page and viewport stops reporting when its result is locked."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:780
+msgid "Discovered URLs"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:781
+msgid "Opening this section loads only ten URLs. Full mapping data is loaded only after you select a URL."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:800
+msgid "Search discovered URLs"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:806
+msgid "Loading the first ten discovered URLs…"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:818
+msgid "mapping(s)"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:824
+msgid "No discovered URLs were found."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:826
+msgid "Page"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:826
+msgid "URL(s) loaded"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:835
+msgid "URL details"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:838
+msgid "Close details"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:840
+msgid "Loading details for this URL…"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:859
+msgid "Recent candidates"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:860
+msgid "First seen"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:862
+msgid "Locked at"
+msgstr ""
+
+#: includes/admin/js/ui.js:406
+msgid "What is shown in LCP Diagnostics & Settings?"
+msgstr ""
+
+#: includes/admin/js/ui.js:407
+msgid "LCP Diagnostics & Settings loads ten discovered URLs only after the accordion opens. Full viewport, selector, resource, confirmation, and refresh details are requested only after you select a URL."
+msgstr ""
+
+#: includes/diagnostics/class-lcp-diagnostics-trait.php:70
+#: includes/rest/class-rest-lcp-diagnostics-trait.php:41
+msgid "LCP observation details are unavailable."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-storage-trait.php:1253
+msgid "No LCP-discovered URLs match the current search."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-storage-trait.php:1254
+msgid "Only the visible URL list is loaded. Mapping details are requested after you select a URL."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-storage-trait.php:1283
+msgid "The selected LCP URL is unavailable."
+msgstr ""
+
+#: includes/engine/lcp/class-lcp-observation-storage-trait.php:1450
+msgid "Full mapping details were loaded only for the selected URL."
+msgstr ""
+
+#: includes/rest/class-rest-lcp-diagnostics-trait.php:46
+msgid "Invalid LCP page identifier."
+msgstr ""
+
+#: includes/rest/class-rest-lcp-diagnostics-trait.php:51
+msgid "The selected LCP URL no longer exists."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:213
+msgid "Configuring, testing, or flushing Redis or Varnish requires manage_options plus plugin activation or network plugin management permission."
+msgstr ""
+
+#: includes/settings/class-settings-persistence-trait.php:148
+msgid "Configuring or validating Redis or Varnish requires manage_options plus plugin activation or network plugin management permission."
+msgstr ""
+
+#: includes/admin/js/cache.js:113
+msgid "Redis and Varnish infrastructure settings and actions require plugin activation or network plugin management permission."
+msgstr ""
+
+#: includes/admin/js/cache.js:469
+msgid "Changing Varnish Flush All behavior requires plugin activation or network plugin management permission."
+msgstr ""
+
+#: includes/admin/js/cache.js:590
+msgid "Redis configuration, testing, and flushing require plugin activation or network plugin management permission. APCu, SQLite, and Disk actions remain available."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Close warning"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Media Library Replacement Warning"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "You are about to start the Media Library Replacement workflow."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Later stages of this process will replace Media Library files and update WordPress metadata, database references, and supported Theme CSS references to use the newly generated files."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "UltraCache performs validation, resumable processing, verification, and recovery checks, but no file and database migration can be guaranteed to work correctly on every WordPress setup."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Before continuing, make sure you have:"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "A current and working backup of your WordPress uploads directory."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "A current and working backup of your WordPress database."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Confirmed that both backups can be restored if necessary."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Type ok below to confirm that you understand the risks and have the required backups."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Type ok"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Continue with Restart"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Continue with Prepare"
+msgstr ""
+
+#: includes/media/queue/class-media-queue-runner-trait.php:582
+msgid "The media worker could not renew its processing lease before conversion."
+msgstr ""
+
+#: includes/media/queue/class-media-queue-runner-trait.php:613
+msgid "Media generation was paused before the result could be saved."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:268
+msgid "The site front-page URL is not allowed by the UltraCache loopback policy."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:325
+msgid "Varnish cache behavior test could not complete the initial public front-page requests."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:328
+msgid "Varnish cache behavior test stopped because front-page invalidation failed."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:331
+msgid "Varnish cache behavior test could not complete the post-invalidation public front-page requests."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:334
+msgid "Varnish cache behavior verified: the front page was invalidated, refilled, and returned as a cache HIT."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:337
+msgid "The test completed, but Varnish-specific response headers were not visible, so cache behavior could not be verified."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:340
+msgid "Varnish was detected, but the public front page remained bypassed instead of becoming a cache HIT."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:343
+msgid "Varnish was detected, but the post-invalidation request did not provide enough evidence of a MISS or stale response."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:346
+msgid "Varnish was detected and invalidation completed, but the final cache HIT could not be verified."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:460
+msgid "Varnish behavior test helper not available."
+msgstr ""
+
+#: includes/admin/js/varnish.js:205
+msgid "The cache behavior test temporarily invalidates the public front page and immediately refills it. It reports Inconclusive instead of guessing when Varnish headers are hidden."
+msgstr ""
+
+#: includes/admin/js/varnish.js:241
+msgid "Cache behavior"
+msgstr ""
+
+#: includes/admin/js/varnish.js:245
+msgid "First request"
+msgstr ""
+
+#: includes/admin/js/varnish.js:249
+msgid "Second request"
+msgstr ""
+
+#: includes/admin/js/varnish.js:253
+msgid "After invalidation"
+msgstr ""
+
+#: includes/admin/js/varnish.js:257
+msgid "Refill verification"
+msgstr ""
+
+#: includes/admin/js/varnish.js:202
+msgid "Test Cache Behavior"
+msgstr ""
+
+#: includes/admin/js/varnish.js:242
+msgid "Verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:242
+msgid "Bypassed"
+msgstr ""
+
+#: includes/admin/js/varnish.js:242
+msgid "Inconclusive"
+msgstr ""
+
+#: includes/bootstrap/class-bootstrap-trait.php:347
+msgid "No eligible local cache URLs were available for Varnish invalidation."
+msgstr ""
+
+#. translators: 1: Varnish action label, 2: unique URL count, 3: request count.
+#: includes/bootstrap/class-bootstrap-trait.php:397
+msgid "Varnish %1$s invalidated %2$d unique URL(s) with %3$d request(s)."
+msgstr ""
+
+#. translators: %s: Varnish action label.
+#: includes/bootstrap/class-bootstrap-trait.php:402
+msgid "Varnish %s failed on one or more invalidation requests."
+msgstr ""
+
+#: includes/admin/js/varnish.js:261
+msgid "Invalidation URLs"
+msgstr ""
+
+#: includes/admin/js/varnish.js:265
+msgid "Duplicates removed"
+msgstr ""
+
+#: includes/admin/js/varnish.js:269
+msgid "Rejected URLs"
+msgstr ""
+
+#: includes/admin/js/varnish.js:273
+msgid "Invalidation requests"
+msgstr ""
+
+#: includes/bootstrap/class-bootstrap-trait.php:335
+msgid "Varnish integration is unavailable."
+msgstr ""
+
+#: includes/admin/js/varnish.js:48
+msgid "URL"
+msgstr ""
+
+#: includes/admin/js/varnish.js:51
+msgid "Rejected"
+msgstr ""
+
+#: includes/admin/js/varnish.js:55
+msgid "Additional endpoint result lines were omitted from the dashboard."
+msgstr ""
+
+#: includes/admin/js/varnish.js:58
+msgid "Additional rejected URL lines were omitted from the dashboard."
+msgstr ""
+
+#. translators: 1: unique URL count, 2: received URL count.
+#: includes/admin/js/varnish.js:263
+msgid "%1$d unique · %2$d received"
+msgstr ""
+
+#. translators: 1: invalidation request count, 2: BAN batch count.
+#: includes/admin/js/varnish.js:275
+msgid "%1$d request(s) · %2$d batch(es)"
+msgstr ""
+
+#. translators: 1: current batch, 2: total batches, 3: URL count, 4: endpoint response detail.
+#: includes/bootstrap/class-bootstrap-trait.php:407
+msgid "Batch %1$d/%2$d · %3$d URL(s) · %4$s"
+msgstr ""
+
+#. translators: 1: current URL, 2: total URLs, 3: endpoint response detail.
+#: includes/bootstrap/class-bootstrap-trait.php:412
+msgid "URL %1$d/%2$d · %3$s"
+msgstr ""
+
+#: includes/admin/js/varnish.js:262
+msgid "Pending invalidations"
+msgstr ""
+
+#: includes/admin/js/varnish.js:266
+msgid "Pending refills"
+msgstr ""
+
+#: includes/admin/js/varnish.js:270
+msgid "Failed queue jobs"
+msgstr ""
+
+#: includes/admin/js/varnish.js:287
+msgid "Queued invalidations"
+msgstr ""
+
+#: includes/admin/js/varnish.js:291
+msgid "%1$d URL(s) · approximately %2$d endpoint request(s)"
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php:726
+msgid "Manual warm-up ownership released. Deferred LCP refreshes and Varnish jobs resumed."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php:728
+msgid "Manual warm-up ownership released. Deferred LCP refreshes resumed."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php:730
+msgid "Manual warm-up ownership released. Pending Varnish jobs resumed."
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Default: 1440 minutes (24 hours). The value is sent as s-maxage for public UltraCache HTML cache responses; 0 leaves the lifetime to Varnish."
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Varnish Status & Test Results"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Connection, cache behavior, invalidation, refill, variants, and endpoint metrics."
+msgstr ""
+

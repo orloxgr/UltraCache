@@ -15,8 +15,12 @@
 	var errors = [];
 	var sentCount = 0;
 	var maxErrors = 120;
+	var maxActivity = 18;
+	var storageKey = 'ultracacheRuntimeJsScan:' + scanId;
+	var recentActivity = [];
 	var originalOnError = window.onerror;
 	var originalOnUnhandledRejection = window.onunhandledrejection;
+	var originalSetTimeout = window.setTimeout;
 
 	window.__ultracacheRuntimeJsScan = window.__ultracacheRuntimeJsScan || {
 		injectedAt: startedAt,
@@ -56,6 +60,170 @@
 		value = String(value || '');
 		max = max || 800;
 		return value.length > max ? value.slice(0, max) : value;
+	}
+
+	function normalizeUrlForLoop(value) {
+		value = String(value || '');
+		if (!value) {
+			return '';
+		}
+		try {
+			var parsed = new URL(value, window.location.href);
+			[
+				'ultracache_runtime_js_scan',
+				'ultracache_runtime_js_scan_id',
+				'ultracache_runtime_js_scan_nonce',
+				'ultracache_runtime_js_scan_context',
+				'ultracache_rt',
+				'ultracache_profile_bypass',
+				'ultracache_store_profile',
+				'ultracache_callback_profile',
+				'ultracache_store_profile_verbose',
+				'ultracache_store_profile_verbose_settings',
+				'ultracache_profile_run',
+				'ultracache_revalidate'
+			].forEach(function (key) {
+				parsed.searchParams.delete(key);
+			});
+			parsed.hash = '';
+			return parsed.href;
+		} catch (e) {
+			return value.replace(/([?&])ultracache_(?:runtime_js_scan(?:_id|_nonce|_context)?|rt|profile_bypass|store_profile(?:_verbose(?:_settings)?)?|callback_profile|profile_run|revalidate)=[^&#]*/g, '$1').replace(/[?&]$/, '').split('#')[0];
+		}
+	}
+
+	function readScanState() {
+		try {
+			var raw = window.sessionStorage ? window.sessionStorage.getItem(storageKey) : '';
+			return raw ? (JSON.parse(raw) || {}) : {};
+		} catch (e) {
+			return {};
+		}
+	}
+
+	function writeScanState(state) {
+		try {
+			if (window.sessionStorage) {
+				window.sessionStorage.setItem(storageKey, JSON.stringify(state || {}));
+			}
+		} catch (e) {}
+	}
+
+	function sourceFromStack(stack) {
+		stack = String(stack || '');
+		if (!stack) {
+			return '';
+		}
+		var matches = stack.match(/https?:\/\/[^\s\)\]\}"'<>]+\.js(?:\?[^\s\)\]\}"'<>]*)?(?::\d+){0,2}/gi) || [];
+		for (var i = 0; i < matches.length; i++) {
+			var source = String(matches[i] || '');
+			var sourceLc = source.toLowerCase();
+			if (sourceLc.indexOf('/wp-includes/js/') !== -1 || sourceLc.indexOf('/ultracache/assets/js/') !== -1 || sourceLc.indexOf('jquery.min.js') !== -1 || sourceLc.indexOf('jquery-migrate') !== -1) {
+				continue;
+			}
+			return source;
+		}
+		return matches.length ? String(matches[0] || '') : '';
+	}
+
+	function summarizeElement(element) {
+		try {
+			if (!element || !element.tagName) {
+				return '';
+			}
+			var out = String(element.tagName || '').toLowerCase();
+			if (element.id) {
+				out += '#' + element.id;
+			}
+			if (element.className && typeof element.className === 'string') {
+				out += '.' + element.className.split(/\s+/).filter(Boolean).slice(0, 5).join('.');
+			}
+			if (element.name) {
+				out += '[name="' + String(element.name).slice(0, 80) + '"]';
+			}
+			if (element.value) {
+				out += '[value="' + String(element.value).slice(0, 80) + '"]';
+			}
+			return out;
+		} catch (e) {
+			return '';
+		}
+	}
+
+	function recordActivity(kind, target, detail, stack) {
+		stack = stack || (new Error()).stack || '';
+		var item = {
+			kind: trimText(kind, 80),
+			target: trimText(target, 240),
+			detail: trimText(detail, 500),
+			source: trimText(sourceFromStack(stack), 1000),
+			stack: trimText(stack, 2400),
+			atMs: now() - startedAt
+		};
+		recentActivity.push(item);
+		if (recentActivity.length > maxActivity) {
+			recentActivity = recentActivity.slice(recentActivity.length - maxActivity);
+		}
+		try {
+			window.__ultracacheRuntimeJsScan.recentActivity = recentActivity;
+		} catch (e) {}
+		return item;
+	}
+
+	function selectNavigationCause() {
+		for (var i = recentActivity.length - 1; i >= 0; i--) {
+			var item = recentActivity[i] || {};
+			var text = String((item.kind || '') + ' ' + (item.target || '') + ' ' + (item.detail || '')).toLowerCase();
+			if (text.indexOf('change') !== -1 && (text.indexOf('orderby') !== -1 || text.indexOf('woocommerce-ordering') !== -1 || text.indexOf('select') !== -1)) {
+				return item;
+			}
+		}
+		for (var j = recentActivity.length - 1; j >= 0; j--) {
+			if (recentActivity[j] && recentActivity[j].source) {
+				return recentActivity[j];
+			}
+		}
+		return recentActivity.length ? recentActivity[recentActivity.length - 1] : null;
+	}
+
+	function detectSameUrlReloadLoop() {
+		var normalizedUrl = normalizeUrlForLoop(window.location.href || '');
+		if (!normalizedUrl) {
+			return;
+		}
+		var previous = readScanState();
+		var previousUrl = String(previous.url || '');
+		var previousAt = Number(previous.at || 0);
+		var previousCount = Number(previous.sameUrlCount || 0);
+		var elapsed = previousAt ? (now() - previousAt) : 0;
+		var sameUrlCount = (previousUrl && previousUrl === normalizedUrl && elapsed >= 0 && elapsed < 20000) ? (previousCount + 1) : 1;
+		var previousCause = previous.navigationCause || null;
+
+		writeScanState({
+			url: normalizedUrl,
+			at: now(),
+			sameUrlCount: sameUrlCount,
+			navigationCause: previousCause,
+			recentActivity: recentActivity
+		});
+
+		if (sameUrlCount >= 2) {
+			var detail = {
+				normalizedUrl: normalizedUrl,
+				sameUrlCount: sameUrlCount,
+				previousCause: previousCause,
+				previousActivity: Array.isArray(previous.recentActivity) ? previous.recentActivity.slice(-8) : []
+			};
+			addError(
+				'same-url-navigation-loop',
+				'Same URL document navigation repeated during Runtime Scan. A script likely triggered a startup change or redirect back to the current URL.',
+				previousCause && previousCause.source ? previousCause.source : normalizedUrl,
+				0,
+				0,
+				JSON.stringify(detail)
+			);
+			send(true);
+		}
 	}
 
 	function addError(kind, message, source, line, column, detail) {
@@ -170,6 +338,95 @@
 	}
 
 	window.__ultracacheRuntimeJsScan.flush = send;
+
+	function installTimeoutActivityProbe() {
+		if (typeof originalSetTimeout !== 'function' || window.setTimeout.__ultracacheRuntimeScanWrapped) {
+			return;
+		}
+		window.setTimeout = function (callback, delay) {
+			if (typeof callback !== 'function') {
+				return originalSetTimeout.apply(this, arguments);
+			}
+			var scheduledStack = (new Error()).stack || '';
+			recordActivity('timeout-scheduled', '', 'delay=' + String(delay || 0), scheduledStack);
+			var args = Array.prototype.slice.call(arguments, 2);
+			return originalSetTimeout.call(this, function () {
+				recordActivity('timeout-fired', '', 'delay=' + String(delay || 0), scheduledStack);
+				return callback.apply(this, args);
+			}, delay);
+		};
+		window.setTimeout.__ultracacheRuntimeScanWrapped = true;
+	}
+
+	function installJqueryActivityProbe() {
+		var jq = window.jQuery;
+		if (!jq || !jq.fn || jq.fn.__ultracacheRuntimeScanWrapped) {
+			return false;
+		}
+
+		if (typeof jq.fn.trigger === 'function') {
+			var originalTrigger = jq.fn.trigger;
+			jq.fn.trigger = function (eventType) {
+				try {
+					var type = typeof eventType === 'string' ? eventType : (eventType && eventType.type ? String(eventType.type) : '');
+					if (type === 'change') {
+						var stack = (new Error()).stack || '';
+						this.each(function () {
+							recordActivity('jquery-trigger-change', summarizeElement(this), 'event=change', stack);
+						});
+					}
+				} catch (e) {}
+				return originalTrigger.apply(this, arguments);
+			};
+		}
+
+		if (typeof jq.fn.change === 'function') {
+			var originalChange = jq.fn.change;
+			jq.fn.change = function () {
+				try {
+					if (!arguments.length) {
+						var stack = (new Error()).stack || '';
+						this.each(function () {
+							recordActivity('jquery-change-shortcut', summarizeElement(this), 'event=change', stack);
+						});
+					}
+				} catch (e) {}
+				return originalChange.apply(this, arguments);
+			};
+		}
+
+		jq.fn.__ultracacheRuntimeScanWrapped = true;
+		window.__ultracacheRuntimeJsScan.debug.jqueryActivityProbe = true;
+		return true;
+	}
+
+	function waitForJqueryActivityProbe(tries) {
+		if (installJqueryActivityProbe()) {
+			return;
+		}
+		if (tries > 240) {
+			return;
+		}
+		originalSetTimeout(function () {
+			waitForJqueryActivityProbe(tries + 1);
+		}, 25);
+	}
+
+	function installNavigationLoopProbe() {
+		installTimeoutActivityProbe();
+		waitForJqueryActivityProbe(0);
+		detectSameUrlReloadLoop();
+		window.addEventListener('beforeunload', function () {
+			var state = readScanState();
+			state.url = normalizeUrlForLoop(window.location.href || '');
+			state.at = now();
+			state.navigationCause = selectNavigationCause();
+			state.recentActivity = recentActivity.slice(-8);
+			writeScanState(state);
+		}, true);
+	}
+
+	installNavigationLoopProbe();
 
 	window.onerror = function (message, source, line, column, error) {
 		try {

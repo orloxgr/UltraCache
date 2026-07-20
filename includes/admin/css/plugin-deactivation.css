@@ -1,0 +1,185 @@
+body.ultracache-deactivation-modal-open {
+    overflow: hidden;
+}
+
+.ultracache-deactivation-overlay {
+    --uc-deactivation-overlay: rgba(15, 23, 42, 0.52);
+    --uc-deactivation-panel: #ffffff;
+    --uc-deactivation-panel-2: #f6f7f7;
+    --uc-deactivation-border: #c3c4c7;
+    --uc-deactivation-border-soft: #dcdcde;
+    --uc-deactivation-text: #1d2327;
+    --uc-deactivation-text-soft: #50575e;
+    --uc-deactivation-text-dim: #646970;
+    --uc-deactivation-accent: var(--wp-admin-theme-color, #2271b1);
+    --uc-deactivation-accent-hover: var(--wp-admin-theme-color-darker-10, #135e96);
+    --uc-deactivation-error: #b32d2e;
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--uc-deactivation-overlay);
+    color-scheme: light;
+}
+
+.ultracache-deactivation-overlay[data-uc-theme="ultracache"] {
+    --uc-deactivation-overlay: rgba(0, 0, 0, 0.72);
+    --uc-deactivation-panel: #0d1117;
+    --uc-deactivation-panel-2: #11161d;
+    --uc-deactivation-border: #2b3648;
+    --uc-deactivation-border-soft: #202938;
+    --uc-deactivation-text: #d6deeb;
+    --uc-deactivation-text-soft: #97a3b6;
+    --uc-deactivation-text-dim: #6f7b8f;
+    --uc-deactivation-accent: #47cfff;
+    --uc-deactivation-accent-hover: #7c5cff;
+    --uc-deactivation-error: #ff5d73;
+    color-scheme: dark;
+}
+
+.ultracache-deactivation-dialog {
+    width: min(620px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 24px;
+    border: 1px solid var(--uc-deactivation-border);
+    border-radius: 8px;
+    background: var(--uc-deactivation-panel);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.32);
+    color: var(--uc-deactivation-text);
+}
+
+.ultracache-deactivation-title {
+    margin: 0;
+    color: var(--uc-deactivation-text);
+    font-size: 22px;
+    line-height: 1.3;
+}
+
+.ultracache-deactivation-intro {
+    margin: 8px 0 20px;
+    color: var(--uc-deactivation-text-soft);
+    font-size: 14px;
+}
+
+.ultracache-deactivation-options {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.ultracache-deactivation-option {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 14px;
+    border: 1px solid var(--uc-deactivation-border-soft);
+    border-radius: 6px;
+    background: var(--uc-deactivation-panel-2);
+    cursor: pointer;
+    transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.ultracache-deactivation-option:hover,
+.ultracache-deactivation-option:focus-within {
+    border-color: var(--uc-deactivation-accent);
+    box-shadow: 0 0 0 1px var(--uc-deactivation-accent);
+}
+
+.ultracache-deactivation-option input {
+    margin: 3px 0 0;
+    accent-color: var(--uc-deactivation-accent);
+}
+
+.ultracache-deactivation-option-copy {
+    display: grid;
+    gap: 4px;
+}
+
+.ultracache-deactivation-option-label {
+    font-weight: 600;
+    color: var(--uc-deactivation-text);
+}
+
+.ultracache-deactivation-option-description {
+    color: var(--uc-deactivation-text-dim);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.ultracache-deactivation-status {
+    min-height: 20px;
+    margin: 14px 0 0;
+    color: var(--uc-deactivation-text-soft);
+}
+
+.ultracache-deactivation-status.is-error {
+    color: var(--uc-deactivation-error);
+}
+
+.ultracache-deactivation-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.ultracache-deactivation-overlay[data-uc-theme="ultracache"] .ultracache-deactivation-actions .button {
+    border-color: var(--uc-deactivation-border);
+    background: var(--uc-deactivation-panel-2);
+    color: var(--uc-deactivation-text);
+    box-shadow: none;
+}
+
+.ultracache-deactivation-overlay[data-uc-theme="ultracache"] .ultracache-deactivation-actions .button:hover:not(:disabled),
+.ultracache-deactivation-overlay[data-uc-theme="ultracache"] .ultracache-deactivation-actions .button:focus:not(:disabled) {
+    border-color: var(--uc-deactivation-accent);
+    background: #16202c;
+    color: #ffffff;
+}
+
+.ultracache-deactivation-overlay[data-uc-theme="ultracache"] .ultracache-deactivation-actions .button-primary {
+    border-color: var(--uc-deactivation-accent);
+    background: var(--uc-deactivation-accent);
+    color: #061017;
+}
+
+.ultracache-deactivation-overlay[data-uc-theme="ultracache"] .ultracache-deactivation-actions .button-primary:hover:not(:disabled),
+.ultracache-deactivation-overlay[data-uc-theme="ultracache"] .ultracache-deactivation-actions .button-primary:focus:not(:disabled) {
+    border-color: var(--uc-deactivation-accent-hover);
+    background: var(--uc-deactivation-accent-hover);
+    color: #ffffff;
+}
+
+@media (max-width: 600px) {
+    .ultracache-deactivation-overlay {
+        align-items: flex-start;
+        padding: 12px;
+    }
+
+    .ultracache-deactivation-dialog {
+        max-height: calc(100vh - 24px);
+        padding: 18px;
+    }
+
+    .ultracache-deactivation-actions {
+        flex-direction: column-reverse;
+    }
+
+    .ultracache-deactivation-actions .button {
+        width: 100%;
+        min-height: 40px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ultracache-deactivation-option {
+        transition-duration: 0.01ms;
+    }
+}

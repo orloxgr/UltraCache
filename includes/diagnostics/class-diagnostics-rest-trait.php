@@ -1,0 +1,358 @@
+<?php
+/**
+ * Dashboard diagnostics and cache-stat response surfaces used by REST and admin consumers.
+ *
+ * @package UltraCache
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+trait Ultra_Cache_WP_Diagnostics_REST_Trait
+{
+public static function get_dashboard_diagnostics($force_storage_refresh = false)
+        {
+            $settings             = self::get_dashboard_settings();
+            $support              = self::get_media_support_status();
+            $compression          = self::get_compression_support_status();
+            $last                 = get_transient('ultracache_last_cache_event');
+            $advanced_cache_path  = function_exists('ultracache_dropin_path') ? ultracache_dropin_path('advanced-cache.php') : '';
+            $object_cache_path    = function_exists('ultracache_dropin_path') ? ultracache_dropin_path('object-cache.php') : '';
+            $browser_cache_path   = self::get_browser_cache_htaccess_path();
+            $object_cache_support  = self::get_object_cache_support_status(false);
+            $object_backend_status = array();
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_backend_status')) {
+                $object_backend_status = Ultra_Cache_Object_Cache_Manager::get_backend_status();
+            }
+            if (!is_array($object_backend_status)) {
+                $object_backend_status = array();
+            }
+            $selected_object_backend = isset($object_backend_status['selected']) ? self::sanitize_object_cache_backend($object_backend_status['selected']) : self::sanitize_object_cache_backend($settings['objectCacheBackend']);
+            $active_object_backend = isset($object_backend_status['active']) ? strtolower(trim((string) $object_backend_status['active'])) : $selected_object_backend;
+            if (!in_array($active_object_backend, array('redis', 'apcu', 'sqlite', 'disk', 'runtime'), true)) {
+                $active_object_backend = $selected_object_backend;
+            }
+            $configured_object_fallback = self::sanitize_object_cache_fallback_backend($settings['objectCacheFallbackBackend'] ?? 'apcu');
+            $fallback_object_backend = isset($object_backend_status['fallback']) ? strtolower(trim((string) $object_backend_status['fallback'])) : ('none' === $configured_object_fallback ? 'runtime' : $configured_object_fallback);
+            if (!in_array($fallback_object_backend, array('apcu', 'sqlite', 'disk', 'runtime'), true)) {
+                $fallback_object_backend = 'none' === $configured_object_fallback ? 'runtime' : $configured_object_fallback;
+            }
+            $selected_object_backend_supported = true;
+            if ('redis' === $selected_object_backend) {
+                $selected_object_backend_supported = !empty(self::get_redis_support_status()['available']);
+            } elseif ('apcu' === $selected_object_backend) {
+                $selected_object_backend_supported = !empty($object_cache_support['apcu']['available']);
+            } elseif ('sqlite' === $selected_object_backend) {
+                $selected_object_backend_supported = !empty($object_cache_support['sqlite']['available']);
+            }
+            $object_fallback_active = isset($object_backend_status['fallbackActive'])
+                ? (bool) $object_backend_status['fallbackActive']
+                : ($selected_object_backend !== $active_object_backend);
+            $object_active_runtime_only = 'runtime' === $active_object_backend;
+            $object_active_persistent = in_array($active_object_backend, array('redis', 'apcu', 'sqlite', 'disk'), true);
+
+            $css_bundle_summary_diagnostics = self::get_css_bundle_summary_diagnostics($settings);
+            $cache_storage_diagnostics = self::get_cache_storage_diagnostics($settings, $css_bundle_summary_diagnostics, (bool) $force_storage_refresh);
+
+            $diagnostics = array(
+                'pageCache' => array(
+                    'enabled' => !empty($settings['pageCacheEnabled']),
+                    'active'  => (bool) (defined('WP_CACHE') && WP_CACHE && ultracache_dropin_exists('advanced-cache.php')),
+                ),
+                'objectCache' => array_merge(
+                    $object_cache_support,
+                    array(
+                        'enabled'         => !empty($settings['objectCacheEnabled']),
+                        'active'          => (bool) (
+                            class_exists('Ultra_Cache_Object_Cache_Manager')
+                            && method_exists('Ultra_Cache_Object_Cache_Manager', 'is_dropin_active')
+                            ? Ultra_Cache_Object_Cache_Manager::is_dropin_active()
+                            : (function_exists('wp_using_ext_object_cache')
+                                && wp_using_ext_object_cache()
+                                && ultracache_dropin_exists('object-cache.php'))
+                        ),
+                        'selectedBackend' => $selected_object_backend,
+                        'fallbackBackend' => $object_fallback_active ? $active_object_backend : $fallback_object_backend,
+                        'configuredFallbackBackend' => $configured_object_fallback,
+                        'fallbackActive'  => (bool) $object_fallback_active,
+                        'activeFallbackBackend' => $object_fallback_active ? $active_object_backend : '',
+                        'activeFallbackKind' => $object_fallback_active ? ($object_active_runtime_only ? 'runtime-only' : 'persistent') : '',
+                        'fallbackPersistent' => $object_fallback_active && $object_active_persistent,
+                        'fallbackReason'  => (string) ($object_backend_status['fallbackReason'] ?? ''),
+                        'fallbackMessage' => (string) ($object_backend_status['fallbackMessage'] ?? ''),
+                        'activeBackend'   => $active_object_backend,
+                        'selectedBackendSupported' => (bool) $selected_object_backend_supported,
+                        'activeBackendPersistent' => (bool) $object_active_persistent,
+                        'activeBackendRuntimeOnly' => (bool) $object_active_runtime_only,
+                        'passiveStatusOnly' => true,
+                        'manualTestsOnly' => true,
+                        'backendStatus'   => $object_backend_status,
+                        'redis'           => array_merge(
+                            self::get_redis_support_status(),
+                            array(
+                                'host'             => self::sanitize_redis_host($settings['redisHost']),
+                                'port'             => self::sanitize_bounded_integer_setting($settings['redisPort'], 6379, 1, 65535),
+                                'database'         => self::sanitize_redis_database($settings['redisDatabase']),
+                                'prefix'           => self::sanitize_redis_prefix($settings['redisPrefix']),
+                                'useTls'           => !empty($settings['redisUseTls']),
+                                'persistent'       => !empty($settings['redisPersistent']),
+                                'connectTimeoutMs' => self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], 200, 50, 15000),
+                                'readTimeoutMs'    => self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], 200, 50, 15000),
+                            ),
+                            isset($object_backend_status['redis']) && is_array($object_backend_status['redis'])
+                                ? array(
+                                    'dropinEnabled' => !empty($object_backend_status['redis']['enabled']),
+                                    'dropinError' => (string) ($object_backend_status['redis']['error'] ?? ''),
+                                    'payloadSkipReason' => (string) ($object_backend_status['redis']['payloadSkipReason'] ?? ''),
+                                )
+                                : array(),
+                            array(
+                                'passiveStatusOnly' => true,
+                                'manualTestsOnly' => true,
+                            ),
+                            (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_last_flush_report'))
+                                ? array('lastFlush' => Ultra_Cache_Object_Cache_Manager::get_last_flush_report())
+                                : array()
+                        ),
+                        'sqlite'          => array_merge(
+                            isset($object_cache_support['sqlite']) && is_array($object_cache_support['sqlite']) ? $object_cache_support['sqlite'] : array(),
+                            isset($object_backend_status['sqlite']) && is_array($object_backend_status['sqlite'])
+                                ? array(
+                                    'dropinEnabled' => !empty($object_backend_status['sqlite']['enabled']),
+                                    'dropinAvailable' => !empty($object_backend_status['sqlite']['available']),
+                                    'journalMode' => (string) ($object_backend_status['sqlite']['journalMode'] ?? ''),
+                                    'path' => (string) ($object_backend_status['sqlite']['path'] ?? ''),
+                                    'error' => (string) ($object_backend_status['sqlite']['error'] ?? ''),
+                                )
+                                : array()
+                        ),
+                    )
+                ),
+                'formats' => array(
+                    'avif' => !empty($support['imagick_avif']) || !empty($support['gd_avif']),
+                    'webp' => !empty($support['imagick_webp']) || !empty($support['gd_webp']),
+                ),
+                'compression' => array(
+                    'brotli' => array(
+                        'available' => !empty($compression['brotli']),
+                        'enabled'   => !empty($settings['brotliEnabled']),
+                    ),
+                    'gzip' => array(
+                        'available' => !empty($compression['gzip']),
+                        'enabled'   => !empty($settings['gzipEnabled']),
+                    ),
+                    'preferred' => (string) $compression['preferred'],
+                    'message'   => (string) $compression['message'],
+                    'serverDefault' => self::get_frontend_compression_probe_status(false),
+                ),
+                'wpCache' => self::get_wp_cache_define_status(),
+                'googleFonts' => self::get_google_fonts_cache_diagnostics(),
+                'fontPipeline' => self::get_font_pipeline_diagnostics($settings),
+                'settingsTransparency' => self::get_settings_transparency_diagnostics($settings),
+                'cssBundleSummary' => $css_bundle_summary_diagnostics,
+                'cacheStorage' => $cache_storage_diagnostics,
+                'securityCorrectness' => self::get_security_cache_correctness_diagnostics($settings),
+                'browserCache' => array(
+                    'enabled' => !empty($settings['browserCacheRulesEnabled']),
+                    'path'    => $browser_cache_path,
+                    'active'  => file_exists($browser_cache_path) && false !== strpos((string) ultracache_safe_file_get_contents($browser_cache_path, 'dashboard diagnostics'), '# BEGIN UltraCache Browser Cache'),
+                ),
+                'varnish' => array_merge(
+                    self::get_varnish_support_status(),
+                    array(
+                        'enabled' => !empty($settings['varnishCliEnabled']),
+                        'mode'    => self::sanitize_varnish_mode($settings['varnishCliMode']),
+                        'configuredMode' => self::sanitize_varnish_mode($settings['varnishCliMode']),
+                        'servers' => self::sanitize_varnish_servers_string($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'endpointCount' => count(array_values(array_filter(array_map('trim', preg_split('/\s+/', self::sanitize_varnish_servers_string($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))))))),
+                        'method'  => ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN',
+                        'effectiveMethod' => (string) (self::get_varnish_invalidation_strategy_status(self::get_varnish_cli_settings())['effectiveLabel'] ?? 'BAN'),
+                        'invalidationStrategy' => self::get_varnish_invalidation_strategy_status(self::get_varnish_cli_settings()),
+                        'adminModeUsed' => ('admin' === self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'httpEndpointModeUsed' => ('http' === self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'secretConfigured' => '' !== (function_exists('ultracache_get_varnish_password') ? ultracache_get_varnish_password() : ''),
+                        'timeout' => max(1, min(15, absint($settings['varnishCliTimeoutSeconds']))),
+                        'last'    => self::get_varnish_last_result(),
+                        'flushScope' => self::get_varnish_flush_scope_status(),
+                        'htmlVariant' => self::get_varnish_html_variant_status($settings),
+                        'htmlTtl' => self::get_varnish_html_ttl_status($settings),
+                        'staleWhileRevalidate' => self::get_varnish_stale_while_revalidate_status($settings),
+                        'refillAfterTargetedInvalidation' => !empty($settings['varnishRefillAfterTargetedInvalidation']),
+                        'warmDuringManualWarmup' => !empty($settings['varnishWarmDuringManualWarmup']),
+                        'verifyRefillHit' => !empty($settings['varnishVerifyRefillHit']),
+                        'refreshAhead' => self::get_varnish_refresh_ahead_status($settings),
+                        'twoStageRefill' => self::get_varnish_two_stage_refill_status(),
+                        'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'queue' => self::get_varnish_queue_stats(),
+                        'metrics' => self::get_varnish_metrics_status(),
+                        'hasUnsafeEndpoints' => !empty(self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['unsafe']),
+                        'unsafeEndpointMessage' => !empty(self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['messages'][0]) ? (string) self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['messages'][0] : '',
+                    )
+                ),
+                'reverseProxy' => self::get_reverse_proxy_status(),
+                'loopbackSsl' => ultracache_get_loopback_ssl_status(),
+                'legacyCacheConflicts' => self::get_legacy_cache_conflict_status(),
+                'analytics' => self::get_analytics_hit_backend_diagnostic($settings),
+                'environment' => self::get_advanced_environment_diagnostic(),
+                'mediaRuntime' => self::get_media_runtime_diagnostic(),
+                'cronWarm' => self::get_cron_warm_status(),
+                'paths' => array(
+                    'cacheDir'          => self::get_path_diagnostic(ULTRACACHE_CACHE_DIR, 'dir'),
+                    'objectCacheDir'    => self::get_path_diagnostic(ULTRACACHE_OBJECT_CACHE_DIR, 'dir'),
+                    'optimizedImagesDir' => defined('ULTRACACHE_OPTIMIZED_IMAGES_DIR') ? self::get_path_diagnostic(ULTRACACHE_OPTIMIZED_IMAGES_DIR, 'dir') : array(),
+                    'avifDir'           => self::get_path_diagnostic(ULTRACACHE_AVIF_DIR, 'dir'),
+                    'webpDir'           => self::get_path_diagnostic(ULTRACACHE_WEBP_DIR, 'dir'),
+                    'advancedCache'     => self::get_path_diagnostic($advanced_cache_path, 'file', 'UltraCache advanced-cache drop-in'),
+                    'objectCache'       => self::get_path_diagnostic($object_cache_path, 'file', 'UltraCache generated object-cache drop-in'),
+                    'runtimeConfig'     => self::get_embedded_runtime_config_diagnostic(),
+                    'analytics'         => self::get_analytics_diagnostic(),
+                    'browserCacheRules' => self::get_path_diagnostic($browser_cache_path, 'file', '# BEGIN UltraCache Browser Cache'),
+                ),
+                'lastCacheWrite' => self::get_page_cache_activity_snapshot(),
+                'lastEvent' => self::normalize_last_cache_event($last),
+            );
+
+            return self::redact_diagnostics_for_output($diagnostics, 'diagnostics', 0);
+        }
+
+public static function are_cache_stats_enabled()
+    {
+        $settings = defined('ULTRACACHE_SETTINGS_KEY') ? get_option(ULTRACACHE_SETTINGS_KEY, array()) : array();
+        if (!is_array($settings)) {
+            return false;
+        }
+
+        return !empty($settings['cacheStatsEnabled']) || !empty($settings['cache_stats_enabled']);
+    }
+
+public static function get_cache_stats_disabled_payload($source = 'stats_disabled')
+    {
+        $opcache = method_exists(__CLASS__, 'get_opcache_status_summary')
+            ? self::get_opcache_status_summary()
+            : array();
+        $apcu = method_exists(__CLASS__, 'get_apcu_status_summary')
+            ? self::get_apcu_status_summary()
+            : array();
+
+        $payload = array(
+            'success' => true,
+            'enabled' => false,
+            'disabled' => true,
+            'cacheStatsEnabled' => false,
+            'message' => __('Cache stats are disabled.', 'ultracache'),
+            'impact' => 'off',
+            'timestamp' => time(),
+            'source' => (string) $source,
+            'dashboardStatsDisabled' => true,
+            'dashboardStatsDisabledReason' => 'Cache stats are disabled.',
+            'dashboardStatsSnapshotCached' => false,
+            'dashboardStatsSnapshotAge' => 0,
+            'dashboardStatsRefreshInterval' => 0,
+            'dashboardStatsPollingDisabled' => true,
+            // Cache Statistics OFF must hard-stop counters/scans/polling, but it must
+            // not hide unrelated runtime tools. OPcache/APCu status is lightweight
+            // admin runtime visibility and keeps the manual flush buttons usable.
+            'opcache' => $opcache,
+            'apcu' => $apcu,
+            'externalCaches' => method_exists(__CLASS__, 'get_external_cache_detection') ? self::get_external_cache_detection(false) : array(),
+            'diagnostics' => array(
+                'cacheStats' => array(
+                    'enabled' => false,
+                    'disabled' => true,
+                    'message' => __('When disabled, UltraCache does not collect, refresh, scan, or poll cache statistics. OPcache/APCu runtime status and manual flush controls remain available.', 'ultracache'),
+                ),
+                'objectCache' => method_exists(__CLASS__, 'get_object_cache_status_diagnostic_lite')
+                    ? self::get_object_cache_status_diagnostic_lite()
+                    : array(),
+            ),
+        );
+
+        return $payload;
+    }
+
+public static function get_dashboard_stats_snapshot($max_age = 60, $allow_refresh = true)
+    {
+        $now = time();
+        $max_age = max(3, (int) $max_age);
+
+        // Count cache stats OFF is a hard stop for dashboard/stat snapshots.
+        // Do not read cached snapshots, refresh engine stats, scan storage,
+        // count Redis/APCu keys, scan manifests, or touch analytics here.
+        if (!self::are_cache_stats_enabled()) {
+            return self::get_cache_stats_disabled_payload('snapshot_disabled');
+        }
+
+        $cache_key = defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY . '_dashboard_stats_snapshot_v2' : 'ultracache_dashboard_stats_snapshot_v2';
+        $cached = get_transient($cache_key);
+
+        if (is_array($cached) && isset($cached['time'], $cached['stats']) && is_array($cached['stats'])) {
+            $age = max(0, $now - (int) $cached['time']);
+            if ($age <= $max_age || !$allow_refresh) {
+                $stats = $cached['stats'];
+                $stats['dashboardStatsSnapshotCached'] = true;
+                $stats['dashboardStatsSnapshotAge'] = $age;
+                $stats['dashboardStatsRefreshInterval'] = $max_age;
+                return $stats;
+            }
+        }
+
+        if (!$allow_refresh) {
+            $passive = array(
+                'success' => true,
+                'dashboardStatsSnapshotCached' => false,
+                'dashboardStatsRefreshInterval' => $max_age,
+                'message' => __('Dashboard stats are passive; no refresh was requested.', 'ultracache'),
+            );
+
+            // Initial dashboard bootstrap must not run heavy engine/storage stats,
+            // but lightweight runtime-cache cards should still render before the
+            // user presses Redetect Caches. Keep OPcache/APCu/Varnish visibility
+            // independent from cache counter snapshots.
+            if (method_exists(__CLASS__, 'get_opcache_status_summary')) {
+                $passive['opcache'] = self::get_opcache_status_summary();
+            }
+            if (method_exists(__CLASS__, 'get_apcu_status_summary')) {
+                $passive['apcu'] = self::get_apcu_status_summary();
+            }
+            if (method_exists(__CLASS__, 'get_external_cache_detection')) {
+                $passive['externalCaches'] = self::get_external_cache_detection(false);
+            }
+            if (method_exists(__CLASS__, 'get_dashboard_diagnostics')) {
+                $passive['diagnostics'] = self::get_dashboard_diagnostics();
+            }
+
+            return $passive;
+        }
+
+        $stats = self::get_engine_stats(false, true, false);
+        $stats = is_array($stats) ? $stats : array();
+        $stats['dashboardStatsSnapshotCached'] = false;
+        $stats['dashboardStatsSnapshotAge'] = 0;
+        $stats['dashboardStatsRefreshInterval'] = $max_age;
+        set_transient($cache_key, array('time' => $now, 'stats' => $stats), max(30, $max_age * 2));
+        return $stats;
+    }
+
+private static function should_use_live_settings_support_checks()
+    {
+        if (defined('WP_CLI') && WP_CLI) {
+            return true;
+        }
+
+        if (defined('REST_REQUEST') && REST_REQUEST) {
+            return true;
+        }
+
+        if (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
+            return true;
+        }
+
+        if (function_exists('is_admin') && is_admin()) {
+            return true;
+        }
+
+        return false;
+    }
+
+}

@@ -1,14 +1,764 @@
+= 2.59.09.68 =
+* Replace the two Varnish test buttons with one Test Varnish action that runs the complete public cache-behavior, invalidation, variant, TTL, conditional-revalidation, HTML-only, and optional admin diagnostic sequence.
+* Keep authenticated ban-list inspection as an optional diagnostic that no longer changes endpoint health when it is unavailable or unreadable.
+* Add explicit connection/authentication and invalidation-command stages to the Varnish status accordion.
+
+= 2.59.09.67 =
+* Set the Varnish shared HTML TTL default to 1440 minutes and migrate the earlier 0/60-minute default values once.
+* Move the complete Varnish status and test output into a collapsed accordion that opens automatically when either Varnish test starts.
+* Remove the admin-socket warning and current-mode explanatory footer from the Varnish card.
+
+= 2.59.09.66 =
+* Made HTML-only Varnish capability detection topology-agnostic by verifying the HTML HIT → invalidation → MISS/STALE → HIT sequence independently from the public static delivery route.
+* Classify static delivery as through Varnish, explicit Varnish bypass, Varnish-visible but unverified, or outside/unobservable; require static preservation only when a real Varnish static HIT exists.
+* Separate Automatic eligibility from manual HTML-only eligibility, expose the static route and preservation result in the Varnish card, and show the actual behavior-test result message instead of a generic completion notice.
+* Remove the bounded Varnish metrics option from the dashboard Delete All Plugin Data flow as well as normal uninstall.
+
+= 2.59.09.65 =
+* Added bounded per-endpoint Varnish health, average latency, consecutive-failure, and last-success/failure metrics without writing to the database for every individual endpoint request.
+* Added aggregated invalidation, batching, refill-verification, and persistent queue retry counters to the existing Varnish card.
+* Added a narrowly scoped authenticated admin-mode `ban.list` inspection with bounded response size and active, completed, request-dependent, and object-only ban-pressure diagnostics; no arbitrary Varnish CLI execution was introduced.
+
+= 2.59.09.64 =
+* Added capability-gated hot-page refresh ahead using the existing Cache Statistics summary, Varnish Age, shared HTML TTL, verified soft purge, the persistent refill queue, and WP-Cron.
+* Added bounded controls for refresh threshold and maximum pages per scan, with no frontend analytics beacon and no new queue table or scheduler.
+* Added Varnish-card diagnostics for candidate count, runtime prerequisites, and the latest bounded refresh-ahead scan.
+
+= 2.59.09.63 =
+* Added representation-specific ETag and Last-Modified validators to PHP page-cache and advanced-cache.php HTML delivery.
+* Added standards-based If-None-Match and If-Modified-Since handling with bodyless 304 responses for fresh GET/HEAD cache hits while preserving full-body delivery for UltraCache STALE objects.
+* Extended Test Cache Behavior and the Varnish card with ETag availability, Last-Modified availability, public conditional 304 diagnostics, and Apache/PHP source reporting when visible.
+
+= 2.59.09.62 =
+* Added capability-gated stale-while-revalidate controls for public UltraCache HTML responses.
+* Applied the shared stale refresh window consistently to PHP cache delivery, advanced-cache.php, and Apache Static HTML Delivery.
+* Extended Test Cache Behavior and the Varnish card to distinguish emitted headers from verified stale/grace and HIT behavior.
+
+= 2.59.09.61 =
+* Added capability-tested HTTP soft purge with stale/grace verification and automatic queued refill.
+* Added Automatic, BAN, PURGE, and Soft purge + refill invalidation strategies to the Varnish card.
+* Kept hard invalidation as the runtime fallback whenever soft purge is unverified or the endpoint configuration changes.
+
+= 2.59.09.60 =
+* Add empirical two-stage Varnish refill: authenticated UltraCache force-refresh rebuilds the active inner HTML variants first, followed by normal public requests that populate Varnish.
+* Verify the origin stage with the existing `X-Ultra-Cache-Force-Refresh: wp-engine` marker; when Varnish serves or hides the force-refresh request, use the existing one-stage fallback instead of claiming origin access.
+* Show two-stage availability and queued-refill origin-stage counts in the Varnish card, and report verified origin refresh or fallback in manual warm-up logs.
+
+= 2.59.09.59 =
+* Add optional post-refill Varnish HIT verification for each active orig, WebP, and AVIF HTML variant, using one additional normal public request per variant.
+* Keep refill success separate from verification evidence: hidden headers report Inconclusive, bypassed or repeated MISS responses are reported explicitly, and verification does not fail an otherwise successful refill.
+* Show verification controls and queued-refill counters in the Varnish card, and add Varnish warmed, HIT verified, bypassed, and inconclusive counters to the manual warm-up popup and completion summary.
+
+= 2.59.09.58 =
+* Added persistent affected-page Varnish refill after successful targeted invalidation.
+* Added optional Varnish warming for dashboard manual cache warm-up requests across active HTML variants.
+* Reused the existing UltraCache warm queue and WP-Cron worker; no additional queue table or scheduler was introduced.
+
+= 2.59.09.57 =
+* Add an optional Varnish HTML TTL that emits a positive `s-maxage` only for verified public HTML cache responses, while leaving existing Varnish policy untouched when set to 0.
+* Apply the same shared-cache contract to PHP page-cache hits, successful fresh stores, advanced-cache.php delivery, and Apache Static HTML Delivery without marking bypassed or private responses as public.
+* Extend Test Cache Behavior and the Varnish card with shared-TTL diagnostics that distinguish an observed header on a verified HIT from missing or inconclusive evidence.
+
+= 2.59.09.56 =
+* Use one canonical orig/WebP/AVIF HTML variant policy across PHP cache delivery, advanced-cache.php, warm bucket selection, and Apache Static HTML Delivery; inactive media rewriting now uses only the orig bucket.
+* Send `Vary: Accept` only when active HTML image rewriting can change the cached document, while retaining `Vary: Accept-Encoding` for compressed HTML and exposing the selected UltraCache variant when Varnish or debug headers are enabled.
+* Extend Test Cache Behavior and the Varnish card with active-bucket diagnostics and bounded canonical Accept-profile checks that report compatible, fragmented, or inconclusive Varnish variant handling.
+
+= 2.59.09.55 =
+* Add Automatic, HTML pages only, and Entire host scopes for site-wide Varnish flushing, while retaining an explicit entire-host action in the existing Varnish card.
+* Extend Test Cache Behavior with a local static-object probe and enable HTML-only flushing only after cached HTML is invalidated, the static object remains a Varnish HIT, and the HTML object refills successfully.
+* Fall back to the existing entire-host flush whenever HTML-only behavior is untested, inconclusive, rejected, or broader than HTML, and invalidate the stored capability when the Varnish endpoint configuration changes.
+
+= 2.59.09.54 =
+* Add persistent `varnish_invalidate` and reserved `varnish_refill` jobs to the existing cron warm queue, with deduplication, bounded endpoint-aware processing, three attempts, and delayed retries.
+* Keep small targeted Varnish invalidations synchronous, while queueing large URL sets or endpoint fan-out so post and product saves are not blocked by many network requests.
+* Preserve pending Varnish jobs across ordinary warm resets, manual warm priority, cache flushes, and cron state changes; process them before ordinary warm work and show pending invalidation, refill, and failed-job counters in the Varnish card.
+
+= 2.59.09.53 =
+* Normalize, validate, and deduplicate targeted Varnish invalidation URLs before contacting configured endpoints, rejecting external, unsupported, unsafe-query, and oversized targets while honoring active page-cache exclusions.
+* Combine exact URL paths into bounded per-host BAN batches for HTTP BAN and admin-secret mode, while preserving one exact request per unique URL for HTTP PURGE.
+* Show received, unique, duplicate, rejected, batch, and request counts for the latest targeted Varnish invalidation in the existing Varnish card.
+
+= 2.59.09.52 =
+* Add a public Varnish cache behavior test that performs repeated front-page requests, targeted invalidation, immediate refill, and conservative HIT/MISS/STALE/BYPASS classification.
+* Show per-step cache behavior results in the existing Varnish card, including HTTP status, Age, UltraCache source, timing, and an explicit Inconclusive result when Varnish headers are hidden.
+
+= 2.59.09.51 =
+* Split the Varnish PHP integration into focused settings, endpoint, transport, invalidation, and diagnostics traits without changing purge behavior.
+* Split the Varnish dashboard UI and controller into dedicated local admin modules while preserving the existing card and actions.
+
+= 2.59.09.50 =
+* Make Media Regeneration crash-resumable: renew the shared processor lease between atomic media units, recover abandoned processing rows back to pending after the expired lease is replaced, preserve regeneration cursors, and never count an interrupted claim as a conversion failure.
+* Add graceful WP-CLI SIGINT/SIGTERM handling so Ctrl+C stops after the current atomic media unit, persists queue state, and releases the processor lock instead of leaving manual recovery work.
+
+= 2.59.09.49 =
+* Allow the Media Library Replacement Theme CSS inventory table through the central custom-table validator so Prepare can create and verify the complete registry schema.
+* Add a typed ok backup warning before a new or failed Prepare and before Restart Replacement Plan; Resume continues from existing server state without asking again.
+
+= 2.59.09.48 =
+* Replace the LCP observer viewport bucket's layout-dependent clientWidth/innerWidth read with matchMedia breakpoints, avoiding the forced reflow attributed to lcp-observer.js while preserving the existing mobile, tablet, and desktop thresholds.
+
+= 2.59.09.47 =
+* Render each discovered LCP URL as an independent inline accordion: details load directly below the selected URL, clicking the same URL closes it, and opening another URL leaves existing details open without preloading unopened rows.
+* Replace the compact LCP viewport lookup's dynamically assembled prepared SQL with one fixed ten-slot placeholder query, eliminating the WordPress.DB.PreparedSQL.NotPrepared error without suppressing the database check.
+
+= 2.59.09.46 =
+* Fix the LCP URL detail REST schema to accept the stored 64-character SHA-256 page hash, matching the list payload and detail handler so selecting a discovered URL no longer fails with rest_invalid_param.
+
+= 2.59.09.45 =
+* Move the LCP Diagnostics & Settings accordion above Media settings & Media Library replacement as a full-width card.
+* Fix the compact LCP URL list, cursor pagination, and click-to-load details to validate the stored SHA-256 page hashes instead of incorrectly expecting SHA-1 hashes; treat a single * search as no filter.
+
+= 2.59.09.44 =
+* Require manage_options plus activate_plugins or manage_network_plugins for Redis and Varnish configuration, secret changes, connection tests, and manual flushes, while keeping APCu, SQLite, and Disk test/flush actions available with manage_options.
+* Apply the same stronger permission to Flush All Cache only when it is configured to include an active Varnish integration, and expose a dashboard capability flag that disables protected Redis/Varnish controls without relying on the UI as the security boundary.
+
+= 2.59.09.43 =
+* Rename the section to LCP Diagnostics & Settings and move the administrator-only audience and discovery-duration controls into it, while keeping the master LCP Frontend Discovery switch below LCP Image Priority.
+* Remove LCP observation records from the global dashboard diagnostics payload. Opening the accordion now loads only a compact page of 10 discovered URLs, with cursor pagination that requests the next or previous page only after the corresponding button is pressed.
+* Add a separate URL-detail endpoint so selectors, resources, observations, candidate evidence, refresh state, and mapping actions are loaded only after an administrator selects one URL. The browser keeps only the current URL page and one selected detail payload.
+
+= 2.59.09.42 =
+* Add optional LCP Frontend Discovery below LCP Image Priority with public or administrator-only audience, durations from one hour to indefinitely, and defaults of disabled, public, and indefinite. URLs containing query parameters are rejected by both the frontend observer and server endpoint, and finite-duration cached observer configurations stop locally at expiry.
+* Use the first valid browser observation immediately, then lock one persistent mapping per page and viewport when the same candidate appears in two of the last three visits. Locked scopes stop loading or reporting through the observer, while Forget and Relearn reset the stored row without creating per-visit learning transients.
+* Replace authenticated per-page learning sessions with persistent database learning state, migrate existing confirmed mappings as locked, remove legacy LCP learning/pending/cooldown transients, and keep page-specific purge and warm-refresh updates only when the active candidate changes or becomes locked, and invalidate cached frontend HTML when discovery enablement, audience, or duration changes.
+
+= 2.59.09.41 =
+* Require the existing file-mutation permission for settings updates that change Apache Static HTML Delivery, Gzip, or Brotli, matching their existing `.htaccess` side effect without changing the settings persistence or reconciliation flow.
+
+= 2.59.09.40 =
+* Remove the residual `ultracache_crawl_scope_summary` option and site option during full plugin uninstall, including the final critical cleanup pass so loaded shutdown callbacks cannot leave it behind.
+
+= 2.59.09.39 =
+* Remove anonymous authority from browser-observed LCP learning. Confirmed mappings, cache purges, preload changes, and refresh-queue jobs can now be changed only through an authenticated administrator learning session scoped to one page and viewport with a WordPress nonce.
+* Add authenticated Start learning for pages without an existing mapping and authenticated Relearn for existing mappings. Automatic mode requires two matching observations inside the same expiring session, manual mode accepts only currently configured selectors, and existing confirmed mappings remain unchanged until an administrator explicitly starts learning.
+
+= 2.59.09.38 =
+* Verify the complete transformed Theme CSS temporary file with the prepared streamed checksum before committing it, then verify the actual active CSS target in resumable chunks before marking replacement rows as applied. Missing-temp and legacy committed-state recovery now accept a prior rename only when the active file checksum matches the prepared output, not merely its size.
+
+= 2.59.09.37 =
+* Correct the default/native dashboard Help modal title styling so the title uses WordPress dark text on the white modal background. Separate the native title-color rule from the FAQ panel border/background rule.
+
+= 2.59.09.36 =
+* Remove the 5 MB Theme CSS cutoff. Scan and validate CSS files of any total size through persisted byte offsets, bounded per-request chunks, and boundary carry so large files resume without being loaded fully into memory.
+* Apply all prepared replacements for each Theme CSS file through an exact streamed backup and a separate transformed temporary file. Commit the active CSS only after the complete source checksum and every prepared replacement are confirmed, with resumable reconciliation around interrupted file commits.
+* Verify transformed Theme CSS files in resumable chunks and persist per-reference old/new-fragment evidence. Upgrade the Media Library Replacement schema additively from version 9 to 10 without dropping existing registry data, and clean Theme CSS temporary and backup directories during Delete All or uninstall.
+
+= 2.59.09.35 =
+* Replace the Theme CSS full-tree manifest build with resumable directory discovery persisted by cursor and a dedicated per-job CSS inventory table. Scan the inventory in bounded requests and validate the same file set through a second resumable traversal before Prepare can complete, without imposing a total file or directory limit.
+* Upgrade the Media Library Replacement schema additively from version 8 to 9 so the new Theme CSS inventory table is created without dropping existing replacement registry tables. Remove runtime use of the legacy large manifest option and include the new inventory in restart, Delete All, and uninstall cleanup.
+
+= 2.59.09.34 =
+* Store automatic browser-observed LCP learning under one stable database identity per page and viewport. New candidates are confirmed through one expiring pending transient per page/viewport, preserving the current confirmed mapping until the replacement receives a second matching observation and preventing selector-driven database-row growth.
+* Make public LCP observation throttling independent of the reported element selector, record refresh cooldown before cache purge or refresh-queue attempts, include selector changes in candidate equality and first-seen resets, and prune old legacy pending rows in bounded recurring cleanup batches without imposing a total page or record limit.
+
+= 2.59.09.33 =
+* Require the existing file-mutation capability boundary before a resumable Media Library Replacement Do job can start or continue when its prepared plan contains Theme CSS replacements, and repeat the guard immediately before Theme CSS files are written. Jobs without Theme CSS replacements continue to require only `manage_options`.
+* Remove synchronous full-Media-Library fallback paths from REST and WP-CLI media processing. Media discovery and conversion now fail explicitly when the bounded persistent queue is unavailable instead of collecting or processing the full library in one request.
+
+= 2.59.09.32 =
+* Remove the Secret constants, detailed Media Library Replacement lifecycle, source/build-process, and Varnish disclosure sections from `readme.txt` and `README.md`, while keeping the concise feature and setup documentation.
+* Move the complete Installation and must-do post-install block in the WordPress.org `readme.txt` to immediately before Screenshots. Documentation-only release; dashboard Help, FAQ, cache, media, and optimization runtime behavior are unchanged.
+
+= 2.59.09.31 =
+* Remove the complete 80-question FAQ from `readme.txt` and `README.md`, keeping the concise installation and must-do post-install workflow in both repository documents.
+* Move the same FAQ into the version-specific dashboard Help modal, organized into eight collapsed topic groups with individually expandable questions, counts, keyboard-native details controls, and matching UltraCache/Native theme styles. Dashboard documentation only; cache and optimization runtime behavior is unchanged.
+
+= 2.59.09.30 =
+* Add a concise must-do post-install JavaScript compatibility check to `readme.txt` and `README.md`: test the public site in a private browser window, copy Console errors, analyze them in JS Defer / Delay Safeguards & Diagnostics, append the proposed safeguards, save both lists, flush cache, and warm the front page until the Console is clear.
+* Expand the version Help modal with the detailed browser-testing workflow, correct private-window shortcuts for Chrome/Edge and Firefox, guidance for Defer Instead versus Do Not Defer or Delay, and the exact cache flush/front-page warm-up loop. Documentation and dashboard-help release; cache and optimization runtime behavior is unchanged.
+
+= 2.59.09.29 =
+* Expand `readme.txt` and `README.md` with a practical, user-facing FAQ covering public page cache, wp-admin and logged-in Object Cache behavior, WooCommerce exclusions, query strings, warm-up, CSS/JavaScript/fonts, automatic and manual LCP learning, AVIF/WebP conversion, media queues, Media Library Replacement, object-cache backends/drop-ins, integrations, diagnostics, storage, cleanup, and support.
+* Clarify that `/wp-admin/` is never page-cached while enabled Object Cache still accelerates dynamic administration requests by reusing cached queries, options, and WordPress objects. Documentation-only release; runtime cache and optimization behavior is unchanged.
+
+= 2.59.09.28 =
+* Add a fixed top-right `Rate us!` dashboard link that opens the UltraCache WordPress.org review form in a new tab. Keep the existing version-specific Help control fixed at the lower-right corner and apply matching Native/UltraCache theme styling and keyboard focus treatment to both controls.
+* Add a final `Still having questions?` support callout inside the version Help modal with a direct `Ask on forums` link to the UltraCache WordPress.org support forum. Both external links use `noopener noreferrer`; cache, media, and optimization runtime behavior is unchanged.
+
+= 2.59.09.27 =
+* Remove the final generated selector `IN (...)` and `NOT IN (...)` SQL fragments from persistent LCP storage. Manual-selector page lookup now uses one fixed prepared page query followed by validated hash matching in PHP, preserving database ordering and exact selector selection without dynamic placeholders.
+* Synchronize configured LCP selectors with fixed prepared statements: confirmed automatic mappings are staled in one bounded update when manual mode is active, while distinct manual/legacy-browser hashes are compared against the configured set and only removed hashes are updated. This clears the four remaining Plugin Check prepared-SQL findings without suppressions or raw SQL fragments.
+
+= 2.59.09.26 =
+* Refactor LCP Diagnostics counts, filters, search, refresh-status handling, and updated_at/id cursor pagination so every database sink receives a fixed SQL template prepared directly with allowlisted values. Remove the generic `$attention_sql`, `$count_sql`, `$row_sql`, and `$queue_query` execution paths that triggered the remaining Plugin Check prepared-SQL findings.
+* Join the one matching `lcp_refresh` queue row into each bounded diagnostics page instead of issuing a generated `IN (...)` status query, and cache the cron-warm queue table-existence check through the shared UltraCache object-cache key. Preserve Attention/Confirmed/Pending/Stale/All tabs, 20/50/100 limits, exact aggregate counters, queue-state filters, row actions, and last-successful-refresh fallback.
+
+= 2.59.09.25 =
+* Refactor the browser-observed LCP storage and lifecycle database paths so `wpdb::prepare()` is applied directly at each `get_row()`, `get_results()`, and `query()` sink. Exact-row lookup, manual-selector lookup, automatic mapping lookup, viewport winner lookup, atomic observation upsert, competing-mapping staling, and selector synchronization no longer pass generic prepared SQL variables into database methods.
+* Keep dynamic selector `IN` / `NOT IN` clauses limited to generated placeholder lists while every table identifier and runtime value remains bound through `%i`, `%s`, or `%d`. Preserve the existing self-healing table retry, automatic/manual precedence, pending-to-confirmed behavior, winner replacement, relearn/forget lifecycle, and targeted LCP refresh flow without changing the observations schema.
+
+= 2.59.09.24 =
+* Remove the unused runtime atomic-file writer that could create temporary sibling files for arbitrary targets. Runtime configuration no longer contains a dormant generic PHP-file replacement path; the existing guarded WordPress drop-in writer remains limited to `advanced-cache.php` and `object-cache.php`.
+* Harden the shared guarded write helpers so generic file writes may create only the inert `index.php` directory marker with the exact `Silence is golden` payload, while generic renames reject every `.php` target. Managed cache drop-ins continue through the dedicated allowlisted drop-in writer.
+
+= 2.59.09.23 =
+* Move the Media Library Replacement schema-upgrade lock from direct `add_option()` calls to the shared `{prefix}ultracache_locks` table. Acquisition is atomic, expired locks can be taken over, release is token-guarded, the existing 60-second lifetime is preserved, and a still-active legacy option lock is respected while an expired legacy row is removed.
+* Restore the plugin-wide invariant of zero direct `add_option()` calls and keep Media Library Replacement table creation serialized through the existing central lock subsystem.
+
+= 2.59.09.22 =
+* Remove conflicting `advanced-cache.php` and `object-cache.php` files immediately after the administrator confirms the existing Remove action. UltraCache no longer creates, returns, or references PHP backups for foreign cache drop-ins; removal remains restricted to those two exact WordPress content-directory paths through the existing capability-protected REST action and canonical WP_Filesystem drop-in helpers.
+* Delete the obsolete `uploads/ultracache/cache/backups/dropins/` directory through the guarded UltraCache filesystem cleanup path and remove the empty parent backup directory when possible. Dashboard conflict text and confirmation now describe permanent removal instead of backup-and-remove behavior.
+
+= 2.59.09.21 =
+* Replace the fixed lower-right version label with a keyboard-operable `Help for [installed version]` button that opens a responsive, theme-aware setup modal. The modal contains the practical Aggressive-profile setup guide for compression, warm-up scope, image conversion, font optimization, WooCommerce, MailerLite, object cache, Varnish, scheduling, and the first cache/media preparation run; it closes by button, overlay, or Escape and restores focus to the trigger.
+* Expand the WordPress.org `Installation` instructions and repository README with the same concise quick-setup workflow and direct users to the version-specific dashboard help modal.
+
+= 2.59.09.20 =
+* Enable `Warm affected pages after save` and `Apache Static HTML Delivery (.htaccess)` in the Aggressive performance profile. Applying Aggressive now turns on targeted post-save warming and direct Apache delivery of eligible prebuilt anonymous HTML cache files, while the individual controls remain available for manual adjustment.
+
+= 2.59.09.19 =
+* Move the complete browser-observed LCP diagnostics interface out of Advanced Diagnostics into its own full-width `LCP Diagnostics` accordion placed immediately above Advanced Diagnostics. The existing counters, server-side tabs, filters, pagination, mapping details, refresh/relearn/forget actions, and themed confirmation dialog remain unchanged; Advanced Diagnostics now contains only the remaining server, cache, storage, security, and runtime inspection panels.
+
+= 2.59.09.18 =
+* Scale LCP Diagnostics for large sites with server-side tabs, URL/selector/resource search, viewport/source/resource/refresh filters, 20/50/100-row limits, indexed updated/status/source/viewport ordering, and stable updated_at/id cursor pagination. Advanced Diagnostics now opens on Attention, loads only one bounded result page, reports exact aggregate counts including failed refreshes, keeps row actions within the active filters/page, and avoids rendering or transferring the full observations table even when thousands of URLs have learned mappings.
+
+= 2.59.09.17 =
+* Add automatic browser-observed LCP learning when no manual LCP selector is configured. The generic PerformanceObserver now records the actual text, image, background-image, or video-poster candidate per page and viewport; automatic candidates require two matching anonymous visits before confirmation, manual selectors continue to take immediate precedence, a confirmed browser winner suppresses further speculative LCP selection for that response, exact observed `<img>` resources receive eager/high-priority markup, image-backed candidates reuse the existing targeted purge and `lcp_refresh` warm queue, text candidates do not create image preloads, and diagnostics identify automatic versus manual sources while explicitly explaining that logged-in refreshes are ignored.
+
+= 2.59.09.16 =
+* Fix creation and use of the dedicated LCP observations table by adding `ultracache_lcp_observations` to the central validated UltraCache custom-table allowlist. The table name now reaches schema creation, existence checks, diagnostics, browser-observation writes, and lifecycle cleanup instead of being rejected as an invalid custom identifier.
+
+= 2.59.09.15 =
+* Add browser-observed LCP diagnostics to Advanced Diagnostics with persistent summary counts, recent mapping details, viewport/selector/element/resource metadata, observation history, current warm-refresh state, and the last successful page-specific LCP refresh. Add themed confirmation actions to forget a mapping, retain it as stale and relearn, refresh only the affected page cache, or open the public page; all mutations use a capability-protected REST endpoint, the existing targeted purge and LCP warm queue, and no full-site or CSS-bundle rebuild.
+
+= 2.59.09.14 =
+* Harden browser-observed LCP lifecycle handling: confirmed mappings no longer expire after seven days; removed or older competing selectors are retained as stale diagnostics while only one confirmed winner per page and viewport can emit a preload; observation, storage, and refresh queue entry share the page-cache eligibility decision; resource validation accepts trusted WordPress public content/uploads/theme/plugin hosts including CDN-rewritten base URLs; the observations table verifies its real existence and repairs/retries after an unexpected removal; and LCP refresh jobs received during a manual warm-up remain deferred in the existing queue and resume automatically when the manual session ends.
+
+= 2.59.09.13 =
+* Make the Image conversion test dialog and the Plugins-screen deactivation dialog follow the per-user UltraCache admin theme selection instead of hard-coded dark colors or the operating-system color scheme. The dashboard modal now consumes the existing theme tokens and updates with an open-theme change; the deactivation dialog receives the stored admin theme through its localized configuration and applies matching native/UltraCache surfaces, text, borders, controls, focus states, and responsive actions.
+
+= 2.59.09.12 =
+* Store browser-observed LCP mappings in the dedicated `{prefix}ultracache_lcp_observations` table instead of one expiring transient map. The table keeps one confirmed mapping per normalized page URL, exact manual selector, and viewport; uses atomic observation-count updates, indexed page/resource lookups, bounded retention cleanup, lazy schema creation for active-plugin updates, activation-time creation, and complete uninstall/Delete All cleanup. No transient-data migration is included.
+
+= 2.59.09.11 =
+* Connect browser-observed LCP learning to the existing database-backed cron warm queue: changed page/selector/viewport mappings now purge only the affected page-cache variants while preserving generated CSS bundles, enqueue a priority lcp_refresh job, force-refresh all active page-cache buckets without rebuilding CSS bundles, avoid full-site crawl expansion for standalone LCP refreshes, de-duplicate pending URL refreshes, and apply a bounded retry cooldown to prevent repeated slider-driven purge/warm loops.
+
+= 2.59.09.10 =
+* Extend Delay icon fonts to matching same-origin stylesheets inserted dynamically after the initial HTML. UltraCache now holds the stylesheet on print media, patches its @font-face rules with font-display: swap before activation, restores the original media value, preserves the stylesheet's existing load callback, honors the visible include/exclude patterns, and exposes measured matching/patching cost through window.ultracacheIconFontDelayTiming and a DevTools User Timing entry.
+
+= 2.59.09.09 =
+* Keep SVG uploads unchanged when upload conversion is enabled: image/svg+xml files now bypass raster resize and AVIF/WebP encoding without producing or deleting the uploaded file.
+* Improve Delay icon fonts discovery and matching: front-page HTML icon-family class tokens such as material-icons are included in scanner results, and visible include/exclude patterns match font-family and font-file names across spaces, hyphens, and underscores (for example material-icons, Material Icons, and MaterialIcons-Regular).
+
+= 2.59.09.08 =
+* Separated manual LCP element targeting from resource priority: selectors are preserved exactly, direct text targets act only as LCP boundaries, direct image/background/poster resources receive priority without descendant guessing, and dynamic targets learn their actual browser-observed resource per page and viewport for the next cached response. Added a generic PerformanceObserver helper, page-scoped HMAC/rate-limited observation storage with targeted cache purge, verified-resource preload injection including SVG, and restored the missing generic tag-processor candidate extractor.
+* Kept Priority Preloads, request-chain delay entries, and CSS async exclusion lists editable while their runtime switches are off; stopped adding implicit ID/class prefixes to manual LCP selectors, accepted SVG throughout LCP discovery/preload/runtime matching, removed the SR7-specific module-background shortcut, and stopped anonymous inline scripts from being delayed by third-party content-pattern matching.
+* Made the JS Defer / Delay and CSS Bundle safeguard diagnostics full-width dashboard sections, and moved update-triggered frontend purge execution into its own operation-focused engine trait without changing behavior.
+* Added separate, profile-enabled purge controls for successful WordPress core, active plugin, and active parent/child theme updates; update purges invalidate page HTML and frontend asset maps once per operation, optionally flush configured external page caches and start the existing warm queue, while leaving object cache and optimized media untouched.
+* Reorganized the dashboard so Query-string Args Caching sits directly below Cache Engine and Warm Cache, while JS and CSS safeguard diagnostics sit directly beneath their related frontend optimization panels; setting IDs and runtime behavior are unchanged.
+* Documented the trusted internal media-replacement dependency exception for Plugin Check without changing runtime behavior.
+* Added Media Library Replacement to promote verified AVIF/WebP rewrite variants into WordPress attachment originals and generated sizes, with attachment metadata, database-reference, and Theme CSS updates.
+* Added a resumable, server-authoritative Check / Prepare / Do / Verify / Delete Originals workflow with persisted progress, pause/resume/retry, cross-browser recovery, concurrency leases, time budgets, and explicit destructive confirmations.
+* Added readiness and pre-write validation that blocks mutation when generated destinations, attachment candidates, output policy, registry plans, database scans, or Theme CSS baselines are incomplete or have changed.
+* Added guarded, idempotent verification and original cleanup, plus recovery foundations for metadata, database references, Theme CSS, and interrupted replacement stages.
+* Added database-wide media-reference indexing and matching for the current WordPress table prefix, including serialized/JSON validation, deduplication, verification, bounded keyset cursors, and WP-CLI access through the same replacement engine.
+* Added separate Image Output Format and Fallback Format controls plus a shared Image compression level for AVIF/WebP optimization, upload generation, regeneration, conversion tests, and Media Library Replacement.
+* Added sample image conversion comparisons, registered intermediate-size coverage, exact reuse of matching existing variants, and opt-in regeneration of already optimized images with current quality settings.
+* Improved the media dashboard workflow, long-job progress UI, queue repair/recount controls, status reporting, and reliable handling of interrupted or concurrently opened operations.
+* Added and strengthened SQLite object caching, then refactored Redis, APCu, SQLite, Disk, and runtime-only behavior into explicit backend classes while preserving the WordPress object-cache API.
+* Refactored large plugin components into smaller operation-focused files for media, settings, diagnostics, JavaScript, LCP, fonts, CSS bundles, warm-up, REST/profiling, lifecycle, server rules, and shared core helpers.
+* Added targeted class loading and lazy component loading to reduce initial PHP parsing while preserving WordPress-compatible bootstrap order, hooks, REST, WP-CLI, and public APIs.
+* Added deactivation and uninstall cleanup policies to the standard Plugins screen, with controlled retention or removal of settings, custom tables, runtime/cache files, and plugin-owned data.
+* Fixed Apache Static HTML Delivery rule synchronization and aligned dashboard, Help, Diagnostics, and translation text with the existing query-string allowlist behavior.
+* Hardened filesystem/path containment, table scope, confirmation tokens, capabilities, nonces, serialized-data handling, generated-file validation, permissions, and destructive cleanup guards.
+* Updated WordPress.org metadata, translations, diagnostics, REST/WP-CLI parity, compliance-sensitive code paths, and release packaging.
+
+= 2.59.07.61 =
+- Route real upload conversion through the existing UltraCache AVIF/WebP encoder chain instead of using WordPress image-editor AVIF saves for final output. WordPress image-editor use is now limited to resizing the intermediate source when the configured maximum upload side requires it.
+- Add a specific Convert new uploads help tooltip without fallback language; this control converts the uploaded attachment itself and reports encoder failures visibly.
+
+= 2.59.07.60 =
+- Move Maximum upload image side to Advanced settings and keep Convert new uploads at the end of the AVIF / WebP Batch Conversion box.
+- Rename Generate on Upload to Rewrite on upload in the media settings UI.
+- Make upload conversion failures self-diagnostic: the visible WordPress upload error now includes source file, detected/target MIME, editor class, destination filename, save return data and candidate output-file validation state.
+- Validate the actual file written by the WordPress image editor from multiple WordPress save-result candidates before reporting a missing output file.
+
+= 2.59.07.59 =
+- Fix upload conversion output validation so successful WebP/AVIF saves are measured through the UltraCache filesystem helper before falling back to WordPress filesize helpers.
+- Add debug context when upload conversion save validation fails after the image editor reports success.
+
+= 2.59.07.58 =
+* Adds real new-upload image conversion controlled from the AVIF / WebP Batch Conversion panel. When enabled, WordPress uploads are converted to the selected Image Output Format during the normal upload flow.
+* Adds Maximum upload image side with a default of 1920. Larger uploaded images are resized proportionally before WebP/AVIF save; smaller images keep their dimensions and are only converted.
+* Uses WordPress upload and image editor APIs for the new upload conversion path. Conversion failure returns a visible upload error instead of silently keeping the original file or switching format.
+
+= 2.59.07.57 =
+- Fixed manual warm-up handling so frontend loopback `write-failed` headers no longer stop a cacheable 200 HTML page from being written by the controlled manual warm-up flow.
+- Fixed skipped manual warm-up URLs so REST 200 `skipped` payloads are shown as skipped instead of raw `/crawl-page` failures in the admin progress log.
+- Simplified manual warm-up progress messages to report user-facing outcomes such as Cached, Cached + CSS, Skipped, or Failed instead of cache-file counts or internal CSS/HTML ordering details.
+
+= 2.59.07.56 =
+- Kept the six manual warm-up actions distinct by scope and mode while tightening the manual warm-up completion contract: HTML-only actions do not trigger automatic CSS bundle preparation, and HTML + CSS actions keep CSS bundle work inside the manual session.
+- Changed manual crawl-page handling so non-200, empty, non-HTML, or cache-rejected URLs are marked as skipped without REST 500 retries, preventing repeated self-requests for the same failing URL.
+- Moved per-page CSS bundle preparation until after the URL proves it returns cacheable HTML, preventing CSS scans for 404/feed/non-HTML URLs, and added in-session canonical URL de-duplication for manual warm-up runs.
+
+= 2.59.07.55 =
+- Added explicit Cache Engine wording for post-save warming as “Warm affected pages after save” and kept it disabled by default.
+- Changed post-save warming so it warms only scoped affected URLs instead of using site-front/feed seed URLs from the broader purge helper.
+- Skipped autosaves, revisions and auto-drafts for post-save warming, added a per-post cooldown, filtered feed URLs from that path, and prevented post-save warm requests from auto-starting CSS bundle scans or media-variant bucket loops.
+
+= 2.59.07.54 =
+* Add a General Inclusions accordion below General Exclusions and move Manual LCP selector, Priority Preloads, and Delay Non-Critical Request Chains into it.
+* Rename the delayed font pattern list to Delay These Fonts / Icon Font and clarify that it can match any chosen font, while commonly being used for icon fonts.
+
+= 2.59.07.53 =
+* Split matching delayed icon-font @font-face blocks out of the generated font-mix CSS bundle so text/font-mix CSS can remain blocking while icon-font CSS is emitted through the delayed icon-font stylesheet path.
+* Reuse the existing Delay icon fonts pattern list during font-mix bundle consolidation and keep the bundle replacement atomic when the delayed companion stylesheet is written.
+
+= 2.59.07.52 =
+* Add first-party and third-party parallel execution controls for frontend deferred and delayed JavaScript.
+* Apply the parallel execution flags to native defer/async conversion and to delayed JavaScript lane replay.
+* Keep ordered execution as the default for both JavaScript paths.
+
+= 2.59.07.51 =
+* Reworked the delayed JavaScript loader so non-third-party delayed scripts run first in their own ordered lane before delayed analytics, consent, embeds, and other third-party scripts.
+* Released the jQuery-ready hold after the first-party lane instead of waiting for delayed third-party scripts, preventing third-party consent/analytics code from leaving basic frontend interactions inactive.
+* Added per-script timeout/fail-forward handling for delayed external scripts so missing load/error events cannot leave a delayed lane active indefinitely.
+
+= 2.59.07.50 =
+* Hardened TranslatePress page-cache compatibility so the translated-output buffer only runs for frontend HTML GET/HEAD requests.
+* Skipped the TranslatePress compatibility buffer for admin, AJAX, REST, cron, CLI, JSON, feed, robots, sitemap, WooCommerce AJAX, and other non-HTML request contexts.
+* Kept the existing translated-HTML storage timing and UltraCache internal query-argument cleanup unchanged, including internal revalidation requests that generate public cache HTML.
+
+= 2.59.07.49 =
+* Fixed TranslatePress compatibility so UltraCache internal revalidation query arguments are stripped from cached frontend URLs before HTML is stored, preventing public language-switcher links such as /en/... from retaining ultracache_revalidate or ultracache_rt parameters.
+
+= 2.59.07.48 =
+* Fixed TranslatePress page-cache storage so translated URLs are cached after TranslatePress finishes its frontend output-buffer translation, preventing alternate-language URLs from storing or serving the default Greek HTML.
+* Kept the normal non-TranslatePress cache path unchanged; the compatibility buffer is only activated on frontend page-cache requests when TranslatePress is detected.
+
+= 2.59.07.47 =
+* Replaced the SQLite WAL-size selector with an automatically saved maximum SQLite database-size selector using 32, 64, 128, 256, 512, 1024, and 2048 MB choices; the default is 256 MB.
+* Enforced the selected main SQLite database-file limit with `PRAGMA max_page_count` and added an automatic disposable-cache rebuild when a reduced limit is below the current file size.
+* Added proactive SQLite capacity maintenance that removes expired entries first and then the oldest cache entries when used pages reach 90% of the selected limit, targeting 80% after cleanup.
+* Separated WAL maintenance from the user database-size setting with a 16 MB post-checkpoint retention target, 1000-page automatic checkpoints, and a non-blocking cross-process maintenance lock.
+
+= 2.59.07.46 =
+* Added an automatically saved SQLite WAL target-size selector with 32, 64, 128, 256, 512, 1024, and 2048 MB choices; new and invalid configurations default to 256 MB.
+* Applied the selected SQLite WAL target consistently to the generated object-cache drop-in, SQLite runtime configuration, and WAL checkpoint maintenance threshold.
+
+= 2.59.07.45 =
+* Fixed SQLite object-cache write lockout when the WAL file exceeded its maintenance target, while retaining a hard combined database and journal size cap.
+* Preserved failed SQLite add attempts in request-local cache without falsely reporting persistent success, preventing repeated `alloptions` database reloads during backend write failures.
+* Verified SQLite set operations changed persistent storage before reporting success.
+
+= 2.59.07.44 =
+* Added a user-controlled stale-worker circuit-breaker threshold under Queue Missing Media During Page Generation, validated as a positive integer and stored in the existing UltraCache settings option.
+* Moved the Media Worker Safety status below the related missing-media queue controls.
+* Reworked rolling stale-worker tracking to use bounded time buckets plus the latest 25 diagnostics, allowing large thresholds without storing one full option record per incident.
+* Preserved the stale-worker count and latest quarantine diagnostics that opened a global pause until an administrator explicitly resumes media generation.
+* Fixed PHP 8.4 nullable-parameter deprecation warnings in font CSS rewriting and the object-cache REST endpoint.
+
+= 2.59.07.43 =
+* Removed the top divider from the Media Worker Safety summary.
+
+= 2.59.07.42 =
+* Changed: Added an always-visible, compact five-line Media Worker Safety summary directly below the existing optimized-image, media-queue, and queue-health statistics. No separate dashboard card was added.
+* Changed: The summary reports the current safety status, recent stale-worker incidents against the rolling threshold/window, remaining cooldown, latest quarantined attachment and timestamp, and the automatic queue action.
+* Changed: Removed duplicated incident counts and cooldown timing from the background-control helper text; detailed state now has one stable location in the media summary.
+
+= 2.59.07.41 =
+* Replaces the one-strike global media pause with a per-item quarantine: a stale `processing` row becomes `failed`, remains excluded from automatic retries, and can be returned explicitly through Retry Failed.
+* Adds a three-minute quiet-period cooldown after each stale worker so the previous PHP process has time to terminate before another media worker may start.
+* Tracks stale-worker incidents in a rolling 30-minute window. The global media circuit opens only after three incidents in that window; the threshold, window, and cooldown remain filterable through `ultracache_media_stale_worker_threshold`, `ultracache_media_stale_worker_window_seconds`, and `ultracache_media_stale_worker_cooldown_seconds`.
+* Rejects signed loopback workers, cron workers, automatic dispatch, and dashboard conversion while the cooldown is active, while preserving a single delayed cron continuation for automatic recovery.
+* Clears rolling incident history only on an explicit administrator resume, preventing an accidental request from silently resetting the global safety threshold.
+* Exposes cooldown time, recent incident count, threshold, and quarantined-item diagnostics in media queue state; the dashboard disables manual conversion during cooldown and shows the remaining quiet period.
+* Adds uninstall cleanup for the new bounded stale-worker state option.
+
+= 2.59.07.40 =
+* Prevents a stalled media encoder from exhausting PHP-FPM by failing closed when a media queue claim exceeds its processing lease instead of automatically recycling the row to `pending`.
+* Opens the persistent media background circuit breaker, clears the watchdog cron event, preserves bounded stale-item diagnostics, and requires an explicit administrator resume before any further automatic media work can start.
+* Blocks immediate, cron, on-demand, and dashboard dispatch while another media queue row is still `processing`, so an expired dispatcher lock cannot create a replacement worker beside a potentially live PHP process.
+* Stops self-chaining HTTP workers after each successful unit; the next bounded unit is scheduled through one delayed cron event instead.
+* Makes queue completion claim-safe by requiring the original status, attempt number, and start timestamp before a worker may persist its result, preventing a delayed worker from overwriting a circuit-breaker or newer claim state.
+* Treats an expired media processor lock as lost ownership and prevents the expired owner from finalizing queue state.
+* Replaces the on-demand affected-page select-then-insert sequence with an atomic upsert, removing the confirmed duplicate-key race under concurrent frontend discovery.
+
+= 2.59.07.39 =
+* Prevents authenticated dashboard requests from causing false `DONOTCACHEPAGE` failures during manual warm-up.
+* Honors each frontend loopback response so a URL that genuinely bypasses page cache fails independently while the remaining warm-up queue continues.
+
+= 2.59.07.38 =
+* Manual dashboard warm-up now bypasses the existing UltraCache page cache and atomically replaces each cache entry after successful generation.
+* Authenticates internal force-refresh requests and bypasses Apache static delivery for those requests.
+
+= 2.59.07.37 =
+* Gives manual full-site and menu warm-up priority by stopping and clearing the cron warm queue before the dashboard crawler starts.
+* Blocks cron warm starts, ticks, and scheduled cache cleanup while a manual warm-up is active or paused, and releases the block after completion or cache-generation reset.
+* Persists authenticated manual warm-up ownership across pause and resume so scheduled cleanup cannot start a competing cron crawler.
+
+= 2.59.07.36 =
+* Fixes false Brotli detection in the HTML compression capability probe and restores Gzip selection when the server does not provide compression.
+
+= 2.59.07.35 =
+* Makes the HTML compression probe use an HTML response and forces the selector to Server managed when server-level Gzip or Brotli is detected.
+* Hardens the SQLite object-cache backend with atomic add/replace/counter operations, persistent write-result handling, restrictive storage permissions, storage limits, secure deletion, and public-access verification.
+* Restricts Apache static HTML delivery to trusted site hosts and applies quality-aware `Accept-Encoding` negotiation to the advanced-cache delivery path.
+* Resolves the reported Plugin Check findings in the AVIF self-test and SQLite object-cache manager.
+
+= 2.59.07.34 =
+* Removes environment-specific deployment references from public release documentation.
+* Keeps release history exclusively in `changelog.txt`; `readme.txt` now contains only plugin information and usage documentation.
+
+= 2.59.07.33 =
+* Fixes the WordPress early-hit page-cache path so it serves available Brotli or Gzip variants according to the request `Accept-Encoding` values.
+* Sends matching `Content-Encoding` and `X-UltraCache-Encoding` headers for compressed early cache hits.
+
+= 2.59.07.32 =
+* Probes server-managed compression and PHP Gzip/Brotli support before opening the HTML Compression selector, then enables only the supported choices.
+* Adds compressed Apache static HTML aliases with matching `Content-Encoding`, `Vary`, and UltraCache source headers.
+* Clears the existing HTML page cache when compression or Apache static delivery mode changes so new aliases are rebuilt consistently.
+
+= 2.59.07.31 =
+* Shows Redis, APCu, SQLite, and Disk in one row on desktop, two columns on tablet, and one column on mobile.
+* Expands the SQLite backend test with explicit Write, Read, Delete, and Expiration results in the Object Cache status panel.
+
+= 2.59.07.30 =
+* Adds SQLite as a fourth selectable WordPress object-cache backend for single-server sites with the PHP SQLite3 extension.
+* Implements persistent signed-payload storage with WAL mode, expiration, global groups, multisite isolation, group flush, full flush, and bounded cleanup of expired entries.
+* Adds SQLite availability, version, journal mode, entry count, storage size, read/write testing, fallback selection, profile auto-detection, and dashboard flush controls.
+* Stores the database in the protected UltraCache object-cache directory and keeps SQLite database, WAL, and shared-memory files intact when the Disk backend is flushed.
+
+= 2.59.07.29 =
+* Removes six unreachable functions from `includes/admin/js/app.js`: the unused Cache Analytics card, committed-settings reset helper, asynchronous action-state helper, duplicate CSS bundle scope accessor, obsolete Safe Defer toggle helper, and the unrendered latest-profile JS safety loader.
+* Removes the matching unreachable debug-profile handler, state, and prop plumbing from `includes/admin/js/diagnostics.js`. Browser Scanner, Runtime Scan, Console Error Handler, DB-backed diagnostic queues, and their visible controls remain unchanged.
+* Removes 22 unused module imports from `includes/admin/js/app.js`, including obsolete profile/list helpers, unused UI primitives, diagnostic utilities, and cache-format helpers. This reduces accidental cross-module coupling and makes missing dependencies easier to detect during future changes.
+* Narrows the internal `window.UltraCacheAdmin` export surfaces by removing 32 helpers/constants/components that have no consumer outside their defining module. Internally used helpers remain private and keep the same implementation; consumed exports and module names are unchanged.
+* Keeps `includes/admin-dashboard.js` as the same 12-line bootstrap and retains the deterministic WordPress script/style dependency order established by the refactor.
+
+= 2.59.07.28 =
+* Stabilizes the per-user dashboard theme system introduced in 2.59.07.27 without changing frontend optimization, cache behavior, media conversion, warm-up, REST payloads, performance settings, or the saved theme values.
+* Adds semantic `uc-dashboard-header` and `uc-dashboard-header-actions` classes to the existing header composition so responsive theme controls can be styled without relying on broad utility-class selectors. The title, description, toggle, and Flush All Cache action remain in the same order and use the same callbacks.
+* Improves the `UltraCache Theme` control accessibility: the visible text is now a real label bound to the checkbox, the checkbox exposes switch semantics through `role="switch"` and `aria-checked`, the saving state is exposed through `aria-busy`, and the decorative slider is hidden from assistive technology.
+* Guards the theme toggle callback before invoking it, preserving the current optimistic save/rollback behavior while preventing an avoidable runtime failure if the component is ever rendered without an `onChange` callback.
+* Completes the native and UltraCache admin canvas backgrounds across `#wpcontent`, `#wpbody`, and `#wpbody-content`, avoiding uncovered strips around the dashboard when switching themes or using narrower wp-admin layouts.
+* Adds explicit `color-scheme` values for native and UltraCache modes so browser-rendered controls and scrollbars follow the active light/dark dashboard appearance consistently.
+* Stabilizes the header action layout: controls stay aligned on desktop, occupy the available width on WordPress mobile breakpoints, and preserve the existing full-width mobile button behavior without changing the rest of the dashboard flex/grid rules.
+* Adds keyboard-visible focus styling specifically for the theme switch and adds a scoped `prefers-reduced-motion` rule for dashboard transitions and animations. Mouse interaction and the existing visual themes remain unchanged.
+
+= 2.59.07.27 =
+* Adds the per-user UltraCache dashboard theme system after the JavaScript and CSS refactor, without changing frontend optimization, cache, media, warm-up, object-cache, Varnish, or external-cache behavior.
+* Makes the WordPress-native dashboard appearance the default for users who have not selected a theme. The existing dark UltraCache appearance remains available unchanged through the new `UltraCache Theme` toggle beside `Flush All Cache`.
+* Stores the preference per administrator in the `ultracache_admin_theme` user-meta key (`native` or `ultracache`). The preference is not stored in the shared performance settings and does not trigger a settings save, cache purge, warm-up, or frontend change.
+* Adds the authenticated `POST /ultracache/v1/admin-theme` REST route. It accepts only `native` or `ultracache`, uses the existing `manage_options` permission check and REST nonce, and returns the persisted theme.
+* Removes the per-user theme meta during full settings/data uninstall cleanup while preserving it when the selected uninstall policy explicitly keeps settings.
+* Adds `includes/admin/js/theme.js` for theme normalization, immediate root/body theme application, optimistic per-user saving with rollback on REST failure, and the compact header toggle component.
+* Adds `includes/admin/css/themes.css` as the final style layer after tokens, foundation, components, and sections. Native mode uses WordPress admin surfaces, borders, form controls, buttons, admin color variables, notices, menus, modals, and scrollbars while UltraCache mode retains the current design.
+* Renders the saved `data-uc-theme` value and matching admin body class server-side before React mounts, preventing a dark-to-light flash on native mode. JavaScript keeps the root attribute and body class synchronized when the toggle changes.
+* Adds the explicit `ultracache-admin-theme` script handle and `ultracache-admin-css-sections` style handle while preserving the final public `ultracache-admin-css` handle.
+
+= 2.59.07.26 =
+* Splits the former 1,711-line `includes/admin-dashboard.css` into four ordered stylesheets under `includes/admin/css/`: `tokens.css`, `foundation.css`, `components.css`, and `sections.css`.
+* Keeps the complete CSS rule stream byte-for-byte identical when the four files are concatenated in dependency order. No selector, declaration, media query, specificity, or cascade order is changed in this release.
+* Preserves the public WordPress style handle `ultracache-admin-css`. It now points to `sections.css` and depends on `ultracache-admin-css-components`, which depends on `ultracache-admin-css-foundation`, which depends on `ultracache-admin-css-tokens`.
+* Leaves `includes/admin-dashboard.css` as a compatibility notice only; it is no longer enqueued. Adds `includes/admin/css/index.php` to prevent directory browsing.
+* Establishes the CSS layer boundaries needed for the future WordPress-native/default and UltraCache dashboard theme switch without introducing that switch yet.
+
+= 2.59.07.25 =
+* Adds `includes/admin/js/app.js` as the dedicated application-composition module. It owns the remaining dashboard helpers, App component, action orchestration, section composition, and complete React element tree that previously remained in `includes/admin-dashboard.js`.
+* Moves the existing application body structurally rather than rewriting it: the module imports the same core/API/settings/help/UI/diagnostics/jobs/warm-up/media/cache/lifecycle modules, configures them in the same order, creates the same state/actions, and mounts the same App component through the existing lifecycle mount helper.
+* Adds the explicit `ultracache-admin-app` WordPress script handle after all feature/lifecycle dependencies and before the final bootstrap. The final `ultracache-admin-js` handle now depends only on `ultracache-admin-app`.
+* Keeps `window.ultracacheData` localized immediately before the final bootstrap handle. The app module performs no runtime initialization until `bootstrap()` is called, so the existing localized configuration remains available before any dashboard settings, stats, diagnostics, paths, or REST configuration are read.
+* Registers translations for the new app handle and preserves the existing translation registration for the final bootstrap.
+
+= 2.59.07.24 =
+* Adds `includes/admin/js/lifecycle.js` as the dedicated React state and dashboard-lifecycle module, loaded through the explicit WordPress script dependency manifest before the final dashboard bootstrap.
+* Moves the complete App-level React state/ref initialization out of `includes/admin-dashboard.js`, including settings, stats, diagnostics, media counts/support/queue state, forms, job/process state, action queues, modal/accordion state, scanner state, persistence refs, cancellation refs, and manual media-session ownership refs.
+* Moves toast insertion/dismissal callbacks into the lifecycle module while preserving IDs, replacement behavior, the 50-toast cap, persistence flags, and the existing default timeout.
+* Moves all 12 App-level effects into the lifecycle module: Redis activation verification, settings-ref synchronization, before-unload protection, toast expiration timers, reverse-proxy notices, cache-plugin conflict notices, responsive/mobile handling, passive cache-stat polling with visibility pause/resume, and advanced/Varnish/Redis form synchronization.
+* Preserves passive dashboard behavior: no frontend compression probe or browser scan is started automatically, cache-stat polling remains disabled when the setting is off, only one stats refresh can be in flight, and polling still pauses while the document is hidden.
+* Moves process ETA calculation, dashboard-root lookup, and React 18/legacy ReactDOM mounting into the lifecycle module without changing displayed ETA wording or root-element compatibility.
+* Keeps form-default evaluation lazy where it was previously conditional, so the scheduled warm-up and Varnish server default providers are not called when explicit saved values already exist.
+* Adds the `ultracache-admin-lifecycle` script handle with `wp-element`, `wp-i18n`, and core dependencies, registers its translations, and makes the final dashboard script depend explicitly on it.
+
+= 2.59.07.23 =
+* Fixes the cache-module extraction regression introduced in 2.59.07.22 where `VarnishCard` called the shared `formatLooseTime()` helper without importing it from `includes/admin/js/core.js`, causing `ReferenceError: formatLooseTime is not defined` and preventing the UltraCache dashboard from rendering.
+* Adds `formatLooseTime` to the explicit core-helper destructuring in `includes/admin/js/cache.js`; no Varnish settings, REST calls, cache behavior, dashboard markup, or CSS are changed.
+* Adds a focused Varnish-card render smoke check with a populated `last.time` value so extracted components cannot pass validation while missing a runtime helper used only by a conditional render path.
+
+= 2.59.07.22 =
+* Adds `includes/admin/js/cache.js` as the dedicated cache-backend and cache-layer dashboard module.
+* Moves the Redis/object-cache card, APCu card, OPcache card, Varnish card, external-cache cards, conflicting cache-helper notice, and their formatting/default helpers out of `includes/admin-dashboard.js`.
+* Moves object-cache backend/fallback selection, Redis settings save/test/flush, full object-cache count, conflicting drop-in recheck/removal, Varnish settings/test/flush, OPcache/APCu flush, LiteSpeed/Nginx flush, external-cache redetection, and Flush All Cache orchestration into the cache module.
+* Preserves the existing queued-action path for `purge_all`, `object_cache_flush`, `object_cache_full_count`, `apcu_flush`, and `varnish_flush_all`; no queue action name, polling interval, status handling, toast text, or refresh behavior is changed.
+* Preserves Redis password handling, backend validation, APCu auto-inclusion in Flush All Cache, Varnish HTTP/admin mode defaults, detailed Varnish REST error propagation, and existing conflicting-drop-in confirmation behavior.
+* Adds the explicit WordPress script handle `ultracache-admin-cache`, loaded after core/API/UI and before the final dashboard bootstrap, and registers its translations.
+
+= 2.59.07.21 =
+* Adds `includes/admin/js/warmup.js` as the dedicated warm-up feature module. It owns warm HTML/CSS job classification, CSS bundle scope normalization, first-visit CSS bundle setting helpers, warm job labels/scopes, crawl-page item retries, crawl batch retrieval, front-page warm actions, full-site/menu warm start/resume/restart flows, and CSS-bundle preparation orchestration.
+* Adds `includes/admin/js/media.js` as the dedicated media feature module. It owns WebP/AVIF conversion-unit processing, HTTP 422 bounded retry and terminal failure reporting, retryable processor-lock handling, media batch retrieval, exclusive manual-session start/stop, conversion preflight, queue repair/rebuild orchestration, failed/completed queue actions, background-work pause/resume, and optimized-file recount handling.
+* Preserves the 2.59.07.09 media behavior where a conversion failure is retried up to its server-provided limit, counted once only when terminal, logged with attachment/source/format/stage/code/detail evidence, and does not stop the remaining dashboard conversion queue.
+* Preserves the 2.59.07.12 exclusive dashboard media-session behavior: dashboard conversion acquires ownership before preflight, visitor/upload/cron workers cannot launch competing conversions, ownership is carried through resumable jobs, and it is released on completion, pause, or failure.
+* Keeps the generic persisted job runner in `includes/admin/js/jobs.js`; `admin-dashboard.js` now supplies only shared React state callbacks and dispatches each job item/batch to the warm-up or media module.
+* Adds explicit WordPress script handles `ultracache-admin-warmup` and `ultracache-admin-media`, loads them after their core/API dependencies and before the final dashboard bootstrap, and registers script translations for both handles.
+
+= 2.59.07.20 =
+* Resumes the staged admin-dashboard refactor after the 2.59.07.19 wp-admin isolation hotfix, using 2.59.07.19 as the exact functional baseline and retaining all request-context isolation and scoped drop-in reconciliation changes.
+* Adds the ordered internal module `includes/admin/js/jobs.js` for generic persisted dashboard-job orchestration; the module is loaded after diagnostics and before the final `admin-dashboard.js` bootstrap through the explicit WordPress script dependency manifest.
+* Moves dashboard job localStorage persistence (`loadSavedJob`, `saveJob`, and `clearSavedJob`) into the jobs module while preserving the existing `ultracache-dashboard-job-state-v3` storage key and invalid/corrupt-storage fallback behavior.
+* Moves saved-job resume/restart eligibility, pending-item detection, media-rebuild generation recognition, and warm-up generation stale-after-flush protection into a pure `getJobControls()` helper.
+* Moves generic job-state initialization and restart normalization into the jobs module, preserving cursor/next-cursor handling, the 100-item persisted pending batch cap, log trimming, counters, queue-building state, start time, batch size, ETA samples/checkpoints, and warm-up generation persistence.
+* Moves process-panel state normalization into the jobs module without changing current/total clamping, media visibility while inactive, cancellation state, logs, counters, or ETA fields.
+* Moves generic batch fetching orchestration, pending-item continuation, cursor progression, pause/cancel persistence, per-item counter aggregation, media ETA sampling, completion cleanup, resumable failure persistence, and exclusive-session release handling into `createJobRunner()`.
+* Keeps feature policy outside the generic engine through callbacks: REST batch selection, media conversion units, warm-up URL processing/retries, manual media-session ownership, media queue progress merging, completion messages, stats refresh, and media queue refresh remain controlled by the existing dashboard code.
+
+= 2.59.07.19 =
+* Adds strict request-context isolation for the frontend engine: frontend output buffering, JavaScript/CSS tag filters, frontend enqueue callbacks, resource-hint mutation, WooCommerce frontend script-data filtering, and store-profile shutdown handlers are no longer registered during wp-admin, REST, AJAX, or cron requests.
+* Keeps cache invalidation hooks active in admin contexts, including post, product, term, menu, theme, widget, front-page, and permalink changes, so admin isolation does not disable cache purging after content changes.
+* Stops automatic page-cache and object-cache drop-in reconciliation on every unrelated wp-admin, REST, AJAX, and plugin-management request. Drop-ins continue to synchronize during activation, settings persistence/rollback, explicit dashboard access, and WP-CLI operations.
+* Removes the complete temporary 2.59.07.18 Elementor/admin asset diagnostic implementation as scheduled: property, hooks, registry snapshots, payload attachment, dashboard script registration, and `includes/admin/js/temporary-admin-asset-diagnostics.js`.
+
+= 2.59.07.18 =
+* Adds a temporary, read-only admin asset diagnostic for the UltraCache dashboard to investigate delayed Elementor 4.x failures such as `React is not defined`, `elementorModules is not defined`, and `Angie is not available` without changing any third-party script registration, enqueue, dequeue, dependency, or execution behavior.
+* Captures WordPress script-registry snapshots immediately before and after the existing UltraCache Elementor Notes suppression at `admin_enqueue_scripts`, `admin_print_scripts-toplevel_page_ultracache`, and `admin_print_footer_scripts-toplevel_page_ultracache`.
+* Records relevant Elementor, Angie, Notes, editor-MCP, `wp-element`, React, ReactDOM, and `wp-components` handles together with their source URL, declared dependencies, version, script group, registration/enqueue status, pending `to_do` state, completed `done` state, and the surrounding WordPress script queues.
+* Adds `includes/admin/js/temporary-admin-asset-diagnostics.js`, loaded only on the UltraCache dashboard. It records browser runtime snapshots at 0 ms, 1.2 seconds, and 5 seconds for `React`, `ReactDOM`, `wp.element`, `elementorModules`, and `Angie`, plus the actually rendered relevant script tags and their `type`, `async`, `defer`, and `data-wp-strategy` attributes.
+* Exposes the collected evidence as `window.UltraCacheTemporaryAdminAssetDiagnostics` and writes collapsed console groups prefixed with `[UltraCache temporary admin asset diagnostic]` for quick copying from the live WordPress test environment.
+
+= 2.59.07.17 =
+* Extracts the JavaScript defer/delay diagnostics interface from `includes/admin-dashboard.js` into the new ordered module `includes/admin/js/diagnostics.js` without changing its rendered markup, CSS classes, labels, list-editing behavior, REST routes, or save flow.
+* Moves Browser Scanner result grouping, Runtime Scan result rendering, captured runtime/resource error presentation, Console Error Handler parsing workflow, DB-backed JS Diagnostic Queue status/actions, append-to-Defer and append-to-exclusion controls, and suggestion deduplication/presence checks into the diagnostics module.
+* Moves the CSS Bundle Exclusions diagnostics field and its profile result metrics, exclusion coverage checks, copy/append controls, JSON download trigger integration, clear action, and result rendering into the same module.
+* Moves the Speed Diagnostics / Performance Profiler card, its CSS bundle and critical-chain summaries, UltraCache overhead probe, frontend rewrite breakdown, duplicate/mixed-status CSS link diagnostics, top callback/origin tables, slow checkpoints, download/clear controls, and CSS-exclusion copy actions into the diagnostics module.
+* Moves shared diagnostic helpers `getJsDelaySafetySuggestions()`, `getJsDelayReviewSuggestions()`, `isSuggestionPresentInDraft()`, `getNextMediaEtaCheckpoint()`, and `formatEtaDuration()` out of the monolith.
+* Moves the pure Browser Runtime Scan URL/snapshot helpers out of the `App` component: display-URL sanitization, runtime scan URL construction, scan-ID verification, runtime result normalization, popup script inventory collection, direct popup snapshot reading, and navigation-loss snapshot creation.
+* Adds an explicit diagnostics runtime configuration boundary for the localized `ultracacheData` object and detected plugins public path. The extracted UI continues to use the same frontend probe URL, Runtime Scan nonce, and console-error path examples as before.
+* Extends the deterministic WordPress script manifest with `ultracache-admin-diagnostics`. Load order is now `namespace.js` -> `core.js` / `api.js` -> `settings.js` / `help.js` / `ui.js` -> `diagnostics.js` -> `admin-dashboard.js`; the diagnostics script is registered for WordPress translations.
+* Updates `includes/admin-dashboard.js` to require and consume the diagnostics module through `window.UltraCacheAdmin`, then configures it after the localized runtime data and public paths are available.
+
+= 2.59.07.16 =
+* Extracts performance-profile definitions and profile patch logic from `includes/admin-dashboard.js` into the new ordered module `includes/admin/js/settings.js`, including profile detection, preserved-setting stripping, object-cache patch splitting, and the Safe/Balanced/Aggressive/All Off presets.
+* Moves JavaScript strategy, WooCommerce frontend/cart-fragment strategy, HTML compression delivery, line-list normalization, append-only merging, and active-profile recognition into the settings module without changing existing option values or profile behavior.
+* Moves settings import/export filtering, payload creation, import validation, JSON download handling, visible exclusion-list deduplication, broad WooCommerce-path coverage, overlap detection, and targeted line removal into the same settings module.
+* Adds an explicit settings runtime configuration boundary for plugin version, site origin, and the detected WooCommerce public path; export metadata and broad WooCommerce-list matching continue to use the same live dashboard values as before.
+* Extracts the complete option-specific help registry, generic help generation, and label-with-help renderer into the new ordered module `includes/admin/js/help.js`.
+* Extends the deterministic WordPress script manifest with `ultracache-admin-settings` and `ultracache-admin-help`; final load order is `namespace.js` -> `core.js` / `api.js` -> `settings.js` / `help.js` / `ui.js` -> `admin-dashboard.js`. The settings module is registered for WordPress script translations.
+
+= 2.59.07.15 =
+* Extracts reusable dashboard presentation primitives from `includes/admin-dashboard.js` into the new ordered module `includes/admin/js/ui.js` without changing their HTML structure, existing class names, CSS, labels, control behavior, REST calls, settings, queues, or dashboard layout.
+* Moves the toast viewport; support action links, inline support card, and support modal; generic cards and accordions; statistic cards; buttons; toggle controls; text, number, select, custom-select, textarea, saveable-textarea, and multiselect fields; detail rows; status pills; and the shared progress panel.
+* Keeps dashboard-specific help lookup, help-label rendering, visible-list merging, and warm-source parsing in the monolith for now, and supplies them to the UI module through an explicit runtime configuration boundary so the extracted components retain their previous behavior.
+* Adds `ultracache-admin-ui` to the deterministic WordPress script manifest with load order `namespace.js` -> `core.js` / `api.js` -> `ui.js` -> `admin-dashboard.js`, and registers the UI module for WordPress script translations.
+* Updates `includes/admin-dashboard.js` to require and consume the UI module through `window.UltraCacheAdmin`; the extracted component declarations and support-link constant no longer remain duplicated in the monolith.
+
+= 2.59.07.14 =
+* Extracts the first stable dashboard modules from the 11,000-line `includes/admin-dashboard.js` monolith without changing the rendered interface, settings, REST routes, request payloads, queue behavior, or feature logic.
+* Adds `includes/admin/js/core.js` for the shared WordPress element/i18n references, React hooks, public-path normalization and joining, class-name composition, safe localStorage access, viewport detection, content-encoding helpers, common number/count/file/byte/duration/time formatters, and the generic sleep helper.
+* Adds `includes/admin/js/api.js` for the complete REST route map, REST client configuration, nonce/header handling, GET query construction, action-specific payload normalization, noisy JSON recovery, structured REST error metadata, HTTP status preservation, empty/invalid response handling, and generic batch-response normalization.
+* Updates `includes/admin-dashboard.js` to consume the `core` and `api` modules through `window.UltraCacheAdmin` while preserving the previous function names at the dashboard call sites; no feature code receives its own fetch wrapper.
+* Extends the deterministic WordPress script manifest so loading order is `namespace.js` -> `core.js` / `api.js` -> `admin-dashboard.js`, with `wp-element` and `wp-i18n` loaded before the core module.
+* Aligns the packaged POT project-version header with the plugin release metadata.
+
+= 2.59.07.13 =
+* Adds the internal `window.UltraCacheAdmin` module namespace and duplicate-module guard as the foundation for the staged dashboard split.
+* Registers local dashboard scripts through a deterministic WordPress dependency manifest while keeping the existing dashboard monolith, UI, settings, REST requests, and runtime behavior unchanged.
+* Keeps `admin-dashboard.js` as the final module entry point and loads the namespace first through the explicit `ultracache-admin-namespace` dependency.
+
+= 2.59.07.12 =
+* Gives a dashboard Media Conversion run exclusive queue ownership before its preflight scan, preventing visitor, upload, cron, maintenance, and loopback background workers from starting competing conversion units.
+* Allows a background unit already inside an encoder to finish, while the dashboard waits for the shared processor lock instead of stopping the manual job.
+* Renews and persists the dashboard session token across conversion requests and resumable jobs, then releases ownership on completion, pause, or failure so pending background work can resume.
+* Adds an expiring recovery watchdog so an abandoned or closed dashboard tab cannot leave background media generation disabled indefinitely.
+
+= 2.59.07.11 =
+* Keeps Async Remaining CSS disabled when the Aggressive performance profile is applied.
+
+= 2.59.07.10 =
+* Resolves arbitrary explicit missing globals from exact provider filenames, script handles, and scanned definitions instead of limiting provider matching to a small hardcoded set of WordPress/core globals.
+* Resolves `PerfectScrollbar is not defined` to the exact `perfect-scrollbar` provider and the direct `theme-addons.js` consumer.
+* Runs provider resolution before fallback stack-source evidence, removing repeated basename and path variants for the same script.
+* Canonicalizes and deduplicates suggestions by effective owner-relative exclusion target.
+* Reduces missing jQuery plugin method results to the exact provider and direct consumer, excluding indirect callers from appendable fixes.
+
+= 2.59.07.09 =
+* Gives captured browser runtime errors priority over static delay/defer classifications and always retains exact non-core stack-source evidence, including sources already present in a safeguard list.
+* Connects the existing jQuery plugin provider resolver to the Runtime Scan execution path, allowing errors such as `counter.appear is not a function` to resolve the script that registers `jQuery.fn.appear` before generic missing-global handling.
+* Adds structured per-unit media conversion diagnostics for source, storage, WordPress image editor, Imagick, GD, and final output-validation failures.
+* Reports the effective attempted media format instead of the internal `best` queue policy; WebP-only mode now reports `webp` and automatic fallback failures report `avif+webp`.
+* Returns retry attempt/limit metadata for failed media queue units and lets the dashboard complete the bounded retries for one attachment without aborting the whole optimization job.
+* Records one terminal failed attachment after the retry limit, shows its attachment ID, source file, format, stage, code, and detail, then continues with the next queued attachment.
+
+= 2.59.07.08 =
+* Removes plugin-owned trait/class declaration conflict guards while retaining the WP-CLI environment condition.
+* Repairs the gettext template header and removes local development paths from source references.
+* Rewrites and aligns the packaged readmes, keeps `readme.txt` below 10 KB, and documents every distributed JavaScript helper.
+* Separates the optimized AVIF/WebP file counter completely from Cache Statistics, dashboard-stat snapshots, cache-stat polling, and the generic JavaScript `stats` state.
+* Stores only the dedicated AVIF, WebP, and total file counts in the non-autoloaded WordPress option `ultracache_media_file_counts`; no JSON file, sidecar, or other filesystem storage is added.
+* Loads the file counter independently during dashboard bootstrap and returns it independently as `mediaFileCounts` from the existing media queue REST response, preventing cache-stat refreshes from resetting it to zero.
+* Updates the dedicated counter when UltraCache creates or deletes optimized files and keeps the previous database values during the one-time option rename from `ultracache_media_storage_stats_v2`.
+* Removes the Optimized Images card from the Cache Statistics panel and removes media-file values from engine/cache-stat payloads.
+* Renames Refresh Storage Stats to Recount Optimized Image Files; the action scans `uploads/ultracache/images` and corrects only the AVIF/WebP file counter.
+
+= 2.59.07.07 =
+* Fixes optimized-image counters resetting to `0 AVIF · 0 WebP` after a dashboard refresh by including the persistent media-storage option in the initial passive dashboard payload.
+* Merges the current persistent media counters into cached dashboard-stat snapshots before returning them, preventing a stale snapshot from overwriting live totals.
+* Synchronizes legacy `imagesOptimized`, `avifImagesOptimized`, and `webpImagesOptimized` aliases with the persistent counters so older cached payload fields cannot take precedence with stale zero values.
+* Keeps persistent media totals visible even when general cache-stat polling is disabled; reading these counters is a lightweight option lookup and does not scan the filesystem.
+
+= 2.59.07.06 =
+* Moves Stop All Media Background Work / Resume All Media Background Work to the final position in the media queue action list so the emergency control appears after normal processing, maintenance, retry, and cleanup actions.
+
+= 2.59.07.05 =
+* Adds a persistent Stop All Media Background Work / Resume All Media Background Work control that invalidates outstanding dispatcher tokens, clears media cron watchdogs, cancels deferred dispatch, returns claimed queue rows to pending, and blocks upload, page-generation, cron, immediate-worker, REST, dashboard, and direct AVIF/WebP conversion entry points after the current physical encode finishes.
+* Keeps the media queue and existing optimized files intact while generation is stopped; refreshing the dashboard cannot resume processing automatically, and resuming can continue from the preserved pending queue.
+* Merges Rebuild Media Queue and Verify / Repair Queue into one Rebuild / Repair Media Queue action. The scan now checks every attachment's required physical derivatives, marks current outputs complete, requeues missing or stale outputs, and shares the conversion lock so queue repair cannot race an active encoder.
+* Treats an optimized derivative as current only when it exists and is at least as new as its source file, allowing changed originals or thumbnails to be repaired without deleting valid outputs first.
+* Removes the redundant cache warm-up explanatory note and simplifies the media conversion panel description.
+
+= 2.59.07.04 =
+* Renames "Queue Missing Media on Demand" to "Queue Missing Media During Page Generation" so the option name matches the actual discovery trigger.
+* Rewrites the setting description to state only when discovery occurs: uncached page generation, warm-up, cron warm, and stale regeneration, with conversion handled separately in the background.
+* Simplifies the related help text without listing unrelated actions that do not trigger media generation.
+
+= 2.59.07.03 =
+* Makes missing-media on-demand processing immediate without converting inside the visitor request: the request queues the attachment and sends one signed, non-blocking same-site REST worker request after WordPress finishes the response and page-cache write.
+* Defers the initial dispatch through a PHP shutdown callback so a fast conversion cannot purge the affected page before the originating request finishes storing that page in cache.
+* Adds a dedicated database dispatcher lock held across the worker chain, so concurrent frontend visits, uploads, warm-up requests, and cron recovery can produce only one active background media dispatcher.
+* Chains one physical image unit at a time through the existing shared conversion lock and timeout-safe processor; successful units dispatch the next worker while pending work remains.
+* Keeps WP-Cron as a watchdog and fallback only. Failed loopback dispatch, conversion-lock contention, and conversion failures use bounded fallback/backoff schedules instead of launching workers from every visitor.
+* Protects the public worker route with a short-lived HMAC bound to the dispatcher token, site URL, and WordPress authentication salt; stale, expired, or non-owner requests are rejected.
+* Resets stale processing rows before watchdog recovery, allowing abandoned conversions to return to the bounded retry flow.
+* Updates the Queue Missing Media on Demand description to distinguish immediate background dispatch from conversion inside the visitor request.
+
+= 2.59.07.02 =
+* Adds a dedicated database lock for Media Queue Rebuild chunks so refresh, resume, another browser tab, WP-CLI, and automatic queue building cannot scan/update the rebuild cursor concurrently.
+* Adds a persistent rebuild generation token. Restart publishes a new generation before waiting for the lock, causing any older in-flight chunk or delayed browser request to stop as stale instead of updating the new run.
+* Makes rebuild requests idempotent per generation, so retrying the same initial request does not delete and restart the queue a second time when the first response was lost.
+* Persists the rebuild generation in the dashboard job state, silently waits for an active chunk lock during refresh/resume, and rejects saved state belonging to an older rebuild.
+
+= 2.59.07.01 =
+* Keeps the existing long-job progress bar and simplifies only the Media Queue Rebuild status area to Total units, Finished, and Time left.
+* Removes the rebuild-only Overall Progress text and chunk scan/queue log lines that could present stale or misleading information while a new rebuild starts.
+* Uses the fixed eligible Media Library attachment total (`libraryTotal`) as the rebuild denominator instead of the mutable queue-row total, preventing on-demand queue additions from producing results such as 28,675 / 28,677.
+* Resets a fresh rebuild display to zero/Calculating until the first authoritative chunk response arrives, preserves exact progress across pause/resume, and prevents a non-complete job from showing 0s remaining.
+
+= 2.59.06.100 =
+* Bounds media conversion failures with a dedicated `consecutive_failures` queue column. A row becomes `failed` after three consecutive failed or abandoned claims instead of remaining pending forever; any successful physical-image unit resets the counter, and Retry Failed resets it for an explicit new attempt.
+* Separates `skippedThisRun` from `alreadyOptimizedThisRun`, eliminating the WP-CLI skipped-total double count.
+* Returns non-2xx REST responses for media queue lock conflicts and conversion/retry-limit failures: 409 for lock contention, 422 for conversion failures, and 500 for other processing errors.
+* Wraps the GD opaque-JPEG source decode and generated-AVIF decode in scoped warning handlers so codec warnings are captured in diagnostics instead of leaking into output.
+* Replaces the three remaining focused WPCS `json_encode()` fallbacks with WordPress `wp_json_encode()` calls.
+
+= 2.59.06.99 =
+* Replaces transient-only optimized-media storage totals with persistent aggregate counters stored in `ultracache_media_storage_stats_v2`.
+* Updates AVIF/WebP file counts and byte totals immediately when UltraCache creates, replaces, or deletes generated derivatives, so dashboard values survive transient expiry, Redis eviction, and process restarts.
+* Seeds the persistent counters from the latest legacy storage scan when available and keeps the last known values visible when reconciliation is incomplete instead of reporting an incorrect zero.
+* Makes Refresh Storage Stats reconcile the persistent counters against the filesystem; complete scans become authoritative while capped/incomplete scans preserve the last known totals and mark reconciliation as needed.
+* Adds dashboard status text distinguishing reconciled persistent counters from last-known counters that still need filesystem reconciliation.
+* Removes the new persistent storage statistics option through the existing UltraCache runtime-data uninstall policy while leaving generated media files untouched.
+
+= 2.59.06.98 =
+* Clarifies the Media Conversion capability summary so Imagick installation, AVIF encoder verification, and WebP availability are reported as distinct states.
+* Updates media runtime diagnostics to label AVIF results as self-test Passed/Failed and WebP results as Available/Unavailable instead of ambiguous Yes/No values.
+* Keeps the automatic AVIF safety test and runtime behavior unchanged; this release only corrects capability reporting terminology.
+
+= 2.59.06.97 =
+* Removes the complete AVIF encoder self-test status panel from the Media Conversion dashboard, including the explanatory text and Imagick/GD result lines.
+* Retains the automatic environment-fingerprinted AVIF safety test exclusively as an internal runtime capability gate for generation and frontend delivery.
+
+= 2.59.06.96 =
+* Removes the manual AVIF self-test button and its authenticated REST trigger from the dashboard after completing the encoder regression diagnosis.
+* Retains the automatic, environment-fingerprinted opaque-JPEG and transparent-RGBA AVIF safety tests as runtime capability gates for generation and frontend delivery.
+
+= 2.59.06.95 =
+* Fixes content-dependent Imagick AVIF corruption by preserving the source image's native channel layout instead of activating an alpha channel on opaque JPEG files.
+* Keeps native transparency for PNG/WebP sources without manufacturing alpha for JPEG sources; the GD conversion path now requests alpha preservation only for source formats that can carry it.
+* Extends the AVIF self-test with a bundled opaque 300x169 odd-height JPEG regression fixture in addition to the transparent 16x16 RGBA PNG, and requires both tests to pass for each encoder.
+* Increments the AVIF self-test algorithm version so previously cached results are invalidated and the expanded test runs automatically after upgrade.
+* Does not delete existing generated AVIF files automatically; previously generated AVIF derivatives must be regenerated after installing this release.
+
+= 2.59.06.94 =
+* Bundles a deterministic 16x16 RGBA PNG for AVIF encoder validation instead of trusting codec presence or container metadata alone.
+* Adds persistent, environment-fingerprinted AVIF self-tests for Imagick and GD that encode the bundled image, fully decode the generated AVIF, and validate known red, green, blue, white, transparent, and semi-transparent pixels.
+* Uses the self-test result as runtime capability truth: failed AVIF engines are excluded from generation, existing AVIF files are no longer selected for frontend HTML/CSS rewrites, and `best` media work requires WebP when no AVIF engine passes.
+* Adds an authenticated REST diagnostic endpoint and a Media Conversion dashboard button showing separate Imagick and GD pass/fail reasons.
+* Makes WebP the recommended default for fresh/default settings and performance profiles while preserving existing saved output selections.
+* Stores the AVIF result in `ultracache_avif_encoder_self_test_v1`, invalidates it when the PHP/image-library fingerprint or bundled test asset changes, and removes it through UltraCache data cleanup/uninstall.
+
+= 2.59.06.93 =
+* Adds a staged media-optimization ETA that measures the first 10 completed attachments, recalibrates after 100 attachments, and recalibrates again at every 500-attachment checkpoint.
+* Keeps the current ETA between checkpoints while reducing the remaining time after every completed attachment, and preserves measured timing data across pause/resume without counting paused time.
+* Propagates the exact eligible Media Library attachment total from the queue discovery query, replacing the provisional queue-row denominator and allowing progress and ETA to remain meaningful while the queue is still building.
+* Shows the ETA sample size in the dashboard and displays a clear estimation countdown until the initial 10-attachment sample is available.
+
+= 2.59.06.92 =
+* Fixes the dashboard media optimizer regression where the shared `processJobItem()` helper referenced the React component-local `cancelRequestedRef` directly and raised `ReferenceError: cancelRequestedRef is not defined`.
+* Passes a cancellation callback explicitly from the dashboard job runner into the media item processor, preserving pause/resume checks between physical-file conversion requests without leaking component-local state into module scope.
+
+= 2.59.06.91 =
+* Changes manual, REST, and background media conversion from whole-attachment processing to one physical source-file conversion unit per request.
+* Keeps attachment progress resumable by detecting existing AVIF/WebP derivatives and returning the remaining unit count after every request.
+* Adds secondary time- and memory-budget checks between physical files for full-attachment CLI and maintenance callers.
+* Preserves explicit WP-CLI full-attachment regeneration while keeping web and cron workers on resumable single-file units.
+* Replaces transient media processor coordination with the shared token-owned UltraCache lock table so dashboard, cron, REST, and CLI queue workers cannot overlap.
+* Atomically claims pending media queue rows and prevents completed queue rows from re-running conversion after a lost or repeated response.
+* Removes automatic browser retries for media failures, returns interrupted units to pending for explicit Resume, pauses the job on the first HTTP/server error, and adds a 250 ms delay between successful conversion units.
+* Limits web queue processing to one conversion unit with an 8-second requested budget and a 15-second hard cap, while background processing uses delayed success, lock, and failure backoff schedules.
+* Reduces stale media-processing recovery from 10 minutes to 2 minutes.
+* Adds repository-level Composer, PHPCS, EditorConfig, and WordPress Coding Standards configuration for repeatable plugin linting.
+* Refreshes the translation template metadata and adds the new media queue status/error strings.
+
+= 2.59.06.90 =
+* Adds local PHPCS tooling under `tools/phpcs` with PHPCS, WordPress Coding Standards, and PHPCompatibilityWP for WordPress.org audit checks.
+* Documents the local PHPCS/PHPCBF commands and ignores the generated Composer `vendor/` directory.
+
+= 2.59.06.89 =
+* Improves same-URL reload-loop diagnostics by scanning printed plugin/theme scripts for upstream startup `.change()` / `trigger("change")` event triggers when the final redirect/listener script is already covered.
+* Adds exclusion-first upstream trigger suggestions for delayed local WooCommerce/orderby scripts that can wake another plugin's redirect listener.
+* Falls back to fetching the looped page's script inventory from the stored scan detail when the runtime report does not include scripts.
+
+= 2.59.06.88 =
+* Makes interrupted Browser Runtime Scan matching less brittle by ranking local delayed WooCommerce/filter startup scripts from the printed page even when the scan cannot read their JavaScript contents before navigation.
+* Prioritizes delayed theme WooCommerce startup scripts, including product/order scripts that are likely to fire synthetic change events before another plugin redirects.
+* Keeps interrupted-navigation findings manual and exclusion-first under "Do Not Defer or Delay" candidates.
+
+= 2.59.06.87 =
+* Teaches Browser Runtime Scan to detect when the diagnostic popup navigates away before the in-page collector can report, covering reload/redirect loops that happen before console errors are captured.
+* Sends same-origin popup script inventory with direct Browser Runtime Scan harvests so REST diagnostics can analyze the actual scripts printed on the interrupted page.
+* Adds exclusion-first suggestions for startup navigation/change triggers, including WooCommerce/orderby synthetic change patterns that can activate another plugin's redirect listener after JavaScript delay.
+
+= 2.59.06.86 =
+* Adds a deterministic plugin ZIP builder that writes internal archive paths with forward slashes, so WordPress recognizes the single `ultracache/` root folder during manual uploads.
+* Verifies release ZIPs reject backslash entries, git artifacts, missing `ultracache/ultracache.php`, and files outside the `ultracache/` root.
+
+= 2.59.06.85 =
+* Adds Runtime Scan same-URL reload-loop detection that persists scan navigation evidence across reloads and records the last synthetic startup event before unload.
+* Marks reload-loop fixes as exclusion-first so they appear as "Do Not Defer or Delay" candidates instead of Defer Instead fixes.
+* Updates dashboard grouping for exclusion-first scan findings so they are counted and shown in the correct Browser Scanner section.
+
+= 2.59.06.84 =
+* Renames scan-result exclusion action buttons from the internal "Do Not Defer or Delay" target name to "Add to exclusions".
+* Quotes "Do Not Defer or Delay" in append buttons and nearby scan-result status text so users understand it is the visible exclusion list name.
+
+= 2.59.06.83 =
+* Removes Advanced Runtime Font CSS Rewrite from the Balanced and Aggressive profile patches so no performance profile enables that advanced font rewrite automatically.
+* Improves Runtime Scan and Console Error Handler suggestions for order-sensitive local plugin/theme dependencies by adding the shared owner JavaScript directory when the crashed consumer and matched provider live under the same owner path.
+
+= 2.59.06.82 =
+* Corrects the Varnish admin CLI response reader to match Varnish's own protocol: a fixed 13-byte status/length header followed by the declared body length plus the terminating newline.
+* Fixes the admin-auth follow-up read so Varnish response bodies cannot leave a newline behind and desynchronize the next CLI response.
+
+= 2.59.06.81 =
+* Fixes the manual object-cache backend test so newly typed Redis passwords and clear-password requests are included in the REST probe payload before settings are saved.
+
+= 2.59.06.80 =
+* Fixes Varnish admin-secret mode by parsing the Varnish CLI response status line dynamically instead of assuming one fixed header width.
+* Updates the Varnish admin auth hash builder to try the exact secret-file byte forms Varnish accepts, covering secrets copied with or without the trailing newline from `/etc/varnish/secret`.
+
+= 2.59.06.79 =
+* Makes the Varnish test REST endpoint return its diagnostic payload for normal connection-test failures instead of hiding endpoint details behind a generic HTTP 500 dashboard error.
+* Updates the dashboard Varnish test action to merge failed diagnostic payloads and show each endpoint's exact `server: FAIL - reason` line in the error toast and Varnish card.
+
 = 2.59.06.78 =
 * Rewords the historical 2.59.06.60 changelog note about removed third-party matcher fragments so automated remote-file scans do not mistake archived domain examples for active plugin behavior.
-* Synchronizes the plugin header, runtime version constant, WordPress.org stable tag, and README current-version marker at 2.59.06.78.
-* Bumps release metadata from 2.59.06.77 to 2.59.06.78. No runtime behavior, files, or directories were added or removed.
 
 = 2.59.06.77 =
 * Rewrites the dashboard info-icon help into plain-language, code-derived explanations that describe what each control changes, why it can improve speed, and what to test before trusting it.
 * Adds specific help coverage for cache delivery, media, JavaScript timing, CSS delivery, font optimization, WooCommerce controls, query/cookie safety lists, object cache, Redis, Varnish, external cache flushing, and warm-up/scheduling controls.
 * Updates the bespoke JS safeguard, Browser Scanner, Console Error Handler, CSS diagnostics, Delayed JS auto-start, Font-Mix CSS, WooCommerce strategy, Apache Static HTML Delivery, and Object Cache Fallback tooltips to match the same explanation style.
 * Regenerates `languages/ultracache.pot` so the new explicit tooltip strings and 2.59.06.77 metadata are reflected in the translation catalog.
-* Bumps release metadata from 2.59.06.76 to 2.59.06.77.
 
 = 2.59.06.76 =
 * Moves "Bundle Generated Font-Mix CSS" from CSS Delivery into Fonts Optimization so the control lives beside the font pipeline it affects.
@@ -16,7 +766,6 @@
 * Runs Font-Mix CSS consolidation before the async CSS pass when the new async Font-Mix option is enabled so the consolidated bundle can be classified and rewritten.
 * Adds richer info-icon help for WooCommerce frontend strategy presets, including Off, Safe, Balanced, Aggressive, and Custom behavior.
 * Adds missing info-icon help to the bespoke JS safeguard, Browser Scanner, Console Error Handler, CSS Bundle Exclusions, page URL diagnostic, and Delayed JS auto-start controls.
-* Bumps release metadata from 2.59.06.75 to 2.59.06.76.
 
 = 2.59.06.75 =
 * Adds expanded info-icon help across dashboard option controls while keeping the short descriptions visible below each title.
@@ -25,50 +774,41 @@
 * Expands Browser Cache Headers .htaccess coverage for web manifests, AVIFS, WASM, EOT, audio/video files, and revalidation-oriented HTML/JSON/XML handling.
 * Keeps Apache Static HTML Delivery separate from Browser Cache Headers and removes its managed rules on deactivation, plugin data cleanup, and uninstall.
 * Removes UltraCache-managed Browser Cache Headers and Apache Static HTML .htaccess blocks during uninstall without touching rules outside those markers.
-* Bumps release metadata from 2.59.06.74 to 2.59.06.75.
 
 = 2.59.06.74 =
 * Adds an opt-in "Bundle Generated Font-Mix CSS" control in CSS Delivery that consolidates UltraCache-generated `optimized-css/css-font-mix-*.css` stylesheet links into one ordered blocking CSS bundle.
 * Keeps the generated font-mix bundle classified as layout-risk CSS so Async CSS diagnostics do not treat it as an async candidate.
 * Adds WooCommerce-box info-icon help as a UI test, moving the individual WooCommerce option descriptions into native hover/focus titles while leaving the rest of the dashboard copy unchanged.
-* Bumps release metadata from 2.59.06.73 to 2.59.06.74.
 
 = 2.59.06.73 =
 * Adds a visible WooCommerce cart-fragments behavior dropdown with Off, Delay request, and Suppress empty-cart execution modes.
 * Adds an empty-cart cart-fragments suppression mode that prevents `wc-cart-fragments` execution on anonymous cacheable pages without WooCommerce cart/session cookies, while keeping cart, checkout, account, logged-in, and active cart/session-cookie contexts on normal WooCommerce behavior.
 * Keeps cart-fragments Delay and Suppress empty-cart execution mutually exclusive during dashboard saves/imports.
-* Bumps release metadata from 2.59.06.72 to 2.59.06.73.
 
 = 2.59.06.72 =
 * Reworks the WooCommerce dashboard card into "WooCommerce Controls" and moves WooCommerce Safe Mode into that section so WooCommerce cache safety, request timing, and cleanup controls live together.
 * Adds a visible WooCommerce frontend strategy dropdown with Off, Safe, Balanced, Aggressive, and Custom presets that write the existing cart-fragments delay and WooCommerce asset-cleanup toggles instead of adding a hidden runtime switch.
 * Renames the cart-fragments timing control to "WooCommerce release timer" to mirror the general Delayed JS timing model.
-* Bumps release metadata from 2.59.06.71 to 2.59.06.72.
 
 = 2.59.06.71 =
 * Renames the "Safe Asset Cleanup" dashboard card to "WooCommerce Asset Timing" so the section matches its WooCommerce-specific controls.
 * Adds visible WooCommerce cart-fragments delay controls that can queue `get_refreshed_fragments` AJAX on anonymous cacheable pages and release it with the Delayed JS timing model or a WooCommerce-specific timer, while skipping logged-in, cart, checkout, account, and active cart/session-cookie contexts.
 * Adds `assets/js/woocommerce-cart-fragments-delay.js` as the frontend helper for the new WooCommerce cart-fragments delay feature and keeps it protected as an UltraCache-owned helper script.
-* Bumps release metadata from 2.59.06.70 to 2.59.06.71.
 
 = 2.59.06.70 =
 * Removes hidden runtime JavaScript safeguards for WordPress inline dependency blocks, GTM bootstrap snippets, and third-party dependency-library delay bypasses so Browser Scanner and Console Error Handler can propose visible "Defer Instead of Delay" or "Do Not Defer or Delay" safeguards from actual detected breakage.
 * Moves inline analytics delay markers such as `gtag(`, `dataLayer`, and `gtm.start` into the visible Safe Third-Party Delay Patterns defaults instead of matching them through a private inline-script list.
 * Removes hidden CSS and asset cleanup safeguards from CSS bundle exclusions, aggressive async CSS admin-asset blocking, frontend authoring asset stripping, and broad icon-font auto-detection; visible lists and scanner output are now authoritative, while UltraCache-owned helper JavaScript remains internally protected.
 * Updates Delay icon fonts UI copy to clarify that only entries in the visible font pattern list are delayed.
-* Bumps release metadata from 2.59.06.69 to 2.59.06.70. No files or directories were added or deleted.
 
 = 2.59.06.69 =
 * Makes the "Defer Instead of Delay" and "Do Not Defer or Delay" JavaScript safeguard lists mutually exclusive: appending to one removes overlapping entries from the other, paired saves send both final lists together, and settings sanitization removes remaining overlaps.
-* Bumps release metadata from 2.59.06.68 to 2.59.06.69. No files or directories were added or deleted.
 
 = 2.59.06.68 =
 * Renames JavaScript safeguard action labels and scan status text so findings are described as appending to "Defer Instead of Delay" or "Do Not Defer or Delay" instead of the ambiguous "fallback exclusion" wording.
-* Bumps release metadata from 2.59.06.67 to 2.59.06.68. No files or directories were added or deleted.
 
 = 2.59.06.67 =
 * Forces the Frontend JavaScript Manipulation safeguard editors for "Defer Instead of Delay" and "Do Not Defer or Delay" into a true two-column, one-row layout instead of relying on utility classes that could stack them vertically.
-* Bumps release metadata from 2.59.06.66 to 2.59.06.67. No files or directories were added or deleted.
 
 = 2.59.06.66 =
 * Changes the Balanced and Aggressive profile default CSS bundle mode from Safe to Aggressive while keeping CSS bundling enabled and user-maintained CSS exclusions preserved.
@@ -78,7 +818,6 @@
 * Fixes pasted console parsing for jQuery Migrate shorthand failures where Chrome prefixes the TypeError with `jquery.min.js?...` and appends the `JQMIGRATE: Migrate is installed` notice, so the real error still produces a `jquery-migrate.min.js` suggestion.
 * Lets Browser Scanner and Console Error Handler escalate persistent findings from "Defer Instead of Delay" to the stronger "Do Not Defer or Delay" fallback instead of hiding already-deferred suggestions.
 * Updates the JavaScript safeguard UI to pair "Defer Instead of Delay" with the stronger "Do Not Defer or Delay" fallback and shared save/append controls.
-* Bumps release metadata from 2.59.06.65 to 2.59.06.66. No files or directories were added or deleted.
 
 = 2.59.06.64 =
 * Fixes ordered delayed-JavaScript replay when another runtime removes, replaces, or independently restores an UltraCache placeholder while the loader is processing its original DOM snapshot.
@@ -88,51 +827,42 @@
 * Improves runtime JS diagnostics so missing WordPress/core globals suggest both the provider and the crashing consumer, filters UltraCache helper stack frames, detects duplicate-execution redeclare errors, and recognizes jQuery Migrate shorthand failures.
 * Lets Browser Scanner and Console Error Handler escalate persistent findings from "Defer Instead of Delay" to the stronger "Do Not Defer or Delay" fallback instead of hiding already-deferred suggestions.
 * Updates the JavaScript safeguard UI to pair "Defer Instead of Delay" with the stronger "Do Not Defer or Delay" fallback, and changes the Aggressive profile to use native Defer instead of broad Delay all JS.
-* Bumps release metadata from 2.59.06.63 to 2.59.06.64. No files or directories were added or deleted.
 
 = 2.59.06.63 =
 * Prevents the CSS bundle source scan and final page warm loopbacks from receiving mod_pagespeed/ngx_pagespeed-rewritten HTML by sending the supported `PageSpeed: off` and backward-compatible `ModPagespeed: off` request headers.
 * Requests unrewritten origin HTML for those internal operations so PageSpeed wrapper URLs such as `A.*.css.pagespeed.cf.*.css` are not passed to UltraCache cache-write validation when the server honors the supported per-request override.
-* Bumps release metadata from 2.59.06.62 to 2.59.06.63. No files or directories were added or deleted.
 
 = 2.59.06.62 =
 * Fixes managed `wp-config.php` block replacement and uninstall removal so only the delimited block is removed while the surrounding line breaks are preserved; `<?php` can no longer be joined to the following `define()` statement.
 * Strengthens candidate `wp-config.php` validation by requiring a normal full PHP opening tag, preventing malformed `<?phpdefine(...)` content from passing as a short opening tag plus an unknown `phpdefine()` call.
 * Applies the same boundary-preserving removal and full-opening-tag validation to WordPress uninstall cleanup.
-* Bumps release metadata from 2.59.06.61 to 2.59.06.62. No files or directories were added or deleted.
 
 = 2.59.06.61 =
 * Removes the standalone Redis manual-test control and its dedicated REST/action-queue surface so unsaved form values are no longer mixed with the already-bootstrapped object-cache runtime.
 * Makes Save Redis Settings perform Redis connection, authentication, and read/write validation before changing wp-config.php, stored settings, or the generated object-cache drop-in; failed validation leaves the previous configuration untouched.
 * Reloads after a verified Redis save, performs a one-time payload probe against the actually active backend, and labels the result with the tested backend.
 * Replaces duplicate object-cache status rows with a concise runtime status, configured backend, Redis connection, PHP extension availability, backend-specific payload probe, and Redis prefix.
-* Bumps release metadata from 2.59.06.60 to 2.59.06.61.
 
 = 2.59.06.60 =
 * Removes redundant Google-hosted Maps tile/static-host and reCAPTCHA static-host matcher fragments while retaining the existing Google Maps and reCAPTCHA entry-point patterns.
 * Replaces the Google Fonts, dashboard heavy-action, and cron warm-up option-based locks with a shared token-guarded `ultracache_locks` table supporting atomic acquisition, expired-lock takeover, renewal, and owner-only release.
 * Replaces the two remaining create-or-update `add_option()` branches with direct non-autoloaded `update_option()` calls, leaving no direct `add_option()` calls in UltraCache.
 * Adds the lock table to activation, validated table handling, bounded expired-row cleanup, Delete All cleanup, and WordPress uninstall cleanup.
-* Bumps release metadata from 2.59.06.59 to 2.59.06.60.
 
 = 2.59.06.59 =
 * Documents the two intentional `var_export( ..., true )` calls used to generate valid PHP string literals for UltraCache-managed `wp-config.php` password constants.
 * Adds narrowly scoped PHPCS exceptions for `WordPress.PHP.DevelopmentFunctions.error_log_var_export`; the calls return strings and do not emit debug output.
-* Bumps release metadata from 2.59.06.58 to 2.59.06.59. No runtime behavior, files, or directories were added or removed.
 
 = 2.59.06.58 =
 * Completes the final reviewer validation across declared URLs, WordPress-native asset enqueueing, remote dependency checks, path resolution, guarded storage, late escaping, prefixes/dynamic names, generated drop-ins, and full uninstall cleanup.
-* Synchronizes the plugin header, runtime version constant, WordPress.org stable tag, and README current-version marker at 2.59.06.58.
 * Regenerates `languages/ultracache.pot` from the current PHP and JavaScript sources, updates source references/header metadata, adds previously missing translatable strings, and removes obsolete catalog entries.
 * Revalidates the AVIF Imagick/GD/WebP fallback policy and Safe CLS responsive-dimension safeguards without changing their runtime behavior.
-* No runtime feature behavior, files, or directories were added or removed.
 
 = 2.59.06.57 =
 * Removes 221 `function_exists()` declaration wrappers and six `class_exists()` declaration wrappers from UltraCache-owned functions/classes, leaving guards only for the standard `WP_Object_Cache` and `wp_cache_*` drop-in symbols.
 * Gives advanced-cache and object-cache internal helpers separate `ultracache_advanced_cache_*` and `ultracache_object_cache_*` names so both drop-ins can load without shared helper declarations or load-order fallbacks.
 * Prefixes the remaining plugin-owned object-cache keys for action-job schema/rows, cron-warm schema, runtime JS diagnostic jobs, CSS rewrite-map rows, and payload diagnostics with `ultracache_`.
 * Removes the unused case-only REST class alias and the duplicate admin `ultracache-root` element/lookup.
-* Bumps release metadata from 2.59.06.56 to 2.59.06.57. No files or directories were added or deleted.
 
 = 2.59.06.56 =
 * Preserves every existing image `width` and `height` attribute instead of replacing percentage, `auto`, empty, zero, boolean, or otherwise non-numeric values with intrinsic pixel dimensions.
@@ -147,49 +877,41 @@
 * Falls back to WebP as the effective media output when neither Imagick nor GD can produce a verified alpha-safe AVIF file, and keeps WebP available as the per-image fallback when an AVIF file is missing.
 * Detects the source image by its real MIME type as well as its extension, handles renamed PNG/JPEG files correctly, and rejects SVG/SVGZ from all raster conversion paths.
 * Preserves alpha in the direct GD and Imagick conversion paths and updates media support/reset probe cache keys.
-* Bumps release metadata from 2.59.06.54.01 to 2.59.06.55. No files or directories were added or deleted.
 
 = 2.59.06.54.01 =
 * Prevents the Delete Everything/deactivation and WordPress uninstall requests from recreating UltraCache-owned database state after cleanup by defining an explicit uninstall-in-progress guard before teardown.
 * Skips deactivation-hook work, cache-asset/CSS-rewrite table creation, and object-cache flush-report persistence while the uninstall guard is active.
 * Refactors uninstall table removal through a validated UltraCache-only helper, verifies each requested table is absent, and repeats the two affected table drops as the final full-cleanup operation.
 * Deletes and re-verifies the final `ultracache_object_cache_last_flush_report`, `ultracache_cache_asset_refs_db_version`, and `ultracache_css_rewrite_map_db_version` options after drop-in/file cleanup.
-* Bumps release metadata from 2.59.06.54 to 2.59.06.54.01. No files or directories were added or deleted.
 
 = 2.59.06.54 =
 * Removes the uniquely delimited UltraCache managed-constants block from the exact active `wp-config.php` during plugin uninstall, regardless of the selected data-retention policy.
 * Resolves only the configuration file loaded by WordPress or authoritatively located by WP-CLI; no WordPress-root or parent-directory path guessing is added.
 * Writes only through `WP_Filesystem::put_contents()`, validates the resulting PHP, verifies the update by SHA-256 read-back, and retains the original contents only in memory for immediate verified rollback.
-* Leaves every `WP_CACHE`, `WP_REDIS_PASSWORD`, and `ULTRACACHE_VARNISH_PASSWORD` declaration outside the UltraCache managed block unchanged.
-* Bumps release metadata from 2.59.06.53 to 2.59.06.54. No files or directories were added or deleted.
 
 = 2.59.06.53 =
 * Replaces every internal short-form plugin identifier with the full ultracache/ULTRACACHE prefix across PHP, JavaScript, generated drop-in templates, persistent keys, hooks, nonces, REST/AJAX integration, HTML identifiers, diagnostics, uninstall cleanup, translations, and documentation.
 * Removes the unused action-queue option helper and obsolete action_jobs_rows_v1 cache cleanup.
 * Bounds runtime JavaScript scan transient names with a fixed MD5 suffix.
 * Corrects Delete All and uninstall cleanup for the active action-queue heavy lock, cron warm transient, and dynamic Google Fonts database locks while removing obsolete option cleanup entries.
-* No migration, legacy aliases, fallback keys, files, or directories were added. A clean Delete All Data and reinstall is required for testing this pre-public refactor.
 
 = 2.59.06.52 =
 * Encodes all frontend helper configuration passed through `wp_add_inline_script()` with `JSON_HEX_TAG`, `JSON_HEX_AMP`, `JSON_HEX_APOS`, and `JSON_HEX_QUOT` to prevent inline-script context breakout across all five helper-data callers.
 * Restricts the WordPress-engine full-page cache output path to canonical files inside `ULTRACACHE_CACHE_DIR` whose basename matches `index-(orig|avif|webp)-<32-character MD5>.html` before raw HTML output.
 * Restricts the early `advanced-cache.php` drop-in output path to canonical files inside `ULTRACACHE_CACHE_DIR` using the same UltraCache filename format, allowing only the generated `.html`, `.html.gz`, and `.html.br` payloads.
 * Documents the two intentional raw full-page cache output paths with narrow PHPCS exceptions; HTML escaping is not applied because it would corrupt the complete cached WordPress response.
-* Bumps release metadata from 2.59.06.51 to 2.59.06.52. No files or directories were added or deleted.
 
 = 2.59.06.51 =
 * Removes the remaining native filesystem fallback branches from guarded reads, file metadata, directory listing/deletion, media optimized-file checks, runtime cleanup, diagnostics, font cleanup, profiling, warm-crawl cleanup, and uninstall cleanup. These paths now fail closed when WP_Filesystem is unavailable.
 * Replaces `tempnam()` with WordPress `wp_tempnam()` and verifies that the returned temporary path remains inside the requested guarded directory.
 * Removes confirmed unused helpers: `ultracache_safe_chmod()`, `ultracache_safe_stream_set_blocking()`, `ultracache_uninstall_home_path()`, `ultracache_json_encode_for_inline_script()`, `ultracache_content_cache_reference_matches()`, `ultracache_request_profile_hook_priority_details()`, `ultracache_font_css_file_diagnostics()`, and the obsolete native recursive-delete helper.
 * Keeps all existing storage locations and runtime behavior otherwise unchanged. No files or directories were added or deleted.
-* Bumps release metadata from 2.59.06.50 to 2.59.06.51.
 
 = 2.59.06.50 =
 * Removes the unused `ultracache_safe_copy()` helper and its native `copy()` fallback.
 * Removes the native `file_put_contents()` fallback from `ultracache_safe_file_put_contents()`; generated UltraCache files now write only through `WP_Filesystem::put_contents()`.
 * Removes the native `rename()` path from `ultracache_safe_rename()`; generated cache and drop-in temporary files now move into place only through `WP_Filesystem::move()`.
 * Replaces the temporary `.htaccess` file and rename workflow with a direct `WP_Filesystem::put_contents()` write. UltraCache retains the original `.htaccess` content only in memory, verifies the new content by SHA-256 read-back, restores or removes the file if verification fails, and removes the obsolete temporary `.htaccess` writable-path allowance.
-* Bumps release metadata from 2.59.06.49 to 2.59.06.50. No files or directories were added or deleted.
 
 = 2.59.06.49 =
 * Restores the Redis and Varnish password fields as explicit administrator controls. Saving a non-empty Redis password writes `WP_REDIS_PASSWORD`; saving a non-empty Varnish password writes `ULTRACACHE_VARNISH_PASSWORD`. Empty fields preserve existing managed values, and dedicated remove actions delete only UltraCache-managed values.
@@ -200,7 +922,6 @@
 * Password values remain excluded from WordPress options, dashboard responses, REST responses, WP-CLI output, diagnostics, logs, embedded runtime configuration, and generated cache drop-ins. Responses expose only configured/managed/external status flags.
 * Updates REST permissions so password writes require both `manage_options` and `activate_plugins` plus the existing REST nonce. The dashboard never displays the stored value; a blank field means keep, while removal requires a separate explicit action.
 * Removes the obsolete wp-config backup-registry cleanup entry rather than adding previous-version cleanup. No migration, legacy lookup, backward-compatibility layer, old-file cleanup, or old-option cleanup was added.
-* Bumps release metadata from 2.59.06.48 to 2.59.06.49. No files or directories were added or deleted.
 
 = 2.59.06.48 =
 * Removes the generated executable runtime-secret PHP sidecar and all related path discovery, rendering, synchronization, protection, diagnostics, object-cache loading, and uninstall code. No replacement secret file is created.
@@ -211,7 +932,6 @@
 * Removes Redis and Varnish password inputs from REST update/test schemas and WP-CLI mutation paths. Dashboard fields are read-only status indicators, and client/API/CLI responses expose only configured yes/no flags.
 * Forces any transient dashboard password keys to remain blank before option persistence. Runtime consumers hydrate credentials from constants only; diagnostics and logs expose no secret values.
 * Updates readme documentation with the required `WP_REDIS_PASSWORD` and `ULTRACACHE_VARNISH_PASSWORD` definitions.
-* Bumps release metadata from 2.59.06.47 to 2.59.06.48. No files or directories were added or deleted. No migration, legacy cleanup, backward-compatibility layer, or old-secret-file removal was added.
 
 = 2.59.06.47 =
 * Removes the generated executable `runtime-config.php` sidecar and its JSON predecessor. UltraCache no longer writes, loads, protects, reconciles, or cleans a standalone runtime configuration file.
@@ -220,13 +940,11 @@
 * Removes the dedicated runtime-config bootstrap hook, file synchronization cycle, protection-file generation, warm-up sync call, path helper, diagnostics path card, and uninstall cleanup associated with the deleted sidecar architecture.
 * Preserves the current runtime secret file architecture unchanged for the following dedicated secret-constants stage. Redis/Varnish password storage and wp-config.php writing are outside this patch.
 * Updates dashboard diagnostics to report `embedded_in_advanced_cache` configuration instead of a runtime-config.php file.
-* Bumps release metadata from 2.59.06.46.02 to 2.59.06.47. No files or directories were added or deleted. No migration, legacy lookup, or backward-compatibility fallback was added.
 
 = 2.59.06.46.02 =
 * Corrective validation patch for the final path-refactor test. `ultracache_wordpress_admin_include_path()` now rejects any value containing `/` or `\` before basename normalization and allowlist matching, so values such as `../file.php` cannot be reduced to an approved filename.
 * includes/core/functions.php: extends `ultracache_loaded_wp_config_path()` for WP-CLI. Normal web requests continue to use PHP's loaded-file list; WP-CLI requests use `WP_CLI\Utils\locate_wp_config()` because WP-CLI evaluates wp-config.php instead of including it. UltraCache adds no ABSPATH/root/parent search fallback.
 * The existing wp-config read/write, backup, temporary-file, atomic-replace, capability, and guard behavior remains unchanged. The exact path returned by either authoritative runtime source continues to be the only primary config accepted by UltraCache's companion-path guard.
-* Bumps release metadata from 2.59.06.46.01 to 2.59.06.46.02. No files or directories were added or deleted.
 
 = 2.59.06.46.01 =
 * Corrective public-path compliance patch after the 2.59.06.46 scan. Functional plugin, theme, uploads, wp-includes, and wp-admin URL matching no longer assumes default directory names such as `/plugins/`, `/themes/`, `/uploads/`, `/wp-includes/`, or `/wp-admin/`.
@@ -234,15 +952,12 @@
 * JavaScript optimization, LCP protection, runtime scanning, cache bypass, diagnostics, and default dependency exclusions now consume dynamic WordPress public-path resolvers. Plugin-specific CDN heuristics retain only owner/slug fragments such as `/woocommerce/assets/`; they no longer assume the configured plugins root name.
 * includes/admin/class-admin-trait.php and includes/admin-dashboard.js: expose resolved public paths through the existing `wp_add_inline_script()` configuration and use them for WooCommerce matching and path examples. Dead profile copies of preserved path settings were removed.
 * Product-filter, Slider Revolution, Elementor, Divi, WooCommerce, WordPress core JS, generated-assets, uploads, plugin, and theme references now derive from WordPress APIs. No remote request, asset load, storage location, cache key, setting key, migration, or compatibility fallback was added.
-* Bumps release metadata from 2.59.06.46 to 2.59.06.46.01. No files or directories were added or deleted.
 
 = 2.59.06.46 =
 * Final path-compliance scan: verifies that active PHP code contains no `WP_CONTENT_DIR` or `WP_PLUGIN_DIR` references, no hardcoded plugin/uploads filesystem roots, and no `ABSPATH`-based wp-config.php assumptions. Direct-access guards remain unchanged; the unavoidable WordPress core-root `ABSPATH` and `WPINC` uses remain isolated in their documented canonical resolvers.
 * includes/core/functions.php: adds `ultracache_mu_plugins_root_dir()` and `ultracache_mu_plugins_root_url()` as the only access points for WordPress's configurable must-use plugin path/URL constants, because WordPress exposes no public helpers for those roots. Font scanning, path-to-URL conversion, profiler ownership, and readable-root guards now consume the centralized resolvers instead of reading `WPMU_PLUGIN_DIR` / `WPMU_PLUGIN_URL` directly.
 * readme.txt and README.md: replaces default-layout examples such as `wp-content/uploads/...` and `/wp-content/plugins/` with wording based on the active WordPress uploads/plugins directories, so the documentation remains correct for custom content, uploads, and plugin locations.
 * ultracache.php: replaces the object-cache failure message's literal `wp-content/object-cache.php` reference with the WordPress content-directory location, preserving the same error condition and action.
-* This patch does not change any storage location, generated URL, cache key, drop-in location, wp-config.php behavior, runtime-secret behavior, setting, or uninstall policy. No migration, legacy lookup, compatibility fallback, file move, or directory move was added.
-* Bumps the plugin version and release metadata from 2.59.06.45 to 2.59.06.46. No files or directories were added or deleted.
 
 = 2.59.06.45 =
 * includes/core/functions.php: adds `ultracache_loaded_wp_config_path()` to resolve the exact `wp-config.php` file already loaded by the current WordPress request through PHP's authoritative `get_included_files()` list. The plugin no longer assumes that wp-config.php is under the WordPress core root or one directory above it. No root/parent fallback search is retained.
@@ -250,7 +965,6 @@
 * ultracache.php: changes `get_wp_config_path()` to consume the loaded-config resolver while preserving the existing readability check, error handling, WP_CACHE parser, and enable/disable workflow.
 * Removes the final wp-config root/parent path assumptions from the active runtime. Existing WordPress core-root helpers remain only for genuine core paths and includes.
 * This patch changes wp-config.php path discovery only. It does not alter wp-config.php contents, backup retention, temporary files, atomic writes, runtime secrets, cache storage, drop-ins, settings, or uninstall policy. No migration, legacy lookup, compatibility fallback, file move, or directory move was added.
-* Bumps the plugin version and release metadata from 2.59.06.44 to 2.59.06.45. No files or directories were added or deleted.
 
 = 2.59.06.44 =
 * includes/core/functions.php: adds `ultracache_wordpress_admin_include_path()` and `ultracache_require_wordpress_admin_include()` as the single approved resolver/loader for the WordPress core admin files used by UltraCache (`file.php`, `image.php`, `plugin.php`, and `upgrade.php`). The unavoidable WordPress core-root `ABSPATH` dependency is isolated in `ultracache_wordpress_core_root_dir()`; callers no longer concatenate `ABSPATH . 'wp-admin/includes/...'` themselves.
@@ -258,16 +972,12 @@
 * includes/core/functions.php and ultracache.php: replaces remaining non-guard WordPress-root uses for cron-command generation, runtime path identity, and existing wp-config.php candidate construction with `ultracache_wordpress_core_root_dir()`. This changes path discovery only; wp-config.php read/write behavior is intentionally unchanged for its later dedicated reviewer-compliance design.
 * uninstall.php: adds uninstall-local WordPress core/admin include resolvers and removes repeated direct `ABSPATH . 'wp-admin/includes/file.php'` construction. The single unavoidable uninstall `ABSPATH` read is isolated and documented.
 * Direct-access guards and generated runtime-file guards using `defined('ABSPATH')` remain unchanged because they are access-control checks, not file/directory location logic. `WPINC` remains isolated in the existing canonical wp-includes resolver.
-* This patch does not change storage locations, drop-ins, runtime secrets, wp-config.php behavior, cache behavior, settings, or uninstall policy. No migration, legacy lookup, compatibility fallback, file move, or directory move was added.
-* Bumps the plugin version and release metadata from 2.59.06.43 to 2.59.06.44. No files or directories were added or deleted.
 
 = 2.59.06.43 =
 * includes/core/functions.php: changes `ultracache_runtime_config_storage_dir()` from direct `WP_CONTENT_DIR` concatenation to the existing `ultracache_wordpress_content_dir()` resolver backed by `WP_Filesystem_Base::wp_content_dir()`. `runtime-config.php` and `runtime-config.json` remain at the same WordPress content-directory `cache/ultracache/` location; this patch changes path discovery only.
 * includes/core/functions.php: removes the remaining direct `WP_CONTENT_DIR` candidate from runtime-secret path discovery and uses the centralized WordPress content-directory resolver instead. Runtime-secret location, file format, protection, and read/write behavior remain unchanged for their later dedicated reviewer-remediation stage.
 * readme.txt and README.md: describe required cache drop-ins as residing in the WordPress content directory without presenting the internal `WP_CONTENT_DIR` constant as the integration path.
 * Removes all active PHP references to `WP_CONTENT_DIR` while retaining required WordPress-core `ABSPATH`/`WPINC` use, wp-config.php discovery, and the current runtime configuration architecture for their separate roadmap stages.
-* This patch does not move files, create migration logic, add fallback paths, alter settings, modify wp-config.php, or change cache/runtime behavior.
-* Bumps the plugin version and release metadata from 2.59.06.42 to 2.59.06.43. No files or directories were added or deleted.
 
 = 2.59.06.42 =
 * uninstall.php: replaces direct `WP_CONTENT_DIR` use for `advanced-cache.php` and `object-cache.php` with `ultracache_uninstall_wordpress_content_dir()`, which resolves the active WordPress content directory through `WP_Filesystem_Base::wp_content_dir()` before constructing the required drop-in paths.
@@ -275,7 +985,6 @@
 * uninstall.php: routes generated CSS/font/deferred-JS cleanup through the existing WordPress uploads resolver, so uninstall uses the same `uploads/ultracache/...` roots as runtime writers and does not carry legacy cache-directory lookup or migration logic.
 * uninstall.php: removes redundant `ABSPATH` and `WP_CONTENT_DIR` candidates from runtime-secret path identity and uses the WordPress home/content resolvers instead. WordPress core include paths that officially require `ABSPATH` remain unchanged.
 * This patch changes uninstall path resolution only. Runtime storage, wp-config.php modification behavior, runtime-secret architecture, cache operation, generated-asset generation, and plugin settings are unchanged. No migration, legacy path lookup, compatibility fallback, file move, or directory move was added.
-* Bumps the plugin version and release metadata from 2.59.06.41 to 2.59.06.42. No files or directories were added or deleted.
 
 = 2.59.06.41 =
 * includes/core/functions.php: replaces UltraCache's direct `WP_CONTENT_DIR` cache-drop-in resolver with `ultracache_wordpress_content_dir()`, which obtains the active WordPress content-directory path from `WP_Filesystem_Base::wp_content_dir()`. `advanced-cache.php` and `object-cache.php` remain in the WordPress-required content-directory root.
@@ -285,7 +994,6 @@
 * includes/settings/class-settings-trait.php: resolves drop-in conflicts through the canonical Filesystem API path, reads metadata through WP_Filesystem, and performs optional backup/copy/delete operations through the same filesystem transport. Removes the direct `WP_CONTENT_DIR` availability checks from active drop-in management.
 * includes/diagnostics/class-diagnostics-trait.php and includes/cli/class-wp-cli-settings-stats-trait.php: use the canonical drop-in existence helper instead of native filesystem checks.
 * This patch changes only cache-drop-in path resolution and lifecycle I/O. Page-cache/object-cache data storage, generated assets, runtime-config.php, runtime secrets, wp-config.php handling, and uninstall cleanup remain assigned to their separate roadmap stages. No migration, legacy path lookup, or compatibility fallback was added.
-* Bumps the plugin version and release metadata from 2.59.06.40 to 2.59.06.41. No files or directories were added or deleted.
 
 = 2.59.06.40 =
 * includes/core/functions.php: changes the canonical page-cache root from `wp-content/cache/ultracache/` to the WordPress-resolved `uploads/ultracache/cache/` path and changes disk object-cache storage from `wp-content/cache/ultracache-objects/` to `uploads/ultracache/object-cache/`.
@@ -294,7 +1002,6 @@
 * ultracache.php: keeps `runtime-config.php` and its protection files at their current dedicated path until the later runtime-configuration storage stage, so executable runtime configuration is not moved into uploads.
 * uninstall.php: updates clean-install cleanup roots to the new uploads page-cache and disk-object-cache directories, with no migration or legacy cache cleanup logic.
 * readme.txt and README.md: document the new WordPress uploads-based cache and object-cache layout.
-* Bumps the plugin version and release metadata from 2.59.06.39 to 2.59.06.40. No files or directories were added or deleted.
 
 = 2.59.06.39 =
 * includes/diagnostics/class-diagnostics-trait.php: replaces stale font-pipeline, CSS-bundle storage, and CSS-bundle summary readers that still looked under the internal page-cache directory with `ultracache_generated_asset_dir()` calls. Diagnostics now inspect the same WordPress uploads locations used by the writers for css-bundles, font-css, optimized-css, google-fonts, and the CSS bundle manifest.
@@ -302,7 +1009,6 @@
 * ultracache.php, uninstall.php: adds the `deferred-inline-js` bucket to Delete All and uninstall generated-runtime cleanup so every ephemeral browser-loaded generated asset directory is covered. Persistent optimized AVIF/WebP files under `uploads/ultracache/images` remain intentionally excluded.
 * Confirms that all active generated-asset writers already use the centralized WordPress uploads helpers introduced before this patch: CSS bundles, optimized CSS, font CSS, localized Google Fonts, deferred inline JavaScript, and optimized images remain under `uploads/ultracache/...`. This patch removes the remaining stale cache-root readers; it does not move files and adds no legacy lookup, migration, or fallback path.
 * Page-cache, disk-object-cache, logs/analytics, drop-ins, wp-config.php, and runtime-secret storage remain unchanged for their dedicated roadmap stages.
-* Bumps the plugin version and release metadata from 2.59.06.38 to 2.59.06.39. No files or directories were added or deleted.
 
 = 2.59.06.38 =
 * includes/core/functions.php: adds `ultracache_plugin_dir()` and `ultracache_plugin_url()` as the single WordPress-native resolver pair for UltraCache-owned files and URLs. Both are derived from `ULTRACACHE_FILE` through `plugin_dir_path()` / `plugin_dir_url()` and sanitize all optional relative paths.
@@ -311,7 +1017,6 @@
 * includes/core/functions.php: routes generated CSS/JS/font assets, optimized image paths, uploads public-path markers, and their URLs through the centralized uploads helpers without changing their current `uploads/ultracache/...` locations.
 * includes/engine/class-engine-media-image-trait.php, includes/media/class-media-html-rewrite-trait.php, includes/media/class-media-path-url-trait.php, includes/media/class-media-queue-trait.php: replaces seven direct `wp_get_upload_dir()` reads with `ultracache_uploads_base_info()` so media resolution, HTML rewriting, on-demand queue discovery, and attachment lookup share the same normalized uploads identity.
 * This patch only centralizes path resolution. Page-cache, disk-object-cache, logs, analytics, drop-in, wp-config.php, and runtime-secret storage locations remain unchanged for their dedicated roadmap stages. No migration, legacy lookup, compatibility fallback, file move, or directory move is added.
-* Bumps the plugin version and release metadata from 2.59.06.37 to 2.59.06.38. No files or directories were added or deleted.
 
 = 2.59.06.37 =
 * includes/core/functions.php: adds centralized WordPress-aware resolvers for the standard plugins root, WordPress core root, and wp-includes directory. The plugins root is now derived from the main plugin file through plugin_dir_path(), while the unavoidable core-root ABSPATH/WPINC use is isolated and documented in one place.
@@ -321,12 +1026,10 @@
 * templates/object-cache.php.tpl, templates/advanced-cache.php.tpl, includes/engine/class-engine-dropin-lifecycle-trait.php: injects the same non-filesystem namespace seed into generated drop-ins so dashboard/runtime diagnostics and drop-in cache operations use identical Redis/APCu/analytics prefixes.
 * Namespace keys intentionally change in this clean-install pre-public build. No legacy-prefix lookup, cache-key migration, or backward-compatibility fallback is added.
 * Existing page-cache, disk-object-cache, generated-asset, drop-in, wp-config.php, and runtime-secret storage locations remain unchanged for their later dedicated roadmap stages.
-* Bumps the plugin version and release metadata from 2.59.06.36 to 2.59.06.37. No files or directories were added or deleted.
 
 = 2.59.06.36 =
 * includes/admin-dashboard.js, PERFORMANCE_PROFILES: removes the three dead Safe, Balanced, and Aggressive copies of `delayFunctionalThirdPartyJsPatterns`. Profile application already preserves this user-editable setting through `PERFORMANCE_PROFILE_PRESERVED_SETTING_KEYS`, so these copied values were never applied.
 * Keeps the canonical PHP default matching-fragment list unchanged for installation defaults, reset/default restoration, and the dashboard Populate action. The listed third-party domains are detection patterns for scripts already present on the site; UltraCache does not request or load files from those providers.
-* Bumps the plugin version and release metadata from 2.59.06.35 to 2.59.06.36. No files or directories were added or deleted, and runtime behavior is unchanged.
 
 = 2.59.06.35 =
 * includes/engine/class-engine-js-optimization-trait.php, build_deferred_external_inline_script_tag(): replaces the manually compiled `<script src="..." defer>` markup for generated deferred inline-JS assets with `wp_get_script_tag()`, while preserving the generated asset URL, defer state, original attributes, and UltraCache metadata.
@@ -336,11 +1039,9 @@
 * includes/engine/class-engine-js-optimization-trait.php, apply_delayed_script_replacements_with_processor(): removes the unreachable `'<script>'` default value from the required record opening tag, eliminating the reviewer-detected raw script literal without adding a fallback path.
 * includes/engine/class-engine-js-optimization-trait.php, collect_js_inline_dependency_defer_recommendations(): stops rebuilding a temporary `<script>` opening tag only to inspect its ID and reads the ID from the complete regex-matched tag instead.
 * Removes the related NonEnqueuedScript PHPCS suppressions because the affected final-HTML transformations now use the WordPress 5.7+ script-tag APIs. Existing plugin-owned admin and frontend files continue to load through `wp_register_script()`, `wp_enqueue_script()`, and `wp_add_inline_script()`.
-* Bumps the plugin version and release metadata from 2.59.06.34 to 2.59.06.35. No files or directories were added or deleted.
 
 = 2.59.06.34 =
 * Corrects the PayPal Terms and Privacy URLs in readme.txt and README.md to the working US Legal Hub URLs.
-* Bumps the plugin version and release metadata from 2.59.06.33 to 2.59.06.34.
 
 = 2.59.06.33 =
 * ultracache.php lines 6 and 21: bumps the plugin header and ULTRACACHE_VERSION constant from 2.59.06.32 to 2.59.06.33.
@@ -359,7 +1060,6 @@
 * includes/diagnostics/class-diagnostics-trait.php lines 2273-2275 and 2300: reports the shared effective server document root in server diagnostics.
 * uninstall.php lines 33-83 and 451-457: computes uninstall-time runtime-secret cleanup from get_home_path()/DOCUMENT_ROOT using the same canonical outside-document-root location rules.
 * readme.txt line 8 and README.md line 3: updates release metadata to 2.59.06.33.
-* No files or directories were added or deleted. WordPress core include paths, wp-config.php discovery, WP_CONTENT_DIR drop-ins/cache storage, and ABSPATH . WPINC core asset mapping remain intentionally unchanged.
 
 = 2.59.06.32 =
 * Removes the generic diagnostic database query wrappers that passed prepared SQL through an opaque `$query` parameter.
@@ -369,7 +1069,6 @@
 = 2.59.06.31 =
 * Corrects the first two Console Error Suggestion actions so they append to the unsaved JS Delay / Defer Exclusions draft instead of Defer those scripts.
 * Renames those actions to Add This Script Exclusions and Add Full Dependency Chain to Exclusions.
-* Keeps the two delay actions appending to the unsaved Safe Third-Party Delay Patterns draft; per-finding button hiding remains unchanged.
 
 = 2.59.06.30 =
 * Replaces the two per-result JS scanner append buttons with four choices: defer this script, defer the full discovered owner chain, delay this script, or delay the full discovered owner chain.
@@ -407,7 +1106,6 @@
 = 2.59.06.20 =
 * Updates changelog.txt with the reviewer-hardening changes from the 2.59.06.15 through 2.59.06.20 cycle.
 * Keeps readme.txt and README.md free of changelog sections; changelog history remains in changelog.txt only.
-* No runtime behavior changes.
 
 = 2.59.06.19 =
 * Fixes fresh-install drop-in conflict detection so current UltraCache advanced-cache.php and object-cache.php markers are recognized as UltraCache-managed.
@@ -417,7 +1115,6 @@
 = 2.59.06.18 =
 * Adds reviewer-facing comments for unavoidable final rendered HTML rewrites where wp_enqueue_style() or wp_enqueue_script() cannot apply after resources have already been printed.
 * Clarifies that late admin print hooks only dequeue conflicting third-party admin assets and do not print scripts.
-* No runtime behavior changes.
 
 = 2.59.06.17 =
 * Replaces hardcoded generated upload URL/path checks with helpers based on WordPress upload directory data and UltraCache generated-asset helpers.
@@ -505,7 +1202,6 @@
 = 2.58.90.02.01 =
 - Broadened MailerLite lazy nonce helper detection to include official plugin assets and MailerLite Universal markers.
 - Preserves WordPress script API loading and admin_url('admin-ajax.php') endpoint handling.
-- No changes to other frontend JavaScript helper migrations.
 
 = 2.58.90.02 =
 - Moved the MailerLite lazy nonce frontend helper into assets/js/mailerlite-lazy-nonce.js.
@@ -515,7 +1211,6 @@
 = 2.58.90.01 =
 - Added staged frontend JavaScript helper enqueue infrastructure and migration inventory.
 - Added assets/js documentation placeholders for upcoming WordPress-registered helper files.
-- No frontend helper runtime behavior changed in this stage.
 
 = 2.58.83 =
 - Evidence-based JS error scanner: source/stack/code-search findings are appendable, review-only scanner output removed, and hardcoded resolver flow disabled.
@@ -530,7 +1225,6 @@
 2.58.76 - JS diagnostic queue DB compliance fix
 - Replaced interpolated JS diagnostic queue table SQL with prepared identifier placeholders.
 - Added targeted object-cache reads and invalidation for JS diagnostic queue job/status lookups.
-- Kept JS diagnostic UI/runtime behavior unchanged.
 
 2.58.75 - JS diagnostics spacing and label polish
 - Adds 12px gaps to JS diagnostics action button rows.
@@ -561,7 +1255,6 @@
 2.58.64 - HTML adjacency resolver
 - Added a final-HTML external-script plus immediate-inline dependency resolver for runtime/console JS diagnostics.
 - Missing globals such as MailerLite messages now resolve to the adjacent provider script instead of a raw/global token.
-- No auto-append, no generic dependency fallback, and no font-display changes.
 
 2.58.63 - Safe Defer diagnostic fixes
 - Runtime/console diagnostics no longer append broad generic dependency fixes such as jquery, jquery-core, wp-i18n, wp-hooks, wp-api-fetch, react, react-dom, or wp-element.
@@ -578,7 +1271,6 @@
 2.58.61 - Final font-display store-stage rewrite
 - Runs linked stylesheet font-display normalization at the absolute cache-store finalizer and inside the write path, after CSS/JS/LCP transformations.
 - Handles root-relative local stylesheet URLs before resolving source paths, so Elementor/theme/plugin font CSS can be rewritten to patched UltraCache CSS copies.
-- Does not add new frontend debug markers.
 
 2.58.60 - Final linked font-display normalization pass
 - Restored a final source-level linked stylesheet font-display normalization pass after async CSS transforms so late/restored local font CSS links are rewritten to UltraCache patched copies.
@@ -652,16 +1344,13 @@
 - Normalize WordPress script group handles so one base-handle exclusion protects related js-before, js, js-after, js-extra, and translations companions.
 - Avoid splitting WordPress script groups at script_loader_tag time when inline companions are registered.
 
-2.58.40 - Targeted final validation fixes
 - CLI warm_frontpage_html_css now warms HTML-only with success when CSS Bundling is disabled instead of failing on missing bundle injection.
 - APCu object-cache CLI flush message now clarifies PHP-process scope and PHP-FPM/web APCu limitations.
 - Varnish purge coordination now records/warns when Varnish is enabled but Flush All Include Varnish is OFF, avoiding misleading full-purge feedback.
 
 2.58.39 - Final WordPress.org package
-- Final submission package metadata refresh.
 - Verified no remote asset enqueue, no wp_localize_script usage, no global ob_start usage, and no unexpected direct wp_remote_* calls beyond guarded infrastructure wrappers.
 - Removed one frontend console warning from a MailerLite nonce fallback failure path.
-- No runtime feature behavior changes.
 
 2.58.38 - Escaping / returned HTML audit
 - Added a shared inline-script JSON encoder that applies JSON_HEX_* flags for script-safe JSON literals.
@@ -671,7 +1360,6 @@
 2.58.37 - Final regex review pass
 - Switched font/local stylesheet scanners to WP_HTML_Tag_Processor.
 - Removed legacy async CSS link rewrite regex fallbacks and moved noscript fallback insertion to the HTML API path.
-- Kept CSS text parsing regexes such as @font-face, url(), and @import unchanged.
 
 2.58.36 - Admin enqueue modernization
 - Updated the UltraCache admin dashboard script enqueue to use the WordPress 6.3+ args array with in_footer => true.
@@ -679,22 +1367,16 @@
 
 2.58.35 - CSS bundle scanner HTML API
 - Switched CSS bundle stylesheet discovery to WP_HTML_Tag_Processor for head/link scanning.
-- Kept the existing stylesheet eligibility rules and bundle build behavior unchanged.
 - Removed the remaining CSS bundle link-scan regex path from the warm verification counter.
 
-2.58.34 - Final submission metadata cleanup
-- Refreshed plugin/readme/README/POT version metadata for the final review package.
 - Normalized the GPLv2 license URI between the plugin header and readme.
 
 2.58.33 - HTTP wrapper URL normalization revert
 - Reverted esc_url_raw() normalization in the general UltraCache safe HTTP wrapper after it correlated with bypassing frontend optimization output.
 - Kept WordPress safe HTTP transport, reject_unsafe_urls, bounded timeout/redirection, and the infrastructure wrapper PHPCS rationale.
-- No HTML, CSS, JavaScript, media, settings, or REST parser behavior changes.
 
 2.58.30 - Final technical dead-code cleanup
 - Removed unused private helpers left behind by recent HTML API, font, CSS, JS, LCP, and media refactors.
-- Cleaned the recent changelog entries for the 2.58.24-2.58.29 cleanup sequence.
-- No runtime feature behavior changes intended.
 
 2.58.29 - Font/Icon scan suspicious candidate cleanup
 - Filter suspicious encoded/random-looking font-family candidates from Font/Icon scan results.
@@ -749,7 +1431,6 @@
 2.58.18 - Script delay HTML API cleanup
 - Switched the full HTML script delay/wrap application path to WP_HTML_Tag_Processor.
 - Removed the offset/substr assembly path for applying already-decided delayed script replacements.
-- Left script selection logic and unrelated optimization paths unchanged.
 
 2.58.17 - JS script loading attribute HTML API cleanup
 - Switched the Defer All JS script loading attribute mutation path to WP_HTML_Tag_Processor.
@@ -797,7 +1478,6 @@
 
 2.58.04 - Translator comment cleanup for Plugin Check i18n placeholders
 - Added missing translator comments for placeholder-based i18n strings reported by Plugin Check.
-- Refreshed the POT template header for 2.58.04.
 
 2.58.03 - Full i18n pass and localization template refresh
 - Expanded PHP and admin dashboard JavaScript i18n coverage for user-facing text.

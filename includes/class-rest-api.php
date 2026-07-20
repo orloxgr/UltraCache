@@ -9,6 +9,7 @@ require_once __DIR__ . '/rest/class-rest-cache-trait.php';
 require_once __DIR__ . '/rest/class-rest-media-trait.php';
 require_once __DIR__ . '/rest/class-rest-action-queue-trait.php';
 require_once __DIR__ . '/rest/class-rest-profiler-trait.php';
+require_once __DIR__ . '/rest/class-rest-lcp-diagnostics-trait.php';
 require_once __DIR__ . '/rest/class-rest-helpers-trait.php';
 
 class Ultra_Cache_Rest_API
@@ -19,6 +20,7 @@ class Ultra_Cache_Rest_API
     use Ultra_Cache_Rest_Media_Trait;
     use Ultra_Cache_Rest_Action_Queue_Trait;
     use Ultra_Cache_Rest_Profiler_Trait;
+    use Ultra_Cache_Rest_LCP_Diagnostics_Trait;
     use Ultra_Cache_Rest_Helpers_Trait;
 
     /** @var Ultra_Cache_Rest_API|null */
