@@ -340,6 +340,7 @@ trait Ultra_Cache_Profiler_Runner_Trait
             'X-UltraCache-Force-Refresh'  => '1',
             'X-UltraCache-Profile-Run'    => $run_id,
             'X-UltraCache-Token'          => (function_exists('ultracache_create_runtime_control_token') ? ultracache_create_runtime_control_token() : ''),
+            'X-UltraCache-VCL-Signature'      => (function_exists('ultracache_get_varnish_revalidation_vcl_signature') ? ultracache_get_varnish_revalidation_vcl_signature() : ''),
             'Cache-Control'               => 'no-cache, no-store, max-age=0',
             'Pragma'                      => 'no-cache',
         );

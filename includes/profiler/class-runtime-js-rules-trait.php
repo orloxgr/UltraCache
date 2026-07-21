@@ -135,7 +135,9 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             $is_confirmed_provider_path = $this->runtime_js_scan_is_explicit_missing_global_provider_path($suggested_lc, (string) $symbol)
                 || ('jquery-migrate' === $symbol_lc && false !== strpos($suggested_lc, 'jquery-migrate'));
             $owner = function_exists('ultracache_plugin_theme_owner_from_public_source') ? ultracache_plugin_theme_owner_from_public_source('/' . ltrim($suggested_lc, '/')) : array();
-            $is_targeted_local_asset = !empty($owner['slug']) || false !== strpos($suggested_lc, 'wp-content/plugins/') || false !== strpos($suggested_lc, 'wp-content/themes/');
+            $is_targeted_local_asset = !empty($owner['slug'])
+                || (function_exists('ultracache_public_path_contains') && function_exists('ultracache_plugins_public_path') && ultracache_public_path_contains($suggested_lc, ultracache_plugins_public_path()))
+                || (function_exists('ultracache_public_path_contains_any') && function_exists('ultracache_themes_public_paths') && ultracache_public_path_contains_any($suggested_lc, ultracache_themes_public_paths()));
             if (!$has_path_context || (!$is_confirmed_provider_path && !$is_targeted_local_asset)) {
                 return;
             }
@@ -2681,6 +2683,9 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             $handle_lc = strtolower((string) ($script['handle'] ?? ''));
             $identity_lc = $src_lc . ' ' . $id_lc . ' ' . $handle_lc;
             $is_delayed = !empty($script['delayed']);
+            $is_theme_asset = function_exists('ultracache_public_path_contains_any')
+                && function_exists('ultracache_themes_public_paths')
+                && ultracache_public_path_contains_any($identity_lc, ultracache_themes_public_paths());
             $has_woocommerce_order_target = (false !== strpos($content_lc, 'woocommerce-ordering') || false !== strpos($content_lc, 'orderby') || false !== strpos($identity_lc, 'woocommerce') || false !== strpos($identity_lc, 'orderby'));
             $fires_synthetic_change = (bool) preg_match('/(?:\.\s*change\s*\(\s*\)|\.\s*trigger\s*\(\s*["\']change["\']\s*\))/i', $content);
             $sets_location = (bool) preg_match('/(?:window\s*\.\s*)?location\s*(?:=|\.\s*(?:href|assign|replace)\s*(?:=|\())/i', $content);
@@ -2694,7 +2699,7 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             if ($has_woocommerce_order_target && $fires_synthetic_change) {
                 $seen[$key] = true;
                 $script['_ultracache_navigation_match'] = 'synthetic-change';
-                $script['_ultracache_navigation_score'] = 120 + ($is_delayed ? 20 : 0) + (false !== strpos($identity_lc, '/wp-content/themes/') ? 10 : 0);
+                $script['_ultracache_navigation_score'] = 120 + ($is_delayed ? 20 : 0) + ($is_theme_asset ? 10 : 0);
                 $synthetic_change[] = $script;
                 continue;
             }
@@ -2708,7 +2713,7 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             }
 
             $path_score = 0;
-            if (false !== strpos($identity_lc, '/wp-content/themes/')) {
+            if ($is_theme_asset) {
                 $path_score += 20;
             }
             if ($is_delayed) {

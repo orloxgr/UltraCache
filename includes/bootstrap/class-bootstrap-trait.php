@@ -119,7 +119,6 @@ trait Ultra_Cache_WP_Bootstrap_Trait
         add_action('init', array($this, 'maybe_mark_ultracache_admin_no_cache'), 0);
         add_action('admin_init', array(__CLASS__, 'register_dashboard_setting'), 0);
         add_action('admin_init', array(__CLASS__, 'cleanup_legacy_dropin_backup_directory'), 1);
-        add_action('admin_init', array(__CLASS__, 'maybe_migrate_varnish_html_ttl_default'), 2);
         add_action('template_redirect', array($this, 'maybe_serve_html_compression_probe'), -10000);
         add_action('admin_init', array($this, 'maybe_send_ultracache_admin_no_cache_headers'), 0);
         add_action('admin_menu', array($this, 'register_admin_menu'));
@@ -191,7 +190,7 @@ trait Ultra_Cache_WP_Bootstrap_Trait
         }
     }
 
-    private static function maybe_translate($text)
+    protected static function maybe_translate($text)
     {
         $text = (string) $text;
 
@@ -360,7 +359,7 @@ trait Ultra_Cache_WP_Bootstrap_Trait
         return $text;
     }
 
-    private static function maybe_translate_sprintf($text)
+    protected static function maybe_translate_sprintf($text)
     {
         $args = func_get_args();
         $text = (string) array_shift($args);

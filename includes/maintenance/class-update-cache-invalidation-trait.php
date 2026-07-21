@@ -113,7 +113,10 @@ trait Ultra_Cache_WP_Update_Cache_Invalidation_Trait
     private static function get_successfully_updated_active_plugins(array $hook_extra)
     {
         if (!function_exists('is_plugin_active')) {
-            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            $plugin_api = ultracache_wordpress_admin_include_path('plugin.php');
+            if ('' !== $plugin_api) {
+                require_once $plugin_api;
+            }
         }
 
         $candidates = self::get_upgrader_item_list($hook_extra, 'plugin', 'plugins');

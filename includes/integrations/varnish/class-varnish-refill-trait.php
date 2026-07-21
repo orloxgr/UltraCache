@@ -1,6 +1,6 @@
 <?php
 /**
- * Affected-page Varnish refill, verification, and manual prewarm helpers.
+ * Affected-page Varnish refill and manual prewarm helpers.
  *
  * @package UltraCache
  */
@@ -30,11 +30,15 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
     }
 
     /**
-     * Whether dashboard manual warm-up should also populate Varnish.
+     * Whether any site warm-up path should populate Varnish for the same page.
+     *
+     * The existing setting key is retained for backward compatibility, while
+     * dashboard manual jobs, cron jobs, and warm-after-flush jobs all consume
+     * the same decision.
      *
      * @return bool
      */
-    private static function should_warm_varnish_during_manual_warmup()
+    private static function should_warm_varnish_during_site_warmup()
     {
         $settings = self::get_dashboard_settings();
         return !empty($settings['varnishCliEnabled'])
@@ -42,110 +46,233 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
     }
 
     /**
-     * Whether one additional public request should verify each refilled variant.
+     * Backward-compatible manual warm-up decision wrapper.
      *
      * @return bool
      */
-    private static function should_verify_varnish_refill_hit()
+    private static function should_warm_varnish_during_manual_warmup()
     {
-        $settings = self::get_dashboard_settings();
-        return !empty($settings['varnishCliEnabled'])
-            && !empty($settings['varnishVerifyRefillHit']);
+        return self::should_warm_varnish_during_site_warmup();
     }
+
+    /**
+     * Expose the shared switch decision to the cron/site warm orchestrator.
+     *
+     * @return bool
+     */
+    public static function should_include_varnish_in_site_warmup()
+    {
+        return self::should_warm_varnish_during_site_warmup();
+    }
+
+    /**
+     * Return the Varnish warm plan shared by every site warm-up path.
+     *
+     * @return array
+     */
+    public static function get_site_warm_varnish_plan()
+    {
+        if (!self::should_warm_varnish_during_site_warmup()) {
+            return array(
+                'enabled' => false,
+                'buckets' => array(),
+                'message' => self::maybe_translate('Varnish warm-up with site warm-up is disabled.'),
+            );
+        }
+
+        $settings = self::get_varnish_cli_settings();
+        if (empty($settings['support']['available']) || empty($settings['servers'])) {
+            return array(
+                'enabled' => false,
+                'buckets' => array(),
+                'message' => self::maybe_translate('Varnish is enabled but no usable endpoint is configured.'),
+            );
+        }
+
+        $dashboard_settings = self::get_dashboard_settings();
+        $policy = function_exists('ultracache_get_html_variant_policy')
+            ? ultracache_get_html_variant_policy($dashboard_settings)
+            : array('buckets' => array('orig'));
+        $buckets = array_values(array_intersect(array('orig', 'webp', 'avif'), (array) ($policy['buckets'] ?? array('orig'))));
+        if (empty($buckets)) {
+            $buckets = array('orig');
+        }
+
+        return array(
+            'enabled' => true,
+            'buckets' => $buckets,
+            'message' => self::maybe_translate_sprintf('Site warm-up will populate %d Varnish HTML variant(s).', count($buckets)),
+        );
+    }
+
+    /**
+     * Backward-compatible plan used by the dashboard staged pipeline.
+     *
+     * @return array
+     */
+    public static function get_manual_varnish_warm_plan()
+    {
+        return self::get_site_warm_varnish_plan();
+    }
+
+    /**
+     * Refill one Varnish HTML bucket immediately for the manual page pipeline.
+     *
+     * @param string $url    Local public URL.
+     * @param string $bucket HTML variant bucket.
+     * @return array
+     */
+    public static function refill_varnish_manual_bucket($url, $bucket)
+    {
+        $url = esc_url_raw((string) $url);
+        $bucket = sanitize_key((string) $bucket);
+        $plan = self::get_manual_varnish_warm_plan();
+        if (empty($plan['enabled'])) {
+            return array(
+                'success' => true,
+                'skipped' => true,
+                'bucket' => $bucket,
+                'message' => (string) ($plan['message'] ?? self::maybe_translate('Varnish warm-up with site warm-up is disabled.')),
+            );
+        }
+        if ('' === $url || !in_array($bucket, (array) ($plan['buckets'] ?? array()), true)) {
+            return array(
+                'success' => false,
+                'skipped' => false,
+                'bucket' => $bucket,
+                'message' => self::maybe_translate('Invalid manual Varnish refill bucket.'),
+            );
+        }
+
+        $summary = self::summarize_varnish_refill_response(self::send_single_varnish_refill_request($url, $bucket));
+        $success = !empty($summary['success']);
+        if (method_exists(static::class, 'record_varnish_operation_result')) {
+            self::record_varnish_operation_result(array(
+                'success' => $success,
+                'message' => (string) ($summary['detail'] ?? ''),
+                'time' => time(),
+                'operationType' => 'manual-refill-bucket',
+                'label' => 'manual-' . $bucket . '-' . substr(sha1($url), 0, 12),
+                'requestCount' => 1,
+                'refillSuccessCount' => $success ? 1 : 0,
+            ));
+        }
+
+        return array(
+            'success' => $success,
+            'skipped' => false,
+            'bucket' => $bucket,
+            'httpCode' => (int) ($summary['httpCode'] ?? 0),
+            'status' => (string) ($summary['status'] ?? 'INCONCLUSIVE'),
+            'evidence' => (string) ($summary['evidence'] ?? ''),
+            'message' => $success
+                ? self::maybe_translate_sprintf('Varnish %s bucket refilled.', strtoupper($bucket))
+                : self::maybe_translate_sprintf('Varnish %s bucket refill failed.', strtoupper($bucket)),
+            'details' => $summary,
+        );
+    }
+
 
     /**
      * Queue eligible URLs for a persistent UltraCache rebuild and Varnish refill.
      *
-     * @param array  $urls   Candidate local URLs.
-     * @param string $reason Refill source.
+     * @param array  $urls                     Candidate local URLs.
+     * @param string $reason                   Refill source.
+     * @param bool   $requires_verified_origin Whether the strict origin contract is required.
+     * @param bool   $force                    Whether this bounded system refill bypasses the targeted-refill toggle.
      * @return array
      */
-    private static function queue_varnish_refill_urls(array $urls, $reason = 'targeted-invalidation')
+    private static function queue_varnish_refill_urls(array $urls, $reason = 'targeted-invalidation', $requires_verified_origin = false, $force = false)
     {
         $result = array(
             'success' => false,
             'queued' => false,
             'queuedUrlCount' => 0,
             'reason' => sanitize_key((string) $reason),
+            'pipeline' => 'shared-page-warm',
         );
-        if (!self::should_refill_after_targeted_varnish_invalidation()) {
-            $result['message'] = 'Affected-page Varnish refill is disabled.';
+        if (!$force && !self::should_refill_after_targeted_varnish_invalidation()) {
+            $result['message'] = self::maybe_translate('Affected-page Varnish refill is disabled.');
+            return $result;
+        }
+        if (!method_exists(static::class, 'enqueue_targeted_warm_pipeline_urls')) {
+            $result['message'] = self::maybe_translate('The shared page warm pipeline is unavailable.');
             return $result;
         }
 
-        $prepared = self::prepare_varnish_invalidation_urls($urls);
-        $canonical_urls = array();
-        foreach ((array) ($prepared['urls'] ?? array()) as $item) {
-            $url = isset($item['url']) ? esc_url_raw((string) $item['url']) : '';
-            if ('' !== $url) {
-                $canonical_urls[$url] = $url;
-            }
-        }
-
-        if (empty($canonical_urls) || !method_exists(static::class, 'insert_cron_warm_queue_urls') || !self::ensure_cron_warm_queue_table()) {
-            $result['message'] = 'No eligible URLs were available for Varnish refill.';
-            return $result;
-        }
-
-        $queued = self::insert_cron_warm_queue_urls(array_values($canonical_urls), 0, 'varnish_refill');
-        if ($queued < 1) {
-            $result['message'] = 'Varnish refill rows could not be queued.';
-            return $result;
-        }
-
-        self::ensure_cron_warm_events_scheduled(1, true);
-        $result['success'] = true;
-        $result['queued'] = true;
-        $result['queuedUrlCount'] = $queued;
-        $result['message'] = self::maybe_translate_sprintf(
-            'Queued %d affected URL(s) for UltraCache rebuild and Varnish refill.',
-            $queued
+        $queued = self::enqueue_targeted_warm_pipeline_urls(
+            $urls,
+            (bool) $requires_verified_origin,
+            sanitize_key((string) $reason)
         );
-        return $result;
+        return array_merge($result, is_array($queued) ? $queued : array());
     }
 
     /**
-     * Return request arguments for one public Varnish refill or verification request.
+     * Return request arguments for one public Varnish refill request.
      *
-     * @param string $bucket       UltraCache HTML variant bucket.
-     * @param bool   $verification Whether this is the follow-up verification request.
+     * @param string $bucket UltraCache HTML variant bucket.
      * @return array
      */
-    private static function get_varnish_refill_request_args($bucket, $verification = false)
+    private static function get_varnish_refill_request_args($bucket)
     {
         $bucket = in_array((string) $bucket, array('orig', 'webp', 'avif'), true) ? (string) $bucket : 'orig';
         $accept = function_exists('ultracache_get_accept_header_for_html_bucket')
             ? ultracache_get_accept_header_for_html_bucket($bucket)
             : 'text/html,application/xhtml+xml';
 
+        $runtime_token = function_exists('ultracache_create_runtime_control_token')
+            ? ultracache_create_runtime_control_token()
+            : '';
+
         return array(
             'method' => 'GET',
             'timeout' => 10,
-            'redirection' => 3,
-            'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-Varnish-' . ($verification ? 'Verify' : 'Refill') . '/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown') . '; +https://wordpress.org)',
-            'headers' => array(
+            'redirection' => 0,
+            'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-Varnish-Refill/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown') . '; +https://wordpress.org)',
+            'headers' => array_filter(array(
                 'Accept' => $accept,
                 'PageSpeed' => 'off',
                 'ModPagespeed' => 'off',
-            ),
+                'X-UltraCache-Warm' => '1',
+                'X-UltraCache-Internal-Request' => '1',
+                'X-UltraCache-Token' => $runtime_token,
+            )),
         );
     }
 
     /**
      * Send one bounded public loopback request for a Varnish HTML variant.
      *
-     * @param string $url          Public local URL.
-     * @param string $bucket       UltraCache HTML variant bucket.
-     * @param bool   $verification Whether this is the follow-up verification request.
+     * @param string $url    Public local URL.
+     * @param string $bucket UltraCache HTML variant bucket.
      * @return array|WP_Error
      */
-    private static function send_single_varnish_refill_request($url, $bucket, $verification = false)
+    private static function send_single_varnish_refill_request($url, $bucket)
     {
-        $args = self::get_varnish_refill_request_args($bucket, $verification);
+        $url = esc_url_raw((string) $url);
+        if ('' === $url
+            || !function_exists('ultracache_is_strict_frontend_loopback_url')
+            || !ultracache_is_strict_frontend_loopback_url($url)) {
+            return new WP_Error(
+                'ultracache_invalid_varnish_refill_url',
+                self::maybe_translate('The Varnish refill URL is not an exact trusted frontend URL for this site.')
+            );
+        }
+
+        $args = self::get_varnish_refill_request_args($bucket);
+        $runtime_token = (string) ($args['headers']['X-UltraCache-Token'] ?? '');
+        if ('' === $runtime_token) {
+            return new WP_Error(
+                'ultracache_internal_auth_unavailable',
+                self::maybe_translate('Could not authenticate the internal Varnish refill request.')
+            );
+        }
+
         $args['sslverify'] = !function_exists('ultracache_is_local_https_url') || !ultracache_is_local_https_url($url);
 
         return function_exists('ultracache_safe_loopback_remote_request')
-            ? ultracache_safe_loopback_remote_request($url, $args, $verification ? 'varnish_refill_verify' : 'varnish_refill')
+            ? ultracache_safe_loopback_remote_request($url, $args, 'varnish_refill')
             : wp_safe_remote_get($url, $args);
     }
 
@@ -165,6 +292,7 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
                 'varnishDetected' => false,
                 'confidence' => 'high',
                 'evidence' => 'request-error',
+                'errorCode' => sanitize_key((string) $response->get_error_code()),
                 'detail' => sanitize_text_field($response->get_error_message()),
                 'headers' => array(),
             );
@@ -172,47 +300,128 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
 
         $response_code = (int) wp_remote_retrieve_response_code($response);
         $headers = array(
-            'via' => self::get_varnish_behavior_response_header($response, 'via'),
-            'server' => self::get_varnish_behavior_response_header($response, 'server'),
-            'xVarnish' => self::get_varnish_behavior_response_header($response, 'x-varnish'),
-            'xVarnishCache' => self::get_varnish_behavior_response_header($response, 'x-varnish-cache'),
-            'xCache' => self::get_varnish_behavior_response_header($response, 'x-cache'),
-            'xCacheStatus' => self::get_varnish_behavior_response_header($response, 'x-cache-status'),
-            'xProxyCache' => self::get_varnish_behavior_response_header($response, 'x-proxy-cache'),
-            'age' => self::get_varnish_behavior_response_header($response, 'age'),
-            'ultraCache' => self::get_varnish_behavior_response_header($response, 'x-ultra-cache'),
-            'ultraCacheSource' => self::get_varnish_behavior_response_header($response, 'x-ultra-cache-source'),
-            'ultraCacheVariant' => self::get_varnish_behavior_response_header($response, 'x-ultracache-variant'),
+            'via' => self::get_varnish_response_header($response, 'via'),
+            'server' => self::get_varnish_response_header($response, 'server'),
+            'xVarnish' => self::get_varnish_response_header($response, 'x-varnish'),
+            'xVarnishCache' => self::get_varnish_response_header($response, 'x-varnish-cache'),
+            'xCache' => self::get_varnish_response_header($response, 'x-cache'),
+            'xCacheStatus' => self::get_varnish_response_header($response, 'x-cache-status'),
+            'xProxyCache' => self::get_varnish_response_header($response, 'x-proxy-cache'),
+            'age' => self::get_varnish_response_header($response, 'age'),
+            'ultraCache' => self::get_varnish_response_header($response, 'x-ultra-cache'),
+            'ultraCacheSource' => self::get_varnish_response_header($response, 'x-ultra-cache-source'),
+            'ultraCacheVariant' => self::get_varnish_response_header($response, 'x-ultracache-variant'),
         );
-        $classification = self::classify_varnish_behavior_response($headers, $response_code);
+        $classification = self::classify_varnish_response($headers, $response_code);
+        $is_redirect = in_array($response_code, array(301, 302, 303, 307, 308), true);
 
         return array(
             'success' => 200 === $response_code,
             'httpCode' => $response_code,
-            'status' => (string) ($classification['status'] ?? 'INCONCLUSIVE'),
+            'status' => $is_redirect ? 'REDIRECT' : (string) ($classification['status'] ?? 'INCONCLUSIVE'),
             'varnishDetected' => !empty($classification['varnishDetected']),
-            'confidence' => (string) ($classification['confidence'] ?? 'low'),
-            'evidence' => (string) ($classification['evidence'] ?? 'none'),
-            'detail' => 'HTTP ' . $response_code,
+            'confidence' => $is_redirect ? 'high' : (string) ($classification['confidence'] ?? 'low'),
+            'evidence' => $is_redirect ? 'redirect-refused' : (string) ($classification['evidence'] ?? 'none'),
+            'errorCode' => '',
+            'detail' => $is_redirect
+                ? self::maybe_translate_sprintf('HTTP %d redirect refused; the exact queued URL was not warmed.', $response_code)
+                : 'HTTP ' . $response_code,
             'headers' => $headers,
         );
     }
 
     /**
-     * Send normal public requests for every active UltraCache HTML variant.
+     * Renew the owning warm pipeline before or after a Varnish request.
      *
-     * @param string    $url        Local public URL.
-     * @param bool|null $verify_hit Optional explicit verification policy.
+     * @param callable|null $heartbeat Internal ownership callback.
+     * @param string        $stage     Current request stage.
+     * @param string        $bucket    HTML variant bucket.
+     * @return bool
+     */
+    private static function invoke_varnish_refill_heartbeat($heartbeat, $stage, $bucket = '')
+    {
+        if (!is_callable($heartbeat)) {
+            return true;
+        }
+
+        $heartbeat_stage = sanitize_key((string) $stage);
+        $bucket = sanitize_key((string) $bucket);
+        if ('' !== $bucket) {
+            $heartbeat_stage .= '-' . $bucket;
+        }
+        try {
+            return false !== call_user_func($heartbeat, $heartbeat_stage);
+        } catch (Throwable $error) {
+            unset($error);
+            return false;
+        }
+    }
+
+    /**
+     * Whether one failed WordPress HTTP response represents a transient condition.
+     *
+     * @param array $summary Normalized refill response.
+     * @return bool
+     */
+    private static function is_varnish_refill_failure_retryable(array $summary)
+    {
+        $error_code = sanitize_key((string) ($summary['errorCode'] ?? ''));
+        if (in_array($error_code, array('ultracache_invalid_varnish_refill_url', 'ultracache_internal_auth_unavailable', 'ultracache_untrusted_loopback_url'), true)) {
+            return false;
+        }
+
+        $http_code = (int) ($summary['httpCode'] ?? 0);
+        return 0 === $http_code
+            || 408 === $http_code
+            || 425 === $http_code
+            || 429 === $http_code
+            || $http_code >= 500;
+    }
+
+    /**
+     * Add one stable high-level refill result state while preserving the
+     * existing boolean fields used by the queue and warm pipeline.
+     *
+     * @param array $result Refill result.
      * @return array
      */
-    private static function send_public_varnish_refill_requests($url, $verify_hit = null)
+    private static function normalize_varnish_refill_result_state(array $result)
+    {
+        if (!empty($result['skipped'])) {
+            $result['resultStatus'] = 'not_applicable';
+        } elseif (!empty($result['success']) && !empty($result['warning'])) {
+            $result['resultStatus'] = 'warning';
+        } elseif (!empty($result['success'])) {
+            $result['resultStatus'] = 'success';
+        } elseif (!empty($result['retryable'])) {
+            $result['resultStatus'] = 'retryable_error';
+        } else {
+            $result['resultStatus'] = 'terminal_error';
+        }
+
+        return $result;
+    }
+
+    /**
+     * Send one public refill request for every active UltraCache HTML variant.
+     *
+     * @param string        $url       Local public URL.
+     * @param callable|null $heartbeat Internal ownership callback.
+     * @return array
+     */
+    private static function send_public_varnish_refill_requests($url, $heartbeat = null)
     {
         $url = esc_url_raw((string) $url);
         if ('' === $url) {
-            return array('success' => false, 'message' => 'Invalid Varnish refill URL.', 'details' => array());
+            return self::normalize_varnish_refill_result_state(array(
+                'success' => false,
+                'retryable' => false,
+                'terminal' => true,
+                'message' => self::maybe_translate('Invalid Varnish refill URL.'),
+                'details' => array(),
+            ));
         }
 
-        $verify_hit = null === $verify_hit ? self::should_verify_varnish_refill_hit() : (bool) $verify_hit;
         $settings = self::get_dashboard_settings();
         $policy = function_exists('ultracache_get_html_variant_policy')
             ? ultracache_get_html_variant_policy($settings)
@@ -225,113 +434,181 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
         $details = array();
         $all_ok = true;
         $refilled_count = 0;
-        $verified_hit_count = 0;
-        $bypassed_count = 0;
-        $inconclusive_count = 0;
-        $not_hit_count = 0;
-        $verification_error_count = 0;
+        $retryable_failure_count = 0;
+        $terminal_failure_count = 0;
 
         foreach ($buckets as $bucket) {
-            $refill_response = self::send_single_varnish_refill_request($url, $bucket, false);
-            $refill = self::summarize_varnish_refill_response($refill_response);
+            if (!self::invoke_varnish_refill_heartbeat($heartbeat, 'varnish-refill-before', $bucket)) {
+                return self::normalize_varnish_refill_result_state(array(
+                    'success' => false,
+                    'retryable' => true,
+                    'terminal' => false,
+                    'ownershipLost' => true,
+                    'failureClass' => 'ownership-lost',
+                    'message' => self::maybe_translate('Warm-up ownership expired before the Varnish refill request completed.'),
+                    'variantCount' => count($details),
+                    'refilledCount' => $refilled_count,
+                    'details' => $details,
+                ));
+            }
+
+            $refill = self::summarize_varnish_refill_response(self::send_single_varnish_refill_request($url, $bucket));
             $success = !empty($refill['success']);
             $all_ok = $all_ok && $success;
             if ($success) {
-                $refilled_count++;
+                ++$refilled_count;
+            } elseif (self::is_varnish_refill_failure_retryable($refill)) {
+                ++$retryable_failure_count;
+            } else {
+                ++$terminal_failure_count;
             }
 
-            $detail = array(
+            $details[] = array(
                 'bucket' => $bucket,
                 'success' => $success,
                 'httpCode' => (int) ($refill['httpCode'] ?? 0),
                 'refillStatus' => (string) ($refill['status'] ?? 'INCONCLUSIVE'),
                 'refillEvidence' => (string) ($refill['evidence'] ?? ''),
                 'detail' => (string) ($refill['detail'] ?? ''),
-                'verificationEnabled' => $verify_hit,
             );
 
-            if ($verify_hit && $success) {
-                $verification_response = self::send_single_varnish_refill_request($url, $bucket, true);
-                $verification = self::summarize_varnish_refill_response($verification_response);
-                $verification_status = strtoupper((string) ($verification['status'] ?? 'INCONCLUSIVE'));
-                $detail['verificationSuccess'] = !empty($verification['success']);
-                $detail['verificationHttpCode'] = (int) ($verification['httpCode'] ?? 0);
-                $detail['verificationStatus'] = $verification_status;
-                $detail['verificationEvidence'] = (string) ($verification['evidence'] ?? '');
-                $detail['verificationDetail'] = (string) ($verification['detail'] ?? '');
-                $detail['verificationAge'] = (string) (($verification['headers']['age'] ?? ''));
-
-                if (empty($verification['success']) || 'ERROR' === $verification_status) {
-                    $verification_error_count++;
-                } elseif ('HIT' === $verification_status) {
-                    $verified_hit_count++;
-                } elseif ('BYPASS' === $verification_status) {
-                    $bypassed_count++;
-                } elseif (in_array($verification_status, array('MISS', 'STALE'), true)) {
-                    $not_hit_count++;
-                } else {
-                    $inconclusive_count++;
-                }
-            } elseif ($verify_hit) {
-                $detail['verificationSuccess'] = false;
-                $detail['verificationStatus'] = 'SKIPPED';
-                $detail['verificationEvidence'] = 'refill-failed';
-                $detail['verificationDetail'] = 'Verification skipped because the refill request failed.';
-                $verification_error_count++;
-            }
-
-            $details[] = $detail;
-        }
-
-        $verification_status = 'disabled';
-        $verified = false;
-        if ($verify_hit) {
-            if ($verification_error_count > 0) {
-                $verification_status = 'error';
-            } elseif ($bypassed_count > 0) {
-                $verification_status = 'bypassed';
-            } elseif ($not_hit_count > 0) {
-                $verification_status = 'not-hit';
-            } elseif ($inconclusive_count > 0) {
-                $verification_status = 'inconclusive';
-            } elseif ($verified_hit_count === count($buckets) && $verified_hit_count > 0) {
-                $verification_status = 'verified';
-                $verified = true;
+            if (!self::invoke_varnish_refill_heartbeat($heartbeat, 'varnish-refill-after', $bucket)) {
+                return self::normalize_varnish_refill_result_state(array(
+                    'success' => false,
+                    'retryable' => true,
+                    'terminal' => false,
+                    'ownershipLost' => true,
+                    'failureClass' => 'ownership-lost',
+                    'message' => self::maybe_translate('Warm-up ownership expired after the Varnish refill request completed.'),
+                    'variantCount' => count($details),
+                    'refilledCount' => $refilled_count,
+                    'details' => $details,
+                ));
             }
         }
 
-        if (!$all_ok) {
-            $message = self::maybe_translate('Varnish public refill failed for one or more HTML variants.');
-        } elseif (!$verify_hit) {
-            $message = self::maybe_translate_sprintf('Varnish public refill completed for %d HTML variant(s).', count($details));
-        } elseif ($verified) {
-            $message = self::maybe_translate_sprintf('Varnish public refill completed and %d HTML variant(s) were verified as HIT.', $verified_hit_count);
-        } else {
-            $message = self::maybe_translate_sprintf(
-                'Varnish public refill completed, but HIT verification was %s.',
-                str_replace('-', ' ', $verification_status)
-            );
-        }
-
-        return array(
+        $retryable = !$all_ok && $retryable_failure_count > 0 && 0 === $terminal_failure_count;
+        return self::normalize_varnish_refill_result_state(array(
             'success' => $all_ok,
-            'message' => $message,
+            'retryable' => $retryable,
+            'terminal' => !$all_ok && !$retryable,
+            'warning' => false,
+            'failureClass' => $all_ok ? '' : ($retryable ? 'varnish-http-transient' : 'varnish-http-terminal'),
+            'message' => $all_ok
+                ? self::maybe_translate_sprintf('Varnish public refill completed for %d HTML variant(s).', count($details))
+                : self::maybe_translate('Varnish public refill failed for one or more HTML variants.'),
             'variantCount' => count($details),
             'refilledCount' => $refilled_count,
-            'verificationEnabled' => $verify_hit,
-            'verificationStatus' => $verification_status,
-            'verified' => $verified,
-            'verifiedHitCount' => $verified_hit_count,
-            'bypassedCount' => $bypassed_count,
-            'inconclusiveCount' => $inconclusive_count,
-            'notHitCount' => $not_hit_count,
-            'verificationErrorCount' => $verification_error_count,
             'details' => $details,
-        );
+        ));
     }
 
     /**
-     * Populate Varnish immediately after one successful dashboard manual warm request.
+     * Populate Varnish immediately after one successful site warm-up page.
+     *
+     * @param string $url         Local public URL.
+     * @param array  $warm_result Existing page force-refresh result.
+     * @param string $context                  Warm-up source used for bounded metrics labels.
+     * @param bool          $requires_verified_origin Whether one-stage fallback must be blocked.
+     * @param callable|null $heartbeat               Internal ownership callback.
+     * @return array
+     */
+    public static function refill_varnish_after_site_warm($url, array $warm_result = array(), $context = 'manual', $requires_verified_origin = false, $heartbeat = null)
+    {
+        $context = sanitize_key((string) $context);
+        $requires_verified_origin = (bool) $requires_verified_origin;
+        if (!in_array($context, array('manual', 'cron', 'warm-after-flush', 'scheduled-cleanup', 'targeted-purge', 'refresh-ahead', 'cli'), true)) {
+            $context = 'manual';
+        }
+
+        $varnish_warm_enabled = in_array($context, array('targeted-purge', 'refresh-ahead'), true)
+            ? self::should_refill_after_targeted_varnish_invalidation()
+            : self::should_warm_varnish_during_site_warmup();
+        if (!$varnish_warm_enabled) {
+            return self::normalize_varnish_refill_result_state(array(
+                'success' => true,
+                'skipped' => true,
+                'message' => in_array($context, array('targeted-purge', 'refresh-ahead'), true)
+                    ? self::maybe_translate('Affected-page Varnish refill is disabled.')
+                    : self::maybe_translate('Varnish warm-up with site warm-up is disabled.'),
+            ));
+        }
+
+        $settings = self::get_varnish_cli_settings();
+        if (empty($settings['support']['available']) || empty($settings['servers'])) {
+            return self::normalize_varnish_refill_result_state(array(
+                'success' => false,
+                'retryable' => false,
+                'terminal' => true,
+                'failureClass' => 'varnish-configuration',
+                'message' => self::maybe_translate('Varnish is enabled but no usable endpoint is available for site warm-up.'),
+            ));
+        }
+
+        $two_stage = self::get_varnish_origin_revalidation_not_applicable_status();
+        if ($requires_verified_origin) {
+            if (!self::is_varnish_origin_revalidation_applicable($settings)) {
+                return self::normalize_varnish_refill_result_state(array(
+                    'success' => false,
+                    'skipped' => false,
+                    'retryable' => false,
+                    'terminal' => true,
+                    'failureClass' => 'origin-revalidation-not-applicable',
+                    'message' => self::maybe_translate('Strict origin revalidation is unavailable because the active Varnish mode is not HTTP soft purge.'),
+                    'variantCount' => 0,
+                    'refilledCount' => 0,
+                    'originRevalidationRequired' => true,
+                    'fallbackBlocked' => true,
+                    'twoStageRefill' => $two_stage,
+                ));
+            }
+
+            if (!empty($warm_result)) {
+                $two_stage = self::record_manual_varnish_origin_refresh_result($warm_result);
+            } else {
+                $two_stage = self::assess_varnish_origin_refresh_result(self::perform_varnish_origin_refresh($url));
+                $two_stage['applicable'] = true;
+                self::set_varnish_two_stage_refill_status($two_stage);
+            }
+        }
+
+        if ($requires_verified_origin && empty($two_stage['available'])) {
+            return self::normalize_varnish_refill_result_state(array(
+                'success' => false,
+                'skipped' => false,
+                'retryable' => false,
+                'terminal' => true,
+                'failureClass' => 'origin-verification-blocked',
+                'message' => self::maybe_translate('Strict soft-purge refill stopped because the authenticated origin refresh was not verified.'),
+                'variantCount' => 0,
+                'refilledCount' => 0,
+                'originRevalidationRequired' => true,
+                'fallbackBlocked' => true,
+                'twoStageRefill' => $two_stage,
+            ));
+        }
+
+        $public_result = self::send_public_varnish_refill_requests($url, $heartbeat);
+        $public_result['originRevalidationRequired'] = $requires_verified_origin;
+        $public_result['fallbackBlocked'] = false;
+        $public_result['twoStageRefill'] = $two_stage;
+
+        if (method_exists(static::class, 'record_varnish_operation_result')) {
+            self::record_varnish_operation_result(array(
+                'success' => !empty($public_result['success']),
+                'message' => (string) ($public_result['message'] ?? ''),
+                'time' => time(),
+                'operationType' => $context . '-refill',
+                'label' => $context . '-' . substr(sha1(esc_url_raw((string) $url)), 0, 12),
+                'requestCount' => max(0, (int) ($public_result['variantCount'] ?? 0)),
+                'refillSuccessCount' => max(0, (int) ($public_result['refilledCount'] ?? 0)),
+            ));
+        }
+        return self::normalize_varnish_refill_result_state($public_result);
+    }
+
+    /**
+     * Backward-compatible dashboard wrapper.
      *
      * @param string $url         Local public URL.
      * @param array  $warm_result Existing dashboard force-refresh result.
@@ -339,75 +616,8 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
      */
     public static function refill_varnish_after_manual_warm($url, array $warm_result = array())
     {
-        if (!self::should_warm_varnish_during_manual_warmup()) {
-            return array(
-                'success' => true,
-                'skipped' => true,
-                'message' => self::maybe_translate('Manual Varnish warm-up is disabled.'),
-            );
-        }
-
-        $settings = self::get_varnish_cli_settings();
-        if (empty($settings['support']['available']) || empty($settings['servers'])) {
-            return array(
-                'success' => false,
-                'message' => self::maybe_translate('Varnish is enabled but no usable endpoint is available for manual warm-up.'),
-            );
-        }
-
-        $two_stage = !empty($warm_result)
-            ? self::record_manual_varnish_origin_refresh_result($warm_result)
-            : array(
-                'available' => false,
-                'status' => 'inconclusive',
-                'fallbackUsed' => true,
-                'message' => self::maybe_translate('The manual warm result was not available for two-stage refill verification.'),
-            );
-        $public_result = self::send_public_varnish_refill_requests($url);
-        $public_result['twoStageRefill'] = $two_stage;
-        return $public_result;
+        return self::refill_varnish_after_site_warm($url, $warm_result, 'manual');
     }
 
-    /**
-     * Rebuild the inner cache and then refill the public Varnish variants.
-     *
-     * @param string $url Public local URL.
-     * @return array
-     */
-    private static function send_varnish_refill_request($url)
-    {
-        $url = esc_url_raw((string) $url);
-        if ('' === $url) {
-            return array('success' => false, 'message' => 'Invalid Varnish refill URL.');
-        }
 
-        $inner_preparation = self::prepare_varnish_inner_cache_for_refill($url);
-        $inner_result = is_array($inner_preparation['innerCache'] ?? null) ? $inner_preparation['innerCache'] : array();
-        $origin_refresh = is_array($inner_preparation['originRefresh'] ?? null) ? $inner_preparation['originRefresh'] : array();
-        $two_stage = is_array($inner_preparation['twoStageRefill'] ?? null) ? $inner_preparation['twoStageRefill'] : array();
-
-        if (empty($inner_preparation['success'])) {
-            return array(
-                'success' => false,
-                'message' => !empty($inner_result['message']) ? (string) $inner_result['message'] : 'UltraCache rebuild failed before Varnish refill.',
-                'innerCache' => $inner_result,
-                'originRefresh' => $origin_refresh,
-                'twoStageRefill' => $two_stage,
-            );
-        }
-
-        $public_result = self::send_public_varnish_refill_requests($url);
-        return array(
-            'success' => !empty($public_result['success']),
-            'message' => (string) ($public_result['message'] ?? 'Varnish refill failed.'),
-            'innerCache' => $inner_result,
-            'originRefresh' => $origin_refresh,
-            'twoStageRefill' => $two_stage,
-            'publicRefill' => $public_result,
-            'verificationEnabled' => !empty($public_result['verificationEnabled']),
-            'verificationStatus' => (string) ($public_result['verificationStatus'] ?? 'disabled'),
-            'verified' => !empty($public_result['verified']),
-            'verifiedHitCount' => absint($public_result['verifiedHitCount'] ?? 0),
-        );
-    }
 }

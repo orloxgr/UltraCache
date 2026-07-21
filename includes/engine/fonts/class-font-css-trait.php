@@ -816,7 +816,7 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
                 }
 
                 // Intentional final HTML optimization output: this rewrites an already-rendered inline style block to normalize @font-face font-display declarations.
-                // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+                // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Rewrites an existing inline style block in the final frontend document; no plugin asset is printed directly.
                 return '<style' . $attrs . ' data-ultracache-inline-font-display-patched="1">' . $patched_css . '</style>';
             },
             $html

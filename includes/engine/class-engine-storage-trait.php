@@ -101,7 +101,8 @@ trait Ultra_Cache_Engine_Storage_Trait
 
         $internal = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_INTERNAL_REQUEST'));
         $warm = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_WARM'));
-        if ('1' !== $internal && '1' !== $warm) {
+        $profile = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_STORE_PROFILE'));
+        if ('1' !== $internal || ('1' !== $warm && '1' !== $profile)) {
             return false;
         }
 
@@ -297,8 +298,8 @@ trait Ultra_Cache_Engine_Storage_Trait
             }
         }
 
-        $mtime = filemtime($base_file_path);
-        $age = $mtime ? max(0, time() - (int) $mtime) : 0;
+        $freshness_mtime = $this->get_page_cache_freshness_mtime($base_file_path);
+        $age = $freshness_mtime ? max(0, time() - (int) $freshness_mtime) : 0;
         if (!headers_sent()) {
             if (!$not_modified) {
                 header('Content-Type: text/html; charset=UTF-8');
@@ -360,6 +361,7 @@ trait Ultra_Cache_Engine_Storage_Trait
             ultracache_safe_unlink($cache_file);
             ultracache_safe_unlink($cache_file . '.gz');
             ultracache_safe_unlink($cache_file . '.br');
+            ultracache_safe_unlink($cache_file . '.fresh');
         }
 
         $this->record_cache_event('stale-generated-css-html-invalidated', array(
@@ -576,7 +578,10 @@ trait Ultra_Cache_Engine_Storage_Trait
 
             $settings = $this->get_settings();
             if (!empty($settings['gzip_enabled']) && function_exists('gzencode')) {
-                self::gz_file_put_contents($file_path . '.gz', $html);
+                $compressed = gzencode($html, 9);
+                if (false === $compressed || !$this->write_cache_variant_atomically($file_path . '.gz', $compressed)) {
+                    ultracache_safe_unlink($file_path . '.gz');
+                }
             } else {
                 ultracache_safe_unlink($file_path . '.gz');
             }
@@ -595,11 +600,82 @@ trait Ultra_Cache_Engine_Storage_Trait
             }
             $this->write_apache_static_html_alias_for_cache_file($file_path, $html, $url, $settings);
 
+            if (!$this->write_page_cache_freshness_marker($file_path)) {
+                $atomic_error = $this->get_last_atomic_write_error();
+                $marker_context = array('file' => $file_path);
+                if (!empty($atomic_error['code'])) {
+                    $marker_context['atomic_code'] = (string) $atomic_error['code'];
+                }
+                if (!empty($atomic_error['message'])) {
+                    $marker_context['atomic_message'] = (string) $atomic_error['message'];
+                }
+                if (!empty($atomic_error['path'])) {
+                    $marker_context['path'] = (string) $atomic_error['path'];
+                }
+                $this->set_cache_write_error(
+                    'freshness_marker_failed',
+                    'Could not update the page-cache freshness marker.',
+                    $marker_context
+                );
+                $this->record_cache_event('store-freshness-marker-failed', $this->get_last_cache_write_error());
+                return false;
+            }
+
             $this->set_cache_write_error('ok', 'Cache file written successfully.', array('file' => $file_path));
             return true;
         } finally {
             $this->release_runtime_lock($write_lock_name);
         }
+    }
+
+    /**
+     * Return cache freshness without changing representation validators.
+     *
+     * The HTML payload mtime represents the last content change. A separate
+     * bounded marker advances after every successful regeneration, including
+     * byte-identical origin refreshes, so local TTL renewal does not alter
+     * ETag or Last-Modified.
+     *
+     * @param string $file_path Identity HTML cache file.
+     * @return int
+     */
+    private function get_page_cache_freshness_mtime($file_path)
+    {
+        $file_path = (string) $file_path;
+        if ('' === $file_path) {
+            return 0;
+        }
+
+        $freshness_marker = $file_path . '.fresh';
+        $freshness_mtime = is_readable($freshness_marker)
+            ? ultracache_safe_filemtime($freshness_marker, 'page_cache_freshness_marker')
+            : false;
+        if (false !== $freshness_mtime && (int) $freshness_mtime > 0) {
+            return (int) $freshness_mtime;
+        }
+
+        $payload_mtime = is_readable($file_path)
+            ? ultracache_safe_filemtime($file_path, 'page_cache_payload_freshness_fallback')
+            : false;
+
+        return false !== $payload_mtime ? max(0, (int) $payload_mtime) : 0;
+    }
+
+    /**
+     * Advance the freshness marker after a complete page-cache write.
+     *
+     * @param string $file_path Identity HTML cache file.
+     * @return bool
+     */
+    private function write_page_cache_freshness_marker($file_path)
+    {
+        $file_path = (string) $file_path;
+        if ('' === $file_path) {
+            return false;
+        }
+
+        $marker_payload = sprintf('%.6F', microtime(true)) . PHP_EOL;
+        return $this->write_cache_variant_atomically($file_path . '.fresh', $marker_payload);
     }
 
     private function should_write_apache_static_html_alias($url, array $settings)
@@ -658,7 +734,8 @@ trait Ultra_Cache_Engine_Storage_Trait
         }
 
         if (!empty($settings['gzip_enabled']) && function_exists('gzencode')) {
-            if (!self::gz_file_put_contents($alias_path . '.gz', $html)) {
+            $compressed = gzencode($html, 9);
+            if (false === $compressed || !$this->write_cache_variant_atomically($alias_path . '.gz', $compressed)) {
                 ultracache_safe_unlink($alias_path . '.gz');
             }
         } else {
@@ -744,7 +821,23 @@ trait Ultra_Cache_Engine_Storage_Trait
     private function write_cache_variant_atomically($path, $contents)
     {
         $path = (string) $path;
+        $contents = (string) $contents;
         $this->reset_atomic_write_error();
+
+        if (is_readable($path)) {
+            $existing_size = ultracache_safe_filesize($path, 'atomic_write_compare_size');
+            if (false !== $existing_size && (int) $existing_size === strlen($contents)) {
+                $existing = ultracache_safe_file_get_contents($path, 'atomic_write_compare_contents');
+                if (is_string($existing) && hash_equals(hash('sha256', $existing), hash('sha256', $contents))) {
+                    $this->set_atomic_write_error(
+                        'unchanged',
+                        'Atomic write skipped because the existing cache representation is identical.',
+                        array('path' => $path)
+                    );
+                    return true;
+                }
+            }
+        }
 
         $dir = dirname($path);
         if (!file_exists($dir) && !ultracache_safe_mkdir($dir, 0755, true) && !file_exists($dir)) {
@@ -780,32 +873,6 @@ trait Ultra_Cache_Engine_Storage_Trait
         }
 
         $this->set_atomic_write_error('ok', 'Atomic write completed.', array('path' => $path));
-        return true;
-    }
-
-    private static function gz_file_put_contents($path, $html)
-    {
-        $gz = gzencode($html, 9);
-        if (false === $gz) {
-            return false;
-        }
-
-        $dir = dirname($path);
-        if (!file_exists($dir) && !ultracache_safe_mkdir($dir, 0755, true) && !file_exists($dir)) {
-            return false;
-        }
-
-        $tmp = $path . '.tmp-' . uniqid('', true);
-        if (false === ultracache_safe_file_put_contents($tmp, $gz, LOCK_EX)) {
-            ultracache_safe_unlink($tmp);
-            return false;
-        }
-
-        if (!ultracache_safe_rename($tmp, $path)) {
-            ultracache_safe_unlink($tmp);
-            return false;
-        }
-
         return true;
     }
 
@@ -881,7 +948,7 @@ trait Ultra_Cache_Engine_Storage_Trait
         }
         $this->delete_apache_static_html_aliases_for_cache_file($file);
 
-        foreach (array($file, $file . '.gz', $file . '.br') as $variant) {
+        foreach (array($file, $file . '.gz', $file . '.br', $file . '.fresh') as $variant) {
             if (file_exists($variant)) {
                 ultracache_safe_unlink($variant);
             }

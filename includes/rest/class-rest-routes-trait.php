@@ -321,6 +321,42 @@ trait Ultra_Cache_Rest_Routes_Trait
                     ),
                 ),
             ),
+            '/manual-warm/page-stage' => array(
+                array(
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => array($this, 'manual_warm_page_stage'),
+                    'permission_callback' => array($this, 'check_permission'),
+                    'args'                => array(
+                        'url' => array(
+                            'type'              => 'string',
+                            'required'          => true,
+                            'sanitize_callback' => array($this, 'sanitize_url_param'),
+                            'validate_callback' => array($this, 'validate_non_empty_url_param'),
+                        ),
+                        'stage' => array(
+                            'type'              => 'string',
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_key',
+                            'enum'              => array('html', 'css', 'varnish'),
+                        ),
+                        'bucket' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_key',
+                            'enum'              => array('orig', 'webp', 'avif'),
+                        ),
+                        'buildCssBundle' => array(
+                            'type'     => 'boolean',
+                            'required' => false,
+                        ),
+                        'manualToken' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ),
+                    ),
+                ),
+            ),
             '/build-frontpage-css' => array(
                 array(
                     'methods'             => WP_REST_Server::CREATABLE,

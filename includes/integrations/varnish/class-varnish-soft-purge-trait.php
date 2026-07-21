@@ -11,25 +11,9 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
 {
-    private static function get_varnish_soft_purge_configuration_signature(array $settings = array())
+    protected static function set_varnish_soft_purge_capability(array $capability)
     {
-        if (empty($settings)) {
-            $settings = self::get_varnish_cli_settings();
-        }
-
-        $payload = array(
-            'mode' => (string) ($settings['mode'] ?? 'http'),
-            'servers' => array_values((array) ($settings['servers'] ?? array())),
-            'host' => (string) (wp_parse_url(home_url('/'), PHP_URL_HOST) ?: ''),
-            'tokenConfigured' => !empty($settings['key']),
-        );
-
-        return hash('sha256', (string) wp_json_encode($payload));
-    }
-
-    private static function set_varnish_soft_purge_capability(array $capability)
-    {
-        $capability['configurationSignature'] = self::get_varnish_soft_purge_configuration_signature();
+        $capability = self::bind_varnish_capability_contracts($capability, array('soft-purge'));
         $capability['testedAt'] = max(0, (int) ($capability['testedAt'] ?? time()));
         set_transient(
             'ultracache_varnish_soft_purge_capability_v1',
@@ -38,7 +22,7 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
         );
     }
 
-    private static function get_varnish_soft_purge_capability(array $settings = array())
+    protected static function get_varnish_soft_purge_capability(array $settings = array())
     {
         if (empty($settings)) {
             $settings = self::get_varnish_cli_settings();
@@ -58,26 +42,41 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
             return array(
                 'supported' => false,
                 'status' => 'untested',
-                'message' => self::maybe_translate('Run Test Varnish to verify whether the configured HTTP endpoints support soft purge with stale/grace delivery.'),
+                'message' => self::maybe_translate('Soft purge is not active for the configured HTTP endpoints.'),
                 'testedAt' => 0,
             );
         }
 
-        $current_signature = self::get_varnish_soft_purge_configuration_signature($settings);
-        if (!hash_equals((string) ($value['configurationSignature'] ?? ''), $current_signature)) {
+        if (!self::varnish_capability_contracts_match($value, array('soft-purge'), $settings)) {
             return array(
                 'supported' => false,
                 'status' => 'configuration-changed',
-                'message' => self::maybe_translate('The Varnish endpoint configuration changed after the soft purge test. Run Test Varnish again.'),
+                'message' => self::maybe_translate('The HTTP transport, soft-purge strategy, or stale-while-revalidate contract changed, so soft purge is inactive.'),
                 'testedAt' => max(0, (int) ($value['testedAt'] ?? 0)),
             );
         }
 
+        $origin_revalidation = self::get_varnish_origin_revalidation_status();
+        if (empty($origin_revalidation['verified'])) {
+            return array(
+                'supported' => false,
+                'status' => 'origin-revalidation-unverified',
+                'message' => self::maybe_translate('Soft purge remains disabled because authenticated force-refresh requests have not reached the WordPress origin.'),
+                'testedAt' => max(0, (int) ($value['testedAt'] ?? 0)),
+                'originRevalidationVerified' => false,
+            );
+        }
+
         return array(
-            'supported' => !empty($value['supported']),
+            'supported' => !empty($value['supported']) && !empty($value['originRevalidationVerified']),
             'status' => sanitize_key((string) ($value['status'] ?? 'inconclusive')),
             'message' => self::sanitize_varnish_string((string) ($value['message'] ?? '')),
             'testedAt' => max(0, (int) ($value['testedAt'] ?? 0)),
+            'originRevalidationVerified' => !empty($value['originRevalidationVerified']),
+            'staleVerified' => !empty($value['staleVerified']),
+            'freshHitVerified' => !empty($value['freshHitVerified']),
+            'verificationAttemptCount' => absint($value['verificationAttemptCount'] ?? 0),
+            'invalidationEndpointCount' => absint($value['invalidationEndpointCount'] ?? 0),
         );
     }
 
@@ -119,26 +118,36 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
         );
     }
 
-    private static function send_varnish_soft_purge_prepared_urls(array $prepared, $scope = 'batch')
+    protected static function send_varnish_soft_purge_prepared_urls(array $prepared, $scope = 'batch', array $endpoint_targets = array(), $requested_targets_supplied = false)
     {
         $settings = self::get_varnish_cli_settings();
         $details = array();
-        $all_ok = true;
         $request_count = 0;
+        $successful_endpoint_requests = 0;
+        $failed_endpoint_requests = 0;
         $urls = array_values((array) ($prepared['urls'] ?? array()));
+        $targets = empty($endpoint_targets)
+            ? self::resolve_varnish_invalidation_targets((array) ($settings['servers'] ?? array()))
+            : self::resolve_varnish_invalidation_targets((array) ($settings['servers'] ?? array()), $endpoint_targets);
+        $url_results = self::initialize_varnish_url_results($urls);
 
         foreach ($urls as $url_index => $item) {
             $expr = self::build_varnish_ban_expression((string) ($item['host'] ?? ''), (string) ($item['path'] ?? '/'), false);
-            foreach ((array) ($settings['servers'] ?? array()) as $terminal) {
+            $canonical_url = (string) ($item['url'] ?? '');
+            foreach ($targets as $terminal) {
                 $endpoint_check = self::validate_varnish_http_endpoint($terminal);
                 $endpoint = !empty($endpoint_check['valid']) ? self::normalize_varnish_endpoint($terminal) : array();
                 if (empty($endpoint)) {
                     ++$request_count;
-                    $all_ok = false;
+                    ++$failed_endpoint_requests;
+                    $failure_detail = self::sanitize_varnish_string((string) ($endpoint_check['message'] ?? 'Invalid or blocked Varnish HTTP endpoint.'));
+                    $response = array('ok' => false, 'detail' => $failure_detail, 'code' => 0);
+                    self::record_varnish_endpoint_result($terminal, 'http', false, 0, $failure_detail);
+                    self::record_varnish_url_endpoint_result($url_results, array($canonical_url), $terminal, $response);
                     $details[] = array(
                         'server' => $terminal,
                         'success' => false,
-                        'detail' => self::sanitize_varnish_string((string) ($endpoint_check['message'] ?? 'Invalid or blocked Varnish HTTP endpoint.')),
+                        'detail' => $failure_detail,
                     );
                     continue;
                 }
@@ -159,7 +168,12 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
                 );
                 ++$request_count;
                 $success = !empty($response['ok']);
-                $all_ok = $all_ok && $success;
+                if ($success) {
+                    ++$successful_endpoint_requests;
+                } else {
+                    ++$failed_endpoint_requests;
+                }
+                self::record_varnish_url_endpoint_result($url_results, array($canonical_url), $terminal, $response);
                 $details[] = array(
                     'server' => $terminal,
                     'success' => $success,
@@ -175,24 +189,44 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
             }
         }
 
+        $accounting = self::finalize_varnish_url_results($url_results);
+        $all_ok = (int) $accounting['fullyInvalidatedUrlCount'] === (int) ($prepared['uniqueCount'] ?? count($urls));
+        $partial = !$all_ok && ((int) $accounting['partiallyInvalidatedUrlCount'] > 0 || (int) $accounting['fullyInvalidatedUrlCount'] > 0);
         $detail_count = count($details);
         $details_truncated = $detail_count > 100;
         if ($details_truncated) {
             $details = array_slice($details, 0, 100);
         }
 
-        $result = array(
+        if ($all_ok) {
+            $message = self::maybe_translate_sprintf(
+                'Varnish soft purge expired %1$d unique URL(s) with %2$d request(s); affected-page refill will follow.',
+                (int) ($prepared['uniqueCount'] ?? count($urls)),
+                $request_count
+            );
+        } elseif ($partial) {
+            $message = self::maybe_translate_sprintf(
+                'Varnish soft purge fully expired %1$d URL(s), partially expired %2$d, and failed %3$d; refill will follow only for fully expired URLs.',
+                (int) $accounting['fullyInvalidatedUrlCount'],
+                (int) $accounting['partiallyInvalidatedUrlCount'],
+                (int) $accounting['failedUrlCount']
+            );
+        } else {
+            $message = self::maybe_translate('Varnish soft purge failed on every requested URL.');
+        }
+
+        $result = array_merge(array(
             'success' => $all_ok,
-            'message' => $all_ok
-                ? self::maybe_translate_sprintf('Varnish soft purge expired %1$d unique URL(s) with %2$d request(s); affected-page refill will follow.', (int) ($prepared['uniqueCount'] ?? count($urls)), $request_count)
-                : self::maybe_translate('Varnish soft purge failed on one or more endpoint requests.'),
+            'partial' => $partial,
+            'message' => $message,
             'time' => time(),
             'mode' => 'http',
             'method' => 'PURGE',
             'effectiveMethod' => 'soft PURGE',
             'invalidationStrategy' => 'soft',
             'softPurge' => true,
-            'endpointCount' => count((array) ($settings['servers'] ?? array())),
+            'endpointCount' => count($targets),
+            'configuredEndpointCount' => count((array) ($settings['servers'] ?? array())),
             'adminModeUsed' => false,
             'httpEndpointModeUsed' => true,
             'secretConfigured' => !empty($settings['key']),
@@ -206,92 +240,20 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
             'hostCount' => count(array_unique(array_map(static function ($item) { return (string) ($item['host'] ?? ''); }, $urls))),
             'batchCount' => 0,
             'requestCount' => $request_count,
+            'successfulEndpointRequestCount' => $successful_endpoint_requests,
+            'failedEndpointRequestCount' => $failed_endpoint_requests,
+            'requestedEndpointTargets' => $requested_targets_supplied ? array_values($endpoint_targets) : array(),
+            'attemptedEndpointTargets' => array_values($targets),
             'rejections' => (array) ($prepared['rejections'] ?? array()),
             'rejectionsTruncated' => !empty($prepared['rejectionsTruncated']),
             'detailCount' => $detail_count,
             'detailsTruncated' => $details_truncated,
             'details' => $details,
-        );
+        ), $accounting);
 
-        self::set_varnish_last_result($result);
+        $persisted_result = $result;
+        unset($persisted_result['urlResults']);
+        self::set_varnish_last_result($persisted_result);
         return $result;
-    }
-
-    private static function run_varnish_soft_purge_capability_test($url, $timeout)
-    {
-        $settings = self::get_varnish_cli_settings();
-        $steps = array();
-        $invalidation = array('success' => false, 'details' => array());
-
-        if ('http' !== (string) ($settings['mode'] ?? 'http')) {
-            $capability = array(
-                'supported' => false,
-                'status' => 'http-only',
-                'message' => self::maybe_translate('Soft purge capability testing is available only in HTTP endpoint mode.'),
-                'testedAt' => time(),
-            );
-            self::set_varnish_soft_purge_capability($capability);
-            return array('capability' => $capability, 'steps' => $steps, 'invalidation' => $invalidation);
-        }
-
-        $steps['baseline'] = self::run_varnish_behavior_request($url, 'soft_purge_baseline', $timeout);
-        if ('HIT' !== strtoupper((string) ($steps['baseline']['status'] ?? ''))) {
-            $capability = array(
-                'supported' => false,
-                'status' => 'baseline-not-hit',
-                'message' => self::maybe_translate('The front page was not a verified Varnish HIT before the soft purge probe.'),
-                'testedAt' => time(),
-            );
-            self::set_varnish_soft_purge_capability($capability);
-            return array('capability' => $capability, 'steps' => $steps, 'invalidation' => $invalidation);
-        }
-
-        $prepared = self::prepare_varnish_invalidation_urls(array($url));
-        if (empty($prepared['urls'])) {
-            $capability = array(
-                'supported' => false,
-                'status' => 'invalid-url',
-                'message' => self::maybe_translate('The front-page URL was not eligible for the soft purge probe.'),
-                'testedAt' => time(),
-            );
-            self::set_varnish_soft_purge_capability($capability);
-            return array('capability' => $capability, 'steps' => $steps, 'invalidation' => $invalidation);
-        }
-
-        $invalidation = self::send_varnish_soft_purge_prepared_urls($prepared, 'soft-purge-test');
-        if (!empty($invalidation['success'])) {
-            $steps['afterSoftPurge'] = self::run_varnish_behavior_request($url, 'after_soft_purge', $timeout);
-            if (!empty($steps['afterSoftPurge']['success'])) {
-                $steps['verification'] = self::run_varnish_behavior_request($url, 'soft_purge_verification', $timeout);
-            }
-        }
-
-        $after_status = strtoupper((string) ($steps['afterSoftPurge']['status'] ?? ''));
-        $verification_status = strtoupper((string) ($steps['verification']['status'] ?? ''));
-        $supported = !empty($invalidation['success']) && 'STALE' === $after_status && 'HIT' === $verification_status;
-
-        if ($supported) {
-            $status = 'verified';
-            $message = self::maybe_translate('Soft purge was verified: the expired object was served stale/grace and the following request returned a fresh Varnish HIT.');
-        } elseif (in_array($after_status, array('MISS', 'BYPASS'), true)) {
-            $status = 'hard-or-bypass';
-            $message = self::maybe_translate('The soft purge request was accepted, but the next request was a MISS/BYPASS rather than stale/grace. UltraCache will not enable soft purge automatically.');
-        } elseif (empty($invalidation['success'])) {
-            $status = 'request-failed';
-            $message = self::maybe_translate('The configured Varnish endpoint rejected or failed the soft purge request.');
-        } else {
-            $status = 'inconclusive';
-            $message = self::maybe_translate('The soft purge probe completed without visible stale/grace and fresh-HIT evidence, so the capability remains disabled.');
-        }
-
-        $capability = array(
-            'supported' => $supported,
-            'status' => $status,
-            'message' => $message,
-            'testedAt' => time(),
-        );
-        self::set_varnish_soft_purge_capability($capability);
-
-        return array('capability' => $capability, 'steps' => $steps, 'invalidation' => $invalidation);
     }
 }

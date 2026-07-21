@@ -1046,8 +1046,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One aggregate over UltraCache-owned LCP refresh jobs.
             $queue_summary = $wpdb->get_row(
                 $wpdb->prepare(
-                    'SELECT SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_refreshes, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refreshes FROM %i WHERE job_type = %s',
+                    'SELECT SUM(CASE WHEN status IN (%s, %s) THEN 1 ELSE 0 END) AS pending_refreshes, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refreshes FROM %i WHERE job_type = %s',
                     'pending',
+                    'processing',
                     'error',
                     $queue_table,
                     'lcp_refresh'

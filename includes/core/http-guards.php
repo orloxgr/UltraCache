@@ -24,7 +24,6 @@ function ultracache_is_allowed_socket_target($host, $port, $context = '')
         // Varnish is commonly deployed on custom ports. Endpoint trust is handled by the caller/context.
         $default_allowed_ports[] = $port;
     }
-
     $allowed_ports = apply_filters('ultracache_allowed_socket_ports', array_values(array_unique(array_map('intval', $default_allowed_ports))), $host, $context);
     if (is_array($allowed_ports) && !in_array($port, array_map('intval', $allowed_ports), true)) {
         return false;

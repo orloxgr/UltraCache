@@ -16,10 +16,10 @@ trait ULTRACACHE_CLI_Integrations_Trait
         }
 
         if ('test' === $action) {
-            if (!method_exists('Ultra_Cache_WP', 'varnish_test_connection')) {
+            if (!method_exists('Ultra_Cache_WP', 'run_varnish_basic_test')) {
                 WP_CLI::error('Varnish helper is not available.');
             }
-            $result = Ultra_Cache_WP::varnish_test_connection();
+            $result = Ultra_Cache_WP::run_varnish_basic_test();
             if (empty($result['success'])) {
                 WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Varnish test failed.');
             }

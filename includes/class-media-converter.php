@@ -113,6 +113,13 @@ final class Ultra_Cache_Media_Converter {
 	private $media_rewrite_accept_context = null;
 
 	/**
+	 * Bounded request-local exact media-type support memo by Accept context.
+	 *
+	 * @var array<string,bool>
+	 */
+	private $media_accept_support_memo = array();
+
+	/**
 	 * Background conversion cron hook.
 	 */
 	const BACKGROUND_QUEUE_HOOK = 'ultracache_process_media_conversion_queue';

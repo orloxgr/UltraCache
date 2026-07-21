@@ -751,7 +751,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
     {
         // The discovery token is public page-scoped telemetry, not user
         // authentication. Fixed rows and 2-of-3 locking bound its state.
-        // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Public page-scoped LCP telemetry uses a bounded signed discovery token instead of a logged-in user nonce.
         $request = isset($_POST) && is_array($_POST) ? wp_unslash($_POST) : array();
         $settings = $this->get_settings();
         if (!$this->is_lcp_frontend_discovery_active($settings)) {

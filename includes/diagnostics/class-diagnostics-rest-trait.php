@@ -55,6 +55,14 @@ public static function get_dashboard_diagnostics($force_storage_refresh = false)
             $css_bundle_summary_diagnostics = self::get_css_bundle_summary_diagnostics($settings);
             $cache_storage_diagnostics = self::get_cache_storage_diagnostics($settings, $css_bundle_summary_diagnostics, (bool) $force_storage_refresh);
 
+            $varnish_mode = self::sanitize_varnish_mode($settings['varnishCliMode']);
+            $varnish_servers = self::sanitize_varnish_servers_string($settings['varnishCliServers'], $varnish_mode);
+            $varnish_cli_settings = self::get_varnish_cli_settings();
+            $varnish_strategy_status = self::get_varnish_invalidation_strategy_status($varnish_cli_settings);
+            $varnish_endpoint_diagnostics = is_array($varnish_cli_settings['endpointDiagnostics'] ?? null)
+                ? $varnish_cli_settings['endpointDiagnostics']
+                : array();
+
             $diagnostics = array(
                 'pageCache' => array(
                     'enabled' => !empty($settings['pageCacheEnabled']),
@@ -162,32 +170,30 @@ public static function get_dashboard_diagnostics($force_storage_refresh = false)
                     self::get_varnish_support_status(),
                     array(
                         'enabled' => !empty($settings['varnishCliEnabled']),
-                        'mode'    => self::sanitize_varnish_mode($settings['varnishCliMode']),
-                        'configuredMode' => self::sanitize_varnish_mode($settings['varnishCliMode']),
-                        'servers' => self::sanitize_varnish_servers_string($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
-                        'endpointCount' => count(array_values(array_filter(array_map('trim', preg_split('/\s+/', self::sanitize_varnish_servers_string($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))))))),
+                        'mode'    => $varnish_mode,
+                        'configuredMode' => $varnish_mode,
+                        'servers' => $varnish_servers,
+                        'endpointCount' => count(array_values(array_filter(array_map('trim', preg_split('/\s+/', $varnish_servers))))),
                         'method'  => ('PURGE' === strtoupper(trim((string) $settings['varnishCliMethod']))) ? 'PURGE' : 'BAN',
-                        'effectiveMethod' => (string) (self::get_varnish_invalidation_strategy_status(self::get_varnish_cli_settings())['effectiveLabel'] ?? 'BAN'),
-                        'invalidationStrategy' => self::get_varnish_invalidation_strategy_status(self::get_varnish_cli_settings()),
-                        'adminModeUsed' => ('admin' === self::sanitize_varnish_mode($settings['varnishCliMode'])),
-                        'httpEndpointModeUsed' => ('http' === self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'effectiveMethod' => (string) ($varnish_strategy_status['effectiveLabel'] ?? 'BAN'),
+                        'invalidationStrategy' => $varnish_strategy_status,
+                        'adminModeUsed' => ('admin' === $varnish_mode),
+                        'httpEndpointModeUsed' => ('http' === $varnish_mode),
                         'secretConfigured' => '' !== (function_exists('ultracache_get_varnish_password') ? ultracache_get_varnish_password() : ''),
                         'timeout' => max(1, min(15, absint($settings['varnishCliTimeoutSeconds']))),
                         'last'    => self::get_varnish_last_result(),
+                        'basicTest' => self::get_varnish_basic_test_result(),
                         'flushScope' => self::get_varnish_flush_scope_status(),
-                        'htmlVariant' => self::get_varnish_html_variant_status($settings),
-                        'htmlTtl' => self::get_varnish_html_ttl_status($settings),
                         'staleWhileRevalidate' => self::get_varnish_stale_while_revalidate_status($settings),
                         'refillAfterTargetedInvalidation' => !empty($settings['varnishRefillAfterTargetedInvalidation']),
                         'warmDuringManualWarmup' => !empty($settings['varnishWarmDuringManualWarmup']),
-                        'verifyRefillHit' => !empty($settings['varnishVerifyRefillHit']),
+                        'warmWithSiteWarmup' => !empty($settings['varnishWarmDuringManualWarmup']),
                         'refreshAhead' => self::get_varnish_refresh_ahead_status($settings),
-                        'twoStageRefill' => self::get_varnish_two_stage_refill_status(),
-                        'endpointDiagnostics' => self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode'])),
+                        'endpointDiagnostics' => $varnish_endpoint_diagnostics,
                         'queue' => self::get_varnish_queue_stats(),
                         'metrics' => self::get_varnish_metrics_status(),
-                        'hasUnsafeEndpoints' => !empty(self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['unsafe']),
-                        'unsafeEndpointMessage' => !empty(self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['messages'][0]) ? (string) self::get_varnish_endpoint_diagnostics($settings['varnishCliServers'], self::sanitize_varnish_mode($settings['varnishCliMode']))['messages'][0] : '',
+                        'hasUnsafeEndpoints' => !empty($varnish_endpoint_diagnostics['unsafe']),
+                        'unsafeEndpointMessage' => !empty($varnish_endpoint_diagnostics['messages'][0]) ? (string) $varnish_endpoint_diagnostics['messages'][0] : '',
                     )
                 ),
                 'reverseProxy' => self::get_reverse_proxy_status(),

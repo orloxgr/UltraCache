@@ -14,7 +14,9 @@ trait Ultra_Cache_Engine_CSS_Bundle_Builder_Trait
 
 private function is_frontpage_css_scan_mode()
     {
-        return '1' === sanitize_text_field(ultracache_query_value('ultracache_frontpage_css_scan'));
+        return '1' === sanitize_text_field(ultracache_query_value('ultracache_frontpage_css_scan'))
+            && function_exists('ultracache_is_authenticated_internal_request')
+            && ultracache_is_authenticated_internal_request('css');
     }
 
 private function get_css_bundle_scope(array $settings = array())
@@ -89,6 +91,9 @@ public function build_frontpage_css_bundle($url = '', array $args = array())
             $scan = $this->fetch_frontpage_css_source_html($frontpage_url);
             if (empty($scan['success']) || empty($scan['html'])) {
                 $result['message'] = !empty($scan['message']) ? (string) $scan['message'] : 'Could not fetch page HTML.';
+                $result['retryable'] = !empty($scan['retryable']);
+                $result['terminal'] = empty($scan['retryable']);
+                $result['failureClass'] = sanitize_key((string) ($scan['failureClass'] ?? 'css-source-fetch'));
                 $this->record_analytics_frontpage_css_warm($result);
                 return $result;
             }
@@ -321,7 +326,7 @@ private function build_css_bundle_link_tag_from_processor($processor)
 
         // This rebuilds an existing stylesheet tag from final rendered HTML for diagnostics/manifest comparison.
         // wp_enqueue_style() cannot be used here because the original stylesheet has already been printed.
-        // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+        // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Reconstructs an already-rendered stylesheet tag for internal diagnostics and manifest comparison.
         $tag = '<link';
         foreach ($attributes as $attribute) {
             $value = $processor->get_attribute($attribute);
@@ -397,12 +402,25 @@ private function fetch_frontpage_css_source_html($url)
             $url
         );
 
+        $runtime_token = function_exists('ultracache_create_runtime_control_token')
+            ? ultracache_create_runtime_control_token()
+            : '';
+        if ('' === $runtime_token) {
+            return array(
+                'success' => false,
+                'retryable' => false,
+                'failureClass' => 'css-source-authentication',
+                'message' => __('Could not authenticate the internal CSS source request.', 'ultracache'),
+                'html' => '',
+            );
+        }
+
         $response = ultracache_safe_loopback_remote_request(
             $scan_url,
             array(
                 'method' => 'GET',
                 'timeout' => 10,
-                'redirection' => 3,
+                'redirection' => 0,
                 'sslverify' => $this->should_verify_loopback_ssl($scan_url),
                 'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-CSSBundle/' . ULTRACACHE_VERSION . '; +https://wordpress.org)',
                 'headers' => array(
@@ -412,22 +430,46 @@ private function fetch_frontpage_css_source_html($url)
                     'ModPagespeed' => 'off',
                     'X-UltraCache-CSS-Bundle' => '1',
                     'X-UltraCache-Internal-Request' => '1',
+                    'X-UltraCache-Token' => $runtime_token,
                 ),
             ),
             'css_bundle_scan'
         );
 
         if (is_wp_error($response)) {
-            return array('success' => false, 'message' => $response->get_error_message(), 'html' => '');
+            return array(
+                'success' => false,
+                'retryable' => true,
+                'failureClass' => 'css-source-network',
+                'message' => $response->get_error_message(),
+                'html' => '',
+            );
         }
 
         $code = (int) wp_remote_retrieve_response_code($response);
         $html = (string) wp_remote_retrieve_body($response);
         if (200 !== $code || '' === $html) {
-            return array('success' => false, 'message' => 200 !== $code ? 'Remote page did not return HTTP 200.' : 'Remote page returned an empty body.', 'html' => '');
+            $is_redirect = in_array($code, array(301, 302, 303, 307, 308), true);
+            $retryable = 0 === $code || 408 === $code || 425 === $code || 429 === $code || $code >= 500 || (200 === $code && '' === $html);
+            return array(
+                'success' => false,
+                'retryable' => $retryable,
+                'failureClass' => $is_redirect ? 'css-source-canonical-redirect' : ($retryable ? 'css-source-http-transient' : 'css-source-http-terminal'),
+                'httpCode' => $code,
+                'message' => $is_redirect
+                    ? 'Remote page redirected; the exact CSS source URL was not scanned.'
+                    : (200 !== $code ? 'Remote page did not return HTTP 200.' : 'Remote page returned an empty body.'),
+                'html' => '',
+            );
         }
         if (!$this->is_html_loopback_response($response, $html)) {
-            return array('success' => false, 'message' => __('Remote page did not return an HTML Content-Type.', 'ultracache'), 'html' => '');
+            return array(
+                'success' => false,
+                'retryable' => false,
+                'failureClass' => 'css-source-non-html',
+                'message' => __('Remote page did not return an HTML Content-Type.', 'ultracache'),
+                'html' => '',
+            );
         }
 
         return array('success' => true, 'message' => '', 'html' => $html);

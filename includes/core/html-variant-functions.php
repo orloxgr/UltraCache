@@ -69,7 +69,72 @@ function ultracache_should_vary_html_by_accept(array $settings)
 }
 
 /**
+ * Return the effective quality assigned to one exact media type.
+ *
+ * Wildcard image ranges are intentionally ignored because they do not prove
+ * browser support for a specific codec. A valid explicit q=0 range refuses
+ * the codec and takes precedence over duplicate ranges; malformed q parameters
+ * retain the default server preference so all runtime layers resolve the same
+ * bucket.
+ *
+ * @param string $accept_header HTTP Accept header.
+ * @param string $media_type    Exact media type, for example image/avif.
+ * @return float
+ */
+function ultracache_get_accept_media_type_quality($accept_header, $media_type)
+{
+    $media_type = strtolower(trim((string) $media_type));
+    if (1 !== preg_match('/\A[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+\z/', $media_type)) {
+        return 0.0;
+    }
+
+    $best_quality = 0.0;
+    $accept_header = substr(strtolower((string) $accept_header), 0, 8192);
+    foreach (array_slice(explode(',', $accept_header), 0, 64) as $range) {
+        $parts = array_map('trim', explode(';', (string) $range));
+        $token = (string) array_shift($parts);
+        if ($token !== $media_type) {
+            continue;
+        }
+
+        $quality = 1.0;
+        foreach ($parts as $parameter) {
+            $parameter = trim((string) $parameter);
+            if (1 !== preg_match('/\Aq\s*=/i', $parameter)) {
+                continue;
+            }
+            if (1 === preg_match('/\Aq\s*=\s*(0(?:\.\d+)?|1(?:\.0+)?)\z/i', $parameter, $matches)) {
+                $quality = max(0.0, min(1.0, (float) $matches[1]));
+            }
+            break;
+        }
+
+        if ($quality <= 0.0) {
+            return 0.0;
+        }
+        $best_quality = max($best_quality, $quality);
+    }
+
+    return $best_quality;
+}
+
+/**
+ * Whether an Accept header explicitly permits one exact image media type.
+ *
+ * @param string $accept_header HTTP Accept header.
+ * @param string $media_type    Exact media type.
+ * @return bool
+ */
+function ultracache_accept_header_allows_media_type($accept_header, $media_type)
+{
+    return ultracache_get_accept_media_type_quality($accept_header, $media_type) > 0.0;
+}
+
+/**
  * Resolve an HTTP Accept header to one of the active UltraCache HTML buckets.
+ *
+ * UltraCache keeps its configured AVIF-before-WebP server preference, but an
+ * explicit q=0 refusal can never select that representation.
  *
  * @param string $accept_header HTTP Accept header.
  * @param array  $settings      UltraCache settings.
@@ -79,13 +144,12 @@ function ultracache_get_html_variant_bucket_for_accept($accept_header, array $se
 {
     $policy = ultracache_get_html_variant_policy($settings);
     $allowed = array_fill_keys((array) $policy['buckets'], true);
-    $accept_header = strtolower((string) $accept_header);
 
-    if (isset($allowed['avif']) && false !== strpos($accept_header, 'image/avif')) {
+    if (isset($allowed['avif']) && ultracache_accept_header_allows_media_type($accept_header, 'image/avif')) {
         return 'avif';
     }
 
-    if (isset($allowed['webp']) && false !== strpos($accept_header, 'image/webp')) {
+    if (isset($allowed['webp']) && ultracache_accept_header_allows_media_type($accept_header, 'image/webp')) {
         return 'webp';
     }
 

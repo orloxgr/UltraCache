@@ -12,25 +12,47 @@ if (!defined('ABSPATH')) {
 trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
 {
     /**
-     * Return a configuration signature without storing endpoint secrets.
+     * Whether the active configuration can use strict origin revalidation.
      *
-     * @return string
+     * The contract is relevant only to HTTP soft-purge operation. Ordinary
+     * BAN/PURGE refill remains a public request and does not depend on proving
+     * a private origin route.
+     *
+     * @param array $settings Optional normalized Varnish settings.
+     * @return bool
      */
-    private static function get_varnish_two_stage_refill_configuration_signature()
+    private static function is_varnish_origin_revalidation_applicable(array $settings = array())
     {
-        if (method_exists(static::class, 'get_varnish_flush_scope_configuration_signature')) {
-            return (string) self::get_varnish_flush_scope_configuration_signature();
+        if (empty($settings)) {
+            $settings = self::get_varnish_cli_settings();
         }
 
-        $settings = self::get_varnish_cli_settings();
-        $payload = array(
-            'mode' => (string) ($settings['mode'] ?? 'http'),
-            'method' => (string) ($settings['method'] ?? 'BAN'),
-            'servers' => array_values(array_map('strval', is_array($settings['servers'] ?? null) ? $settings['servers'] : array())),
-            'siteHost' => wp_parse_url(home_url('/'), PHP_URL_HOST),
+        $mode = self::sanitize_varnish_mode((string) ($settings['mode'] ?? 'http'));
+        $configured_strategy = self::sanitize_varnish_invalidation_strategy(
+            (string) ($settings['invalidationStrategy'] ?? 'ban')
         );
 
-        return hash('sha256', (string) wp_json_encode($payload));
+        return 'http' === $mode && in_array($configured_strategy, array('soft', 'auto'), true);
+    }
+
+    /**
+     * Return the neutral result used when strict origin proof is not part of
+     * the active Varnish contract.
+     *
+     * @return array
+     */
+    private static function get_varnish_origin_revalidation_not_applicable_status()
+    {
+        return array(
+            'applicable' => false,
+            'available' => false,
+            'status' => 'not-applicable',
+            'testedAt' => 0,
+            'reachedBucketCount' => 0,
+            'expectedBucketCount' => 0,
+            'fallbackUsed' => false,
+            'message' => self::maybe_translate('Strict origin revalidation is used only by HTTP soft purge and stale/grace refresh. Ordinary BAN/PURGE refill uses the public cache route.'),
+        );
     }
 
     /**
@@ -41,7 +63,7 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
      */
     private static function set_varnish_two_stage_refill_status(array $status)
     {
-        $status['configurationSignature'] = self::get_varnish_two_stage_refill_configuration_signature();
+        $status = self::bind_varnish_capability_contracts($status, array('soft-purge', 'refill'));
         $status['testedAt'] = absint($status['testedAt'] ?? time());
         $status['available'] = !empty($status['available']);
         $status['status'] = sanitize_key((string) ($status['status'] ?? 'inconclusive'));
@@ -61,27 +83,33 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
      */
     public static function get_varnish_two_stage_refill_status()
     {
+        if (!self::is_varnish_origin_revalidation_applicable()) {
+            return self::get_varnish_origin_revalidation_not_applicable_status();
+        }
+
         $value = get_transient('ultracache_varnish_two_stage_refill_v1');
         if (!is_array($value)) {
             return array(
+                'applicable' => true,
                 'available' => false,
                 'status' => 'untested',
                 'testedAt' => 0,
-                'message' => self::maybe_translate('Run a manual warm-up or allow an affected-page refill to test whether authenticated force-refresh requests reach the WordPress origin before Varnish is populated.'),
+                'message' => self::maybe_translate('Authenticated force-refresh has not been verified for the current HTTP soft-purge configuration.'),
             );
         }
 
-        $current_signature = self::get_varnish_two_stage_refill_configuration_signature();
-        if (empty($value['configurationSignature']) || !hash_equals((string) $value['configurationSignature'], $current_signature)) {
+        if (!self::varnish_capability_contracts_match($value, array('soft-purge', 'refill'))) {
             return array(
+                'applicable' => true,
                 'available' => false,
                 'status' => 'configuration-changed',
-                'testedAt' => 0,
-                'message' => self::maybe_translate('The Varnish endpoint configuration changed. Two-stage refill will be tested again during the next warm or refill operation.'),
+                'testedAt' => absint($value['testedAt'] ?? 0),
+                'message' => self::maybe_translate('The soft-purge or public-refill contract changed. Two-stage refill must be verified again during the next strict soft-purge operation.'),
             );
         }
 
         return array(
+            'applicable' => true,
             'available' => !empty($value['available']),
             'status' => sanitize_key((string) ($value['status'] ?? 'inconclusive')),
             'testedAt' => absint($value['testedAt'] ?? 0),
@@ -110,7 +138,7 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
 
         foreach ((array) ($result['forceRefreshDetails'] ?? array()) as $detail) {
             $headers = is_array($detail['headers'] ?? null) ? $detail['headers'] : array();
-            $classification = self::classify_varnish_behavior_response(
+            $classification = self::classify_varnish_response(
                 $headers,
                 absint($detail['httpCode'] ?? 0)
             );
@@ -144,8 +172,8 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
                 'testedAt' => time(),
                 'reachedBucketCount' => $reached,
                 'expectedBucketCount' => $expected,
-                'fallbackUsed' => true,
-                'message' => self::sanitize_varnish_string((string) ($result['message'] ?? self::maybe_translate('Authenticated origin refresh failed; UltraCache will use the ordinary one-stage warm fallback.'))),
+                'fallbackUsed' => false,
+                'message' => self::sanitize_varnish_string((string) ($result['message'] ?? self::maybe_translate('Authenticated origin refresh failed before reaching the WordPress engine.'))),
             );
         }
 
@@ -156,9 +184,9 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
                 'testedAt' => time(),
                 'reachedBucketCount' => $reached,
                 'expectedBucketCount' => $expected,
-                'fallbackUsed' => true,
+                'fallbackUsed' => false,
                 'message' => self::maybe_translate_sprintf(
-                    'The authenticated force-refresh request was served as a visible Varnish %s before reaching WordPress, so UltraCache used the one-stage fallback.',
+                    'The authenticated force-refresh request was served as a visible Varnish %s before reaching WordPress.',
                     $visible_proxy_status
                 ),
             );
@@ -170,8 +198,8 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
             'testedAt' => time(),
             'reachedBucketCount' => $reached,
             'expectedBucketCount' => $expected,
-            'fallbackUsed' => true,
-            'message' => self::maybe_translate('The force-refresh response did not expose the WordPress origin marker. UltraCache used the one-stage fallback rather than claiming two-stage refill support.'),
+            'fallbackUsed' => false,
+            'message' => self::maybe_translate('The force-refresh response did not expose the WordPress origin marker.'),
         );
     }
 
@@ -204,55 +232,6 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
     }
 
     /**
-     * Prepare the inner cache before sending the normal public Varnish refill.
-     *
-     * @param string $url Local public URL.
-     * @return array
-     */
-    private static function prepare_varnish_inner_cache_for_refill($url)
-    {
-        $origin_result = self::perform_varnish_origin_refresh($url);
-        $two_stage = self::assess_varnish_origin_refresh_result(is_array($origin_result) ? $origin_result : array());
-        self::set_varnish_two_stage_refill_status($two_stage);
-
-        if (!empty($two_stage['available'])) {
-            return array(
-                'success' => !empty($origin_result['success']),
-                'innerCache' => $origin_result,
-                'originRefresh' => $origin_result,
-                'twoStageRefill' => $two_stage,
-            );
-        }
-
-        $engine = method_exists(static::class, 'get_engine_instance') ? self::get_engine_instance() : null;
-        $fallback_result = array(
-            'success' => false,
-            'message' => self::maybe_translate('UltraCache engine unavailable for one-stage warm fallback.'),
-        );
-        if ($engine && method_exists($engine, 'warm_url')) {
-            $fallback_result = $engine->warm_url(
-                $url,
-                array(
-                    'ignore_runtime_bypass' => true,
-                    'skip_css_bundle' => true,
-                    'time_budget' => 20,
-                    'source' => 'varnish-refill-fallback',
-                )
-            );
-        }
-
-        $two_stage['fallbackUsed'] = true;
-        self::set_varnish_two_stage_refill_status($two_stage);
-
-        return array(
-            'success' => !empty($fallback_result['success']),
-            'innerCache' => $fallback_result,
-            'originRefresh' => $origin_result,
-            'twoStageRefill' => $two_stage,
-        );
-    }
-
-    /**
      * Record the two-stage result already produced by a dashboard force-refresh warm.
      *
      * @param array $warm_result Manual warm result.
@@ -260,10 +239,13 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
      */
     private static function record_manual_varnish_origin_refresh_result(array $warm_result)
     {
-        $status = self::assess_varnish_origin_refresh_result($warm_result);
-        if (empty($status['available'])) {
-            $status['fallbackUsed'] = true;
+        if (!self::is_varnish_origin_revalidation_applicable()) {
+            return self::get_varnish_origin_revalidation_not_applicable_status();
         }
+
+        $status = self::assess_varnish_origin_refresh_result($warm_result);
+        $status['applicable'] = true;
+        $status['fallbackUsed'] = false;
         self::set_varnish_two_stage_refill_status($status);
         return $status;
     }

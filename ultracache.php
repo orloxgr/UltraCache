@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.59.09.68
+ * Version: 2.59.09.114
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('ULTRACACHE_VERSION')) {
-    define('ULTRACACHE_VERSION', '2.59.09.68');
+    define('ULTRACACHE_VERSION', '2.59.09.114');
 }
 if (!defined('ULTRACACHE_FILE')) {
     define('ULTRACACHE_FILE', __FILE__);
@@ -92,6 +92,7 @@ require_once ultracache_plugin_dir('includes/cache/class-dropin-reconciliation-t
 require_once ultracache_plugin_dir('includes/runtime/class-runtime-config-trait.php');
 require_once ultracache_plugin_dir('includes/runtime/class-runtime-cache-services-trait.php');
 require_once ultracache_plugin_dir('includes/warmup/class-cron-warm-orchestrator-trait.php');
+require_once ultracache_plugin_dir('includes/warmup/class-targeted-warm-pipeline-trait.php');
 require_once ultracache_plugin_dir('includes/maintenance/class-scheduled-maintenance-trait.php');
 require_once ultracache_plugin_dir('includes/maintenance/class-update-cache-invalidation-trait.php');
 require_once ultracache_plugin_dir('includes/storage/class-cache-asset-registry-trait.php');
@@ -106,6 +107,7 @@ class Ultra_Cache_WP
     use Ultra_Cache_WP_Runtime_Config_Trait;
     use Ultra_Cache_WP_Runtime_Cache_Services_Trait;
     use Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait;
+    use Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait;
     use Ultra_Cache_WP_Scheduled_Maintenance_Trait;
     use Ultra_Cache_WP_Update_Cache_Invalidation_Trait;
     use Ultra_Cache_WP_Cache_Asset_Registry_Trait;

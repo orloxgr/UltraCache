@@ -97,8 +97,24 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
             wp_schedule_event(time() + MINUTE_IN_SECONDS, $schedule, 'ultracache_scheduled_cache_cleanup');
         }
 
+        if (method_exists(static::class, 'ensure_targeted_page_warm_worker_ready')) {
+            self::ensure_targeted_page_warm_worker_ready();
+        }
+
         if (method_exists(static::class, 'should_keep_varnish_refresh_ahead_cron') && self::should_keep_varnish_refresh_ahead_cron()) {
             self::ensure_cron_warm_events_scheduled();
+        } else {
+            $warm_state = self::get_cron_warm_state();
+            $queue_stats = method_exists(static::class, 'get_varnish_queue_stats')
+                ? self::get_varnish_queue_stats()
+                : array();
+            $has_queue_work = max(0, (int) ($queue_stats['pendingInvalidations'] ?? 0)) > 0
+                || max(0, (int) ($queue_stats['processingInvalidations'] ?? 0)) > 0
+                || max(0, (int) ($queue_stats['pendingRefills'] ?? 0)) > 0
+                || max(0, (int) ($queue_stats['processingRefills'] ?? 0)) > 0;
+            if (empty($warm_state['active']) && !$has_queue_work) {
+                self::unschedule_cron_warm_events();
+            }
         }
     }
 
@@ -225,7 +241,7 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
                 break;
             case 'cron_orphan':
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only orphaned UltraCache-owned warm queue rows when the queue is inactive.
-                $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE updated_at > 0 AND updated_at < %d LIMIT %d', $table, (int) ($args[0] ?? 0), (int) ($args[1] ?? 0)));
+                $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE status <> %s AND updated_at > 0 AND updated_at < %d LIMIT %d', $table, 'processing', (int) ($args[0] ?? 0), (int) ($args[1] ?? 0)));
                 break;
             case 'media_refs_purged':
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only already-purged UltraCache-owned media page refs.

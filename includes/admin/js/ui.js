@@ -1245,10 +1245,7 @@
 		const skippedCount = Math.max(0, Number(process.skippedCount || 0));
 		const failedCount = Math.max(0, Number(process.failedCount || 0));
 		const varnishWarmedCount = Math.max(0, Number(process.varnishWarmedCount || 0));
-		const varnishVerifiedCount = Math.max(0, Number(process.varnishVerifiedCount || 0));
-		const varnishBypassedCount = Math.max(0, Number(process.varnishBypassedCount || 0));
-		const varnishInconclusiveCount = Math.max(0, Number(process.varnishInconclusiveCount || 0));
-		const hasCounters = successCount > 0 || skippedCount > 0 || failedCount > 0 || avifCount > 0 || webpCount > 0 || varnishWarmedCount > 0 || varnishVerifiedCount > 0 || varnishBypassedCount > 0 || varnishInconclusiveCount > 0 || Number(process.unitCount || 0) > 0;
+		const hasCounters = successCount > 0 || skippedCount > 0 || failedCount > 0 || avifCount > 0 || webpCount > 0 || varnishWarmedCount > 0 || Number(process.unitCount || 0) > 0;
 
 
 		return h('div', { className: 'uc-process-popup', role: 'status', 'aria-live': 'polite' }, [
@@ -1284,6 +1281,12 @@
 					progressText
 				),
 			]),
+			process.currentStageLabel
+				? h('div', { className: 'mt-2 text-[11px] text-zinc-400 break-all', key: 'current-stage' }, [
+					h('span', { className: 'text-emerald-400 font-bold', key: 'stage-label' }, String(process.currentStageLabel)),
+					process.currentItem ? h('span', { key: 'stage-url' }, ' · ' + String(process.currentItem)) : null,
+				])
+				: null,
 			h('div', { className: 'w-full bg-zinc-800 h-1 rounded-full overflow-hidden', key: 'bar-wrap' }, [
 				h('div', {
 					className: 'bg-emerald-500 h-full transition-all duration-300',
@@ -1310,9 +1313,6 @@
 						h('span', { className: 'text-zinc-400 font-bold', key: 'skipped' }, 'Skipped: ' + skippedCount),
 						h('span', { className: failedCount > 0 ? 'text-amber-400 font-bold' : 'text-zinc-500 font-bold', key: 'failed' }, 'Failed: ' + failedCount),
 						varnishWarmedCount > 0 ? h('span', { className: 'text-emerald-400 font-bold', key: 'varnish-warmed' }, 'Varnish warmed: ' + varnishWarmedCount) : null,
-						varnishVerifiedCount > 0 ? h('span', { className: 'text-emerald-400 font-bold', key: 'varnish-verified' }, 'Varnish HIT verified: ' + varnishVerifiedCount) : null,
-						varnishBypassedCount > 0 ? h('span', { className: 'text-amber-400 font-bold', key: 'varnish-bypassed' }, 'Varnish bypassed: ' + varnishBypassedCount) : null,
-						varnishInconclusiveCount > 0 ? h('span', { className: 'text-zinc-400 font-bold', key: 'varnish-inconclusive' }, 'Varnish inconclusive: ' + varnishInconclusiveCount) : null,
 					].filter(Boolean))
 				: null,
 			process.logs && process.logs.length

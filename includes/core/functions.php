@@ -18,3 +18,4 @@ require_once plugin_dir_path(__FILE__) . 'request-profiler.php';
 require_once plugin_dir_path(__FILE__) . 'locks.php';
 require_once plugin_dir_path(__FILE__) . 'filesystem-guards.php';
 require_once plugin_dir_path(__FILE__) . 'http-guards.php';
+require_once plugin_dir_path(__FILE__) . 'varnish.php';

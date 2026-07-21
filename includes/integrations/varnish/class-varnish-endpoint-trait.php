@@ -11,6 +11,29 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_WP_Varnish_Endpoint_Trait
 {
+        private static function parse_varnish_http_terminal($terminal)
+        {
+            $terminal = trim((string) $terminal);
+            if ('' === $terminal) {
+                return array('', '', 0);
+            }
+
+            $url = preg_match('#^https?://#i', $terminal) ? $terminal : 'http://' . $terminal;
+            $parts = wp_parse_url($url);
+            if (!is_array($parts)) {
+                return array('', '', 0);
+            }
+
+            $scheme = strtolower((string) ($parts['scheme'] ?? 'http'));
+            $host = trim((string) ($parts['host'] ?? ''));
+            $port = isset($parts['port']) ? (int) $parts['port'] : ('https' === $scheme ? 443 : 80);
+            if (!in_array($scheme, array('http', 'https'), true) || '' === $host || $port <= 0 || $port > 65535) {
+                return array('', '', 0);
+            }
+
+            return array($scheme, $host, $port);
+        }
+
         private static function normalize_varnish_endpoint($terminal)
         {
             $terminal = trim((string) $terminal);
@@ -23,14 +46,15 @@ trait Ultra_Cache_WP_Varnish_Endpoint_Trait
                 return array();
             }
 
+            $scheme = (string) ($check['scheme'] ?? 'http');
             $host = (string) ($check['host'] ?? '');
             $port = (int) ($check['port'] ?? 0);
-            if ('' === $host || $port <= 0) {
+            if (!in_array($scheme, array('http', 'https'), true) || '' === $host || $port <= 0) {
                 return array();
             }
 
             return array(
-                'scheme' => 'http',
+                'scheme' => $scheme,
                 'host'   => $host,
                 'port'   => $port,
             );
@@ -39,7 +63,11 @@ trait Ultra_Cache_WP_Varnish_Endpoint_Trait
         private static function build_varnish_target_url(array $endpoint, $path = '/')
         {
             $path = '/' . ltrim((string) $path, '/');
-            return $endpoint['scheme'] . '://' . $endpoint['host'] . ':' . $endpoint['port'] . $path;
+            $host = (string) ($endpoint['host'] ?? '');
+            if (false !== strpos($host, ':') && '[' !== substr($host, 0, 1)) {
+                $host = '[' . $host . ']';
+            }
+            return $endpoint['scheme'] . '://' . $host . ':' . $endpoint['port'] . $path;
         }
 
         private static function summarize_varnish_http_body($body, $max_length = 180)

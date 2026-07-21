@@ -665,14 +665,21 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_action_queue_heavy_lock_v1',
             'ultracache_warmup_generation',
             'ultracache_varnish_refresh_ahead_state_v1',
+            'ultracache_varnish_refresh_candidates_v1',
             'ultracache_varnish_metrics_v1',
+            'ultracache_varnish_diagnostic_basic_v1',
+            'ultracache_varnish_diagnostic_flush_scope_v1',
+            'ultracache_varnish_diagnostic_validators_v1',
+            'ultracache_varnish_diagnostic_accept_vcl_v1',
+            'ultracache_varnish_diagnostic_soft_purge_v1',
+            'ultracache_varnish_diagnostic_multi_endpoint_v1',
+            'ultracache_varnish_html_ttl_default_migration_v1',
             'ultracache_lcp_last_refresh',
             'ultracache_manual_warm_state',
         );
 
         if (!$ultracache_keep_settings) {
             array_unshift($ultracache_options, 'ultracache_settings');
-            $ultracache_options[] = 'ultracache_varnish_html_ttl_default_migration_v1';
         }
 
         if (!$ultracache_keep_tables) {

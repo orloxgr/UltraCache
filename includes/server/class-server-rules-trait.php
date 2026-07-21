@@ -245,6 +245,9 @@ trait Ultra_Cache_WP_Server_Rules_Trait
         );
 
         $lines = array(
+            '<FilesMatch "^index-(orig|webp|avif)\.html(?:\.(?:gz|br))?$">',
+            'FileETag MTime Size',
+            '</FilesMatch>',
             '<IfModule mod_headers.c>',
             '<FilesMatch "^index-(orig|webp|avif)\.html$">',
             'Header set Cache-Control "' . $html_cache_control . '"',
@@ -300,6 +303,14 @@ trait Ultra_Cache_WP_Server_Rules_Trait
             $lines = array_merge($lines, $brotli_lines);
         }
 
+        $lines = array_merge($lines, array(
+            '<FilesMatch "^index-(orig|webp|avif)\.html(?:\.(?:gz|br))?$">',
+            'Header always unset Content-Type "expr=%{REQUEST_STATUS} == 304"',
+            'Header always unset Content-Encoding "expr=%{REQUEST_STATUS} == 304"',
+            'Header always unset Content-Length "expr=%{REQUEST_STATUS} == 304"',
+            '</FilesMatch>',
+        ));
+
         $lines = array_values(array_filter($lines, static function ($line) {
             return '' !== (string) $line;
         }));
@@ -332,23 +343,34 @@ trait Ultra_Cache_WP_Server_Rules_Trait
         };
 
         $bucket_rules = array();
+        $avif_accept_conditions = array(
+            'RewriteCond %{HTTP:Accept} "(^|,)[[:space:]]*image/avif([[:space:]]*;[^,]*)?([[:space:]]*,|$)" [NC]',
+            'RewriteCond %{HTTP:Accept} "!(^|,)[[:space:]]*image/avif[[:space:]]*;[^,]*q[[:space:]]*=[[:space:]]*0(\.0+)?([[:space:]]*(;|,|$))" [NC]',
+        );
+        $webp_accept_conditions = array(
+            'RewriteCond %{HTTP:Accept} "(^|,)[[:space:]]*image/webp([[:space:]]*;[^,]*)?([[:space:]]*,|$)" [NC]',
+            'RewriteCond %{HTTP:Accept} "!(^|,)[[:space:]]*image/webp[[:space:]]*;[^,]*q[[:space:]]*=[[:space:]]*0(\.0+)?([[:space:]]*(;|,|$))" [NC]',
+        );
         if (in_array('avif', $active_html_buckets, true)) {
-            $bucket_rules[] = array(array('RewriteCond %{HTTP:Accept} image/avif [NC]'), 'index/index-avif.html', '^$');
+            $bucket_rules[] = array($avif_accept_conditions, 'index/index-avif.html', '^$');
         }
         if (in_array('webp', $active_html_buckets, true)) {
-            $bucket_rules[] = array(array('RewriteCond %{HTTP:Accept} image/webp [NC]'), 'index/index-webp.html', '^$');
+            $bucket_rules[] = array($webp_accept_conditions, 'index/index-webp.html', '^$');
         }
         $bucket_rules[] = array(array(), 'index/index-orig.html', '^$');
         if (in_array('avif', $active_html_buckets, true)) {
-            $bucket_rules[] = array(array('RewriteCond %{HTTP:Accept} image/avif [NC]'), '$1/index-avif.html', '^(.+?)/?$');
+            $bucket_rules[] = array($avif_accept_conditions, '$1/index-avif.html', '^(.+?)/?$');
         }
         if (in_array('webp', $active_html_buckets, true)) {
-            $bucket_rules[] = array(array('RewriteCond %{HTTP:Accept} image/webp [NC]'), '$1/index-webp.html', '^(.+?)/?$');
+            $bucket_rules[] = array($webp_accept_conditions, '$1/index-webp.html', '^(.+?)/?$');
         }
         $bucket_rules[] = array(array(), '$1/index-orig.html', '^(.+?)/?$');
 
         if ($brotli_enabled || $gzip_enabled) {
             $lines[] = '<IfModule mod_headers.c>';
+            $explicit_encoding_quality_condition = 'RewriteCond %{HTTP:Accept-Encoding} "!(^|,)[[:space:]]*(br|gzip)[[:space:]]*;[^,]*q[[:space:]]*=" [NC]';
+            $brotli_accept_condition = 'RewriteCond %{HTTP:Accept-Encoding} "(^|,)[[:space:]]*br([[:space:]]*;[^,]*)?([[:space:]]*,|$)" [NC]';
+            $gzip_accept_condition = 'RewriteCond %{HTTP:Accept-Encoding} "(^|,)[[:space:]]*gzip([[:space:]]*;[^,]*)?([[:space:]]*,|$)" [NC]';
             foreach ($host_targets as $host_target) {
                 foreach ($bucket_rules as $bucket_rule) {
                     list($bucket_conditions, $file, $rule_pattern) = $bucket_rule;
@@ -359,8 +381,8 @@ trait Ultra_Cache_WP_Server_Rules_Trait
                             array_merge(
                                 $bucket_conditions,
                                 array(
-                                    'RewriteCond %{HTTP:Accept-Encoding} br [NC]',
-                                    'RewriteCond %{HTTP:Accept-Encoding} !br[[:space:]]*;[[:space:]]*q=0([.]0*)? [NC]',
+                                    $brotli_accept_condition,
+                                    $explicit_encoding_quality_condition,
                                 )
                             ),
                             $file . '.br',
@@ -374,8 +396,8 @@ trait Ultra_Cache_WP_Server_Rules_Trait
                             array_merge(
                                 $bucket_conditions,
                                 array(
-                                    'RewriteCond %{HTTP:Accept-Encoding} gzip [NC]',
-                                    'RewriteCond %{HTTP:Accept-Encoding} !gzip[[:space:]]*;[[:space:]]*q=0([.]0*)? [NC]',
+                                    $gzip_accept_condition,
+                                    $explicit_encoding_quality_condition,
                                 )
                             ),
                             $file . '.gz',

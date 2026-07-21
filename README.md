@@ -2,7 +2,7 @@
 
 UltraCache combines WordPress page caching, object-cache integration, AVIF/WebP media rewrite, frontend optimization, warm-up tools, Varnish helpers, and diagnostics in one administrator-controlled plugin.
 
-Version: `2.59.09.68`
+Version: `2.59.09.114`
 Requires WordPress: `6.9` or newer  
 Requires PHP: `8.1` or newer  
 License: GPL-2.0-or-later
@@ -19,8 +19,8 @@ License: GPL-2.0-or-later
 - CSS bundling, async CSS, Google Fonts localization, and font CSS optimization.
 - JavaScript defer/delay with editable exclusion controls.
 - LCP priority with exact manual CSS selectors, SVG image support, optional timed browser-based frontend discovery, persistent per-page and per-viewport learning, targeted page-cache refresh through the existing warm queue, lazy loading, and optional CLS dimensions.
-- Homepage, menu, selected-URL, and full-site warm-up.
-- Optional administrator-configured Varnish integration with public cache-behavior tests, topology-aware verified HTML-only flushing, bounded persistent invalidation/refill queues, shared TTL and stale refresh controls, conditional ETag/Last-Modified revalidation, manual Varnish prewarm, and capability-gated hot-page refresh ahead, bounded endpoint health/latency metrics, queue retry counters, and authenticated admin-mode ban-pressure inspection.
+- Homepage, menu, selected-URL, and full-site warm-up with per-page HTML, CSS, Varnish bucket, and HIT-verification stages shared by dashboard, cron, and warm-after-flush jobs.
+- Optional administrator-configured Varnish integration with scheme-preserving HTTP/HTTPS endpoints, a compact canonical-page connection/invalidation/refill test, deterministic HTML-only BAN or entire-host PURGE scope selection, bounded persistent invalidation queue, unified resumable page-warm pipeline, shared TTL and stale refresh controls, site-warm Varnish prewarm, HTTP soft-purge/SWR-gated refresh ahead, integrated refill inside warm-after-flush page processing, compact production metrics, and live queue counters.
 - Dashboard and WP-CLI diagnostics, including persistent browser-observed LCP mapping and warm-refresh inspection.
 
 ## Storage and WordPress drop-ins

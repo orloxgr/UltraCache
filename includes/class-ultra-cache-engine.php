@@ -167,6 +167,8 @@ class Ultra_Cache_Engine
             return;
         }
 
+        add_filter('woocommerce_set_cookie_enabled', array($this, 'filter_internal_warm_woocommerce_cookie'), PHP_INT_MAX, 6);
+
         // Frontend rendering/optimization hooks must never participate in
         // wp-admin, REST, AJAX, or cron responses. This prevents the frontend
         // engine from affecting third-party admin script dependency graphs or
@@ -176,6 +178,7 @@ class Ultra_Cache_Engine
         add_action('init', array($this, 'profile_init_checkpoint'), 0);
         add_action('wp_loaded', array($this, 'profile_wp_loaded_checkpoint'), 0);
         add_action('template_redirect', array($this, 'profile_template_redirect_checkpoint'), -1000);
+        add_filter('redirect_canonical', array($this, 'filter_authenticated_internal_canonical_redirect'), 10, 2);
         add_action('template_redirect', array($this, 'maybe_start_buffering'), 0);
         add_filter('wp_should_output_buffer_template_for_enhancement', array($this, 'should_force_template_enhancement_output_buffer'), PHP_INT_MAX);
         add_action('wp_template_enhancement_output_buffer_started', array($this, 'template_enhancement_output_buffer_started_checkpoint'), 0);
@@ -438,6 +441,7 @@ class Ultra_Cache_Engine
         if ($should_bypass) {
             $this->profile_request_checkpoint('bypass_selected', array('reason' => (string) $this->last_bypass_reason));
             $this->record_analytics_bypass($this->last_bypass_reason);
+            $this->send_varnish_shared_html_headers(false);
             $this->send_debug_headers('BYPASS', $this->last_bypass_reason);
             return;
         }
@@ -459,6 +463,7 @@ class Ultra_Cache_Engine
         if ('' !== (string) $this->page_cache_generation_lock_denied_reason) {
             $skip_reason = (string) $this->page_cache_generation_lock_denied_reason;
             $this->record_analytics_store_skip($skip_reason);
+            $this->send_varnish_shared_html_headers(false);
             $this->send_debug_headers('SKIP', $skip_reason);
             return;
         }
@@ -850,6 +855,7 @@ class Ultra_Cache_Engine
         $this->template_enhancement_buffer_required = false;
 
         if (!is_string($html) || '' === $html) {
+            $this->send_varnish_shared_html_headers(false);
             if ($this->is_store_profiler_enabled()) {
                 $this->start_store_profile_diagnostic_skip('empty-output');
                 $this->finalize_store_profile('SKIP', 'empty-output', '');
@@ -874,6 +880,7 @@ class Ultra_Cache_Engine
                 $this->clear_revalidate_lock($current_request_url);
             }
             $this->send_set_cookie_skip_diagnostic_header($skip_reason);
+            $this->send_varnish_shared_html_headers(false);
             $this->send_debug_headers('SKIP', $skip_reason);
             $this->finalize_store_profile('SKIP', $skip_reason, '');
             $this->release_page_generation_lock();
@@ -883,6 +890,7 @@ class Ultra_Cache_Engine
         $url = $current_request_url;
         $file_path = $this->get_cache_path($url);
         if (empty($file_path)) {
+            $this->send_varnish_shared_html_headers(false);
             $this->send_debug_headers('SKIP', 'empty-cache-path');
             $this->finalize_store_profile('SKIP', 'empty-cache-path', '');
             $this->release_page_generation_lock();
@@ -906,6 +914,7 @@ class Ultra_Cache_Engine
             if ($this->is_internal_revalidate_request()) {
                 $this->clear_revalidate_lock($url);
             }
+            $this->send_varnish_shared_html_headers(false);
             $this->send_debug_headers('SKIP', 'write-failed');
             $this->finalize_store_profile('SKIP', 'write-failed', $file_path);
             $this->release_page_generation_lock();
@@ -918,10 +927,19 @@ class Ultra_Cache_Engine
                 header('X-Ultra-Cache-Revalidate: refreshed');
             }
         }
+        $validator_metadata = $this->get_cached_html_validator_metadata($file_path, 'identity');
+        $not_modified = !headers_sent()
+            && !empty($validator_metadata)
+            && $this->cached_html_request_is_not_modified($validator_metadata);
+
         $this->send_varnish_shared_html_headers(true);
+        $this->send_cached_html_validator_headers($validator_metadata);
         $this->send_debug_headers('STORE');
         if (!headers_sent()) {
             header('X-Ultra-Cache-Store-Post-Response: deferred');
+            if ($not_modified) {
+                $this->send_cached_html_not_modified_status();
+            }
         }
         $this->profile_request_checkpoint('cache_output_callback_end', array('html_bytes' => is_string($html) ? strlen($html) : 0));
 
@@ -938,7 +956,8 @@ class Ultra_Cache_Engine
         ));
         $this->release_page_generation_lock();
 
-        return $html;
+        $method = strtoupper((string) ultracache_server_value('REQUEST_METHOD'));
+        return ($not_modified || 'HEAD' === $method) ? '' : $html;
     }
 
     /**
@@ -1018,6 +1037,8 @@ class Ultra_Cache_Engine
         $control_args = array(
             'ultracache_revalidate',
             'ultracache_rt',
+            'ultracache_rv',
+            'ultracache_bucket',
             'ultracache_store_profile',
             'ultracache_callback_profile',
             'ultracache_store_profile_verbose',

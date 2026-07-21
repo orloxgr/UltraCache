@@ -11,155 +11,45 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
 {
-    private static function get_varnish_behavior_response_header($response, $name)
+    /**
+     * Normalize a weak or strong ETag for diagnostic comparisons.
+     *
+     * Used by the compact Varnish connection, invalidation, and refill test.
+     *
+     * @param string $etag Raw ETag header value.
+     * @return string
+     */
+    protected static function normalize_varnish_conditional_etag($etag)
     {
-        if (is_wp_error($response)) {
-            return '';
+        $etag = trim(substr((string) $etag, 0, 500));
+        if (0 === stripos($etag, 'W/')) {
+            $etag = trim(substr($etag, 2));
         }
 
-        $value = wp_remote_retrieve_header($response, (string) $name);
-        if (is_array($value)) {
-            $value = implode(', ', array_map('strval', $value));
-        }
-
-        $value = trim((string) $value);
-        if ('' === $value) {
-            return '';
-        }
-
-        $value = preg_replace('/[\r\n\t]+/', ' ', $value);
-        $value = is_string($value) ? preg_replace('/\s+/', ' ', $value) : '';
-
-        return self::sanitize_varnish_string(substr((string) $value, 0, 500));
+        return $etag;
     }
 
-    private static function classify_varnish_behavior_response(array $headers, $response_code)
-    {
-        $response_code = (int) $response_code;
-        if ($response_code < 200 || $response_code >= 400) {
-            return array(
-                'status'          => 'ERROR',
-                'varnishDetected' => false,
-                'confidence'      => 'high',
-                'evidence'        => 'http-status',
-            );
-        }
-
-        $via = strtolower((string) ($headers['via'] ?? ''));
-        $server = strtolower((string) ($headers['server'] ?? ''));
-        $x_varnish = trim((string) ($headers['xVarnish'] ?? ''));
-        $x_varnish_cache = strtolower((string) ($headers['xVarnishCache'] ?? ''));
-        $varnish_detected = '' !== $x_varnish
-            || false !== strpos($via, 'varnish')
-            || false !== strpos($server, 'varnish')
-            || '' !== $x_varnish_cache;
-
-        $status_headers = strtolower(implode(' ', array_filter(array(
-            (string) ($headers['xCache'] ?? ''),
-            (string) ($headers['xCacheStatus'] ?? ''),
-            (string) ($headers['xProxyCache'] ?? ''),
-            (string) ($headers['xVarnishCache'] ?? ''),
-        ))));
-
-        $has_stale = 1 === preg_match('/\b(stale|grace|updating|revalidated)\b/i', $status_headers);
-        $has_bypass = 1 === preg_match('/\b(pass|bypass|uncacheable)\b/i', $status_headers);
-        $has_miss = 1 === preg_match('/\bmiss\b/i', $status_headers);
-        $has_hit = 1 === preg_match('/\b(hit|cached)\b/i', $status_headers);
-
-        if ($varnish_detected && $has_stale) {
-            return array(
-                'status'          => 'STALE',
-                'varnishDetected' => true,
-                'confidence'      => 'high',
-                'evidence'        => 'cache-status-header',
-            );
-        }
-
-        if ($varnish_detected && (int) $has_bypass + (int) $has_miss + (int) $has_hit > 1) {
-            return array(
-                'status'          => 'INCONCLUSIVE',
-                'varnishDetected' => true,
-                'confidence'      => 'low',
-                'evidence'        => 'ambiguous-cache-status-header',
-            );
-        }
-
-        if ($varnish_detected && $has_bypass) {
-            return array(
-                'status'          => 'BYPASS',
-                'varnishDetected' => true,
-                'confidence'      => 'high',
-                'evidence'        => 'cache-status-header',
-            );
-        }
-
-        if ($varnish_detected && $has_miss) {
-            return array(
-                'status'          => 'MISS',
-                'varnishDetected' => true,
-                'confidence'      => 'high',
-                'evidence'        => 'cache-status-header',
-            );
-        }
-
-        if ($varnish_detected && $has_hit) {
-            return array(
-                'status'          => 'HIT',
-                'varnishDetected' => true,
-                'confidence'      => 'high',
-                'evidence'        => 'cache-status-header',
-            );
-        }
-
-        $age_raw = trim((string) ($headers['age'] ?? ''));
-        $age = ctype_digit($age_raw) ? (int) $age_raw : null;
-        if ($varnish_detected && null !== $age && $age > 0) {
-            return array(
-                'status'          => 'HIT',
-                'varnishDetected' => true,
-                'confidence'      => 'medium',
-                'evidence'        => 'positive-age',
-            );
-        }
-
-        $varnish_ids = array();
-        if ('' !== $x_varnish && preg_match_all('/\b\d+\b/', $x_varnish, $matches)) {
-            $varnish_ids = array_values(array_unique($matches[0]));
-        }
-
-        if ($varnish_detected && count($varnish_ids) >= 2) {
-            return array(
-                'status'          => 'HIT',
-                'varnishDetected' => true,
-                'confidence'      => 'medium',
-                'evidence'        => 'multiple-x-varnish-ids',
-            );
-        }
-
-        if ($varnish_detected && 1 === count($varnish_ids) && 0 === $age) {
-            return array(
-                'status'          => 'MISS',
-                'varnishDetected' => true,
-                'confidence'      => 'medium',
-                'evidence'        => 'single-x-varnish-id-age-zero',
-            );
-        }
-
-        return array(
-            'status'          => 'INCONCLUSIVE',
-            'varnishDetected' => $varnish_detected,
-            'confidence'      => 'low',
-            'evidence'        => $varnish_detected ? 'varnish-headers-without-cache-status' : 'no-varnish-headers',
-        );
-    }
-
-    private static function run_varnish_behavior_request($url, $step, $timeout, $accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', array $request_headers = array())
+    protected static function run_varnish_behavior_request(
+        $url,
+        $step,
+        $timeout,
+        $accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        array $request_headers = array()
+    )
     {
         $headers = array(
             'Accept'          => sanitize_text_field((string) $accept),
             'Accept-Encoding' => 'identity',
         );
-        foreach (array('If-None-Match', 'If-Modified-Since') as $allowed_header) {
+        $allowed_headers = array(
+            'If-None-Match',
+            'If-Modified-Since',
+            'Cookie',
+            'Authorization',
+            'Cache-Control',
+            'Pragma',
+        );
+        foreach ($allowed_headers as $allowed_header) {
             if (!isset($request_headers[$allowed_header]) || !is_scalar($request_headers[$allowed_header])) {
                 continue;
             }
@@ -173,7 +63,7 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
         $response = ultracache_safe_loopback_remote_request($url, array(
             'method'      => 'GET',
             'timeout'     => max(2, min(10, (int) $timeout)),
-            'redirection' => 2,
+            'redirection' => 0,
             'headers'     => $headers,
             'cookies'     => array(),
         ), 'varnish_behavior_' . sanitize_key((string) $step));
@@ -197,30 +87,37 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
         $response_code = (int) wp_remote_retrieve_response_code($response);
         $response_message = trim((string) wp_remote_retrieve_response_message($response));
         $headers = array(
-            'age'              => self::get_varnish_behavior_response_header($response, 'age'),
-            'via'              => self::get_varnish_behavior_response_header($response, 'via'),
-            'server'           => self::get_varnish_behavior_response_header($response, 'server'),
-            'xVarnish'         => self::get_varnish_behavior_response_header($response, 'x-varnish'),
-            'xVarnishCache'    => self::get_varnish_behavior_response_header($response, 'x-varnish-cache'),
-            'xCache'           => self::get_varnish_behavior_response_header($response, 'x-cache'),
-            'xCacheStatus'     => self::get_varnish_behavior_response_header($response, 'x-cache-status'),
-            'xProxyCache'      => self::get_varnish_behavior_response_header($response, 'x-proxy-cache'),
-            'cacheControl'       => self::get_varnish_behavior_response_header($response, 'cache-control'),
-            'vary'               => self::get_varnish_behavior_response_header($response, 'vary'),
-            'cfCacheStatus'      => self::get_varnish_behavior_response_header($response, 'cf-cache-status'),
-            'ultraCache'         => self::get_varnish_behavior_response_header($response, 'x-ultra-cache'),
-            'ultraCacheSource'   => self::get_varnish_behavior_response_header($response, 'x-ultra-cache-source'),
-            'ultraCacheAge'      => self::get_varnish_behavior_response_header($response, 'x-ultra-cache-age'),
-            'ultraCacheVariant'  => self::get_varnish_behavior_response_header($response, 'x-ultracache-variant'),
-            'ultraCacheCacheable' => self::get_varnish_behavior_response_header($response, 'x-ultracache-cacheable'),
-            'ultraCacheSurrogateTtl' => self::get_varnish_behavior_response_header($response, 'x-ultracache-surrogate-ttl'),
-            'ultraCacheStaleWhileRevalidate' => self::get_varnish_behavior_response_header($response, 'x-ultracache-stale-while-revalidate'),
-            'etag'              => self::get_varnish_behavior_response_header($response, 'etag'),
-            'lastModified'      => self::get_varnish_behavior_response_header($response, 'last-modified'),
-            'contentLength'     => self::get_varnish_behavior_response_header($response, 'content-length'),
+            'age'              => self::get_varnish_response_header($response, 'age'),
+            'via'              => self::get_varnish_response_header($response, 'via'),
+            'server'           => self::get_varnish_response_header($response, 'server'),
+            'xVarnish'         => self::get_varnish_response_header($response, 'x-varnish'),
+            'xVarnishCache'    => self::get_varnish_response_header($response, 'x-varnish-cache'),
+            'xCache'           => self::get_varnish_response_header($response, 'x-cache'),
+            'xCacheStatus'     => self::get_varnish_response_header($response, 'x-cache-status'),
+            'xProxyCache'      => self::get_varnish_response_header($response, 'x-proxy-cache'),
+            'cacheControl'       => self::get_varnish_response_header($response, 'cache-control'),
+            'surrogateControl'   => self::get_varnish_response_header($response, 'surrogate-control'),
+            'pragma'             => self::get_varnish_response_header($response, 'pragma'),
+            'vary'               => self::get_varnish_response_header($response, 'vary'),
+            'cfCacheStatus'      => self::get_varnish_response_header($response, 'cf-cache-status'),
+            'ultraCache'         => self::get_varnish_response_header($response, 'x-ultra-cache'),
+            'ultraCacheSource'   => self::get_varnish_response_header($response, 'x-ultra-cache-source'),
+            'ultraCacheAge'      => self::get_varnish_response_header($response, 'x-ultra-cache-age'),
+            'ultraCacheVariant'  => self::get_varnish_response_header($response, 'x-ultracache-variant'),
+            'ultraCacheCacheable' => self::get_varnish_response_header($response, 'x-ultracache-cacheable'),
+            'ultraCacheSurrogateTtl' => self::get_varnish_response_header($response, 'x-ultracache-surrogate-ttl'),
+            'ultraCacheStaleWhileRevalidate' => self::get_varnish_response_header($response, 'x-ultracache-stale-while-revalidate'),
+            'etag'              => self::get_varnish_response_header($response, 'etag'),
+            'lastModified'      => self::get_varnish_response_header($response, 'last-modified'),
+            'contentLength'     => self::get_varnish_response_header($response, 'content-length'),
+            'contentEncoding'   => self::get_varnish_response_header($response, 'content-encoding'),
+            'contentType'       => self::get_varnish_response_header($response, 'content-type'),
+            'warning'           => self::get_varnish_response_header($response, 'warning'),
         );
-        $classification = self::classify_varnish_behavior_response($headers, $response_code);
-        $http_ok = $response_code >= 200 && $response_code < 400;
+        $headers['setCookiePresent'] = '' !== trim((string) wp_remote_retrieve_header($response, 'set-cookie'));
+        $classification = self::classify_varnish_response($headers, $response_code);
+        $http_ok = ($response_code >= 200 && $response_code < 300) || 304 === $response_code;
+        $response_body = (string) wp_remote_retrieve_body($response);
 
         return array(
             'success'         => $http_ok,
@@ -232,12 +129,13 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
             'confidence'      => (string) $classification['confidence'],
             'evidence'        => (string) $classification['evidence'],
             'message'         => self::sanitize_varnish_string('HTTP ' . $response_code . ('' !== $response_message ? ' ' . $response_message : '')),
-            'bodyBytes'       => strlen((string) wp_remote_retrieve_body($response)),
+            'bodyBytes'       => strlen($response_body),
+            'bodySha256'      => '' !== $response_body ? hash('sha256', $response_body) : '',
             'headers'         => $headers,
         );
     }
 
-    private static function varnish_behavior_steps_completed(array $steps)
+    protected static function varnish_behavior_steps_completed(array $steps)
     {
         foreach ($steps as $step) {
             if (!is_array($step) || empty($step['success'])) {
@@ -248,73 +146,29 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
         return true;
     }
 
-    /**
-     * Evaluate visible evidence for the configured shared HTML TTL.
-     *
-     * @param array $steps              Behavior-test request steps.
-     * @param int   $configured_minutes Configured TTL in minutes.
-     * @return array
-     */
-    private static function evaluate_varnish_shared_html_ttl(array $steps, $configured_minutes)
+    private static function classify_varnish_basic_invalidation_failure(array $invalidation)
     {
-        $configured_minutes = max(0, min(525600, absint($configured_minutes)));
-        $configured_seconds = $configured_minutes * MINUTE_IN_SECONDS;
-        if ($configured_seconds <= 0) {
-            return array(
-                'status' => 'disabled',
-                'observed' => false,
-                'configuredMinutes' => 0,
-                'configuredSeconds' => 0,
-                'message' => __('UltraCache is not sending a Varnish shared HTML TTL because the setting is 0.', 'ultracache'),
-            );
+        $parts = array((string) ($invalidation['message'] ?? ''));
+        foreach ((array) ($invalidation['details'] ?? array()) as $detail) {
+            if (is_array($detail)) {
+                $parts[] = (string) ($detail['detail'] ?? '');
+            }
         }
+        $evidence = strtolower(implode(' ', $parts));
 
-        $origin = is_array($steps['afterInvalidation'] ?? null) ? $steps['afterInvalidation'] : array();
-        $hit = is_array($steps['verification'] ?? null) ? $steps['verification'] : array();
-        if (empty($origin['success']) || empty($hit['success'])) {
-            return array(
-                'status' => 'inconclusive',
-                'observed' => false,
-                'configuredMinutes' => $configured_minutes,
-                'configuredSeconds' => $configured_seconds,
-                'message' => __('The shared HTML TTL could not be checked because the post-invalidation refill sequence did not complete.', 'ultracache'),
-            );
+        return preg_match('/\b(auth(?:entication)?|secret|challenge|permission denied|access denied|unauthorized|forbidden|401|403)\b/i', $evidence)
+            ? 'authentication-failed'
+            : 'invalidation-failed';
+    }
+
+    private static function run_varnish_basic_test_invalidation($url)
+    {
+        self::begin_varnish_test_run();
+        try {
+            return self::varnish_flush_url_hard($url);
+        } finally {
+            self::end_varnish_test_run();
         }
-
-        $origin_cache_control = strtolower((string) ($origin['headers']['cacheControl'] ?? ''));
-        $hit_cache_control = strtolower((string) ($hit['headers']['cacheControl'] ?? ''));
-        $expected_pattern = '/(?:^|[,\s])s-maxage\s*=\s*' . preg_quote((string) $configured_seconds, '/') . '(?:$|[,\s])/';
-        $origin_header = 1 === preg_match($expected_pattern, $origin_cache_control);
-        $hit_header = 1 === preg_match($expected_pattern, $hit_cache_control);
-        $surrogate_ttl = trim((string) ($hit['headers']['ultraCacheSurrogateTtl'] ?? ''));
-        $surrogate_header = ctype_digit($surrogate_ttl) && (int) $surrogate_ttl === $configured_seconds;
-        $hit_verified = 'HIT' === strtoupper((string) ($hit['status'] ?? ''));
-        $age_raw = trim((string) ($hit['headers']['age'] ?? ''));
-        $age = ctype_digit($age_raw) ? (int) $age_raw : null;
-        $observed = $origin_header && $hit_verified && ($hit_header || $surrogate_header);
-
-        if ($observed) {
-            $status = 'observed';
-            $message = __('The configured shared HTML TTL was visible on the refilled response and the following request was a verified Varnish HIT.', 'ultracache');
-        } elseif (!$origin_header) {
-            $status = 'header-missing';
-            $message = __('The configured shared HTML TTL was not visible on the post-invalidation origin response. Existing server policy may be replacing or hiding Cache-Control.', 'ultracache');
-        } else {
-            $status = 'inconclusive';
-            $message = __('The configured shared HTML TTL was emitted, but the test could not verify the corresponding Varnish HIT behavior.', 'ultracache');
-        }
-
-        return array(
-            'status' => $status,
-            'observed' => $observed,
-            'configuredMinutes' => $configured_minutes,
-            'configuredSeconds' => $configured_seconds,
-            'originHeaderObserved' => $origin_header,
-            'hitHeaderObserved' => $hit_header || $surrogate_header,
-            'hitVerified' => $hit_verified,
-            'age' => $age,
-            'message' => $message,
-        );
     }
 
     public static function varnish_test_behavior()
@@ -322,102 +176,94 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
         self::reset_settings_cache();
         $settings = self::get_varnish_cli_settings();
         $support = is_array($settings['support'] ?? null) ? $settings['support'] : array();
-        self::set_varnish_refresh_ahead_capability(array(
-            'supported' => false,
-            'status' => 'not-verified',
-            'message' => self::maybe_translate('Refresh-ahead capability has not been verified by the current behavior test.'),
-            'ageObserved' => false,
-            'observedAge' => null,
-            'testedAt' => time(),
-        ), $settings);
+        $tested_at = time();
 
         if (empty($support['available'])) {
             $result = array(
-                'success'  => false,
+                'success' => false,
                 'verified' => false,
-                'testType' => 'behavior',
-                'status'   => 'unavailable',
-                'message'  => self::sanitize_varnish_string((string) ($support['message'] ?? 'Varnish integration is unavailable.')),
-                'time'     => time(),
+                'testType' => 'basic',
+                'operationType' => 'diagnostic-basic-test',
+                'status' => 'configuration-incomplete',
+                'message' => self::sanitize_varnish_string((string) ($support['message'] ?? 'Varnish integration is unavailable.')),
+                'time' => $tested_at,
             );
-            self::set_varnish_last_result($result);
             return $result;
         }
 
         if (empty($settings['enabled'])) {
             $result = array(
-                'success'  => false,
+                'success' => false,
                 'verified' => false,
-                'testType' => 'behavior',
-                'status'   => 'disabled',
-                'message'  => __('Varnish integration is disabled.', 'ultracache'),
-                'time'     => time(),
+                'testType' => 'basic',
+                'operationType' => 'diagnostic-basic-test',
+                'status' => 'configuration-incomplete',
+                'message' => __('Varnish integration is disabled.', 'ultracache'),
+                'time' => $tested_at,
             );
-            self::set_varnish_last_result($result);
             return $result;
         }
 
         if (empty($settings['servers'])) {
             $result = array(
-                'success'  => false,
+                'success' => false,
                 'verified' => false,
-                'testType' => 'behavior',
-                'status'   => 'not-configured',
-                'message'  => __('No Varnish endpoints are configured.', 'ultracache'),
-                'time'     => time(),
+                'testType' => 'basic',
+                'operationType' => 'diagnostic-basic-test',
+                'status' => 'configuration-incomplete',
+                'message' => __('No Varnish endpoints are configured.', 'ultracache'),
+                'time' => $tested_at,
             );
-            self::set_varnish_last_result($result);
             return $result;
         }
 
-        $url = home_url('/');
-        if (!ultracache_is_trusted_loopback_url($url)) {
+        $normalized = self::normalize_varnish_invalidation_url(home_url('/'));
+        $url = !empty($normalized['valid']) ? esc_url_raw((string) ($normalized['url'] ?? '')) : '';
+        if ('' === $url || !ultracache_is_trusted_loopback_url($url)) {
             $result = array(
-                'success'  => false,
+                'success' => false,
                 'verified' => false,
-                'testType' => 'behavior',
-                'status'   => 'blocked-url',
-                'message'  => __('The site front-page URL is not allowed by the UltraCache loopback policy.', 'ultracache'),
-                'time'     => time(),
+                'testType' => 'basic',
+                'operationType' => 'diagnostic-basic-test',
+                'status' => 'configuration-incomplete',
+                'message' => __('The canonical front-page URL is not eligible for the Varnish test.', 'ultracache'),
+                'time' => $tested_at,
             );
-            self::set_varnish_last_result($result);
             return $result;
         }
 
-        $timeout = max(2, min(5, (int) $settings['timeout']));
+        $timeout = max(2, min(5, (int) ($settings['timeout'] ?? 5)));
         $steps = array();
-        $steps['first'] = self::run_varnish_behavior_request($url, 'first', $timeout);
-        if (!empty($steps['first']['success'])) {
-            $steps['second'] = self::run_varnish_behavior_request($url, 'second', $timeout);
-        }
+        $steps['beforeInvalidation'] = self::run_varnish_behavior_request($url, 'basic_before_invalidation', $timeout);
 
-        $baseline_completed = isset($steps['first'], $steps['second'])
-            && self::varnish_behavior_steps_completed(array(
-                $steps['first'],
-                $steps['second'],
-            ));
         $invalidation = array(
             'success' => false,
             'details' => array(),
         );
-        if ($baseline_completed) {
-            $invalidation = self::varnish_flush_url_hard($url);
+        if (!empty($steps['beforeInvalidation']['success'])) {
+            $invalidation = self::run_varnish_basic_test_invalidation($url);
         }
 
         $invalidation_success = !empty($invalidation['success']);
         if ($invalidation_success) {
-            $steps['afterInvalidation'] = self::run_varnish_behavior_request($url, 'after_invalidation', $timeout);
+            $steps['afterInvalidation'] = self::run_varnish_behavior_request($url, 'basic_after_invalidation', $timeout);
             if (!empty($steps['afterInvalidation']['success'])) {
-                $steps['verification'] = self::run_varnish_behavior_request($url, 'verification', $timeout);
+                // Give the newly refilled object time to become observable as a public Varnish HIT.
+                sleep(2);
+                $steps['verification'] = self::run_varnish_behavior_request($url, 'basic_refill_verification', $timeout);
             }
         }
 
-        $requests_completed = $baseline_completed
-            && isset($steps['afterInvalidation'], $steps['verification'])
+        $before_completed = !empty($steps['beforeInvalidation']['success']);
+        $refill_completed = isset($steps['afterInvalidation'], $steps['verification'])
             && self::varnish_behavior_steps_completed(array(
                 $steps['afterInvalidation'],
                 $steps['verification'],
             ));
+        $after_status = strtoupper((string) ($steps['afterInvalidation']['status'] ?? ''));
+        $verification_status = strtoupper((string) ($steps['verification']['status'] ?? ''));
+        $invalidation_verified = in_array($after_status, array('MISS', 'STALE'), true);
+        $hit_verified = 'HIT' === $verification_status;
         $varnish_detected = false;
         foreach ($steps as $step) {
             if (!empty($step['varnishDetected'])) {
@@ -426,136 +272,73 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
             }
         }
 
-        $after_status = strtoupper((string) ($steps['afterInvalidation']['status'] ?? ''));
-        $verification_status = strtoupper((string) ($steps['verification']['status'] ?? ''));
-        $invalidation_verified = in_array($after_status, array('MISS', 'STALE'), true);
-        $hit_verified = 'HIT' === $verification_status;
-        $verified = $requests_completed && $invalidation_success && $varnish_detected && $invalidation_verified && $hit_verified;
-        $variant_test = array(
-            'status' => 'not-run',
-            'compatible' => false,
-            'message' => __('Varnish HTML variant compatibility was not tested because the base cache behavior was not verified.', 'ultracache'),
-            'profiles' => array(),
-        );
-        $scope_test = array(
-            'capability' => self::get_varnish_html_flush_capability(),
-            'steps' => array(),
-            'invalidation' => array('success' => false, 'details' => array()),
-        );
-        $soft_purge_test = array(
-            'capability' => self::get_varnish_soft_purge_capability($settings),
-            'steps' => array(),
-            'invalidation' => array('success' => false, 'details' => array()),
-        );
-        $conditional_revalidation_test = array(
-            'status' => 'not-run',
-            'observed' => false,
-            'etagAvailable' => false,
-            'lastModifiedAvailable' => false,
-            'etagObserved' => false,
-            'lastModifiedObserved' => false,
-            'source' => '',
-            'etagStep' => array(),
-            'lastModifiedStep' => array(),
-            'message' => __('Conditional HTML validators were not tested because the base cache behavior was not verified.', 'ultracache'),
-        );
-        if ($verified) {
-            $conditional_revalidation_test = self::run_varnish_conditional_revalidation_test(
-                $url,
-                $timeout,
-                is_array($steps['verification'] ?? null) ? $steps['verification'] : array()
-            );
-            $variant_test = self::run_varnish_html_variant_test($url, $timeout, $steps);
-            $scope_test = self::run_varnish_html_flush_scope_test($url, $timeout);
-            $soft_purge_test = self::run_varnish_soft_purge_capability_test($url, $timeout);
-        }
+        $visible_sequence_verified = $invalidation_success
+            && $refill_completed
+            && $varnish_detected
+            && $invalidation_verified
+            && $hit_verified;
+        $cache_signals_hidden = $invalidation_success
+            && $refill_completed
+            && (!$varnish_detected || ('INCONCLUSIVE' === $after_status && 'INCONCLUSIVE' === $verification_status));
 
-        $shared_ttl_test = self::evaluate_varnish_shared_html_ttl($steps, $settings['htmlTtlMinutes'] ?? 0);
-        $stale_while_revalidate_test = self::evaluate_varnish_stale_while_revalidate(
-            $steps,
-            $settings['staleWhileRevalidateSeconds'] ?? 0,
-            is_array($soft_purge_test['capability'] ?? null) ? $soft_purge_test['capability'] : array()
-        );
-        $refresh_ahead_capability = self::evaluate_varnish_refresh_ahead_capability(
-            $steps,
-            $settings,
-            is_array($soft_purge_test['capability'] ?? null) ? $soft_purge_test['capability'] : array(),
-            is_array($shared_ttl_test) ? $shared_ttl_test : array(),
-            $verified
-        );
-        if (!empty($refresh_ahead_capability['supported']) && !empty(self::get_dashboard_settings()['varnishRefreshAheadEnabled'])) {
-            self::ensure_cron_warm_events_scheduled(5, true);
-        }
-
-        if (!$baseline_completed) {
-            $status = 'request-failed';
-            $message = __('Varnish cache behavior test could not complete the initial public front-page requests.', 'ultracache');
+        if (!$before_completed) {
+            $status = 'refill-failed';
+            $message = __('The public canonical page could not be requested before invalidation.', 'ultracache');
+            $success = false;
         } elseif (!$invalidation_success) {
+            $status = self::classify_varnish_basic_invalidation_failure($invalidation);
+            $message = 'authentication-failed' === $status
+                ? __('Varnish connection or authentication failed.', 'ultracache')
+                : __('Varnish exact URL invalidation failed.', 'ultracache');
+            $success = false;
+        } elseif (!$refill_completed) {
+            $status = 'refill-failed';
+            $message = __('Varnish invalidation succeeded, but the public refill sequence did not complete.', 'ultracache');
+            $success = false;
+        } elseif ($visible_sequence_verified) {
+            $status = 'working';
+            $message = __('Varnish is working: the canonical page was invalidated, refilled, and returned as a cache HIT.', 'ultracache');
+            $success = true;
+        } elseif ($cache_signals_hidden || ('INCONCLUSIVE' === $after_status && $hit_verified)) {
+            $status = 'working-signals-hidden';
+            $message = __('Varnish invalidation and public refill completed, but cache HIT/MISS signals are hidden or incomplete.', 'ultracache');
+            $success = true;
+        } elseif ('HIT' === $after_status) {
             $status = 'invalidation-failed';
-            $message = __('Varnish cache behavior test stopped because front-page invalidation failed.', 'ultracache');
-        } elseif (!$requests_completed) {
-            $status = 'request-failed';
-            $message = __('Varnish cache behavior test could not complete the post-invalidation public front-page requests.', 'ultracache');
-        } elseif ($verified) {
-            $status = 'verified';
-            $message = __('Varnish cache behavior verified: the front page was invalidated, refilled, and returned as a cache HIT.', 'ultracache');
-        } elseif (!$varnish_detected) {
-            $status = 'inconclusive';
-            $message = __('The test completed, but Varnish-specific response headers were not visible, so cache behavior could not be verified.', 'ultracache');
-        } elseif ('BYPASS' === $verification_status) {
-            $status = 'bypassed';
-            $message = __('Varnish was detected, but the public front page remained bypassed instead of becoming a cache HIT.', 'ultracache');
-        } elseif (!$invalidation_verified) {
-            $status = 'invalidation-inconclusive';
-            $message = __('Varnish was detected, but the post-invalidation request did not provide enough evidence of a MISS or stale response.', 'ultracache');
+            $message = __('Varnish accepted the invalidation request, but the visible public object remained a cache HIT.', 'ultracache');
+            $success = false;
         } else {
-            $status = 'hit-inconclusive';
-            $message = __('Varnish was detected and invalidation completed, but the final cache HIT could not be verified.', 'ultracache');
-        }
-
-        $ban_pressure = array(
-            'status' => 'not-applicable',
-            'available' => false,
-            'message' => __('Ban-list diagnostics apply only to authenticated Varnish admin mode.', 'ultracache'),
-        );
-        if ('admin' === (string) ($settings['mode'] ?? 'http')) {
-            $ban_pressure = self::collect_varnish_ban_pressure();
+            $status = 'refill-failed';
+            $message = __('Varnish invalidation completed, but the public page did not return as a cache HIT.', 'ultracache');
+            $success = false;
         }
 
         $result = array(
-            'success'              => $requests_completed && $invalidation_success,
-            'verified'             => $verified,
-            'testType'             => 'behavior',
-            'status'               => $status,
-            'message'              => $message,
-            'time'                 => time(),
-            'url'                  => esc_url_raw($url),
-            'mode'                 => (string) ($settings['mode'] ?? 'http'),
-            'method'               => (string) ($settings['method'] ?? 'BAN'),
-            'effectiveMethod'      => (string) ($settings['effectiveMethod'] ?? ''),
-            'endpointCount'        => (int) ($settings['endpointCount'] ?? 0),
-            'varnishDetected'      => $varnish_detected,
-            'invalidationAttempted' => $baseline_completed,
+            'success' => $success,
+            'verified' => $visible_sequence_verified,
+            'testType' => 'basic',
+            'operationType' => 'diagnostic-basic-test',
+            'status' => $status,
+            'message' => $message,
+            'time' => $tested_at,
+            'url' => $url,
+            'mode' => (string) ($settings['mode'] ?? 'http'),
+            'method' => (string) ($settings['method'] ?? 'BAN'),
+            'effectiveMethod' => (string) ($settings['effectiveMethod'] ?? ''),
+            'endpointCount' => (int) ($settings['endpointCount'] ?? count((array) ($settings['servers'] ?? array()))),
+            'varnishDetected' => $varnish_detected,
+            'cacheSignalsHidden' => $cache_signals_hidden,
+            'connectionTested' => $before_completed,
+            'connectionVerified' => $invalidation_success,
+            'invalidationAttempted' => $before_completed,
             'invalidationAccepted' => $invalidation_success,
             'invalidationVerified' => $invalidation_verified,
-            'hitVerified'          => $hit_verified,
-            'steps'                => $steps,
-            'variantTest'          => is_array($variant_test) ? $variant_test : array(),
-            'sharedTtlTest'        => is_array($shared_ttl_test) ? $shared_ttl_test : array(),
-            'staleWhileRevalidateTest' => is_array($stale_while_revalidate_test) ? $stale_while_revalidate_test : array(),
-            'refreshAheadCapability' => is_array($refresh_ahead_capability) ? $refresh_ahead_capability : array(),
-            'conditionalRevalidationTest' => is_array($conditional_revalidation_test) ? $conditional_revalidation_test : array(),
-            'htmlFlushCapability'  => is_array($scope_test['capability'] ?? null) ? $scope_test['capability'] : array(),
-            'htmlFlushSteps'       => is_array($scope_test['steps'] ?? null) ? $scope_test['steps'] : array(),
-            'htmlFlushInvalidation' => is_array($scope_test['invalidation'] ?? null) ? $scope_test['invalidation'] : array(),
-            'softPurgeCapability' => is_array($soft_purge_test['capability'] ?? null) ? $soft_purge_test['capability'] : array(),
-            'softPurgeSteps' => is_array($soft_purge_test['steps'] ?? null) ? $soft_purge_test['steps'] : array(),
-            'softPurgeInvalidation' => is_array($soft_purge_test['invalidation'] ?? null) ? $soft_purge_test['invalidation'] : array(),
-            'details'              => is_array($invalidation['details'] ?? null) ? $invalidation['details'] : array(),
-            'banPressure'          => is_array($ban_pressure) ? $ban_pressure : array(),
+            'hitVerified' => $hit_verified,
+            'steps' => $steps,
+            'connectionDetails' => is_array($invalidation['details'] ?? null) ? $invalidation['details'] : array(),
+            'details' => is_array($invalidation['details'] ?? null) ? $invalidation['details'] : array(),
         );
 
-        self::set_varnish_last_result($result);
         return $result;
     }
 }

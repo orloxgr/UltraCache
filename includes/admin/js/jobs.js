@@ -99,14 +99,14 @@
 			skippedCount: forceRestart ? 0 : Math.max(0, Number(source.skippedCount || 0)),
 			failedCount: forceRestart ? 0 : Math.max(0, Number(source.failedCount || 0)),
 			varnishWarmedCount: forceRestart ? 0 : Math.max(0, Number(source.varnishWarmedCount || 0)),
-			varnishVerifiedCount: forceRestart ? 0 : Math.max(0, Number(source.varnishVerifiedCount || 0)),
-			varnishBypassedCount: forceRestart ? 0 : Math.max(0, Number(source.varnishBypassedCount || 0)),
-			varnishInconclusiveCount: forceRestart ? 0 : Math.max(0, Number(source.varnishInconclusiveCount || 0)),
 			etaMeasuredMs: forceRestart ? 0 : Math.max(0, Number(source.etaMeasuredMs || 0)),
 			etaSampleCount: sampleCount,
 			etaPerItemMs: forceRestart ? 0 : Math.max(0, Number(source.etaPerItemMs || 0)),
 			etaNextCheckpoint: forceRestart ? 10 : Math.max(10, Number(source.etaNextCheckpoint || getNextEtaCheckpoint(sampleCount))),
 			warmupGeneration: isWarmJobType(source.type) ? warmupGeneration : source.warmupGeneration,
+			currentItem: forceRestart ? '' : String(source.currentItem || ''),
+			currentStageLabel: forceRestart ? '' : String(source.currentStageLabel || ''),
+			currentPipeline: forceRestart ? null : (source.currentPipeline && typeof source.currentPipeline === 'object' ? source.currentPipeline : null),
 		});
 	}
 
@@ -122,12 +122,12 @@
 			total,
 			queueBuilding: !!source.queueBuilding,
 			unitCount: Math.max(0, Number(source.unitCount || 0)),
+			successCount: Math.max(0, Number(source.successCount || 0)),
+			skippedCount: Math.max(0, Number(source.skippedCount || 0)),
+			failedCount: Math.max(0, Number(source.failedCount || 0)),
 			avifCount: Math.max(0, Number(source.avifCount || 0)),
 			webpCount: Math.max(0, Number(source.webpCount || 0)),
 			varnishWarmedCount: Math.max(0, Number(source.varnishWarmedCount || 0)),
-			varnishVerifiedCount: Math.max(0, Number(source.varnishVerifiedCount || 0)),
-			varnishBypassedCount: Math.max(0, Number(source.varnishBypassedCount || 0)),
-			varnishInconclusiveCount: Math.max(0, Number(source.varnishInconclusiveCount || 0)),
 			logs: Array.isArray(source.logs) ? source.logs : [],
 			startTime: Number(source.startTime || 0),
 			etaPerItemMs: Math.max(0, Number(source.etaPerItemMs || 0)),
@@ -136,6 +136,8 @@
 			cancellable: !!source.active,
 			cancelRequested: !!source.cancelRequested,
 			showWhenInactive: !!source.showWhenInactive || source.type === 'media',
+			currentItem: String(source.currentItem || ''),
+			currentStageLabel: String(source.currentStageLabel || ''),
 		}, overrides && typeof overrides === 'object' ? overrides : {});
 	}
 
@@ -188,9 +190,6 @@
 			skippedCount: Number(source.skippedCount || 0) + result.skippedIncrement,
 			failedCount: Number(source.failedCount || 0) + result.failedIncrement,
 			varnishWarmedCount: Number(source.varnishWarmedCount || 0) + result.varnishWarmedIncrement,
-			varnishVerifiedCount: Number(source.varnishVerifiedCount || 0) + result.varnishVerifiedIncrement,
-			varnishBypassedCount: Number(source.varnishBypassedCount || 0) + result.varnishBypassedIncrement,
-			varnishInconclusiveCount: Number(source.varnishInconclusiveCount || 0) + result.varnishInconclusiveIncrement,
 			etaMeasuredMs,
 			etaSampleCount,
 			etaPerItemMs,
@@ -318,7 +317,31 @@
 
 						const item = batchItems[index];
 						const itemStartedAt = Date.now();
-						const itemResult = await processItem(state.type, item, isCancelled, exclusiveToken, state);
+						const checkpointItem = (patch) => {
+							state = Object.assign({}, state, patch && typeof patch === 'object' ? patch : {});
+							updateProcessState(state);
+							persistJobState(state);
+						};
+						const itemResult = await processItem(state.type, item, isCancelled, exclusiveToken, state, checkpointItem);
+						if (itemResult && itemResult.pauseItem) {
+							state = Object.assign({}, state, {
+								active: false,
+								cancelRequested: true,
+								pendingItems: batchItems.slice(index),
+								nextCursor: batchNextCursor,
+								hasMore: batchHasMore,
+								logs: state.logs.concat([itemResult.line || 'Paused by user.']).slice(-50),
+							});
+							persistJobState(state);
+							updateProcessState(state, { active: false, cancellable: false });
+							if (exclusiveToken) {
+								try {
+									await pauseExclusiveSession(state, exclusiveToken);
+								} catch (sessionError) {}
+							}
+							onPaused(state, exclusiveToken);
+							return;
+						}
 						const applied = applyJobItemResult(state, itemResult, Math.max(0, Date.now() - itemStartedAt), {
 							shouldMeasureEta,
 							decorateState: decorateStateAfterItem,
@@ -329,6 +352,9 @@
 							nextCursor: batchNextCursor,
 							hasMore: batchHasMore,
 							cancelRequested: isCancelled(),
+							currentItem: '',
+							currentStageLabel: '',
+							currentPipeline: null,
 						});
 						updateProcessState(state);
 						persistJobState(state);

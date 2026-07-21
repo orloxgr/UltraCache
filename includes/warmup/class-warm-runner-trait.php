@@ -227,6 +227,14 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
 
             $reason = $this->get_loopback_cache_reason($response);
 
+            if ('set-cookie-woocommerce_recently_viewed' === $reason) {
+                // The authenticated internal warm request stores only the response body.
+                // WooCommerce's visitor-only recently-viewed cookie must not reject the
+                // page cache warm when older WooCommerce versions do not expose the
+                // woocommerce_set_cookie_enabled filter.
+                return '';
+            }
+
             if ('write-failed' === $reason) {
                 // Manual warm-up performs its own controlled cache-file write from the
                 // fetched HTML below. A frontend loopback storage miss should not stop
@@ -433,22 +441,33 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 $this->delete_runtime_lock_file($file, 'runtime_lock_release');
             }
         }
-        private function is_ultracache_internal_loopback_request()
+        private function is_authenticated_ultracache_internal_warm_request()
         {
-            if ('1' === sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_INTERNAL_REQUEST'))) {
-                return true;
-            }
-            if ('1' === sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_WARM'))) {
-                return true;
-            }
-            if ('1' === sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_CSS_BUNDLE'))) {
-                return true;
-            }
-            if ($this->is_frontpage_css_scan_mode()) {
-                return true;
+            return function_exists('ultracache_is_authenticated_internal_request')
+                && ultracache_is_authenticated_internal_request('warm');
+        }
+
+        /**
+         * Prevent WooCommerce's recently-viewed response cookie from making an
+         * authenticated internal warm response uncacheable.
+         *
+         * @param bool   $enabled Whether WooCommerce may set the cookie.
+         * @param string $name    Cookie name.
+         * @return bool
+         */
+        public function filter_internal_warm_woocommerce_cookie($enabled, $name = '')
+        {
+            if (!$enabled || 'woocommerce_recently_viewed' !== (string) $name) {
+                return (bool) $enabled;
             }
 
-            return false;
+            return $this->is_authenticated_ultracache_internal_warm_request() ? false : (bool) $enabled;
+        }
+
+        private function is_ultracache_internal_loopback_request()
+        {
+            return function_exists('ultracache_is_authenticated_internal_request')
+                && ultracache_is_authenticated_internal_request();
         }
         private function get_allowed_warm_buckets(array $settings = array())
         {
@@ -478,6 +497,36 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
         public function warm_url($url, array $args = array())
         {
             $args = is_array($args) ? $args : array();
+            $heartbeat = isset($args['_warm_pipeline_heartbeat']) && is_callable($args['_warm_pipeline_heartbeat'])
+                ? $args['_warm_pipeline_heartbeat']
+                : null;
+            unset($args['_warm_pipeline_heartbeat']);
+            $run_heartbeat = static function ($stage) use ($heartbeat) {
+                if (!is_callable($heartbeat)) {
+                    return true;
+                }
+                try {
+                    return false !== call_user_func($heartbeat, sanitize_key((string) $stage));
+                } catch (Throwable $error) {
+                    unset($error);
+                    return false;
+                }
+            };
+            $ownership_lost_result = static function ($url, array $buckets = array(), array $files = array()) {
+                return array(
+                    'success' => false,
+                    'cached' => false,
+                    'skipped' => false,
+                    'retryable' => true,
+                    'terminal' => false,
+                    'ownershipLost' => true,
+                    'failureClass' => 'ownership-lost',
+                    'url' => esc_url_raw((string) $url),
+                    'message' => __('Warm-up ownership expired or was transferred before the current HTML stage completed.', 'ultracache'),
+                    'files' => array_values($files),
+                    'buckets' => array_values($buckets),
+                );
+            };
             $ignore_runtime_bypass = !empty($args['ignore_runtime_bypass']);
             $force_refresh = !empty($args['force_refresh']);
             $settings_for_warm = $this->get_settings();
@@ -531,69 +580,86 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
 
             $cached_files = array();
             $last_error = '';
-            $request_url = $url;
-            $force_refresh_token = '';
+            $retryable_failure = false;
+            $terminal_failure = false;
+            $internal_request_token = function_exists('ultracache_create_runtime_control_token')
+                ? ultracache_create_runtime_control_token()
+                : '';
             $force_refresh_details = array();
             $force_refresh_reached_bucket_count = 0;
-            if ($force_refresh) {
-                $force_refresh_token = ultracache_create_runtime_control_token();
-                if ('' === $force_refresh_token) {
-                    $result = array(
-                        'success' => false,
-                        'cached'  => false,
-                        'url'     => $url,
-                        'message' => __('Could not authenticate the internal cache refresh request.', 'ultracache'),
-                        'files'   => array(),
-                        'buckets' => $buckets,
-                    );
-                    $this->record_analytics_warm($url, $result);
-                    return $result;
-                }
-
-                $request_url = add_query_arg(
-                    array(
-                        'ultracache_revalidate' => '1',
-                        'ultracache_rt'         => $force_refresh_token,
-                    ),
-                    $url
+            if ('' === $internal_request_token) {
+                $result = array(
+                    'success' => false,
+                    'cached'  => false,
+                    'url'     => $url,
+                    'message' => __('Could not authenticate the internal cache warm request.', 'ultracache'),
+                    'files'   => array(),
+                    'buckets' => $buckets,
                 );
+                $this->record_analytics_warm($url, $result);
+                return $result;
             }
 
             foreach ($buckets as $bucket) {
+                $request_url = $url;
+                if ($force_refresh) {
+                    $request_nonce = function_exists('wp_generate_uuid4')
+                        ? str_replace('-', '', wp_generate_uuid4())
+                        : wp_generate_password(24, false, false);
+                    $request_url = add_query_arg(
+                        array(
+                            'ultracache_revalidate' => '1',
+                            'ultracache_rt'         => $internal_request_token,
+                            'ultracache_rv'         => substr((string) $request_nonce, 0, 32),
+                            'ultracache_bucket'     => sanitize_key((string) $bucket),
+                        ),
+                        $url
+                    );
+                }
+                if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-before')) {
+                    return $ownership_lost_result($url, $buckets, $cached_files);
+                }
                 $pause_reason = function_exists('ultracache_operation_pause_reason') ? ultracache_operation_pause_reason($operation_budget) : '';
                 if ('' !== $pause_reason) {
                     $last_error = 'Warm paused by ' . $pause_reason . '.';
+                    $retryable_failure = true;
                     break;
                 }
                 $accept_header = $this->get_accept_header_for_bucket($bucket);
+                $request_args = array(
+                    'method'      => 'GET',
+                    'timeout'     => 10,
+                    'redirection' => 0,
+                    'sslverify'   => $this->should_verify_loopback_ssl($url),
+                    'user-agent'  => 'Mozilla/5.0 (compatible; UltraCache-Warm/' . ULTRACACHE_VERSION . '; +https://wordpress.org)',
+                    'headers'     => array_filter(
+                        array(
+                            'Accept'                          => $accept_header,
+                            'PageSpeed'                       => 'off',
+                            'ModPagespeed'                    => 'off',
+                            'X-UltraCache-Warm'               => '1',
+                            'X-UltraCache-Internal-Request'   => '1',
+                            'X-UltraCache-Force-Refresh'      => $force_refresh ? '1' : '',
+                            'X-UltraCache-Revalidate'         => $force_refresh ? '1' : '',
+                            'X-UltraCache-Token'              => $internal_request_token,
+                            'X-UltraCache-VCL-Signature'      => $force_refresh && function_exists('ultracache_get_varnish_revalidation_vcl_signature') ? ultracache_get_varnish_revalidation_vcl_signature() : '',
+                            'Cache-Control'                   => $force_refresh ? 'no-cache, no-store, must-revalidate, max-age=0' : '',
+                            'Pragma'                          => $force_refresh ? 'no-cache' : '',
+                        )
+                    ),
+                );
                 $response = ultracache_safe_loopback_remote_request(
                     $request_url,
-                    array(
-                        'method'      => 'GET',
-                        'timeout'     => 10,
-                        'redirection' => 3,
-                        'sslverify'   => $this->should_verify_loopback_ssl($url),
-                        'user-agent'  => 'Mozilla/5.0 (compatible; UltraCache-Warm/' . ULTRACACHE_VERSION . '; +https://wordpress.org)',
-                        'headers'     => array_filter(
-                            array(
-                                'Accept'                          => $accept_header,
-                                'PageSpeed'                       => 'off',
-                                'ModPagespeed'                    => 'off',
-                                'X-UltraCache-Warm'               => '1',
-                                'X-UltraCache-Internal-Request'   => '1',
-                                'X-UltraCache-Force-Refresh'      => $force_refresh ? '1' : '',
-                                'X-UltraCache-Revalidate'         => $force_refresh ? '1' : '',
-                                'X-UltraCache-Token'              => $force_refresh_token,
-                                'Cache-Control'                   => $force_refresh ? 'no-cache, no-store, must-revalidate, max-age=0' : '',
-                                'Pragma'                          => $force_refresh ? 'no-cache' : '',
-                            )
-                        ),
-                    ),
+                    $request_args,
                     'warm_url'
                 );
 
                 if (is_wp_error($response)) {
                     $last_error = $response->get_error_message();
+                    $retryable_failure = true;
+                    if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-after')) {
+                        return $ownership_lost_result($url, $buckets, $cached_files);
+                    }
                     continue;
                 }
 
@@ -610,6 +676,7 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                         'httpCode' => $code,
                         'reachedOrigin' => $reached_origin,
                         'marker' => sanitize_text_field($force_refresh_marker),
+                        'transport' => 'public-route',
                         'headers' => array(
                             'via' => sanitize_text_field((string) wp_remote_retrieve_header($response, 'via')),
                             'server' => sanitize_text_field((string) wp_remote_retrieve_header($response, 'server')),
@@ -626,14 +693,41 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                     );
                 }
                 if (200 !== $code || empty($html)) {
-                    $last_error = 200 !== $code ? 'Remote page did not return HTTP 200.' : 'Remote page returned an empty body.';
+                    $is_redirect = in_array($code, array(301, 302, 303, 307, 308), true);
+                    $last_error = $is_redirect
+                        ? 'Remote page redirected; the exact queued URL was not warmed.'
+                        : (200 !== $code ? 'Remote page did not return HTTP 200.' : 'Remote page returned an empty body.');
+                    $http_retryable = 0 === $code || 408 === $code || 425 === $code || 429 === $code || $code >= 500 || (200 === $code && empty($html));
+                    $retryable_failure = $retryable_failure || $http_retryable;
+                    $terminal_failure = $terminal_failure || !$http_retryable;
+                    $request_retryable = $retryable_failure && !$terminal_failure;
+                    $redirect_url = '';
+                    if ($is_redirect) {
+                        $location = trim((string) wp_remote_retrieve_header($response, 'location'));
+                        if ('' !== $location && class_exists('WP_Http') && method_exists('WP_Http', 'make_absolute_url')) {
+                            $location = WP_Http::make_absolute_url($location, $url);
+                        }
+                        $location = esc_url_raw($location);
+                        if ('' !== $location) {
+                            $location = wp_http_validate_url($location) ? $location : '';
+                        }
+                        if ('' !== $location
+                            && function_exists('ultracache_is_strict_frontend_loopback_url')
+                            && ultracache_is_strict_frontend_loopback_url($location)) {
+                            $redirect_url = $location;
+                        }
+                    }
                     $result = array(
                         'success'  => false,
                         'cached'   => false,
-                        'skipped'  => true,
+                        'skipped'  => !$request_retryable,
+                        'retryable' => $request_retryable,
+                        'terminal' => !$request_retryable,
+                        'failureClass' => $is_redirect ? 'canonical-redirect' : ($request_retryable ? 'http-transient' : (200 === $code ? 'empty-response' : 'http-terminal')),
                         'url'      => $url,
+                        'redirectUrl' => $redirect_url,
                         'message'  => $last_error,
-                        'files'    => array(),
+                        'files'    => $cached_files,
                         'buckets'  => $buckets,
                         'httpCode' => $code,
                     );
@@ -650,6 +744,9 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                         'success' => false,
                         'cached'  => false,
                         'skipped' => true,
+                        'retryable' => false,
+                        'terminal' => true,
+                        'failureClass' => 'non-html-response',
                         'url'     => $url,
                         'message' => $last_error,
                         'files'   => array(),
@@ -669,6 +766,9 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                         'success' => false,
                         'cached'  => false,
                         'skipped' => true,
+                        'retryable' => false,
+                        'terminal' => true,
+                        'failureClass' => 'cache-rejected',
                         'url'     => $url,
                         'message' => $last_error,
                         'files'   => array(),
@@ -687,10 +787,16 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                     $css_bundle_result = array('success' => false, 'skipped' => true, 'message' => __('CSS bundle skipped for this URL by the selected CSS Bundling Scope.', 'ultracache'));
                     $should_build_bundle_for_url = ('per-page' === $bundle_scope || $this->is_frontpage_request_url($url));
                     if ($should_build_bundle_for_url && empty($this->get_frontpage_css_manifest_entry($url))) {
+                        if (!$run_heartbeat('css-before')) {
+                            return $ownership_lost_result($url, $buckets, $cached_files);
+                        }
                         // Build the CSS bundle only after the warm loopback proved that the
                         // public page returns cacheable HTML. This keeps manual warm-up progress
                         // aligned with the actual work and prevents CSS scans for 404/feed/non-HTML URLs.
                         $css_bundle_result = $this->build_frontpage_css_bundle($url, array('skip_final_warm' => true));
+                        if (!$run_heartbeat('css-after')) {
+                            return $ownership_lost_result($url, $buckets, $cached_files);
+                        }
                     } elseif ($should_build_bundle_for_url) {
                         $css_bundle_result = array('success' => true, 'skipped' => true, 'message' => __('Existing CSS bundle manifest entry found for this URL.', 'ultracache'));
                     }
@@ -712,6 +818,10 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 $file_path = $this->get_cache_path($url, $bucket);
                 if (empty($file_path)) {
                     $last_error = 'Could not determine cache path.';
+                    $terminal_failure = true;
+                    if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-after')) {
+                        return $ownership_lost_result($url, $buckets, $cached_files);
+                    }
                     continue;
                 }
 
@@ -719,13 +829,21 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 if (!$wrote || !file_exists($file_path)) {
                     $write_error = method_exists($this, 'get_last_cache_write_error_message') ? $this->get_last_cache_write_error_message() : '';
                     $last_error = '' !== (string) $write_error ? 'Failed to write cache file: ' . (string) $write_error : 'Failed to write cache file.';
+                    $retryable_failure = true;
+                    if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-after')) {
+                        return $ownership_lost_result($url, $buckets, $cached_files);
+                    }
                     continue;
                 }
 
                 $cached_files[] = $file_path;
+                if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-after')) {
+                    return $ownership_lost_result($url, $buckets, $cached_files);
+                }
             }
 
-            $success = !empty($cached_files);
+            $success = !empty($buckets) && count($cached_files) === count($buckets);
+            $partial = !empty($cached_files) && count($cached_files) < count($buckets);
             if ($success) {
                 $this->record_cache_event('warm', array('url' => $url, 'files' => $cached_files));
             }
@@ -734,9 +852,14 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 'success' => $success,
                 'cached'  => $success,
                 'url'     => $url,
-                'message' => $success ? ($css_bundle_requested ? __('Cached + CSS.', 'ultracache') : __('Cached.', 'ultracache')) : ('' !== $last_error ? $last_error : __('Cache write failed.', 'ultracache')),
+                'message' => $success
+                    ? ($css_bundle_requested ? __('Cached + CSS.', 'ultracache') : __('Cached.', 'ultracache'))
+                    : ($partial ? __('Only some requested HTML variants were cached.', 'ultracache') : ('' !== $last_error ? $last_error : __('Cache write failed.', 'ultracache'))),
                 'files'   => $cached_files,
                 'buckets' => $buckets,
+                'retryable' => !$success && $retryable_failure && !$terminal_failure,
+                'terminal' => !$success && (!$retryable_failure || $terminal_failure),
+                'failureClass' => $partial ? 'partial-html-variants' : ($terminal_failure ? 'html-terminal' : ($retryable_failure ? 'html-transient' : 'cache-write-failed')),
             );
 
             if ($force_refresh) {

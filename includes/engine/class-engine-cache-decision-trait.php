@@ -43,6 +43,8 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 'download_file',
                 'ultracache_revalidate',
                 'ultracache_rt',
+                'ultracache_rv',
+                'ultracache_bucket',
                 'ultracache_store_profile',
                 'ultracache_callback_profile',
                 'ultracache_store_profile_verbose',
@@ -182,6 +184,8 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             return array(
                 'ultracache_revalidate',
                 'ultracache_rt',
+                'ultracache_rv',
+                'ultracache_bucket',
                 'ultracache_store_profile',
                 'ultracache_callback_profile',
                 'ultracache_store_profile_verbose',
@@ -616,6 +620,9 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             if ('1' !== $request_flag && '1' !== $header_flag) {
                 return false;
             }
+            if ('1' !== sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_INTERNAL_REQUEST'))) {
+                return false;
+            }
 
             $token = sanitize_text_field(ultracache_query_value('ultracache_rt'));
             if ('' === $token) {
@@ -627,6 +634,21 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             }
 
             return $this->is_valid_revalidate_token($token);
+        }
+
+        public function filter_authenticated_internal_canonical_redirect($redirect_url, $requested_url)
+        {
+            unset($requested_url);
+
+            if ($this->is_internal_revalidate_request()) {
+                return false;
+            }
+
+            $css_scan_request = '1' === sanitize_text_field(ultracache_query_value('ultracache_frontpage_css_scan'))
+                && function_exists('ultracache_is_authenticated_internal_request')
+                && ultracache_is_authenticated_internal_request('css');
+
+            return $css_scan_request ? false : $redirect_url;
         }
 
         private function is_profile_bypass_request()
@@ -717,6 +739,15 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             }
             $this->profile_request_checkpoint('should_bypass_after_basic_checks', array('request_method' => $request_method));
 
+            $authorization = trim((string) ultracache_server_value('HTTP_AUTHORIZATION'));
+            $redirect_authorization = trim((string) ultracache_server_value('REDIRECT_HTTP_AUTHORIZATION'));
+            $php_auth_user = trim((string) ultracache_server_value('PHP_AUTH_USER'));
+            if ('' !== $authorization || '' !== $redirect_authorization || '' !== $php_auth_user) {
+                $this->last_bypass_reason = 'authorization';
+                $this->profile_request_checkpoint('should_bypass_return', array('reason' => $this->last_bypass_reason));
+                return true;
+            }
+
             $this->profile_request_checkpoint('should_bypass_before_internal_revalidate');
             if ($this->is_internal_revalidate_request()) {
                 $this->profile_request_checkpoint('should_bypass_return', array('reason' => 'internal-revalidate-allowed'));
@@ -786,6 +817,8 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 unset(
                     $ultracache_query_vars_for_cacheability['ultracache_revalidate'],
                     $ultracache_query_vars_for_cacheability['ultracache_rt'],
+                    $ultracache_query_vars_for_cacheability['ultracache_rv'],
+                    $ultracache_query_vars_for_cacheability['ultracache_bucket'],
                     $ultracache_query_vars_for_cacheability['ultracache_store_profile'],
                     $ultracache_query_vars_for_cacheability['ultracache_callback_profile'],
                     $ultracache_query_vars_for_cacheability['ultracache_store_profile_verbose'],
@@ -1068,7 +1101,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             $query = '';
             if (!empty($parts['query'])) {
                 parse_str((string) $parts['query'], $query_vars);
-                unset($query_vars['ultracache_revalidate'], $query_vars['ultracache_rt'], $query_vars['ultracache_store_profile'], $query_vars['ultracache_callback_profile'], $query_vars['ultracache_store_profile_verbose'], $query_vars['ultracache_store_profile_verbose_settings'], $query_vars['ultracache_profile_bypass'], $query_vars['ultracache_profile_run'], $query_vars['ultracache_runtime_js_scan'], $query_vars['ultracache_runtime_js_scan_id'], $query_vars['ultracache_runtime_js_scan_nonce']);
+                unset($query_vars['ultracache_revalidate'], $query_vars['ultracache_rt'], $query_vars['ultracache_rv'], $query_vars['ultracache_bucket'], $query_vars['ultracache_store_profile'], $query_vars['ultracache_callback_profile'], $query_vars['ultracache_store_profile_verbose'], $query_vars['ultracache_store_profile_verbose_settings'], $query_vars['ultracache_profile_bypass'], $query_vars['ultracache_profile_run'], $query_vars['ultracache_runtime_js_scan'], $query_vars['ultracache_runtime_js_scan_id'], $query_vars['ultracache_runtime_js_scan_nonce']);
                 if (!empty($query_vars)) {
                     ksort($query_vars);
                     $query = http_build_query($query_vars);

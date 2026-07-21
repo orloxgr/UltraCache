@@ -166,13 +166,20 @@ $option_names = array(
     'ultracache_warmup_generation',
     'ultracache_lcp_last_refresh',
     'ultracache_varnish_refresh_ahead_state_v1',
+    'ultracache_varnish_refresh_candidates_v1',
     'ultracache_varnish_metrics_v1',
+    'ultracache_varnish_diagnostic_basic_v1',
+    'ultracache_varnish_diagnostic_flush_scope_v1',
+    'ultracache_varnish_diagnostic_validators_v1',
+    'ultracache_varnish_diagnostic_accept_vcl_v1',
+    'ultracache_varnish_diagnostic_soft_purge_v1',
+    'ultracache_varnish_diagnostic_multi_endpoint_v1',
+    'ultracache_varnish_html_ttl_default_migration_v1',
     ULTRACACHE_MANUAL_WARM_STATE_KEY,
 );
 
 if (!$keep_settings) {
     array_unshift($option_names, ULTRACACHE_SETTINGS_KEY);
-    $option_names[] = 'ultracache_varnish_html_ttl_default_migration_v1';
 }
 
 if (!$keep_tables) {

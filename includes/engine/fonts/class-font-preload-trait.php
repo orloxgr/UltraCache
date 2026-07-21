@@ -304,7 +304,7 @@ trait Ultra_Cache_Engine_Font_Preload_Trait
             }
 
             // Intentional final HTML optimization output: font preloads are added to the rendered document head after font discovery/localization.
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Adds a discovered font preload to final rendered HTML after the enqueue phase has completed.
             $link = '<link rel="preload" as="font" type="font/woff2" href="' . $url . '" crossorigin />';
             if (false === strpos($html, $link)) {
                 $links[] = $link;

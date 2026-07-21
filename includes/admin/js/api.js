@@ -155,6 +155,7 @@
 			get_crawl_urls: { path: 'crawl-urls', method: 'GET' },
 			inspect_url: { path: 'inspect-url', method: 'POST' },
 			crawl_page: { path: 'crawl-page', method: 'POST' },
+			manual_warm_page_stage: { path: 'manual-warm/page-stage', method: 'POST' },
 			build_frontpage_css: { path: 'build-frontpage-css', method: 'POST' },
 			warm_frontpage_html: { path: 'warm-frontpage-html', method: 'POST' },
 			warm_frontpage_html_css: { path: 'warm-frontpage-html-css', method: 'POST' },

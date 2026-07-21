@@ -746,16 +746,26 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
     {
         $terminal = trim((string) $terminal);
         if ('' === $terminal) {
-            return array('valid' => false, 'message' => self::maybe_translate('Empty Varnish HTTP endpoint. Use host:port, for example 127.0.0.1:82 or varnish.example.com:8080.'));
+            return array('valid' => false, 'message' => self::maybe_translate('Empty Varnish HTTP endpoint. Use host:port or an explicit http(s) URL, for example 127.0.0.1:82 or https://varnish.example.com:443.'));
         }
 
-        list($host, $port) = self::parse_varnish_terminal($terminal);
+        if (preg_match('#^([a-z][a-z0-9+.-]*)://#i', $terminal, $matches)) {
+            $explicit_scheme = strtolower((string) $matches[1]);
+            if (!in_array($explicit_scheme, array('http', 'https'), true)) {
+                return array('valid' => false, 'message' => self::maybe_translate('Varnish HTTP endpoints must use http:// or https://.'));
+            }
+        }
+
+        list($scheme, $host, $port) = self::parse_varnish_http_terminal($terminal);
+        if (!in_array($scheme, array('http', 'https'), true) || '' === $host || $port <= 0) {
+            return array('valid' => false, 'message' => self::maybe_translate('Invalid Varnish HTTP endpoint. Use host:port or an explicit http(s) URL.'));
+        }
         $message = self::get_varnish_http_endpoint_block_message($host, $port);
         if ('' !== $message) {
-            return array('valid' => false, 'message' => $message, 'host' => $host, 'port' => $port);
+            return array('valid' => false, 'message' => $message, 'scheme' => $scheme, 'host' => $host, 'port' => $port);
         }
 
-        return array('valid' => true, 'message' => '', 'host' => $host, 'port' => $port);
+        return array('valid' => true, 'message' => '', 'scheme' => $scheme, 'host' => $host, 'port' => $port);
     }
 
 
@@ -811,14 +821,23 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
                 continue;
             }
 
-            $server = preg_replace('#^[a-z]+://#i', '', $server);
-            $server = preg_replace('#/.*$#', '', $server);
+            $scheme = '';
+            if (preg_match('#^([a-z][a-z0-9+.-]*)://#i', $server, $matches)) {
+                $scheme = strtolower((string) $matches[1]);
+                $server = substr($server, strlen((string) $matches[0]));
+            }
+
+            $server = preg_replace('~[/?#].*$~', '', $server);
             $server = preg_replace('/[^A-Za-z0-9\.\-:\[\]]/', '', $server);
             if ('' === $server) {
                 continue;
             }
 
-            $normalized[] = $server;
+            if ('http' === $mode && '' !== $scheme) {
+                $normalized[] = $scheme . '://' . $server;
+            } else {
+                $normalized[] = $server;
+            }
         }
 
         if (empty($normalized)) {
@@ -921,6 +940,44 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
         }
 
         return !empty($value);
+    }
+
+
+    private static function sanitize_local_url_textarea_setting($value, $limit = 25)
+    {
+        $limit = max(1, min(100, absint($limit)));
+        $lines = preg_split('/[\r\n,]+/', (string) $value);
+        $urls = array();
+        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+
+        foreach ((array) $lines as $line) {
+            $line = trim((string) $line);
+            if ('' === $line) {
+                continue;
+            }
+            if ('/' === substr($line, 0, 1)) {
+                $line = home_url($line);
+            }
+            $line = preg_replace('/#.*$/', '', $line);
+            $url = esc_url_raw((string) $line, array('http', 'https'));
+            if ('' === $url) {
+                continue;
+            }
+
+            $trusted = function_exists('ultracache_is_trusted_loopback_url')
+                ? ultracache_is_trusted_loopback_url($url)
+                : ('' !== $home_host && hash_equals($home_host, strtolower((string) wp_parse_url($url, PHP_URL_HOST))));
+            if (!$trusted) {
+                continue;
+            }
+
+            $urls[$url] = $url;
+            if (count($urls) >= $limit) {
+                break;
+            }
+        }
+
+        return implode("\n", array_values($urls));
     }
 
 
@@ -1073,10 +1130,10 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
         $settings['varnishStaleWhileRevalidateSeconds'] = self::sanitize_bounded_integer_setting($settings['varnishStaleWhileRevalidateSeconds'] ?? $defaults['varnishStaleWhileRevalidateSeconds'], $defaults['varnishStaleWhileRevalidateSeconds'], 0, 86400);
         $settings['varnishRefillAfterTargetedInvalidation'] = !empty($settings['varnishRefillAfterTargetedInvalidation']);
         $settings['varnishWarmDuringManualWarmup'] = !empty($settings['varnishWarmDuringManualWarmup']);
-        $settings['varnishVerifyRefillHit'] = !empty($settings['varnishVerifyRefillHit']);
         $settings['varnishRefreshAheadEnabled'] = !empty($settings['varnishRefreshAheadEnabled']);
         $settings['varnishRefreshAheadThresholdPercent'] = self::sanitize_bounded_integer_setting($settings['varnishRefreshAheadThresholdPercent'] ?? $defaults['varnishRefreshAheadThresholdPercent'], $defaults['varnishRefreshAheadThresholdPercent'], 50, 95);
         $settings['varnishRefreshAheadMaxPages'] = self::sanitize_bounded_integer_setting($settings['varnishRefreshAheadMaxPages'] ?? $defaults['varnishRefreshAheadMaxPages'], $defaults['varnishRefreshAheadMaxPages'], 1, 10);
+        $settings['varnishRefreshAheadPinnedUrls'] = self::sanitize_local_url_textarea_setting($settings['varnishRefreshAheadPinnedUrls'] ?? '', 25);
 
         unset($settings['frontendSafeModeEnabled']);
 

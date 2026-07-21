@@ -1456,10 +1456,10 @@ function sanitizeRuntimeJsScanDisplayUrl(url) {
 			}
 			try {
 				const parsed = new URL(value, window.location.origin);
-				['ultracache_runtime_js_scan', 'ultracache_runtime_js_scan_id', 'ultracache_runtime_js_scan_nonce', 'ultracache_runtime_js_scan_context', 'ultracache_rt', 'ultracache_profile_bypass', 'ultracache_store_profile', 'ultracache_callback_profile', 'ultracache_store_profile_verbose', 'ultracache_store_profile_verbose_settings', 'ultracache_profile_run', 'ultracache_revalidate'].forEach((key) => parsed.searchParams.delete(key));
+				['ultracache_runtime_js_scan', 'ultracache_runtime_js_scan_id', 'ultracache_runtime_js_scan_nonce', 'ultracache_runtime_js_scan_context', 'ultracache_rt', 'ultracache_rv', 'ultracache_bucket', 'ultracache_profile_bypass', 'ultracache_store_profile', 'ultracache_callback_profile', 'ultracache_store_profile_verbose', 'ultracache_store_profile_verbose_settings', 'ultracache_profile_run', 'ultracache_revalidate'].forEach((key) => parsed.searchParams.delete(key));
 				return parsed.toString();
 			} catch (error) {
-				return value.replace(/([?&])ultracache_(runtime_js_scan(?:_id|_nonce|_context)?|rt|profile_bypass|store_profile(?:_verbose(?:_settings)?)?|callback_profile|profile_run|revalidate)=[^&#]*/g, '$1').replace(/[?&]$/, '');
+				return value.replace(/([?&])ultracache_(runtime_js_scan(?:_id|_nonce|_context)?|rt|rv|bucket|profile_bypass|store_profile(?:_verbose(?:_settings)?)?|callback_profile|profile_run|revalidate)=[^&#]*/g, '$1').replace(/[?&]$/, '');
 			}
 		}
 

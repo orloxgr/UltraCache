@@ -275,12 +275,6 @@ trait Ultra_Cache_WP_Admin_Trait
                 'in_footer' => true,
                 'module'    => false,
             ),
-            'ultracache-admin-varnish-metrics' => array(
-                'path'      => 'includes/admin/js/varnish-metrics.js',
-                'deps'      => array('wp-element', 'wp-i18n', 'ultracache-admin-core', 'ultracache-admin-ui'),
-                'in_footer' => true,
-                'module'    => false,
-            ),
             'ultracache-admin-varnish-flush-scope' => array(
                 'path'      => 'includes/admin/js/varnish-flush-scope.js',
                 'deps'      => array('wp-element', 'wp-i18n', 'ultracache-admin-core', 'ultracache-admin-ui'),
@@ -289,7 +283,7 @@ trait Ultra_Cache_WP_Admin_Trait
             ),
             'ultracache-admin-varnish' => array(
                 'path'      => 'includes/admin/js/varnish.js',
-                'deps'      => array('wp-element', 'wp-i18n', 'ultracache-admin-core', 'ultracache-admin-api', 'ultracache-admin-ui', 'ultracache-admin-cache-shared', 'ultracache-admin-varnish-refresh-ahead', 'ultracache-admin-varnish-metrics', 'ultracache-admin-varnish-flush-scope'),
+                'deps'      => array('wp-element', 'wp-i18n', 'ultracache-admin-core', 'ultracache-admin-api', 'ultracache-admin-ui', 'ultracache-admin-cache-shared', 'ultracache-admin-varnish-refresh-ahead', 'ultracache-admin-varnish-flush-scope'),
                 'in_footer' => true,
                 'module'    => false,
             ),
@@ -352,7 +346,6 @@ trait Ultra_Cache_WP_Admin_Trait
         wp_set_script_translations('ultracache-admin-media', 'ultracache', ultracache_plugin_dir('languages'));
         wp_set_script_translations('ultracache-admin-media-replacement', 'ultracache', ultracache_plugin_dir('languages'));
         wp_set_script_translations('ultracache-admin-media-replacement-ui', 'ultracache', ultracache_plugin_dir('languages'));
-        wp_set_script_translations('ultracache-admin-varnish-metrics', 'ultracache', ultracache_plugin_dir('languages'));
         wp_set_script_translations('ultracache-admin-cache', 'ultracache', ultracache_plugin_dir('languages'));
         wp_set_script_translations('ultracache-admin-lifecycle', 'ultracache', ultracache_plugin_dir('languages'));
         wp_set_script_translations('ultracache-admin-dashboard-application', 'ultracache', ultracache_plugin_dir('languages'));

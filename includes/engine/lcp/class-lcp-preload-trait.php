@@ -113,7 +113,7 @@ private function inject_critical_preload_link_candidates($html, array $candidate
 
             // This injects a final-HTML preload discovered after LCP/critical-chain analysis.
             // It is not an enqueued stylesheet/script, so wp_enqueue_style() / wp_enqueue_script() is not applicable.
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Adds a post-render critical-chain preload after LCP analysis, outside the enqueue lifecycle.
             $tags[] = '<link ' . $attrs . ' data-ultracache-critical-chain="1">';
         }
 
@@ -259,7 +259,7 @@ private function inject_lcp_preload_link($html, $src)
         }
 
         // Intentional final HTML optimization output: LCP image preloads are inserted after analyzing the rendered hero/slider markup.
-        // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+        // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Adds a post-render LCP image preload after analyzing final slider/hero markup.
         $link = '<link rel="preload" as="image" href="' . $preload_href . '"';
         if ('' !== $mime_type) {
             $link .= ' type="' . esc_attr($mime_type) . '"';

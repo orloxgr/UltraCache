@@ -11,6 +11,170 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_WP_Varnish_Transport_Trait
 {
+    /**
+     * Read and sanitize one bounded WordPress HTTP response header.
+     *
+     * Shared by the production refill pipeline and the compact Varnish test.
+     *
+     * @param array|WP_Error $response WordPress HTTP API response.
+     * @param string         $name     Header name.
+     * @return string
+     */
+    protected static function get_varnish_response_header($response, $name)
+    {
+        if (is_wp_error($response)) {
+            return '';
+        }
+
+        $value = wp_remote_retrieve_header($response, (string) $name);
+        if (is_array($value)) {
+            $value = implode(', ', array_map('strval', $value));
+        }
+
+        $value = trim((string) $value);
+        if ('' === $value) {
+            return '';
+        }
+
+        $value = preg_replace('/[\r\n\t]+/', ' ', $value);
+        $value = is_string($value) ? preg_replace('/\s+/', ' ', $value) : '';
+
+        return self::sanitize_varnish_string(substr((string) $value, 0, 500));
+    }
+
+    /**
+     * Classify one public Varnish response from portable HTTP evidence.
+     *
+     * This parser is runtime transport code. It is used to summarize actual
+     * refill responses and by the compact connection/invalidation test.
+     *
+     * @param array $headers       Normalized response headers.
+     * @param int   $response_code HTTP response status.
+     * @return array
+     */
+    protected static function classify_varnish_response(array $headers, $response_code)
+    {
+        $response_code = (int) $response_code;
+        if (($response_code >= 300 && $response_code < 400 && 304 !== $response_code) || $response_code < 200 || $response_code >= 400) {
+            return array(
+                'status'          => 'ERROR',
+                'varnishDetected' => false,
+                'confidence'      => 'high',
+                'evidence'        => ($response_code >= 300 && $response_code < 400) ? 'canonical-redirect' : 'http-status',
+            );
+        }
+
+        $via = strtolower((string) ($headers['via'] ?? ''));
+        $server = strtolower((string) ($headers['server'] ?? ''));
+        $x_varnish = trim((string) ($headers['xVarnish'] ?? ''));
+        $x_varnish_cache = strtolower((string) ($headers['xVarnishCache'] ?? ''));
+        $varnish_detected = '' !== $x_varnish
+            || false !== strpos($via, 'varnish')
+            || false !== strpos($server, 'varnish')
+            || '' !== $x_varnish_cache;
+
+        $status_headers = strtolower(implode(' ', array_filter(array(
+            (string) ($headers['xCache'] ?? ''),
+            (string) ($headers['xCacheStatus'] ?? ''),
+            (string) ($headers['xProxyCache'] ?? ''),
+            (string) ($headers['xVarnishCache'] ?? ''),
+        ))));
+
+        $warning_header = strtolower((string) ($headers['warning'] ?? ''));
+        $has_stale_warning = 1 === preg_match('/(?:^|[,\s])11[01](?:$|[,\s-])/', $warning_header)
+            || false !== strpos($warning_header, 'response is stale')
+            || false !== strpos($warning_header, 'revalidation failed');
+        $has_stale = $has_stale_warning || 1 === preg_match('/\b(stale|grace|updating)\b/i', $status_headers);
+        $has_bypass = 1 === preg_match('/\b(pass|bypass|uncacheable)\b/i', $status_headers);
+        $has_miss = 1 === preg_match('/\bmiss\b/i', $status_headers);
+        $has_hit = 1 === preg_match('/\b(hit|cached)\b/i', $status_headers);
+
+        if ($varnish_detected && $has_stale) {
+            return array(
+                'status'          => 'STALE',
+                'varnishDetected' => true,
+                'confidence'      => 'high',
+                'evidence'        => $has_stale_warning ? 'warning-header' : 'cache-status-header',
+            );
+        }
+
+        if ($varnish_detected && (int) $has_bypass + (int) $has_miss + (int) $has_hit > 1) {
+            return array(
+                'status'          => 'INCONCLUSIVE',
+                'varnishDetected' => true,
+                'confidence'      => 'low',
+                'evidence'        => 'ambiguous-cache-status-header',
+            );
+        }
+
+        if ($varnish_detected && $has_bypass) {
+            return array(
+                'status'          => 'BYPASS',
+                'varnishDetected' => true,
+                'confidence'      => 'high',
+                'evidence'        => 'cache-status-header',
+            );
+        }
+
+        if ($varnish_detected && $has_miss) {
+            return array(
+                'status'          => 'MISS',
+                'varnishDetected' => true,
+                'confidence'      => 'high',
+                'evidence'        => 'cache-status-header',
+            );
+        }
+
+        if ($varnish_detected && $has_hit) {
+            return array(
+                'status'          => 'HIT',
+                'varnishDetected' => true,
+                'confidence'      => 'high',
+                'evidence'        => 'cache-status-header',
+            );
+        }
+
+        $age_raw = trim((string) ($headers['age'] ?? ''));
+        $age = ctype_digit($age_raw) ? (int) $age_raw : null;
+        if ($varnish_detected && null !== $age && $age > 0) {
+            return array(
+                'status'          => 'HIT',
+                'varnishDetected' => true,
+                'confidence'      => 'medium',
+                'evidence'        => 'positive-age',
+            );
+        }
+
+        $varnish_ids = array();
+        if ('' !== $x_varnish && preg_match_all('/\b\d+\b/', $x_varnish, $matches)) {
+            $varnish_ids = array_values(array_unique($matches[0]));
+        }
+
+        if ($varnish_detected && count($varnish_ids) >= 2) {
+            return array(
+                'status'          => 'HIT',
+                'varnishDetected' => true,
+                'confidence'      => 'medium',
+                'evidence'        => 'multiple-x-varnish-ids',
+            );
+        }
+
+        if ($varnish_detected && 1 === count($varnish_ids) && 0 === $age) {
+            return array(
+                'status'          => 'MISS',
+                'varnishDetected' => true,
+                'confidence'      => 'medium',
+                'evidence'        => 'single-x-varnish-id-age-zero',
+            );
+        }
+
+        return array(
+            'status'          => 'INCONCLUSIVE',
+            'varnishDetected' => $varnish_detected,
+            'confidence'      => 'low',
+            'evidence'        => $varnish_detected ? 'varnish-headers-without-cache-status' : 'no-varnish-headers',
+        );
+    }
         private static function send_varnish_http_request(array $endpoint, $target_url, $host_header, $timeout_s, $expr, $method, array $extra_headers = array())
         {
             $started_at = microtime(true);
@@ -89,7 +253,8 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
             return $finalize(array('ok' => true, 'detail' => self::sanitize_varnish_string($detail), 'code' => $code));
         }
 
-        // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.WP.AlternativeFunctions.file_system_operations_fsockopen,WordPress.WP.AlternativeFunctions.file_system_operations_fclose,WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+        // Varnish CLI is a bounded socket protocol with challenge-response authentication; WordPress has no API for this transport.
+        // phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.WP.AlternativeFunctions.file_system_operations_fsockopen,WordPress.WP.AlternativeFunctions.file_system_operations_fclose,WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Scoped to the authenticated Varnish admin socket helpers below.
 
         private static function read_varnish_admin_response($fp, $max_body_bytes = 1048576)
         {
@@ -143,30 +308,58 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
             return '';
         }
 
-        private static function build_varnish_admin_auth_tokens($challenge, $secret)
+        private static function get_varnish_admin_secret_materials($secret)
         {
-            $challenge = trim((string) $challenge);
-            $secret    = str_replace("\0", '', (string) $secret);
-            if ('' === $challenge || '' === $secret || !function_exists('hash')) {
+            $secret = (string) $secret;
+            if ('' === $secret) {
                 return array();
             }
 
             $secret_without_line_break = rtrim($secret, "\r\n");
-            $secret_materials = array(
+            $materials = array(
                 $secret,
                 $secret_without_line_break . "\n",
                 $secret_without_line_break,
             );
 
-            $tokens = array();
-            foreach (array_values(array_unique($secret_materials)) as $material) {
-                if ('' === $material) {
-                    continue;
-                }
-                $tokens[] = hash('sha256', $challenge . "\n" . $material . $challenge . "\n");
+            return array_values(array_filter(array_unique($materials), static function ($material) {
+                return '' !== (string) $material;
+            }));
+        }
+
+        private static function build_varnish_admin_auth_token($challenge, $secret_material)
+        {
+            $challenge = trim((string) $challenge);
+            $secret_material = (string) $secret_material;
+            if ('' === $challenge || '' === $secret_material || !function_exists('hash')) {
+                return '';
             }
 
-            return array_values(array_unique($tokens));
+            return hash('sha256', $challenge . "\n" . $secret_material . $challenge . "\n");
+        }
+
+        private static function write_varnish_admin_command($fp, $command)
+        {
+            if (!is_resource($fp)) {
+                return false;
+            }
+
+            $command = (string) $command;
+            $length = strlen($command);
+            if (0 === $length || $length > 8192 || "\n" !== substr($command, -1)) {
+                return false;
+            }
+
+            $written = 0;
+            while ($written < $length) {
+                $bytes = fwrite($fp, substr($command, $written));
+                if (false === $bytes || 0 === $bytes) {
+                    return false;
+                }
+                $written += $bytes;
+            }
+
+            return true;
         }
 
         private static function open_authenticated_varnish_admin_connection($host, $port, $secret, $timeout_s)
@@ -179,7 +372,12 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
                 return array('ok' => false, 'detail' => self::sanitize_varnish_string('Invalid or blocked Varnish admin endpoint.'));
             }
 
-            if ('' === trim($secret)) {
+            if (strlen($secret) > 4096) {
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Varnish admin secret exceeds the supported length.'));
+            }
+
+            $secret_materials = self::get_varnish_admin_secret_materials($secret);
+            if (empty($secret_materials)) {
                 return array('ok' => false, 'detail' => self::sanitize_varnish_string('Varnish admin secret is required for admin mode.'));
             }
 
@@ -194,76 +392,80 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
                 return array($fp, '');
             };
 
-            list($fp, $connect_error) = $connect();
-            if (!is_resource($fp)) {
-                return array('ok' => false, 'detail' => self::sanitize_varnish_string($connect_error));
-            }
+            $last_auth_code = 0;
+            foreach ($secret_materials as $secret_material) {
+                list($fp, $connect_error) = $connect();
+                if (!is_resource($fp)) {
+                    return array('ok' => false, 'detail' => self::sanitize_varnish_string($connect_error));
+                }
 
-            $hello = self::read_varnish_admin_response($fp);
-            if (empty($hello['ok'])) {
-                fclose($fp);
-                return array('ok' => false, 'detail' => self::sanitize_varnish_string((string) ($hello['body'] ?? 'Invalid admin banner.')));
-            }
+                $hello = self::read_varnish_admin_response($fp);
+                if (empty($hello['ok'])) {
+                    fclose($fp);
+                    return array('ok' => false, 'detail' => self::sanitize_varnish_string((string) ($hello['body'] ?? 'Invalid admin banner.')));
+                }
 
-            if (107 === (int) $hello['code']) {
+                $hello_code = (int) ($hello['code'] ?? 0);
+                if (200 === $hello_code) {
+                    return array('ok' => true, 'fp' => $fp);
+                }
+
+                if (107 !== $hello_code) {
+                    fclose($fp);
+                    return array('ok' => false, 'detail' => self::sanitize_varnish_string('Unexpected admin banner · Admin ' . $hello_code));
+                }
+
                 $challenge = self::extract_varnish_admin_challenge((string) ($hello['body'] ?? ''));
                 if ('' === $challenge) {
                     fclose($fp);
                     return array('ok' => false, 'detail' => self::sanitize_varnish_string('Admin auth failed · Missing challenge from Varnish banner.'));
                 }
 
-                $tokens = self::build_varnish_admin_auth_tokens($challenge, $secret);
-                if (empty($tokens)) {
+                $token = self::build_varnish_admin_auth_token($challenge, $secret_material);
+                if ('' === $token) {
                     fclose($fp);
                     return array('ok' => false, 'detail' => self::sanitize_varnish_string('Admin auth failed · Could not build auth token.'));
                 }
 
-                $auth = array('ok' => false, 'code' => 0, 'body' => '');
-                foreach ($tokens as $index => $token) {
-                    fwrite($fp, 'auth ' . $token . "\n");
-                    $auth = self::read_varnish_admin_response($fp);
-                    if (!empty($auth['ok']) && 200 === (int) ($auth['code'] ?? 0)) {
-                        break;
-                    }
-                    if ($index < count($tokens) - 1) {
-                        fclose($fp);
-                        list($fp, $connect_error) = $connect();
-                        if (!is_resource($fp)) {
-                            return array('ok' => false, 'detail' => self::sanitize_varnish_string($connect_error));
-                        }
-                        $hello = self::read_varnish_admin_response($fp);
-                        if (empty($hello['ok']) || 107 !== (int) ($hello['code'] ?? 0)) {
-                            fclose($fp);
-                            return array('ok' => false, 'detail' => self::sanitize_varnish_string('Admin auth failed · Could not re-open authenticated session.'));
-                        }
-                    }
+                if (!self::write_varnish_admin_command($fp, 'auth ' . $token . "\n")) {
+                    fclose($fp);
+                    return array('ok' => false, 'detail' => self::sanitize_varnish_string('Admin auth failed · Could not write authentication command.'));
                 }
 
-                if (empty($auth['ok']) || 200 !== (int) ($auth['code'] ?? 0)) {
-                    fclose($fp);
-                    $detail = 'Admin auth failed';
-                    if (!empty($auth['body'])) {
-                        $detail .= ' · ' . self::summarize_varnish_http_body($auth['body']);
-                    }
-                    return array('ok' => false, 'detail' => self::sanitize_varnish_string($detail));
+                $auth = self::read_varnish_admin_response($fp);
+                $last_auth_code = (int) ($auth['code'] ?? 0);
+                if (!empty($auth['ok']) && 200 === $last_auth_code) {
+                    return array('ok' => true, 'fp' => $fp);
                 }
-            } elseif (200 !== (int) $hello['code']) {
+
                 fclose($fp);
-                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Unexpected admin banner · ' . self::summarize_varnish_http_body((string) ($hello['body'] ?? ''))));
             }
 
-            return array('ok' => true, 'fp' => $fp);
+            $detail = 'Admin auth failed';
+            if ($last_auth_code > 0) {
+                $detail .= ' · Admin ' . $last_auth_code;
+            }
+
+            return array('ok' => false, 'detail' => self::sanitize_varnish_string($detail));
         }
 
         private static function send_varnish_admin_ban($host, $port, $secret, $timeout_s, $expr)
         {
+            $expr = trim((string) $expr);
+            if ('' === $expr || strlen($expr) > 4096 || preg_match('/[\x00-\x1F\x7F]/', $expr)) {
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Invalid or oversized Varnish BAN expression.'));
+            }
+
             $connection = self::open_authenticated_varnish_admin_connection($host, $port, $secret, $timeout_s);
             if (empty($connection['ok']) || !is_resource($connection['fp'] ?? null)) {
                 return array('ok' => false, 'detail' => self::sanitize_varnish_string((string) ($connection['detail'] ?? 'Admin connection failed.')));
             }
 
             $fp = $connection['fp'];
-            fwrite($fp, 'ban ' . $expr . "\n");
+            if (!self::write_varnish_admin_command($fp, 'ban ' . $expr . "\n")) {
+                fclose($fp);
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Could not write Varnish BAN command.'));
+            }
             $resp = self::read_varnish_admin_response($fp);
             fclose($fp);
 
@@ -287,7 +489,10 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
             }
 
             $fp = $connection['fp'];
-            fwrite($fp, "ban.list\n");
+            if (!self::write_varnish_admin_command($fp, "ban.list\n")) {
+                fclose($fp);
+                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Could not write Varnish ban.list command.'));
+            }
             $resp = self::read_varnish_admin_response($fp, 262144);
             fclose($fp);
 
@@ -296,12 +501,15 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
             }
 
             return array(
-                'ok' => (200 === (int) $resp['code']),
-                'detail' => self::sanitize_varnish_string('Admin ' . (int) $resp['code'] . ' ban.list'),
+                'ok' => in_array((int) $resp['code'], array(200, 201), true),
+                'partial' => (201 === (int) $resp['code']),
+                'detail' => self::sanitize_varnish_string('Admin ' . (int) $resp['code'] . ' ban.list' . (201 === (int) $resp['code'] ? ' · response truncated by Varnish CLI limit' : '')),
                 'code' => (int) $resp['code'],
                 'body' => (string) ($resp['body'] ?? ''),
             );
         }
+
+        // phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.WP.AlternativeFunctions.file_system_operations_fsockopen,WordPress.WP.AlternativeFunctions.file_system_operations_fclose,WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
 
         private static function varnish_command_for_expr($terminal, $secret, $timeout_s, $expr, $method)
         {

@@ -14,7 +14,7 @@
 	}
 
 	const { h, __, sprintf } = core;
-	const { ToggleRow, NumberRow, StatusPill } = ui;
+	const { ToggleRow, NumberRow, TextAreaField, StatusPill } = ui;
 
 	function getViewState(form, refreshAhead) {
 		const source = refreshAhead && typeof refreshAhead === 'object' ? refreshAhead : {};
@@ -25,6 +25,7 @@
 			state,
 			threshold: Number.isFinite(Number(form.varnishRefreshAheadThresholdPercent)) ? Math.max(50, Math.min(95, Number(form.varnishRefreshAheadThresholdPercent))) : 85,
 			maxPages: Number.isFinite(Number(form.varnishRefreshAheadMaxPages)) ? Math.max(1, Math.min(10, Number(form.varnishRefreshAheadMaxPages))) : 5,
+			pinnedUrls: String(form.varnishRefreshAheadPinnedUrls || ''),
 		};
 	}
 
@@ -34,8 +35,8 @@
 			h(ToggleRow, {
 				label: __("Refresh hot pages before expiry", 'ultracache'),
 				description: view.available
-					? __("Uses the existing Cache Statistics candidate list, probes only a bounded number of local pages, and soft-purges a verified Varnish HIT only when its Age has reached the configured percentage of the shared TTL. Varnish-only HITs are not tracked with a frontend beacon.", 'ultracache')
-					: String(refreshAhead.message || __("Run Test Varnish and enable Cache Statistics to verify refresh-ahead prerequisites.", 'ultracache')),
+					? __("Uses a bounded candidate pool collected only by the active scanner from critical WordPress pages, menus, sitemap discovery, pinned URLs, and optional Cache Statistics observations. Each scan rotates the probe bucket, while eligible pages are refilled across all active HTML buckets.", 'ultracache')
+					: String(refreshAhead.message || __("Refresh ahead is unavailable until the configured HTTP soft-purge and stale-refresh capability is active.", 'ultracache')),
 				checked: !!form.varnishRefreshAheadEnabled,
 				onChange: (value) => onFieldChange('varnishRefreshAheadEnabled', value),
 				disabled: busy || infrastructureLocked || (!view.available && !form.varnishRefreshAheadEnabled),
@@ -65,6 +66,15 @@
 					key: 'refresh-ahead-max-pages',
 				}),
 			]),
+			h(TextAreaField, {
+				label: __("Pinned critical URLs", 'ultracache'),
+				description: __("Optional local URLs or paths, one per line. Pinned pages receive the highest refresh-ahead priority; the list is limited to 25 entries.", 'ultracache'),
+				value: view.pinnedUrls,
+				onChange: (value) => onFieldChange('varnishRefreshAheadPinnedUrls', value),
+				disabled: busy || infrastructureLocked,
+				placeholder: "/\n/news/\nhttps://example.com/critical-page/",
+				key: 'refresh-ahead-pinned-urls',
+			}),
 		];
 	}
 
@@ -80,11 +90,33 @@
 					tone: view.active ? 'success' : (form.varnishRefreshAheadEnabled ? 'warning' : 'neutral'),
 				}),
 			]),
-			h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'refresh-ahead-candidates' }, [
-				h('div', { className: 'text-sm text-white' }, __("Observed page candidates", 'ultracache')),
-				h(StatusPill, { ok: Number(source.candidateCount || 0) > 0, text: String(Number(source.candidateCount || 0)), tone: Number(source.candidateCount || 0) > 0 ? 'neutral' : 'warning' }),
-			]),
 		];
+
+		if (view.active) {
+			rows.push(h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'refresh-ahead-candidates' }, [
+				h('div', { className: 'text-sm text-white' }, __("Refresh candidates", 'ultracache')),
+				h(StatusPill, { ok: Number(source.candidateCount || 0) > 0, text: String(Number(source.candidateCount || 0)), tone: Number(source.candidateCount || 0) > 0 ? 'neutral' : 'warning' }),
+			]));
+		}
+
+		const candidateSources = source.candidateSources && typeof source.candidateSources === 'object' ? source.candidateSources : {};
+		const sourceSummary = Object.keys(candidateSources)
+			.filter((key) => Number(candidateSources[key] || 0) > 0)
+			.map((key) => `${key.replace(/-/g, ' ')} ${Number(candidateSources[key] || 0)}`)
+			.join(' · ');
+		if (sourceSummary) {
+			rows.push(h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'refresh-ahead-candidate-sources' }, [
+				h('div', { className: 'text-sm text-white' }, __("Candidate sources", 'ultracache')),
+				h('div', { className: 'text-xs text-zinc-400 text-right' }, sourceSummary),
+			]));
+		}
+
+		if (view.state.lastProbeBucket) {
+			rows.push(h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'refresh-ahead-probe-bucket' }, [
+				h('div', { className: 'text-sm text-white' }, __("Last probe bucket", 'ultracache')),
+				h(StatusPill, { ok: true, text: String(view.state.lastProbeBucket).toUpperCase(), tone: 'neutral' }),
+			]));
+		}
 
 		if (view.state.lastScanAt) {
 			rows.push(h('div', { className: 'flex items-center justify-between gap-4 py-2', key: 'refresh-ahead-last-scan' }, [

@@ -108,7 +108,7 @@
 		try {
 			const parsed = new URL(String(url || ''), window.location.origin);
 			parsed.hash = '';
-			['ultracache_revalidate', 'ultracache_rt', 'ultracache_frontpage_css_scan', 'ultracache_css_v'].forEach((key) => {
+			['ultracache_revalidate', 'ultracache_rt', 'ultracache_rv', 'ultracache_bucket', 'ultracache_frontpage_css_scan', 'ultracache_css_v'].forEach((key) => {
 				parsed.searchParams.delete(key);
 			});
 			parsed.searchParams.sort();
@@ -118,83 +118,52 @@
 		}
 	}
 
-	function hasSeenWarmUrl(type, url, manualSessionToken) {
+	function isWarmUrlSeen(type, url, manualSessionToken) {
+		const sessionKey = String(manualSessionToken || '') || ('no-token:' + String(type || 'warm'));
+		const canonicalUrl = getCanonicalWarmUrl(url);
+		const seen = manualWarmSeenUrls.get(sessionKey);
+		return !!(seen && seen.has(canonicalUrl));
+	}
+
+	function markWarmUrlSeen(type, url, manualSessionToken) {
 		const sessionKey = String(manualSessionToken || '') || ('no-token:' + String(type || 'warm'));
 		const canonicalUrl = getCanonicalWarmUrl(url);
 		if (!manualWarmSeenUrls.has(sessionKey)) {
 			manualWarmSeenUrls.set(sessionKey, new Set());
 		}
-		const seen = manualWarmSeenUrls.get(sessionKey);
-		if (seen.has(canonicalUrl)) {
-			return true;
-		}
-		seen.add(canonicalUrl);
-		return false;
+		manualWarmSeenUrls.get(sessionKey).add(canonicalUrl);
 	}
 
-	async function processJobItem(type, item, shouldCancel, manualSessionToken) {
-		if (hasSeenWarmUrl(type, item, manualSessionToken)) {
-			return {
-				line: 'Skipped duplicate: ' + item,
-				progressIncrement: 1,
-				skippedIncrement: 1,
-			};
+	function clonePipelineState(value) {
+		if (!value || typeof value !== 'object') {
+			return null;
 		}
+		try {
+			return JSON.parse(JSON.stringify(value));
+		} catch (error) {
+			return null;
+		}
+	}
 
+	function getManualWarmStageLabel(stage, bucket) {
+		if ('html' === stage) {
+			return 'HTML';
+		}
+		if ('css' === stage) {
+			return 'CSS';
+		}
+		if ('varnish' === stage) {
+			return 'Varnish ' + String(bucket || 'orig').toUpperCase();
+		}
+		return 'Finalizing';
+	}
+
+	async function requestManualWarmStage(payload) {
 		let attempt = 0;
 		let lastError = null;
-
 		while (attempt <= maxWarmItemRetries) {
 			try {
-				const result = await apiRequest('crawl_page', {
-					url: item,
-					buildCssBundle: shouldBuildCssBundleForWarmJob(type),
-					manualToken: String(manualSessionToken || ''),
-				});
-				const skipped = !!(result && (result.cached === false || result.skipped));
-				const failed = !!(result && result.success === false && !skipped);
-				const detail = failed || skipped ? (result && result.message ? ' — ' + result.message : '') : '';
-				const varnishRefill = result && result.varnishRefill && typeof result.varnishRefill === 'object' ? result.varnishRefill : null;
-				const varnishWarmed = !!(varnishRefill && varnishRefill.success && !varnishRefill.skipped);
-				const varnishFailed = !!(varnishRefill && varnishRefill.success === false);
-				const varnishVerificationEnabled = !!(varnishRefill && varnishRefill.verificationEnabled);
-				const varnishTwoStage = varnishRefill && varnishRefill.twoStageRefill && typeof varnishRefill.twoStageRefill === 'object' ? varnishRefill.twoStageRefill : null;
-				const varnishTwoStageAvailable = !!(varnishTwoStage && varnishTwoStage.available);
-				const varnishTwoStageFallback = !!(varnishTwoStage && !varnishTwoStage.available && varnishTwoStage.fallbackUsed);
-				const varnishVerificationStatus = String(varnishRefill && varnishRefill.verificationStatus ? varnishRefill.verificationStatus : 'disabled').toLowerCase();
-				const varnishVerified = varnishVerificationEnabled && varnishVerificationStatus === 'verified';
-				const varnishBypassed = varnishVerificationEnabled && varnishVerificationStatus === 'bypassed';
-				const varnishInconclusive = varnishVerificationEnabled && ['inconclusive', 'not-hit', 'error'].indexOf(varnishVerificationStatus) !== -1;
-				let varnishDetail = '';
-				if (varnishFailed) {
-					varnishDetail = ' — Varnish refill failed' + (varnishRefill.message ? ': ' + String(varnishRefill.message) : '');
-				} else if (varnishVerified) {
-					varnishDetail = ' — Varnish HIT verified';
-				} else if (varnishBypassed) {
-					varnishDetail = ' — Varnish bypassed';
-				} else if (varnishInconclusive) {
-					varnishDetail = ' — Varnish verification ' + varnishVerificationStatus.replace(/-/g, ' ');
-				}
-				if (varnishWarmed && varnishTwoStageAvailable) {
-					varnishDetail += ' — origin refresh verified';
-				} else if (varnishWarmed && varnishTwoStageFallback) {
-					varnishDetail += ' — one-stage fallback';
-				}
-				const successLabel = shouldBuildCssBundleForWarmJob(type)
-					? (varnishWarmed ? 'Cached + CSS + Varnish: ' : 'Cached + CSS: ')
-					: (varnishWarmed ? 'Cached + Varnish: ' : 'Cached: ');
-				await sleep(40);
-				return {
-					line: (failed ? 'Failed: ' : (skipped ? 'Skipped: ' : successLabel)) + item + detail + varnishDetail,
-					progressIncrement: 1,
-					successIncrement: failed || skipped ? 0 : 1,
-					skippedIncrement: skipped ? 1 : 0,
-					failedIncrement: failed ? 1 : 0,
-					varnishWarmedIncrement: varnishWarmed ? 1 : 0,
-					varnishVerifiedIncrement: varnishVerified ? 1 : 0,
-					varnishBypassedIncrement: varnishBypassed ? 1 : 0,
-					varnishInconclusiveIncrement: varnishInconclusive ? 1 : 0,
-				};
+				return await apiRequest('manual_warm_page_stage', payload);
 			} catch (error) {
 				lastError = error;
 				if (attempt >= maxWarmItemRetries) {
@@ -204,11 +173,184 @@
 			}
 			attempt += 1;
 		}
-
 		return {
-			line: 'Failed: ' + item + ' — Request failed.',
+			success: false,
+			skipped: false,
+			requestFailed: true,
+			message: lastError && lastError.message ? String(lastError.message) : 'Request failed.',
+		};
+	}
+
+	async function processJobItem(type, item, shouldCancel, manualSessionToken, state, checkpointItem) {
+		const canonicalItem = getCanonicalWarmUrl(item);
+		const currentPipeline = state && getCanonicalWarmUrl(state.currentItem || '') === canonicalItem
+			? clonePipelineState(state.currentPipeline)
+			: null;
+		if (!currentPipeline && isWarmUrlSeen(type, item, manualSessionToken)) {
+			return {
+				line: 'Skipped duplicate: ' + item,
+				progressIncrement: 1,
+				skippedIncrement: 1,
+			};
+		}
+
+		const buildCssBundle = shouldBuildCssBundleForWarmJob(type);
+		let pipeline = currentPipeline || {
+			url: canonicalItem,
+			nextStage: 'html',
+			buildCssBundle,
+			buckets: [],
+			bucketIndex: 0,
+			refilledBuckets: [],
+			varnishEnabled: false,
+			html: null,
+			css: null,
+		};
+		pipeline.buildCssBundle = buildCssBundle;
+
+		const checkpoint = (stage, bucket) => {
+			if (typeof checkpointItem !== 'function') {
+				return;
+			}
+			checkpointItem({
+				currentItem: canonicalItem,
+				currentStageLabel: getManualWarmStageLabel(stage, bucket),
+				currentPipeline: clonePipelineState(pipeline),
+			});
+		};
+		const clearCheckpoint = () => {
+			if (typeof checkpointItem === 'function') {
+				checkpointItem({ currentItem: '', currentStageLabel: '', currentPipeline: null });
+			}
+		};
+		const pauseIfRequested = (stage, bucket) => {
+			if (!shouldCancel()) {
+				return null;
+			}
+			checkpoint(stage, bucket);
+			return {
+				pauseItem: true,
+				line: 'Paused: ' + item + ' — resume from ' + getManualWarmStageLabel(stage, bucket) + '.',
+			};
+		};
+		const failItem = (message) => {
+			markWarmUrlSeen(type, item, manualSessionToken);
+			clearCheckpoint();
+			return {
+				line: 'Failed: ' + item + (message ? ' — ' + message : ''),
+				progressIncrement: 1,
+				failedIncrement: 1,
+			};
+		};
+
+		if ('html' === pipeline.nextStage) {
+			checkpoint('html');
+			const htmlResult = await requestManualWarmStage({
+				url: item,
+				stage: 'html',
+				buildCssBundle,
+				manualToken: String(manualSessionToken || ''),
+			});
+			if (htmlResult && htmlResult.skipped) {
+				markWarmUrlSeen(type, item, manualSessionToken);
+				clearCheckpoint();
+				return {
+					line: 'Skipped: ' + item + (htmlResult.message ? ' — ' + String(htmlResult.message) : ''),
+					progressIncrement: 1,
+					skippedIncrement: 1,
+				};
+			}
+			if (!htmlResult || !htmlResult.success) {
+				return failItem(htmlResult && htmlResult.message ? String(htmlResult.message) : 'HTML warm failed.');
+			}
+
+			const plan = htmlResult.varnishPlan && typeof htmlResult.varnishPlan === 'object' ? htmlResult.varnishPlan : {};
+			pipeline.html = {
+				success: true,
+				message: String(htmlResult.message || ''),
+				forceRefreshReachedOrigin: !!htmlResult.forceRefreshReachedOrigin,
+			};
+			pipeline.varnishEnabled = !!plan.enabled;
+			pipeline.buckets = Array.isArray(plan.buckets) && plan.buckets.length
+				? plan.buckets.filter((bucket) => ['orig', 'webp', 'avif'].indexOf(String(bucket)) !== -1)
+				: [];
+			pipeline.bucketIndex = Math.max(0, Number(pipeline.bucketIndex || 0));
+			pipeline.nextStage = buildCssBundle ? 'css' : (pipeline.varnishEnabled && pipeline.buckets.length ? 'varnish' : 'done');
+			checkpoint(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
+			const paused = pauseIfRequested(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
+			if (paused) {
+				return paused;
+			}
+		}
+
+		if ('css' === pipeline.nextStage) {
+			checkpoint('css');
+			const cssResult = await requestManualWarmStage({
+				url: item,
+				stage: 'css',
+				buildCssBundle: true,
+				manualToken: String(manualSessionToken || ''),
+			});
+			if (!cssResult || (!cssResult.success && !cssResult.skipped)) {
+				return failItem(cssResult && cssResult.message ? String(cssResult.message) : 'CSS warm failed.');
+			}
+			pipeline.css = {
+				success: !!cssResult.success,
+				skipped: !!cssResult.skipped,
+				message: String(cssResult.message || ''),
+			};
+			pipeline.nextStage = pipeline.varnishEnabled && pipeline.buckets.length ? 'varnish' : 'done';
+			checkpoint(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
+			const paused = pauseIfRequested(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
+			if (paused) {
+				return paused;
+			}
+		}
+
+		if ('varnish' === pipeline.nextStage) {
+			while (pipeline.bucketIndex < pipeline.buckets.length) {
+				const bucket = String(pipeline.buckets[pipeline.bucketIndex] || 'orig');
+				checkpoint('varnish', bucket);
+				const varnishResult = await requestManualWarmStage({
+					url: item,
+					stage: 'varnish',
+					bucket,
+					manualToken: String(manualSessionToken || ''),
+				});
+				if (!varnishResult || (!varnishResult.success && !varnishResult.skipped)) {
+					return failItem(varnishResult && varnishResult.message ? String(varnishResult.message) : ('Varnish ' + bucket.toUpperCase() + ' refill failed.'));
+				}
+				if (!varnishResult.skipped && pipeline.refilledBuckets.indexOf(bucket) === -1) {
+					pipeline.refilledBuckets.push(bucket);
+				}
+				pipeline.bucketIndex += 1;
+				pipeline.nextStage = pipeline.bucketIndex < pipeline.buckets.length
+					? 'varnish'
+					: 'done';
+				checkpoint(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
+				const paused = pauseIfRequested(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
+				if (paused) {
+					return paused;
+				}
+			}
+		}
+
+		markWarmUrlSeen(type, item, manualSessionToken);
+		clearCheckpoint();
+		const varnishWarmed = pipeline.refilledBuckets.length > 0;
+		const stageSummary = [];
+		stageSummary.push('HTML ✓');
+		if (buildCssBundle) {
+			stageSummary.push('CSS ✓');
+		}
+		pipeline.refilledBuckets.forEach((bucket) => stageSummary.push('Varnish ' + String(bucket).toUpperCase() + ' ✓'));
+
+		await sleep(40);
+		return {
+			line: 'Cached: ' + item + ' — ' + stageSummary.join(' · '),
 			progressIncrement: 1,
-			failedIncrement: 1,
+			successIncrement: 1,
+			varnishWarmedIncrement: varnishWarmed ? 1 : 0,
 		};
 	}
 

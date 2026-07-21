@@ -349,29 +349,4 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
     }
 
 
-    public static function maybe_migrate_varnish_html_ttl_default()
-    {
-        $migration_key = 'ultracache_varnish_html_ttl_default_migration_v1';
-        if (get_option($migration_key, false)) {
-            return;
-        }
-
-        $saved = get_option(ULTRACACHE_SETTINGS_KEY, null);
-        if (is_array($saved)) {
-            $current_ttl = array_key_exists('varnishHtmlTtlMinutes', $saved)
-                ? absint($saved['varnishHtmlTtlMinutes'])
-                : 0;
-
-            if (0 === $current_ttl || 60 === $current_ttl) {
-                $saved['varnishHtmlTtlMinutes'] = 1440;
-                update_option(ULTRACACHE_SETTINGS_KEY, $saved, false);
-                self::reset_settings_cache();
-                self::sync_page_cache_bootstrap();
-                self::sync_apache_static_html_delivery_rules();
-            }
-        }
-
-        update_option($migration_key, 1, false);
-    }
-
 }

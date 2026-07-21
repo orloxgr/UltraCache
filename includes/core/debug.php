@@ -382,3 +382,42 @@ function ultracache_validate_runtime_control_token($token, $secret = '', $ttl = 
     return function_exists('hash_equals') ? hash_equals($expected, $mac) : $expected === $mac;
 }
 
+/**
+ * Verify that the current request is an authenticated UltraCache loopback.
+ *
+ * The generic internal marker is never trusted on its own. Optional context
+ * markers allow callers to require the exact warm or CSS scanner contract.
+ *
+ * @param string $context Optional request context: warm or css.
+ * @return bool
+ */
+function ultracache_is_authenticated_internal_request($context = '')
+{
+    $internal = function_exists('ultracache_server_value')
+        ? sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_INTERNAL_REQUEST'))
+        : '';
+    if ('1' !== $internal) {
+        return false;
+    }
+
+    $context = sanitize_key((string) $context);
+    if ('warm' === $context) {
+        $warm = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_WARM'));
+        if ('1' !== $warm) {
+            return false;
+        }
+    } elseif ('css' === $context) {
+        $css = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_CSS_BUNDLE'));
+        if ('1' !== $css) {
+            return false;
+        }
+    } elseif ('' !== $context) {
+        return false;
+    }
+
+    $token = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_TOKEN'));
+    return '' !== $token
+        && function_exists('ultracache_validate_runtime_control_token')
+        && ultracache_validate_runtime_control_token($token);
+}
+

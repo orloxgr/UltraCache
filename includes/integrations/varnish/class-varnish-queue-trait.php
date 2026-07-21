@@ -127,20 +127,45 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
             return null;
         }
 
-        $queued = self::insert_cron_warm_queue_urls($canonical_urls, 0, 'varnish_invalidate');
+        $accepted_queue_urls = array();
+        $enqueue_summary = array();
+        $queued = self::insert_cron_warm_queue_urls(
+            $canonical_urls,
+            0,
+            'varnish_invalidate',
+            '',
+            false,
+            $accepted_queue_urls,
+            $enqueue_summary
+        );
         if ($queued < 1) {
             return null;
         }
 
         self::ensure_cron_warm_events_scheduled(1, true);
+        $queue_failed = max(0, $unique_count - $queued);
         $queue = self::get_varnish_queue_stats();
         $result = array(
-            'success' => true,
+            'success' => $queue_failed < 1,
+            'partial' => $queue_failed > 0,
+            'warning' => $queue_failed > 0,
             'queued' => true,
-            'message' => self::maybe_translate_sprintf(
-                'Queued %1$d Varnish URL invalidation(s); the persistent worker will process them before ordinary warm-up jobs.',
-                $unique_count
-            ),
+            'message' => $queue_failed > 0
+                ? self::maybe_translate_sprintf(
+                    'Accepted %1$d Varnish URL invalidation(s): %2$d inserted, %3$d coalesced, %4$d upgraded, and %5$d could not be persisted.',
+                    $queued,
+                    max(0, (int) ($enqueue_summary['inserted'] ?? 0)),
+                    max(0, (int) ($enqueue_summary['coalesced'] ?? 0)),
+                    max(0, (int) ($enqueue_summary['upgraded'] ?? 0)),
+                    $queue_failed
+                )
+                : self::maybe_translate_sprintf(
+                    'Accepted %1$d Varnish URL invalidation(s): %2$d inserted, %3$d coalesced, and %4$d upgraded.',
+                    $queued,
+                    max(0, (int) ($enqueue_summary['inserted'] ?? 0)),
+                    max(0, (int) ($enqueue_summary['coalesced'] ?? 0)),
+                    max(0, (int) ($enqueue_summary['upgraded'] ?? 0))
+                ),
             'time' => time(),
             'scope' => sanitize_key((string) $scope),
             'operationType' => 'queued-invalidation',
@@ -151,6 +176,12 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
             'rejectedUrlCount' => (int) ($prepared['rejectedCount'] ?? 0),
             'estimatedRequestCount' => $estimated_requests,
             'queuedUrlCount' => $queued,
+            'acceptedUrlCount' => $queued,
+            'insertedUrlCount' => max(0, (int) ($enqueue_summary['inserted'] ?? 0)),
+            'coalescedUrlCount' => max(0, (int) ($enqueue_summary['coalesced'] ?? 0)),
+            'upgradedUrlCount' => max(0, (int) ($enqueue_summary['upgraded'] ?? 0)),
+            'queueFailedUrlCount' => $queue_failed,
+            'failedUrlCount' => $queue_failed,
             'rejections' => (array) ($prepared['rejections'] ?? array()),
             'rejectionsTruncated' => !empty($prepared['rejectionsTruncated']),
             'queue' => $queue,
@@ -170,49 +201,113 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
 
         $stats = array(
             'pendingInvalidations' => 0,
+            'processingInvalidations' => 0,
             'pendingRefills' => 0,
-            'failed' => 0,
+            'processingRefills' => 0,
+            'pendingSharedPipelineRefills' => 0,
+            'planned' => 0,
+            'processing' => 0,
             'retrying' => 0,
+            'partial' => 0,
+            'warnings' => 0,
+            'completed' => 0,
+            'skipped' => 0,
+            'terminalErrors' => 0,
+            'failed' => 0,
             'retryAttempts' => 0,
             'nextAttemptAt' => 0,
+            'refillWorker' => array(
+                'status' => 'idle',
+                'pending' => 0,
+                'active' => false,
+                'nextScheduledAt' => 0,
+            ),
         );
-        if (!($wpdb instanceof wpdb) || !self::ensure_cron_warm_queue_table()) {
+        if (!($wpdb instanceof wpdb) || !self::cron_warm_queue_table_read_ready()) {
             return $stats;
         }
 
         $table = self::get_cron_warm_queue_table_name();
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads bounded aggregate counters from one UltraCache-owned queue table query.
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads aggregate counters from one UltraCache-owned queue table query.
         $row = $wpdb->get_row(
             $wpdb->prepare(
                 "SELECT
                     SUM(CASE WHEN job_type = %s AND status = %s THEN 1 ELSE 0 END) AS pending_invalidations,
-                    SUM(CASE WHEN job_type = %s AND status = %s THEN 1 ELSE 0 END) AS pending_refills,
-                    SUM(CASE WHEN job_type IN (%s, %s) AND status = %s THEN 1 ELSE 0 END) AS failed_jobs,
-                    SUM(CASE WHEN job_type IN (%s, %s) AND status = %s AND attempt_count > %d THEN 1 ELSE 0 END) AS retrying_jobs,
-                    SUM(CASE WHEN job_type IN (%s, %s) THEN attempt_count ELSE 0 END) AS retry_attempts,
-                    MIN(CASE WHEN job_type IN (%s, %s) AND status = %s AND next_attempt_at > %d THEN next_attempt_at ELSE NULL END) AS next_attempt_at
+                    SUM(CASE WHEN job_type = %s AND status = %s THEN 1 ELSE 0 END) AS processing_invalidations,
+                    SUM(CASE WHEN job_type = %s AND source_context <> %s AND status = %s THEN 1 ELSE 0 END) AS pending_refills,
+                    SUM(CASE WHEN job_type = %s AND source_context <> %s AND status = %s THEN 1 ELSE 0 END) AS processing_refills,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s AND attempt_count = %d THEN 1 ELSE 0 END) AS planned_jobs,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s THEN 1 ELSE 0 END) AS processing_jobs,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s AND attempt_count > %d THEN 1 ELSE 0 END) AS retrying_jobs,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s AND result_level = %s THEN 1 ELSE 0 END) AS partial_jobs,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s AND result_level = %s THEN 1 ELSE 0 END) AS warning_jobs,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s AND result_level <> %s THEN 1 ELSE 0 END) AS completed_jobs,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s THEN 1 ELSE 0 END) AS skipped_jobs,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s THEN 1 ELSE 0 END) AS terminal_errors,
+                    SUM(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s AND attempt_count > %d THEN attempt_count ELSE 0 END) AS retry_attempts,
+                    MIN(CASE WHEN ((job_type = %s) OR (job_type = %s AND source_context <> %s)) AND status = %s AND next_attempt_at > %d THEN next_attempt_at ELSE NULL END) AS next_attempt_at
                 FROM %i
                 WHERE job_type IN (%s, %s)",
                 'varnish_invalidate',
                 'pending',
-                'varnish_refill',
+                'varnish_invalidate',
+                'processing',
+                'page_warm',
+                '',
                 'pending',
+                'page_warm',
+                '',
+                'processing',
                 'varnish_invalidate',
-                'varnish_refill',
-                'error',
-                'varnish_invalidate',
-                'varnish_refill',
+                'page_warm',
+                '',
                 'pending',
                 0,
                 'varnish_invalidate',
-                'varnish_refill',
+                'page_warm',
+                '',
+                'processing',
                 'varnish_invalidate',
-                'varnish_refill',
+                'page_warm',
+                '',
+                'pending',
+                0,
+                'varnish_invalidate',
+                'page_warm',
+                '',
+                'pending',
+                'partial',
+                'varnish_invalidate',
+                'page_warm',
+                '',
+                'done',
+                'warning',
+                'varnish_invalidate',
+                'page_warm',
+                '',
+                'done',
+                'warning',
+                'varnish_invalidate',
+                'page_warm',
+                '',
+                'skipped',
+                'varnish_invalidate',
+                'page_warm',
+                '',
+                'error',
+                'varnish_invalidate',
+                'page_warm',
+                '',
+                'pending',
+                0,
+                'varnish_invalidate',
+                'page_warm',
+                '',
                 'pending',
                 time(),
                 $table,
                 'varnish_invalidate',
-                'varnish_refill'
+                'page_warm'
             ),
             ARRAY_A
         );
@@ -221,11 +316,24 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
         }
 
         $stats['pendingInvalidations'] = max(0, (int) ($row['pending_invalidations'] ?? 0));
+        $stats['processingInvalidations'] = max(0, (int) ($row['processing_invalidations'] ?? 0));
         $stats['pendingRefills'] = max(0, (int) ($row['pending_refills'] ?? 0));
-        $stats['failed'] = max(0, (int) ($row['failed_jobs'] ?? 0));
+        $stats['processingRefills'] = max(0, (int) ($row['processing_refills'] ?? 0));
+        $stats['pendingSharedPipelineRefills'] = $stats['pendingRefills'] + $stats['processingRefills'];
+        $stats['planned'] = max(0, (int) ($row['planned_jobs'] ?? 0));
+        $stats['processing'] = max(0, (int) ($row['processing_jobs'] ?? 0));
         $stats['retrying'] = max(0, (int) ($row['retrying_jobs'] ?? 0));
+        $stats['partial'] = max(0, (int) ($row['partial_jobs'] ?? 0));
+        $stats['warnings'] = max(0, (int) ($row['warning_jobs'] ?? 0));
+        $stats['completed'] = max(0, (int) ($row['completed_jobs'] ?? 0));
+        $stats['skipped'] = max(0, (int) ($row['skipped_jobs'] ?? 0));
+        $stats['terminalErrors'] = max(0, (int) ($row['terminal_errors'] ?? 0));
+        $stats['failed'] = $stats['terminalErrors'];
         $stats['retryAttempts'] = max(0, (int) ($row['retry_attempts'] ?? 0));
         $stats['nextAttemptAt'] = max(0, (int) ($row['next_attempt_at'] ?? 0));
+        if (method_exists(static::class, 'get_targeted_page_warm_worker_status')) {
+            $stats['refillWorker'] = self::get_targeted_page_warm_worker_status($stats['pendingRefills']);
+        }
         return $stats;
     }
 
@@ -237,7 +345,7 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
     private static function has_pending_varnish_queue_rows()
     {
         $stats = self::get_varnish_queue_stats();
-        return !empty($stats['pendingInvalidations']) || !empty($stats['pendingRefills']);
+        return !empty($stats['pendingInvalidations']) || !empty($stats['pendingSharedPipelineRefills']);
     }
 
     /**
@@ -283,11 +391,10 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads ready rows from an UltraCache-owned persistent queue.
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT id, url, job_type, attempt_count FROM %i WHERE status = %s AND job_type IN (%s, %s) AND next_attempt_at <= %d ORDER BY CASE job_type WHEN 'varnish_invalidate' THEN 0 ELSE 1 END ASC, position ASC, id ASC LIMIT %d",
+                "SELECT id, url, job_type, attempt_count FROM %i WHERE status = %s AND job_type = %s AND next_attempt_at <= %d ORDER BY position ASC, id ASC LIMIT %d",
                 $table,
                 'pending',
                 'varnish_invalidate',
-                'varnish_refill',
                 time(),
                 $limit
             ),
@@ -298,37 +405,167 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
     }
 
     /**
+     * Decode a bounded list of endpoint labels retained for one invalidation retry.
+     *
+     * @param mixed $value Stored JSON value.
+     * @return array
+     */
+    private static function decode_varnish_queue_pending_targets($value)
+    {
+        $value = is_string($value) ? trim($value) : '';
+        if ('' === $value || strlen($value) > 8192) {
+            return array('pending' => array(), 'required' => array(), 'phase' => '');
+        }
+
+        $decoded = json_decode($value, true);
+        if (!is_array($decoded)) {
+            return array('pending' => array(), 'required' => array(), 'phase' => '');
+        }
+
+        $pending_values = isset($decoded['pending']) && is_array($decoded['pending']) ? $decoded['pending'] : $decoded;
+        $required_values = isset($decoded['required']) && is_array($decoded['required']) ? $decoded['required'] : $pending_values;
+        $normalize = static function (array $values) {
+            $targets = array();
+            foreach (array_slice($values, 0, 32) as $target) {
+                $target = trim((string) $target);
+                if ('' !== $target && strlen($target) <= 512) {
+                    $targets[$target] = true;
+                }
+            }
+            $targets = array_keys($targets);
+            sort($targets, SORT_STRING);
+            return $targets;
+        };
+
+        $phase = sanitize_key((string) ($decoded['phase'] ?? ''));
+        if (!in_array($phase, array('', 'purge-pending', 'purged'), true)) {
+            $phase = '';
+        }
+
+        return array(
+            'pending' => $normalize($pending_values),
+            'required' => $normalize($required_values),
+            'phase' => $phase,
+        );
+    }
+
+    /**
+     * Encode failed endpoint labels and the endpoint set they belong to.
+     *
+     * @param array $targets          Endpoint labels still requiring invalidation.
+     * @param array $required_targets Complete endpoint set required for this request generation.
+     * @return string
+     */
+    private static function encode_varnish_queue_pending_targets(array $targets, array $required_targets = array(), $phase = 'purge-pending')
+    {
+        $normalize = static function (array $values) {
+            $bounded = array();
+            foreach (array_slice($values, 0, 32) as $target) {
+                $target = trim((string) $target);
+                if ('' !== $target && strlen($target) <= 512) {
+                    $bounded[$target] = true;
+                }
+            }
+            $bounded = array_keys($bounded);
+            sort($bounded, SORT_STRING);
+            return $bounded;
+        };
+
+        $pending = $normalize($targets);
+        $required = $normalize($required_targets);
+        $phase = sanitize_key((string) $phase);
+        if (!in_array($phase, array('purge-pending', 'purged'), true)) {
+            $phase = 'purge-pending';
+        }
+        if (empty($pending) && 'purged' !== $phase) {
+            return '';
+        }
+        if (empty($required)) {
+            $required = $pending;
+        }
+
+        $encoded = wp_json_encode(array(
+            'pending' => $pending,
+            'required' => $required,
+            'phase' => $phase,
+        ));
+        return is_string($encoded) && strlen($encoded) <= 8192 ? $encoded : '';
+    }
+
+    /**
+     * Read the exact per-URL result returned by the invalidation transport.
+     *
+     * @param array  $result Batch result.
+     * @param string $url    Queue URL.
+     * @return array
+     */
+    private static function get_varnish_queue_url_result(array $result, $url)
+    {
+        $url = (string) $url;
+        $url_results = is_array($result['urlResults'] ?? null) ? $result['urlResults'] : array();
+        if (isset($url_results[$url]) && is_array($url_results[$url])) {
+            $url_result = $url_results[$url];
+            $url_result['attemptedEndpointTargets'] = array_values((array) ($result['attemptedEndpointTargets'] ?? array()));
+            return $url_result;
+        }
+
+        $normalized = self::normalize_varnish_invalidation_url($url);
+        $canonical = !empty($normalized['valid']) ? (string) ($normalized['url'] ?? '') : '';
+        if ('' !== $canonical && isset($url_results[$canonical]) && is_array($url_results[$canonical])) {
+            $url_result = $url_results[$canonical];
+            $url_result['attemptedEndpointTargets'] = array_values((array) ($result['attemptedEndpointTargets'] ?? array()));
+            return $url_result;
+        }
+
+        return array(
+            'url' => $url,
+            'success' => false,
+            'partial' => false,
+            'retryable' => false,
+            'successfulEndpointTargets' => array(),
+            'failedEndpointTargets' => array_values((array) ($result['attemptedEndpointTargets'] ?? array())),
+            'attemptedEndpointTargets' => array_values((array) ($result['attemptedEndpointTargets'] ?? array())),
+            'message' => (string) ($result['message'] ?? self::maybe_translate('Varnish invalidation did not return an authoritative per-URL result.')),
+        );
+    }
+
+    /**
      * Persist one Varnish queue attempt result.
      *
-     * @param array  $row     Queue row.
-     * @param bool   $success Whether the operation succeeded.
-     * @param string $message Result detail.
-     * @return bool
+     * @param array $row        Claimed queue row.
+     * @param array $url_result Exact per-URL invalidation result.
+     * @return array|false
      */
-    private static function mark_varnish_queue_row_attempt(array $row, $success, $message)
+    private static function mark_varnish_queue_row_attempt(array $row, array $url_result)
     {
         global $wpdb;
 
         $row_id = absint($row['id'] ?? 0);
-        if ($row_id < 1 || !($wpdb instanceof wpdb) || !self::ensure_cron_warm_queue_table()) {
+        $claim_token = sanitize_text_field((string) ($row['claim_token'] ?? ''));
+        if ($row_id < 1 || '' === $claim_token || !($wpdb instanceof wpdb) || !self::ensure_cron_warm_queue_table()) {
             return false;
         }
 
-        $attempt_count = max(0, (int) ($row['attempt_count'] ?? 0)) + 1;
+        $attempt_count = max(1, (int) ($row['attempt_count'] ?? 1));
+        $success = !empty($url_result['success']);
+        $retryable = !$success && !empty($url_result['retryable']);
         $message = method_exists(static::class, 'sanitize_varnish_string')
-            ? self::sanitize_varnish_string((string) $message)
-            : (string) $message;
+            ? self::sanitize_varnish_string((string) ($url_result['message'] ?? ''))
+            : (string) ($url_result['message'] ?? '');
         $message = sanitize_textarea_field($message);
         if (strlen($message) > 2000) {
             $message = substr($message, 0, 2000);
         }
 
+        $failed_targets = array_values((array) ($url_result['failedEndpointTargets'] ?? array()));
+        $required_targets = array_values((array) ($url_result['requiredEndpointTargets'] ?? ($url_result['attemptedEndpointTargets'] ?? array())));
+        $pending_targets = $success ? '' : self::encode_varnish_queue_pending_targets($failed_targets, $required_targets);
         $now = time();
         $status = 'done';
         $processed_at = $now;
         $next_attempt_at = 0;
         if (!$success) {
-            if ($attempt_count >= self::get_varnish_queue_max_attempts()) {
+            if (!$retryable || $attempt_count >= self::get_varnish_queue_max_attempts()) {
                 $status = 'error';
             } else {
                 $status = 'pending';
@@ -337,21 +574,71 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
             }
         }
 
+        $result_level = $success
+            ? 'success'
+            : ('error' === $status ? 'error' : (!empty($url_result['partial']) ? 'partial' : 'retrying'));
+
+        $rerun_message = self::maybe_translate('A newer Varnish invalidation request arrived while this row was processing; every configured endpoint will run again.');
         $table = self::get_cron_warm_queue_table_name();
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Updates one UltraCache-owned persistent queue row.
-        return false !== $wpdb->update(
-            $table,
-            array(
-                'status' => $status,
-                'result_message' => $message,
-                'attempt_count' => $attempt_count,
-                'next_attempt_at' => $next_attempt_at,
-                'updated_at' => $now,
-                'processed_at' => $processed_at,
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Claim token prevents a delayed Varnish worker from overwriting newer queue ownership.
+        $updated = $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE %i SET status = CASE WHEN rerun_requested = %d THEN %s ELSE %s END, result_level = CASE WHEN rerun_requested = %d THEN %s ELSE %s END, claim_token = %s, claimed_at = %d, lease_expires_at = %d, pending_targets = CASE WHEN rerun_requested = %d THEN %s ELSE %s END, result_message = CASE WHEN rerun_requested = %d THEN %s ELSE %s END, attempt_count = CASE WHEN rerun_requested = %d THEN %d ELSE attempt_count END, next_attempt_at = CASE WHEN rerun_requested = %d THEN %d ELSE %d END, updated_at = %d, processed_at = CASE WHEN rerun_requested = %d THEN %d ELSE %d END, rerun_requested = %d WHERE id = %d AND status = %s AND claim_token = %s",
+                $table,
+                1,
+                'pending',
+                $status,
+                1,
+                '',
+                $result_level,
+                '',
+                0,
+                0,
+                1,
+                '',
+                $pending_targets,
+                1,
+                $rerun_message,
+                $message,
+                1,
+                0,
+                1,
+                0,
+                $next_attempt_at,
+                $now,
+                1,
+                0,
+                $processed_at,
+                0,
+                $row_id,
+                'processing',
+                $claim_token
+            )
+        );
+
+        if (1 !== (int) $updated) {
+            return array('success' => false, 'leaseLost' => true, 'status' => 'processing', 'requeued' => false);
+        }
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads authoritative row state after releasing the owned Varnish claim.
+        $saved = $wpdb->get_row(
+            $wpdb->prepare(
+                'SELECT status, result_level, attempt_count, pending_targets FROM %i WHERE id = %d',
+                $table,
+                $row_id
             ),
-            array('id' => $row_id),
-            array('%s', '%s', '%d', '%d', '%d', '%d'),
-            array('%d')
+            ARRAY_A
+        );
+        $saved_status = is_array($saved) ? sanitize_key((string) ($saved['status'] ?? $status)) : $status;
+        $saved_attempt_count = is_array($saved) ? max(0, (int) ($saved['attempt_count'] ?? $attempt_count)) : $attempt_count;
+
+        return array(
+            'success' => true,
+            'leaseLost' => false,
+            'status' => $saved_status,
+            'resultLevel' => is_array($saved) ? sanitize_key((string) ($saved['result_level'] ?? $result_level)) : $result_level,
+            'requeued' => 'pending' === $saved_status && 0 === $saved_attempt_count,
+            'pendingTargetState' => is_array($saved) ? self::decode_varnish_queue_pending_targets($saved['pending_targets'] ?? '') : array('pending' => array(), 'required' => array()),
         );
     }
 
@@ -365,6 +652,7 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
     {
         $rows = self::load_ready_varnish_queue_rows($limit);
         if (empty($rows)) {
+            self::prune_completed_varnish_auxiliary_queue_rows();
             return array('processed' => 0, 'success' => 0, 'failed' => 0, 'queue' => self::get_varnish_queue_stats());
         }
 
@@ -377,123 +665,177 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
         $processed = 0;
         $succeeded = 0;
         $failed = 0;
+        $partial = 0;
+        $retried = 0;
+        $endpoint_requests = 0;
+        $successful_endpoint_requests = 0;
+        $failed_endpoint_requests = 0;
+        $completed_urls = array();
+        $aggregate_details = array();
+        $aggregate_details_truncated = false;
+        $requires_verified_origin = false;
+        $effective_method = '';
+        $invalidation_strategy = '';
+
         try {
-            $rows = self::load_ready_varnish_queue_rows($limit);
-            $invalidations = array();
-            $refills = array();
-            foreach ($rows as $row) {
-                if ('varnish_invalidate' === (string) ($row['job_type'] ?? '')) {
-                    $invalidations[] = $row;
-                } elseif ('varnish_refill' === (string) ($row['job_type'] ?? '')) {
-                    $refills[] = $row;
+            self::recover_expired_cron_warm_queue_leases();
+            $candidates = self::load_ready_varnish_queue_rows($limit);
+            $claimed_rows = array();
+            foreach ($candidates as $candidate) {
+                $claimed_row = self::claim_cron_warm_queue_row($candidate);
+                if (!empty($claimed_row)) {
+                    $claimed_rows[] = $claimed_row;
                 }
             }
-            // One refill URL can rebuild and publicly request up to three active HTML
-            // variants, plus one verification request per variant when explicitly enabled.
-            // Process one refill URL per tick to keep loopback work bounded.
-            $refills = array_slice($refills, 0, 1);
 
-            if (!empty($invalidations)) {
+            $settings = self::get_varnish_cli_settings();
+            $current_targets = self::resolve_varnish_invalidation_targets((array) ($settings['servers'] ?? array()));
+            sort($current_targets, SORT_STRING);
+            $groups = array();
+            foreach ($claimed_rows as $row) {
+                $target_state = self::decode_varnish_queue_pending_targets($row['pending_targets'] ?? '');
+                $targets = (array) ($target_state['pending'] ?? array());
+                $required_targets = (array) ($target_state['required'] ?? array());
+                if (empty($targets) || $required_targets !== $current_targets) {
+                    $targets = array();
+                    $required_targets = $current_targets;
+                }
+                $group_key = hash('sha256', (string) wp_json_encode(array($targets, $required_targets)));
+                if (!isset($groups[$group_key])) {
+                    $groups[$group_key] = array(
+                        'targets' => $targets,
+                        'requiredTargets' => $required_targets,
+                        'rows' => array(),
+                    );
+                }
+                $groups[$group_key]['rows'][] = $row;
+            }
+
+            foreach ($groups as $group) {
+                $group_rows = (array) ($group['rows'] ?? array());
+                $group_targets = (array) ($group['targets'] ?? array());
+                $group_required_targets = (array) ($group['requiredTargets'] ?? array());
                 $urls = array_values(array_filter(array_map(static function ($row) {
                     return isset($row['url']) ? (string) $row['url'] : '';
-                }, $invalidations)));
-                $result = self::varnish_flush_url_batch($urls, 'queued');
-                $ok = !empty($result['success']);
-                $message = (string) ($result['message'] ?? ($ok ? 'Varnish invalidation complete.' : 'Varnish invalidation failed.'));
-                foreach ($invalidations as $row) {
-                    self::mark_varnish_queue_row_attempt($row, $ok, $message);
+                }, $group_rows)));
+                if (empty($urls)) {
+                    continue;
+                }
+
+                $result = self::varnish_flush_url_batch($urls, 'queued', '', $group_targets);
+                $effective_method = (string) ($result['effectiveMethod'] ?? $effective_method);
+                $invalidation_strategy = sanitize_key((string) ($result['invalidationStrategy'] ?? $invalidation_strategy));
+                $requires_verified_origin = $requires_verified_origin || 'soft' === $invalidation_strategy;
+                $endpoint_requests += max(0, (int) ($result['requestCount'] ?? 0));
+                $successful_endpoint_requests += max(0, (int) ($result['successfulEndpointRequestCount'] ?? 0));
+                $failed_endpoint_requests += max(0, (int) ($result['failedEndpointRequestCount'] ?? 0));
+
+                foreach ((array) ($result['details'] ?? array()) as $detail) {
+                    if (count($aggregate_details) >= 100) {
+                        $aggregate_details_truncated = true;
+                        break;
+                    }
+                    $aggregate_details[] = $detail;
+                }
+                if (!empty($result['detailsTruncated'])) {
+                    $aggregate_details_truncated = true;
+                }
+
+                foreach ($group_rows as $row) {
+                    $url = (string) ($row['url'] ?? '');
+                    $url_result = self::get_varnish_queue_url_result($result, $url);
+                    $url_result['requiredEndpointTargets'] = $group_required_targets;
+                    $attempt_result = self::mark_varnish_queue_row_attempt($row, $url_result);
+                    if (empty($attempt_result['success'])) {
+                        continue;
+                    }
+
                     ++$processed;
-                    if ($ok) {
+                    if (!empty($attempt_result['requeued'])) {
+                        ++$retried;
+                        continue;
+                    }
+
+                    $saved_status = (string) ($attempt_result['status'] ?? '');
+                    if (!empty($url_result['success']) && 'done' === $saved_status) {
                         ++$succeeded;
-                    } else {
+                        if ('' !== $url) {
+                            $completed_urls[$url] = true;
+                        }
+                        continue;
+                    }
+
+                    if (!empty($url_result['partial'])) {
+                        ++$partial;
+                    }
+                    if ('pending' === $saved_status) {
+                        ++$retried;
+                    } elseif ('error' === $saved_status) {
                         ++$failed;
                     }
                 }
-
-                $refill_queue = $ok
-                    ? self::queue_varnish_refill_urls($urls, 'queued-invalidation')
-                    : array('success' => false, 'queued' => false, 'queuedUrlCount' => 0);
-                $result['operationType'] = 'queued-invalidation';
-                $result['queueProcessedUrlCount'] = count($invalidations);
-                $result['refillQueued'] = !empty($refill_queue['queued']);
-                $result['refillQueuedUrlCount'] = max(0, (int) ($refill_queue['queuedUrlCount'] ?? 0));
-                $result['queue'] = self::get_varnish_queue_stats();
-                self::set_varnish_last_result($result);
             }
 
-            $refill_succeeded = 0;
-            $refill_failed = 0;
-            $refill_verified = 0;
-            $refill_bypassed = 0;
-            $refill_inconclusive = 0;
-            $refill_not_hit = 0;
-            $refill_verification_errors = 0;
-            $refill_two_stage_available = 0;
-            $refill_two_stage_fallback = 0;
-            $refill_two_stage_inconclusive = 0;
-            $refill_two_stage_errors = 0;
-            foreach ($refills as $row) {
-                $result = self::send_varnish_refill_request((string) ($row['url'] ?? ''));
-                $ok = !empty($result['success']);
-                self::mark_varnish_queue_row_attempt($row, $ok, (string) ($result['message'] ?? 'Varnish refill failed.'));
-                ++$processed;
-                if ($ok) {
-                    ++$succeeded;
-                    ++$refill_succeeded;
+            $pipeline_queue = !empty($completed_urls)
+                && self::should_refill_after_targeted_varnish_invalidation()
+                && method_exists(static::class, 'enqueue_targeted_warm_pipeline_urls')
+                ? self::enqueue_targeted_warm_pipeline_urls(array_keys($completed_urls), $requires_verified_origin, 'queued-invalidation')
+                : array('success' => empty($completed_urls), 'queued' => false, 'queuedUrlCount' => 0);
+
+            if ($processed > 0) {
+                if ($failed < 1 && $retried < 1 && $partial < 1) {
+                    $message = self::maybe_translate_sprintf(
+                        'Queued Varnish invalidation completed for %d URL(s).',
+                        $succeeded
+                    );
                 } else {
-                    ++$failed;
-                    ++$refill_failed;
+                    $message = self::maybe_translate_sprintf(
+                        'Queued Varnish invalidation completed %1$d URL(s), retained %2$d for retry, and ended %3$d with terminal errors.',
+                        $succeeded,
+                        $retried,
+                        $failed
+                    );
                 }
 
-                $two_stage = is_array($result['twoStageRefill'] ?? null) ? $result['twoStageRefill'] : array();
-                $two_stage_status = sanitize_key((string) ($two_stage['status'] ?? 'inconclusive'));
-                if (!empty($two_stage['available'])) {
-                    ++$refill_two_stage_available;
-                } elseif ('error' === $two_stage_status) {
-                    ++$refill_two_stage_errors;
-                } elseif ('inconclusive' === $two_stage_status || 'configuration-changed' === $two_stage_status || 'untested' === $two_stage_status) {
-                    ++$refill_two_stage_inconclusive;
-                } else {
-                    ++$refill_two_stage_fallback;
+                if (!empty($pipeline_queue['message'])) {
+                    $message .= ' ' . (string) $pipeline_queue['message'];
                 }
 
-                $public_refill = is_array($result['publicRefill'] ?? null) ? $result['publicRefill'] : array();
-                $verification_status = sanitize_key((string) ($public_refill['verificationStatus'] ?? 'disabled'));
-                if ('verified' === $verification_status) {
-                    ++$refill_verified;
-                } elseif ('bypassed' === $verification_status) {
-                    ++$refill_bypassed;
-                } elseif ('not-hit' === $verification_status) {
-                    ++$refill_not_hit;
-                } elseif ('inconclusive' === $verification_status) {
-                    ++$refill_inconclusive;
-                } elseif ('error' === $verification_status) {
-                    ++$refill_verification_errors;
-                }
-                self::renew_cron_warm_lock($lock_token, $lock_ttl);
-            }
-            if (!empty($refills)) {
-                self::set_varnish_last_result(array(
-                    'success' => 0 === $refill_failed,
-                    'message' => 0 === $refill_failed
-                        ? self::maybe_translate_sprintf('Completed %d queued affected-page Varnish refill(s).', $refill_succeeded)
-                        : self::maybe_translate_sprintf('Completed %1$d queued Varnish refill(s); %2$d failed and will follow the retry policy.', $refill_succeeded, $refill_failed),
+                $summary = array(
+                    'success' => $processed > 0 && $failed < 1 && $retried < 1,
+                    'partial' => $succeeded > 0 && ($failed > 0 || $retried > 0 || $partial > 0),
+                    'message' => $message,
                     'time' => time(),
-                    'operationType' => 'queued-refill',
-                    'refillSuccessCount' => $refill_succeeded,
-                    'refillFailureCount' => $refill_failed,
-                    'refillVerifiedCount' => $refill_verified,
-                    'refillBypassedCount' => $refill_bypassed,
-                    'refillInconclusiveCount' => $refill_inconclusive,
-                    'refillNotHitCount' => $refill_not_hit,
-                    'refillVerificationErrorCount' => $refill_verification_errors,
-                    'refillTwoStageAvailableCount' => $refill_two_stage_available,
-                    'refillTwoStageFallbackCount' => $refill_two_stage_fallback,
-                    'refillTwoStageInconclusiveCount' => $refill_two_stage_inconclusive,
-                    'refillTwoStageErrorCount' => $refill_two_stage_errors,
+                    'scope' => 'queued',
+                    'operationType' => 'queued-invalidation',
+                    'effectiveMethod' => $effective_method,
+                    'invalidationStrategy' => $invalidation_strategy,
+                    'receivedUrlCount' => $processed,
+                    'validUrlCount' => $processed,
+                    'uniqueUrlCount' => $processed,
+                    'duplicateUrlCount' => 0,
+                    'rejectedUrlCount' => 0,
+                    'queueProcessedUrlCount' => $processed,
+                    'fullyInvalidatedUrlCount' => $succeeded,
+                    'partiallyInvalidatedUrlCount' => $partial,
+                    'retryingUrlCount' => $retried,
+                    'failedUrlCount' => $failed,
+                    'requestCount' => $endpoint_requests,
+                    'successfulEndpointRequestCount' => $successful_endpoint_requests,
+                    'failedEndpointRequestCount' => $failed_endpoint_requests,
+                    'refillQueued' => !empty($pipeline_queue['queued']),
+                    'refillQueuedUrlCount' => max(0, (int) ($pipeline_queue['queuedUrlCount'] ?? 0)),
+                    'refillMode' => !empty($pipeline_queue['queued']) ? 'shared-page-warm-pipeline' : 'none',
+                    'strictOriginRequired' => $requires_verified_origin,
+                    'detailCount' => count($aggregate_details),
+                    'detailsTruncated' => $aggregate_details_truncated,
+                    'details' => $aggregate_details,
                     'queue' => self::get_varnish_queue_stats(),
-                ));
+                );
+                self::set_varnish_last_result($summary);
             }
+
+            self::prune_completed_varnish_auxiliary_queue_rows();
         } finally {
             self::release_cron_warm_lock($lock_token);
         }
@@ -506,8 +848,64 @@ trait Ultra_Cache_WP_Varnish_Queue_Trait
             'processed' => $processed,
             'success' => $succeeded,
             'failed' => $failed,
+            'partial' => $partial,
+            'retrying' => $retried,
             'queue' => self::get_varnish_queue_stats(),
         );
+    }
+
+    /**
+     * Prune terminal auxiliary queue rows after bounded retention.
+     *
+     * @return int
+     */
+    private static function prune_completed_varnish_auxiliary_queue_rows()
+    {
+        global $wpdb;
+        if (!($wpdb instanceof wpdb) || !self::ensure_cron_warm_queue_table()) {
+            return 0;
+        }
+
+        $completed_retention = max(HOUR_IN_SECONDS, min(7 * DAY_IN_SECONDS, (int) apply_filters('ultracache_varnish_queue_completed_retention', DAY_IN_SECONDS)));
+        $error_retention = max(DAY_IN_SECONDS, min(30 * DAY_IN_SECONDS, (int) apply_filters('ultracache_varnish_queue_error_retention', 14 * DAY_IN_SECONDS)));
+        $table = self::get_cron_warm_queue_table_name();
+        $now = time();
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Prunes retained successful/skipped UltraCache auxiliary rows.
+        $completed_deleted = $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM %i WHERE (job_type = %s OR (job_type = %s AND source_context <> %s)) AND status IN (%s, %s) AND processed_at > %d AND processed_at < %d",
+                $table,
+                'varnish_invalidate',
+                'page_warm',
+                '',
+                'done',
+                'skipped',
+                0,
+                $now - $completed_retention
+            )
+        );
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Retains terminal errors longer for diagnostics, then bounds table growth.
+        $error_deleted = $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM %i WHERE (job_type = %s OR (job_type = %s AND source_context <> %s)) AND status = %s AND processed_at > %d AND processed_at < %d",
+                $table,
+                'varnish_invalidate',
+                'page_warm',
+                '',
+                'error',
+                0,
+                $now - $error_retention
+            )
+        );
+
+        $completed_deleted = false === $completed_deleted ? 0 : max(0, (int) $completed_deleted);
+        $error_deleted = false === $error_deleted ? 0 : max(0, (int) $error_deleted);
+        if (($completed_deleted > 0 || $error_deleted > 0) && method_exists(static::class, 'record_varnish_queue_prune_metrics')) {
+            self::record_varnish_queue_prune_metrics($completed_deleted, $error_deleted);
+        }
+        return $completed_deleted + $error_deleted;
     }
 
     /**

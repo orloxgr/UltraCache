@@ -134,7 +134,7 @@ trait Ultra_Cache_WP_Varnish_URL_Normalization_Trait
      * @param string $url Candidate URL.
      * @return array
      */
-    private static function normalize_varnish_invalidation_url($url)
+    protected static function normalize_varnish_invalidation_url($url)
     {
         $input_url = trim(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
         if ('' === $input_url) {
@@ -264,7 +264,7 @@ trait Ultra_Cache_WP_Varnish_URL_Normalization_Trait
      * @param array $urls Candidate URLs.
      * @return array
      */
-    private static function prepare_varnish_invalidation_urls(array $urls)
+    protected static function prepare_varnish_invalidation_urls(array $urls)
     {
         $prepared = array();
         $seen = array();

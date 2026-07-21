@@ -46,7 +46,7 @@ trait Ultra_Cache_WP_Config_Manager_Trait
             }
             $lines[] = "if ( ! defined( 'WP_REDIS_PASSWORD' ) ) {";
             // var_export() intentionally creates a valid PHP string literal for wp-config.php; it is not debug output.
-            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- var_export() creates a valid PHP string literal for the managed wp-config.php constant; it is not diagnostic output.
             $lines[] = "\tdefine( 'WP_REDIS_PASSWORD', " . var_export($redis_password, true) . ' );';
             $lines[] = '}';
         }
@@ -57,7 +57,7 @@ trait Ultra_Cache_WP_Config_Manager_Trait
             }
             $lines[] = "if ( ! defined( 'ULTRACACHE_VARNISH_PASSWORD' ) ) {";
             // var_export() intentionally creates a valid PHP string literal for wp-config.php; it is not debug output.
-            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- var_export() creates a valid PHP string literal for the managed wp-config.php constant; it is not diagnostic output.
             $lines[] = "\tdefine( 'ULTRACACHE_VARNISH_PASSWORD', " . var_export($varnish_password, true) . ' );';
             $lines[] = '}';
         }

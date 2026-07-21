@@ -276,7 +276,7 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             }
 
             // Intentional final HTML optimization output: noscript fallback for an already-present stylesheet made asynchronous by the optimizer.
-            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet
+            // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- Rewrites final rendered HTML with a noscript fallback for a stylesheet already printed by WordPress.
             return '<noscript><link ' . $attrs . ' data-ultracache-async-css-fallback="1" /></noscript>';
         }
 

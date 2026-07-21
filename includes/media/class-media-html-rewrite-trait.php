@@ -893,7 +893,19 @@ private function can_serve_avif() {
 				return false;
 			}
 
-			return (false !== stripos($accept, 'image/' . $format));
+			$memo_key = $format . '|' . md5(substr((string) $accept, 0, 8192));
+			if (array_key_exists($memo_key, $this->media_accept_support_memo)) {
+				return (bool) $this->media_accept_support_memo[$memo_key];
+			}
+
+			$allowed = function_exists('ultracache_accept_header_allows_media_type')
+				&& ultracache_accept_header_allows_media_type($accept, 'image/' . $format);
+			if (count($this->media_accept_support_memo) >= 12) {
+				$this->media_accept_support_memo = array();
+			}
+			$this->media_accept_support_memo[$memo_key] = $allowed;
+
+			return $allowed;
 		}
 
 		private function is_media_optimization_enabled() {

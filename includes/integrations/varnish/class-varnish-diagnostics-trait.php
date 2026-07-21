@@ -11,28 +11,6 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_WP_Varnish_Diagnostics_Trait
 {
-        public static function varnish_test_connection()
-        {
-            self::reset_settings_cache();
-            $home = home_url('/');
-            $parsed = wp_parse_url($home);
-            $host = $parsed && !empty($parsed['host']) ? $parsed['host'] : '';
-            if ('' === $host) {
-                $result = array('success' => false, 'message' => self::maybe_translate('Could not determine site host for Varnish test.'), 'time' => time());
-                self::set_varnish_last_result($result);
-                return $result;
-            }
-
-            $expr = self::build_varnish_ban_expression($host, '/', false);
-            $result = self::varnish_send_expr_to_all($expr, '/');
-            $settings = self::get_varnish_cli_settings();
-            if ('admin' === (string) ($settings['mode'] ?? 'http') && !empty($result['success'])) {
-                $result['banPressure'] = self::collect_varnish_ban_pressure();
-                self::set_varnish_last_result($result);
-            }
-            return $result;
-        }
-
         private static function get_reverse_proxy_status()
         {
             $cached = get_transient('ultracache_reverse_proxy_status_v2');
@@ -138,30 +116,6 @@ trait Ultra_Cache_WP_Varnish_Diagnostics_Trait
 
             set_transient('ultracache_reverse_proxy_status_v2', $status, MINUTE_IN_SECONDS);
             return $status;
-        }
-        /**
-         * Return the active UltraCache HTML image-variant policy for the
-         * Varnish dashboard diagnostics.
-         *
-         * @param array $settings Dashboard or normalized settings.
-         * @return array
-         */
-        private static function get_varnish_html_variant_status(array $settings)
-        {
-            $policy = ultracache_get_html_variant_policy($settings);
-            $buckets = array_values((array) ($policy['buckets'] ?? array('orig')));
-
-            return array(
-                'enabled' => !empty($policy['enabled']),
-                'varyAcceptRequired' => !empty($policy['vary_accept']),
-                'varyHeader' => !empty($policy['vary_accept']) ? 'Accept, Accept-Encoding' : 'Accept-Encoding',
-                'activeBuckets' => $buckets,
-                'mode' => (string) ($policy['mode'] ?? 'webp'),
-                'fallback' => (string) ($policy['fallback'] ?? 'original'),
-                'message' => !empty($policy['vary_accept'])
-                    ? self::maybe_translate('HTML image rewriting is active, so Varnish must keep the listed UltraCache image buckets distinct.')
-                    : self::maybe_translate('HTML image rewriting is inactive, so all Accept profiles use the orig HTML bucket.'),
-            );
         }
 
 }

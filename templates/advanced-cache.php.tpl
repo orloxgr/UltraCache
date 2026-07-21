@@ -242,6 +242,25 @@ function ultracache_advanced_cache_safe_stream_socket_client($remote_socket, $ti
     return @stream_socket_client($remote_socket, $errno, $errstr, $timeout, $flags);
 }
 
+function ultracache_advanced_cache_write_all($stream, $payload) {
+    if (!is_resource($stream) || !is_string($payload) || '' === $payload || strlen($payload) > 16384) {
+        return false;
+    }
+
+    $length = strlen($payload);
+    $written = 0;
+    while ($written < $length) {
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- The early drop-in sends one bounded authenticated loopback request before WordPress APIs are available.
+        $chunk = @fwrite($stream, substr($payload, $written));
+        if (!is_int($chunk) || $chunk <= 0) {
+            return false;
+        }
+        $written += $chunk;
+    }
+
+    return true;
+}
+
 
 function ultracache_advanced_cache_debug_headers_enabled() {
     global $runtime_config;
@@ -496,6 +515,13 @@ if (!in_array($method, array('GET', 'HEAD'), true)) {
     return;
 }
 
+$authorization = trim((string) ultracache_advanced_cache_server_var('HTTP_AUTHORIZATION', ''));
+$redirect_authorization = trim((string) ultracache_advanced_cache_server_var('REDIRECT_HTTP_AUTHORIZATION', ''));
+$php_auth_user = trim((string) ultracache_advanced_cache_server_var('PHP_AUTH_USER', ''));
+if ('' !== $authorization || '' !== $redirect_authorization || '' !== $php_auth_user) {
+    return;
+}
+
 $raw_http_host = ultracache_advanced_cache_server_var('HTTP_HOST', '');
 $request_uri = ultracache_advanced_cache_normalize_request_uri(ultracache_advanced_cache_server_var('REQUEST_URI', ''));
 if ('' === $raw_http_host || '' === $request_uri) {
@@ -549,6 +575,8 @@ $runtime_config = array(
         'rest_route',
         'ultracache_revalidate',
         'ultracache_rt',
+        'ultracache_rv',
+        'ultracache_bucket',
         'ultracache_store_profile',
         'ultracache_callback_profile',
         'ultracache_store_profile_verbose',
@@ -580,6 +608,7 @@ $runtime_config = array(
     'varnish_enabled'                => false,
     'varnish_html_ttl_minutes'       => 0,
     'varnish_stale_while_revalidate_seconds' => 0,
+    'home_url'                       => '',
     'html_vary_accept'               => false,
     'html_variant_buckets'           => array('orig'),
     'stale_while_revalidate_enabled' => false,
@@ -685,6 +714,7 @@ $ultracache_normalize_runtime_config = static function ($config) use ($runtime_c
         'varnish_enabled'                => !empty($config['varnish_enabled']),
         'varnish_html_ttl_minutes'       => max(0, min(525600, isset($config['varnish_html_ttl_minutes']) ? (int) $config['varnish_html_ttl_minutes'] : 0)),
         'varnish_stale_while_revalidate_seconds' => max(0, min(86400, isset($config['varnish_stale_while_revalidate_seconds']) ? (int) $config['varnish_stale_while_revalidate_seconds'] : 0)),
+        'home_url'                       => isset($config['home_url']) && is_scalar($config['home_url']) ? trim(preg_replace('/[\x00-\x1F\x7F]/', '', (string) $config['home_url'])) : '',
         'html_vary_accept'               => !empty($config['html_vary_accept']) && count($html_variant_buckets) > 1,
         'html_variant_buckets'           => $html_variant_buckets,
         'stale_while_revalidate_enabled' => !empty($config['stale_while_revalidate_enabled']),
@@ -752,6 +782,7 @@ $revalidate_header = ultracache_advanced_cache_server_var('HTTP_X_ULTRACACHE_REV
 $revalidate_token = isset($_GET['ultracache_rt']) ? (string) $_GET['ultracache_rt'] : ultracache_advanced_cache_server_var('HTTP_X_ULTRACACHE_TOKEN', '');
 $is_revalidate_request = (
     ('1' === $revalidate_flag || '1' === $revalidate_header)
+    && '1' === ultracache_advanced_cache_server_var('HTTP_X_ULTRACACHE_INTERNAL_REQUEST', '')
     && '' !== $ultracache_runtime_control_secret
     && ultracache_advanced_cache_validate_runtime_control_token($revalidate_token, $ultracache_runtime_control_secret)
 );
@@ -782,6 +813,8 @@ if (!empty($ultracache_initial_query_vars) && is_array($ultracache_initial_query
     $ultracache_initial_internal_keys = array(
         'ultracache_revalidate' => true,
         'ultracache_rt' => true,
+        'ultracache_rv' => true,
+        'ultracache_bucket' => true,
         'ultracache_store_profile' => true,
         'ultracache_callback_profile' => true,
         'ultracache_store_profile_verbose' => true,
@@ -1151,28 +1184,41 @@ $ultracache_record_background_revalidation = static function () {
 $ultracache_get_revalidate_lock_path = static function ($cache_file) {
     return (string) $cache_file . '.revalidate.lock';
 };
-$ultracache_can_queue_revalidate = static function ($lock_file, $max_stale_seconds) use ($ultracache_get_filemtime, $ultracache_advanced_cache_is_cache_path) {
-    if (!$ultracache_advanced_cache_is_cache_path($lock_file) || !file_exists($lock_file)) {
-        return true;
-    }
-    $mtime = $ultracache_get_filemtime($lock_file);
-    if (!$mtime) {
-        return true;
-    }
-    $lock_ttl = max(30, min(300, (int) $max_stale_seconds));
-    return (time() - (int) $mtime) > $lock_ttl;
-};
-$ultracache_write_revalidate_lock = static function ($lock_file) use ($ultracache_make_dir, $ultracache_write_file, $ultracache_advanced_cache_is_cache_path) {
+$ultracache_try_acquire_revalidate_lock = static function ($lock_file, $max_stale_seconds) use ($ultracache_get_filemtime, $ultracache_make_dir, $ultracache_delete_file, $ultracache_advanced_cache_is_cache_path) {
     if (!$ultracache_advanced_cache_is_cache_path($lock_file)) {
-        return;
+        return false;
     }
+
     $dir = dirname($lock_file);
-    if (!file_exists($dir)) {
-        $ultracache_make_dir($dir, 0755, true);
+    if (!file_exists($dir) && !$ultracache_make_dir($dir, 0755, true)) {
+        return false;
     }
-    $ultracache_write_file($lock_file, (string) time(), LOCK_EX);
+
+    $lock_ttl = max(30, min(300, (int) $max_stale_seconds));
+    for ($attempt = 0; $attempt < 2; $attempt++) {
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Exclusive create is required for an atomic pre-WordPress stale-revalidation lease.
+        $handle = @fopen($lock_file, 'x');
+        if (is_resource($handle)) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Bounded timestamp written to an exclusively created cache-root lock.
+            $written = @fwrite($handle, (string) time());
+            fclose($handle);
+            if (false !== $written) {
+                return true;
+            }
+            $ultracache_delete_file($lock_file);
+            return false;
+        }
+
+        $mtime = $ultracache_get_filemtime($lock_file);
+        if (!$mtime || (time() - (int) $mtime) <= $lock_ttl) {
+            return false;
+        }
+        $ultracache_delete_file($lock_file);
+    }
+
+    return false;
 };
-$ultracache_queue_revalidate = static function ($target_url, $secret) {
+$ultracache_queue_revalidate = static function ($target_url, $secret, $home_url) {
     $secret = (string) $secret;
     if ('' === $target_url || '' === $secret) {
         return false;
@@ -1182,15 +1228,31 @@ $ultracache_queue_revalidate = static function ($target_url, $secret) {
         return false;
     }
     $separator = false !== strpos($target_url, '?') ? '&' : '?';
-    $request_url = $target_url . $separator . 'ultracache_revalidate=1&ultracache_rt=' . rawurlencode($token);
+    try {
+        $request_nonce = bin2hex(random_bytes(12));
+    } catch (Throwable) {
+        $request_nonce = substr(hash_hmac('sha256', $target_url . '|' . sprintf('%.6F', microtime(true)) . '|' . getmypid() . '|' . memory_get_usage(), $secret), 0, 24);
+    }
+    $request_url = $target_url . $separator . 'ultracache_revalidate=1&ultracache_rt=' . rawurlencode($token) . '&ultracache_rv=' . rawurlencode($request_nonce);
 
     $parts = parse_url($request_url);
-    if (empty($parts['host'])) {
+    $home_parts = parse_url((string) $home_url);
+    if (empty($parts['host']) || empty($home_parts['host'])) {
         return false;
     }
 
     $scheme = !empty($parts['scheme']) ? strtolower((string) $parts['scheme']) : 'http';
-    $host = (string) $parts['host'];
+    $host = strtolower((string) $parts['host']);
+    $home_host = strtolower((string) $home_parts['host']);
+    if (!in_array($scheme, array('http', 'https'), true) || $host !== $home_host) {
+        return false;
+    }
+
+    $signature = hash_hmac('sha256', 'ultracache-varnish-origin-revalidation|' . (string) $home_url, $secret);
+    if ('' === $signature) {
+        return false;
+    }
+
     $port = isset($parts['port']) ? (int) $parts['port'] : ('https' === $scheme ? 443 : 80);
     $path = (!empty($parts['path']) ? (string) $parts['path'] : '/') . (!empty($parts['query']) ? '?' . (string) $parts['query'] : '');
     $remote = ('https' === $scheme ? 'ssl://' : 'tcp://') . $host . ':' . $port;
@@ -1199,37 +1261,30 @@ $ultracache_queue_revalidate = static function ($target_url, $secret) {
         $host_header .= ':' . (string) $port;
     }
 
-    // Prefer fire-and-forget sockets. This keeps stale HIT serving out of the 1s cURL wait path.
     $errno = 0;
     $errstr = '';
-    $flags = STREAM_CLIENT_CONNECT;
-    if (defined('STREAM_CLIENT_ASYNC_CONNECT')) {
-        $flags |= STREAM_CLIENT_ASYNC_CONNECT;
-    }
-    $fp = ultracache_advanced_cache_safe_stream_socket_client($remote, 0.15, $errno, $errstr, $flags);
-    if ($fp) {
-        stream_set_blocking($fp, false);
-        stream_set_timeout($fp, 0, 150000);
-        $out = "GET {$path} HTTP/1.1
-";
-        $out .= "Host: {$host_header}
-";
-        $out .= "Connection: Close
-";
-        $out .= "X-UltraCache-Revalidate: 1
-";
-        $out .= "X-UltraCache-Token: {$token}
-
-";
-        $written = @fwrite($fp, $out);
-        fclose($fp);
-        if (false !== $written) {
-            return true;
-        }
+    $fp = ultracache_advanced_cache_safe_stream_socket_client($remote, 0.5, $errno, $errstr, STREAM_CLIENT_CONNECT);
+    if (!is_resource($fp)) {
+        return false;
     }
 
-    // No cURL fallback here: stale revalidation must never run a blocking HTTP client in the visitor path.
-    return false;
+    stream_set_blocking($fp, true);
+    stream_set_timeout($fp, 0, 500000);
+    $out = "GET {$path} HTTP/1.1\r\n";
+    $out .= "Host: {$host_header}\r\n";
+    $out .= "Connection: Close\r\n";
+    $out .= "X-UltraCache-Warm: 1\r\n";
+    $out .= "X-UltraCache-Internal-Request: 1\r\n";
+    $out .= "X-UltraCache-Force-Refresh: 1\r\n";
+    $out .= "X-UltraCache-Revalidate: 1\r\n";
+    $out .= "X-UltraCache-Token: {$token}\r\n";
+    $out .= "X-UltraCache-VCL-Signature: {$signature}\r\n";
+    $out .= "Cache-Control: no-cache, no-store, must-revalidate, max-age=0\r\n";
+    $out .= "Pragma: no-cache\r\n\r\n";
+    $written = ultracache_advanced_cache_write_all($fp, $out);
+    fclose($fp);
+
+    return $written;
 };
 
 $normalize_path = static function ($path) {
@@ -1371,6 +1426,8 @@ $ultracache_hard_security_query_args = array(
     'download_file',
     'ultracache_revalidate',
     'ultracache_rt',
+    'ultracache_rv',
+    'ultracache_bucket',
     'ultracache_store_profile',
     'ultracache_callback_profile',
     'ultracache_store_profile_verbose',
@@ -1402,6 +1459,8 @@ $ultracache_hard_security_paths = array(
 $ultracache_internal_control_query_args = array(
     'ultracache_revalidate',
     'ultracache_rt',
+    'ultracache_rv',
+    'ultracache_bucket',
     'ultracache_store_profile',
     'ultracache_callback_profile',
     'ultracache_store_profile_verbose',
@@ -1608,12 +1667,47 @@ if ('' === $cache_key_path) {
     $cache_key_path = 'index';
 }
 
-$accept = strtolower((string) ultracache_advanced_cache_server_var('HTTP_ACCEPT', ''));
+$accept = (string) ultracache_advanced_cache_server_var('HTTP_ACCEPT', '');
 $active_html_buckets = array_fill_keys((array) ($runtime_config['html_variant_buckets'] ?? array('orig')), true);
+$ultracache_accept_allows_exact_media_type = static function ($header_value, $media_type) {
+    $media_type = strtolower(trim((string) $media_type));
+    if (1 !== preg_match('/\A[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+\z/', $media_type)) {
+        return false;
+    }
+
+    $header_value = substr(strtolower((string) $header_value), 0, 8192);
+    $allowed = false;
+    foreach (array_slice(explode(',', $header_value), 0, 64) as $range) {
+        $parts = array_map('trim', explode(';', (string) $range));
+        $token = (string) array_shift($parts);
+        if ($token !== $media_type) {
+            continue;
+        }
+
+        $quality = 1.0;
+        foreach ($parts as $parameter) {
+            $parameter = trim((string) $parameter);
+            if (1 !== preg_match('/\Aq\s*=/i', $parameter)) {
+                continue;
+            }
+            if (1 === preg_match('/\Aq\s*=\s*(0(?:\.\d+)?|1(?:\.0+)?)\z/i', $parameter, $matches)) {
+                $quality = max(0.0, min(1.0, (float) $matches[1]));
+            }
+            break;
+        }
+
+        if ($quality <= 0.0) {
+            return false;
+        }
+        $allowed = true;
+    }
+
+    return $allowed;
+};
 $bucket = 'orig';
-if (isset($active_html_buckets['avif']) && false !== strpos($accept, 'image/avif')) {
+if (isset($active_html_buckets['avif']) && $ultracache_accept_allows_exact_media_type($accept, 'image/avif')) {
     $bucket = 'avif';
-} elseif (isset($active_html_buckets['webp']) && false !== strpos($accept, 'image/webp')) {
+} elseif (isset($active_html_buckets['webp']) && $ultracache_accept_allows_exact_media_type($accept, 'image/webp')) {
     $bucket = 'webp';
 }
 
@@ -1736,7 +1830,8 @@ function ultracache_advanced_cache_send_shared_html_headers(array $config, $cach
 
     $seconds = $minutes * 60;
     if (!$cacheable) {
-        header('Cache-Control: public, max-age=0, s-maxage=0, must-revalidate', true);
+        header('Cache-Control: private, no-store, max-age=0, must-revalidate', true);
+        header('Surrogate-Control: no-store', true);
         header('X-UltraCache-Cacheable: 0');
         header('X-UltraCache-Surrogate-TTL: 0');
         header('X-UltraCache-Stale-While-Revalidate: 0');
@@ -1757,8 +1852,11 @@ function ultracache_advanced_cache_send_shared_html_headers(array $config, $cach
 
 $fresh_ttl = max(60, (int) ($runtime_config['cache_fresh_ttl_minutes'] ?? 15) * 60);
 $max_stale = max($fresh_ttl, (int) ($runtime_config['cache_max_stale_minutes'] ?? 60) * 60);
-$mtime = $ultracache_get_filemtime($cache_file);
-$age = $mtime ? max(0, time() - (int) $mtime) : 0;
+$freshness_mtime = $ultracache_get_filemtime($cache_file . '.fresh');
+if (!$freshness_mtime) {
+    $freshness_mtime = $ultracache_get_filemtime($cache_file);
+}
+$age = $freshness_mtime ? max(0, time() - (int) $freshness_mtime) : 0;
 $serve_until = !empty($runtime_config['stale_while_revalidate_enabled']) ? $max_stale : $fresh_ttl;
 if ($age > $serve_until) {
     return;
@@ -1766,11 +1864,7 @@ if ($age > $serve_until) {
 
 if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_ttl && $age <= $max_stale) {
     $lock_file = $ultracache_get_revalidate_lock_path($cache_file);
-    $should_revalidate = false;
-    if ($ultracache_can_queue_revalidate($lock_file, $max_stale)) {
-        $ultracache_write_revalidate_lock($lock_file);
-        $should_revalidate = true;
-    }
+    $should_revalidate = $ultracache_try_acquire_revalidate_lock($lock_file, $max_stale);
 
     $ultracache_record_hit($bucket, $encoding_bucket, true);
     $validator_metadata = ultracache_advanced_cache_get_validator_metadata($serve_file, $encoding_bucket);
@@ -1807,7 +1901,7 @@ if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_t
             @flush();
         }
 
-        $queued = $ultracache_queue_revalidate($normalized, $ultracache_runtime_control_secret);
+        $queued = $ultracache_queue_revalidate($normalized, $ultracache_runtime_control_secret, (string) ($runtime_config['home_url'] ?? ''));
         if ($queued) {
             $ultracache_record_background_revalidation();
         } else {

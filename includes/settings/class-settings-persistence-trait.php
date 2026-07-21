@@ -118,10 +118,10 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
             'varnishStaleWhileRevalidateSeconds',
             'varnishRefillAfterTargetedInvalidation',
             'varnishWarmDuringManualWarmup',
-            'varnishVerifyRefillHit',
             'varnishRefreshAheadEnabled',
             'varnishRefreshAheadThresholdPercent',
             'varnishRefreshAheadMaxPages',
+            'varnishRefreshAheadPinnedUrls',
             'flushAllIncludeVarnish',
         );
         foreach ($infrastructure_keys as $key) {

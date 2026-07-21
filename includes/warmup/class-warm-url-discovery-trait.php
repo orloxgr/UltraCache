@@ -398,7 +398,7 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
         {
             $per_page = (int) get_option('posts_per_page', 10);
             if ('product' === $post_type) {
-                $per_page = (int) apply_filters('loop_shop_per_page', $per_page); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
+                $per_page = (int) apply_filters('loop_shop_per_page', $per_page); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WooCommerce owns this documented third-party filter name.
             }
 
             return max(1, $per_page);
@@ -416,7 +416,7 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
 
             return 'post';
         }
-        private function get_descending_position_for_post($post, $post_type = '', $join = '', $where = '', array $params = array())
+        private function get_descending_position_for_post($post, $post_type = '', $scope = 'post_type', array $scope_args = array())
         {
             global $wpdb;
 
@@ -425,23 +425,140 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
                 return 0;
             }
 
-            $post_type = $post_type ? (string) $post_type : (string) $post->post_type;
+            $post_type = $post_type ? sanitize_key((string) $post_type) : sanitize_key((string) $post->post_type);
             $post_date = (string) $post->post_date;
-            if ('' === $post_date) {
+            $scope = sanitize_key((string) $scope);
+            if ('' === $post_type || '' === $post_date) {
                 return 0;
             }
 
-            $sql = "SELECT COUNT(DISTINCT p.ID) FROM {$wpdb->posts} p {$join} WHERE p.post_status = 'publish' AND p.post_type = %s {$where} AND (p.post_date > %s OR (p.post_date = %s AND p.ID >= %d))";
-            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-            $prepared = $wpdb->prepare($sql, array_merge(array($post_type), $params, array($post_date, $post_date, (int) $post->ID)));
-            $cache_key = 'ultracache_desc_pos_' . md5((string) $prepared);
+            $cache_key = 'ultracache_desc_pos_' . md5((string) wp_json_encode(array(
+                'postId'   => (int) $post->ID,
+                'postType' => $post_type,
+                'postDate' => $post_date,
+                'scope'    => $scope,
+                'args'     => $scope_args,
+            )));
             $cached = wp_cache_get($cache_key, 'ultracache');
             if (false !== $cached) {
                 return max(1, (int) $cached);
             }
 
-            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter
-            $count = (int) $wpdb->get_var($prepared);
+            switch ($scope) {
+                case 'author':
+                    $author_id = absint($scope_args['authorId'] ?? 0);
+                    if ($author_id < 1) {
+                        return 1;
+                    }
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded archive-position lookup against the WordPress posts table; result is cached below.
+                    $count = (int) $wpdb->get_var($wpdb->prepare(
+                        'SELECT COUNT(DISTINCT p.ID) FROM %i p WHERE p.post_status = %s AND p.post_type = %s AND p.post_author = %d AND (p.post_date > %s OR (p.post_date = %s AND p.ID >= %d))',
+                        $wpdb->posts,
+                        'publish',
+                        $post_type,
+                        $author_id,
+                        $post_date,
+                        $post_date,
+                        (int) $post->ID
+                    ));
+                    break;
+
+                case 'year':
+                    $year = absint($scope_args['year'] ?? 0);
+                    if ($year < 1) {
+                        return 1;
+                    }
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded archive-position lookup against the WordPress posts table; result is cached below.
+                    $count = (int) $wpdb->get_var($wpdb->prepare(
+                        'SELECT COUNT(DISTINCT p.ID) FROM %i p WHERE p.post_status = %s AND p.post_type = %s AND YEAR(p.post_date) = %d AND (p.post_date > %s OR (p.post_date = %s AND p.ID >= %d))',
+                        $wpdb->posts,
+                        'publish',
+                        $post_type,
+                        $year,
+                        $post_date,
+                        $post_date,
+                        (int) $post->ID
+                    ));
+                    break;
+
+                case 'month':
+                    $year = absint($scope_args['year'] ?? 0);
+                    $month = absint($scope_args['month'] ?? 0);
+                    if ($year < 1 || $month < 1 || $month > 12) {
+                        return 1;
+                    }
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded archive-position lookup against the WordPress posts table; result is cached below.
+                    $count = (int) $wpdb->get_var($wpdb->prepare(
+                        'SELECT COUNT(DISTINCT p.ID) FROM %i p WHERE p.post_status = %s AND p.post_type = %s AND YEAR(p.post_date) = %d AND MONTH(p.post_date) = %d AND (p.post_date > %s OR (p.post_date = %s AND p.ID >= %d))',
+                        $wpdb->posts,
+                        'publish',
+                        $post_type,
+                        $year,
+                        $month,
+                        $post_date,
+                        $post_date,
+                        (int) $post->ID
+                    ));
+                    break;
+
+                case 'day':
+                    $year = absint($scope_args['year'] ?? 0);
+                    $month = absint($scope_args['month'] ?? 0);
+                    $day = absint($scope_args['day'] ?? 0);
+                    if ($year < 1 || $month < 1 || $month > 12 || $day < 1 || $day > 31) {
+                        return 1;
+                    }
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded archive-position lookup against the WordPress posts table; result is cached below.
+                    $count = (int) $wpdb->get_var($wpdb->prepare(
+                        'SELECT COUNT(DISTINCT p.ID) FROM %i p WHERE p.post_status = %s AND p.post_type = %s AND YEAR(p.post_date) = %d AND MONTH(p.post_date) = %d AND DAY(p.post_date) = %d AND (p.post_date > %s OR (p.post_date = %s AND p.ID >= %d))',
+                        $wpdb->posts,
+                        'publish',
+                        $post_type,
+                        $year,
+                        $month,
+                        $day,
+                        $post_date,
+                        $post_date,
+                        (int) $post->ID
+                    ));
+                    break;
+
+                case 'term':
+                    $taxonomy = sanitize_key((string) ($scope_args['taxonomy'] ?? ''));
+                    $term_id = absint($scope_args['termId'] ?? 0);
+                    if ('' === $taxonomy || $term_id < 1) {
+                        return 1;
+                    }
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded taxonomy archive-position lookup against WordPress core tables; result is cached below.
+                    $count = (int) $wpdb->get_var($wpdb->prepare(
+                        'SELECT COUNT(DISTINCT p.ID) FROM %i p INNER JOIN %i tr ON tr.object_id = p.ID INNER JOIN %i tt ON tt.term_taxonomy_id = tr.term_taxonomy_id WHERE p.post_status = %s AND p.post_type = %s AND tt.taxonomy = %s AND tt.term_id = %d AND (p.post_date > %s OR (p.post_date = %s AND p.ID >= %d))',
+                        $wpdb->posts,
+                        $wpdb->term_relationships,
+                        $wpdb->term_taxonomy,
+                        'publish',
+                        $post_type,
+                        $taxonomy,
+                        $term_id,
+                        $post_date,
+                        $post_date,
+                        (int) $post->ID
+                    ));
+                    break;
+
+                default:
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded archive-position lookup against the WordPress posts table; result is cached below.
+                    $count = (int) $wpdb->get_var($wpdb->prepare(
+                        'SELECT COUNT(DISTINCT p.ID) FROM %i p WHERE p.post_status = %s AND p.post_type = %s AND (p.post_date > %s OR (p.post_date = %s AND p.ID >= %d))',
+                        $wpdb->posts,
+                        'publish',
+                        $post_type,
+                        $post_date,
+                        $post_date,
+                        (int) $post->ID
+                    ));
+                    break;
+            }
+
             wp_cache_set($cache_key, $count, 'ultracache', HOUR_IN_SECONDS);
 
             return max(1, $count);
@@ -473,7 +590,7 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
                 return 1;
             }
 
-            $position = $this->get_descending_position_for_post($post, $post->post_type, '', ' AND p.post_author = %d', array((int) $post->post_author));
+            $position = $this->get_descending_position_for_post($post, $post->post_type, 'author', array('authorId' => (int) $post->post_author));
             return (int) ceil($position / $this->get_archive_posts_per_page($post->post_type));
         }
         private function get_date_archive_page_number($post, $period = 'month')
@@ -486,36 +603,27 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
             $year = (int) mysql2date('Y', $post->post_date);
             $month = (int) mysql2date('m', $post->post_date);
             $day = (int) mysql2date('d', $post->post_date);
-            $where = ' AND YEAR(p.post_date) = %d';
-            $params = array($year);
-
-            if ('month' === $period || 'day' === $period) {
-                $where .= ' AND MONTH(p.post_date) = %d';
-                $params[] = $month;
-            }
-
-            if ('day' === $period) {
-                $where .= ' AND DAY(p.post_date) = %d';
-                $params[] = $day;
-            }
-
-            $position = $this->get_descending_position_for_post($post, $post->post_type, '', $where, $params);
+            $scope = in_array($period, array('year', 'month', 'day'), true) ? $period : 'month';
+            $position = $this->get_descending_position_for_post($post, $post->post_type, $scope, array(
+                'year'  => $year,
+                'month' => $month,
+                'day'   => $day,
+            ));
             return (int) ceil($position / $this->get_archive_posts_per_page($post->post_type));
         }
         private function get_term_archive_page_number($post, $taxonomy, $term_id)
         {
-            global $wpdb;
-
             $post = get_post($post);
-            $taxonomy = is_string($taxonomy) ? $taxonomy : '';
-            $term_id = (int) $term_id;
+            $taxonomy = is_string($taxonomy) ? sanitize_key($taxonomy) : '';
+            $term_id = absint($term_id);
             if (!$post || '' === $taxonomy || $term_id <= 0) {
                 return 1;
             }
 
-            $join = " INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.ID INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id";
-            $where = ' AND tt.taxonomy = %s AND tt.term_id = %d';
-            $position = $this->get_descending_position_for_post($post, $post->post_type, $join, $where, array($taxonomy, $term_id));
+            $position = $this->get_descending_position_for_post($post, $post->post_type, 'term', array(
+                'taxonomy' => $taxonomy,
+                'termId'   => $term_id,
+            ));
             return (int) ceil($position / $this->get_archive_posts_per_page($post->post_type));
         }
         public function get_crawl_scope_summary($scope_settings_override = null)

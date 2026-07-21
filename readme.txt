@@ -5,7 +5,7 @@ Donate link: https://iniotakis.com/
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 2.59.09.68
+Stable tag: 2.59.09.114
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -14,7 +14,7 @@ WordPress page and Redis/APCu/SQLite object caching, AVIF/WebP, CSS/font and Jav
 == Description ==
 UltraCache is a WordPress performance plugin for site owners who want fast public page delivery with visible controls.
 
-It provides WordPress page caching, Redis/APCu/SQLite object caching, AVIF/WebP media tools, CSS/font optimization, smart JavaScript error fixing, warm-up, Varnish helpers, image conversion and diagnostics from one dashboard.
+It provides WordPress page caching, Redis/APCu/SQLite object caching, AVIF/WebP media tools, CSS/font optimization, smart JavaScript error fixing, warm-up, Varnish helpers, image conversion and diagnostics from one dashboard. Explicit HTTP and HTTPS Varnish endpoint schemes are preserved exactly as configured. Test Varnish checks one canonical page through connection/authentication, exact invalidation, and public refill. Configured warm-after-flush jobs refill Varnish for each page inside the same site warm-up pipeline.
 
 = Main features =
 
@@ -33,7 +33,7 @@ It provides WordPress page caching, Redis/APCu/SQLite object caching, AVIF/WebP 
 * Lazy image loading, CLS image dimensions, Main Thread Relief, and Critical Request Chain Relief controls.
 * Smart JavaScript Error Fixer with browser runtime scans and pasted console-error analysis for generating `Defer Instead of Delay` and `Do Not Defer or Delay` fixes.
 * Scheduled and manual warm-up for the homepage, menu URLs, selected URLs, and full-site queues.
-* Optional Varnish purge helpers with command-connectivity and public cache-behavior tests, verified HTML-only site flushing, bounded persistent invalidation/refill queues, shared TTL and stale refresh controls, conditional ETag/Last-Modified 304 diagnostics, and capability-gated hot-page refresh ahead based on bounded UltraCache-observed page activity.
+* Optional Varnish purge helpers with a compact connection/invalidation/refill test, deterministic HTML-only BAN or entire-host PURGE scope selection, a bounded persistent invalidation queue, unified resumable page-warm pipeline, shared TTL and stale refresh controls, targeted and site-warm refill, and HTTP soft-purge/SWR-gated refresh ahead.
 * Dashboard diagnostics for page cache, object cache, media, CSS, storage, OPcache/APCu, Varnish, and STORE profiles.
 
 = Object cache =

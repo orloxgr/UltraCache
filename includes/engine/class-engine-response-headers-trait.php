@@ -126,6 +126,15 @@ trait Ultra_Cache_Engine_Response_Headers_Trait
     {
         foreach (headers_list() as $header_line) {
             $header_line = (string) $header_line;
+            if (0 === stripos($header_line, 'Set-Cookie:')) {
+                return true;
+            }
+            if (0 === stripos($header_line, 'Pragma:') && false !== stripos($header_line, 'no-cache')) {
+                return true;
+            }
+            if (0 === stripos($header_line, 'Surrogate-Control:') && 1 === preg_match('/(?:^|[,\s])(private|no-store)(?:$|[,=\s])/', strtolower($header_line))) {
+                return true;
+            }
             if (0 !== stripos($header_line, 'Cache-Control:')) {
                 continue;
             }
@@ -157,7 +166,8 @@ trait Ultra_Cache_Engine_Response_Headers_Trait
         }
 
         if (!$cacheable) {
-            header('Cache-Control: public, max-age=0, s-maxage=0, must-revalidate', true);
+            header('Cache-Control: private, no-store, max-age=0, must-revalidate', true);
+            header('Surrogate-Control: no-store', true);
             header('X-UltraCache-Cacheable: 0');
             header('X-UltraCache-Surrogate-TTL: 0');
             header('X-UltraCache-Stale-While-Revalidate: 0');
@@ -165,6 +175,9 @@ trait Ultra_Cache_Engine_Response_Headers_Trait
         }
 
         if ($this->response_forbids_public_shared_cache()) {
+            header('X-UltraCache-Cacheable: 0');
+            header('X-UltraCache-Surrogate-TTL: 0');
+            header('X-UltraCache-Stale-While-Revalidate: 0');
             return;
         }
 

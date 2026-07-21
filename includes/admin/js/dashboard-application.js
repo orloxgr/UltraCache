@@ -1155,7 +1155,14 @@
 			setDiagnostics((current) => {
 				const next = Object.assign({}, current || {});
 				const varnish = Object.assign({}, next.varnish || {});
-				varnish.last = Object.assign({}, varnish.last || {}, result || {});
+				const responseBasicTest = result.diagnostics && result.diagnostics.varnish && result.diagnostics.varnish.basicTest
+					? result.diagnostics.varnish.basicTest
+					: result;
+				const basicTest = Object.assign({}, responseBasicTest || {});
+				delete basicTest.diagnostics;
+				delete basicTest.settings;
+				delete basicTest.stats;
+				varnish.basicTest = basicTest;
 				next.varnish = varnish;
 				return next;
 			});
@@ -2218,11 +2225,8 @@
 					const skippedCount = Math.max(0, Number(state.skippedCount || 0));
 					const successCount = Math.max(0, Number(state.successCount || 0));
 					const varnishWarmedCount = Math.max(0, Number(state.varnishWarmedCount || 0));
-					const varnishVerifiedCount = Math.max(0, Number(state.varnishVerifiedCount || 0));
-					const varnishBypassedCount = Math.max(0, Number(state.varnishBypassedCount || 0));
-					const varnishInconclusiveCount = Math.max(0, Number(state.varnishInconclusiveCount || 0));
 					const varnishSummary = varnishWarmedCount > 0
-						? ' Varnish: ' + varnishWarmedCount + ' warmed' + (varnishVerifiedCount > 0 ? ', ' + varnishVerifiedCount + ' HIT verified' : '') + (varnishBypassedCount > 0 ? ', ' + varnishBypassedCount + ' bypassed' : '') + (varnishInconclusiveCount > 0 ? ', ' + varnishInconclusiveCount + ' inconclusive' : '') + '.'
+						? ' Varnish: ' + varnishWarmedCount + ' warmed.'
 						: '';
 					let finalNotice = { type: 'success', text: isWarmJobType(state.type) ? 'Cache warming complete.' : (state.forceRegenerateExisting ? 'Media regeneration complete.' : 'Media optimization complete.') };
 					if (isWarmJobType(state.type)) {

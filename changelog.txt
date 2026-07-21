@@ -1,3 +1,313 @@
+= 2.59.09.114 =
+* Add a two-second settling interval between the compact Test Varnish refill request and its public HIT verification request, matching the observed Varnish cache transition without changing production warm or refill behavior.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, and `includes/integrations/varnish/class-varnish-behavior-test-trait.php`.
+
+= 2.59.09.113 =
+* Fix manual warm progress counters by carrying the real cached, skipped, and failed counts into the process state rendered by the warm-up popup.
+* Prevent WordPress canonical redirect handling from stripping signed UltraCache revalidation and CSS-scan query arguments on authenticated internal warm requests, including the site homepage.
+* Scope the redirect bypass strictly to valid UltraCache revalidation or CSS-bundle scan contracts with the internal-request marker and runtime-control token; normal public and Varnish refill canonical redirects remain unchanged.
+* Preserve the existing HTML, CSS bundle, Varnish refill, queue, and cron warm behavior.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/admin/js/jobs.js`, `includes/class-ultra-cache-engine.php`, and `includes/engine/class-engine-cache-decision-trait.php`.
+
+= 2.59.09.112 =
+* Fix the manual/menu/full-site Varnish refill fatal introduced when the standalone diagnostics were removed: production refill still depended on response-header and cache-classification methods that remained defined only in the lazy basic-test trait.
+* Move the bounded Varnish response-header reader and portable MISS/HIT/BYPASS/STALE classifier into the normal transport layer shared by production refill, strict origin refill, and the compact Test Varnish runner.
+* Remove the duplicate diagnostic-owned implementations and update every caller to the shared runtime transport contract, preventing warm operations from depending on a diagnostic trait.
+* Add a cross-trait dependency check covering all methods from the lazy basic-test trait that are referenced by production Varnish runtime files.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/integrations/varnish/class-varnish-transport-trait.php`, `includes/integrations/varnish/class-varnish-behavior-test-trait.php`, `includes/integrations/varnish/class-varnish-refill-trait.php`, and `includes/integrations/varnish/class-varnish-origin-refill-trait.php`.
+
+= 2.59.09.111 =
+* Remove the optional Varnish HIT-verification setting and its additional public request for every refilled orig, WebP, and AVIF HTML bucket.
+* Keep the production warm pipeline focused on its real stages: HTML cache generation, optional CSS bundle generation, and one public Varnish refill request per active HTML variant.
+* Remove the separate verification stage, verification heartbeats, retry recommendations, HIT/bypass/inconclusive counters, and related manual warm-up REST/UI state.
+* Count only the actual refill requests in production Varnish metrics; a refill succeeds when each selected public refill request returns a successful response.
+* Preserve strict authenticated origin revalidation for HTTP soft-purge/SWR flows; this change affects only the extra post-refill HIT probe.
+* Remove `varnishVerifyRefillHit` from settings registration, validation, REST schemas, dashboard forms, capability fingerprints, and client payloads.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/integrations/varnish/class-varnish-refill-trait.php`, `includes/integrations/varnish/class-varnish-capability-fingerprint-trait.php`, `includes/integrations/varnish/class-varnish-settings-trait.php`, `includes/warmup/class-warm-page-pipeline-trait.php`, `includes/warmup/class-cron-warm-orchestrator-trait.php`, `includes/rest/class-rest-cache-trait.php`, `includes/rest/class-rest-routes-trait.php`, `includes/rest/class-rest-schemas-trait.php`, `includes/settings/class-settings-registration-trait.php`, `includes/settings/class-settings-validation-trait.php`, `includes/settings/class-settings-persistence-trait.php`, `includes/settings/class-settings-rendering-trait.php`, `includes/diagnostics/class-diagnostics-rest-trait.php`, `includes/admin/js/varnish.js`, `includes/admin/js/settings.js`, `includes/admin/js/lifecycle.js`, `includes/admin/js/warmup.js`, `includes/admin/js/jobs.js`, `includes/admin/js/ui.js`, and `includes/admin/js/dashboard-application.js`.
+
+= 2.59.09.110 =
+* Remove the standalone Varnish Flush scope, Validators, Accept/VCL, Soft purge/SWR, and Multi-endpoint diagnostic actions, their lazy PHP runners and test traits, their REST routes, and their dashboard controls.
+* Remove the Advanced Varnish diagnostics accordion, stored-result rendering, configuration-change comparison, VCL/Accept recommendation panel, and the JavaScript modules used only by those diagnostics.
+* Keep one compact Test Varnish action for configured transport/authentication, one exact canonical front-page invalidation, and public refill verification, with its latest result stored separately from the last production invalidation.
+* Keep the main Varnish status limited to support, mode, connection, purge method, effective flush scope, last production invalidation, refill state, queue state, last error, and last basic test.
+* Remove advanced diagnostic payloads from dashboard responses and remove diagnostic-only REST/API/controller wiring while retaining the operational queue, metrics, settings, invalidation, refill, warm-up, and refresh-ahead surfaces.
+* Remove dashboard-facing VCL and Accept-normalization snippet generation and replace stale diagnostic guidance with current capability-state messages.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/integrations/class-varnish-trait.php`, `includes/integrations/varnish/class-varnish-test-action-trait.php`, `includes/integrations/varnish/class-varnish-test-runner.php`, `includes/integrations/varnish/class-varnish-behavior-test-trait.php`, `includes/integrations/varnish/class-varnish-diagnostics-trait.php`, `includes/integrations/varnish/class-varnish-settings-trait.php`, `includes/integrations/varnish/class-varnish-metrics-trait.php`, `includes/integrations/varnish/class-varnish-flush-scope-trait.php`, `includes/integrations/varnish/class-varnish-soft-purge-trait.php`, `includes/integrations/varnish/class-varnish-stale-refresh-trait.php`, `includes/integrations/varnish/class-varnish-origin-refill-trait.php`, `includes/integrations/varnish/class-varnish-origin-revalidation-trait.php`, `includes/rest/class-rest-cache-trait.php`, `includes/rest/class-rest-routes-trait.php`, `includes/diagnostics/class-diagnostics-rest-trait.php`, `includes/cli/class-wp-cli-integrations-trait.php`, `includes/admin/class-admin-trait.php`, `includes/admin/js/api.js`, `includes/admin/js/cache.js`, `includes/admin/js/dashboard-application.js`, `includes/admin/js/varnish.js`, and `includes/admin/js/varnish-refresh-ahead.js`. Removed files: advanced Varnish diagnostic runners/test traits and `includes/admin/js/varnish-diagnostics.js`, `varnish-accept-normalization.js`, `varnish-metrics.js`, and `varnish-origin-revalidation.js`.
+
+= 2.59.09.109 =
+* Fix the Accept/VCL Advanced diagnostic fatal by moving the ETag comparison normalizer into the shared Varnish behavior contract used by the validator, flush-scope, and variant runners; remove the private duplicate from the validator-only trait.
+* Separate successful diagnostic execution from the diagnostic finding in Advanced REST responses. Completed tests with partial, unsupported, or incompatible findings now return a normal HTTP 200 payload and update the diagnostic panel instead of being reported as a failed UltraCache request.
+* Replace the combined validator failure message with a bounded `failedChecks` list that names the exact failing areas, such as ETag 304, Last-Modified 304, validator stability, conditional precedence, cookie policy, Authorization policy, or stale conditional behavior.
+* Add cross-runner dependency checks for every lazy Varnish diagnostic so shared helper calls cannot silently remain private or absent from one runner composition.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/integrations/varnish/class-varnish-behavior-test-trait.php`, `includes/integrations/varnish/class-varnish-conditional-revalidation-test-trait.php`, and `includes/rest/class-rest-cache-trait.php`.
+
+= 2.59.09.108 =
+* Fix the Advanced Varnish Flush scope fatal caused by the lazy diagnostic runner inheriting shared behavior-request helpers that were incorrectly declared private in the parent diagnostics runner.
+* Define the four cross-runner behavior helpers as protected shared internals: response-header reading, response classification, public behavior requests, and completed-step validation. Keep the two basic-test-only invalidation helpers private.
+* Apply the same visibility contract to every lazy diagnostic runner that reuses the common behavior engine, preventing equivalent private-method fatals in Flush scope, Validators, Accept/VCL, and Soft purge/SWR actions without loading advanced diagnostic traits in the normal runtime.
+* Add a diagnostic-runner visibility/composition regression check covering every cross-trait call to the shared behavior engine.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, and `includes/integrations/varnish/class-varnish-behavior-test-trait.php`.
+
+= 2.59.09.107 =
+* Fix the UltraCache dashboard fatal introduced by the Varnish diagnostic split: the runtime HTML-variant status called `get_varnish_accept_normalization_contract()` even though that shared contract remained defined only in the lazy Accept/VCL diagnostic trait.
+* Move the small Accept-normalization contract and VCL-snippet builder into the normal Varnish diagnostics trait, where the dashboard uses them, while keeping browser-profile probing and Accept/VCL test execution lazy-loaded in the dedicated Advanced diagnostic runner.
+* Preserve the 2.59.09.102 diagnostic boundary without loading the full advanced Accept test trait during normal dashboard or frontend runtime.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/integrations/varnish/class-varnish-diagnostics-trait.php`, and `includes/integrations/varnish/class-varnish-accept-normalization-trait.php`.
+
+= 2.59.09.106 =
+* Complete the Varnish simplification integration pass by keeping the independent basic diagnostic result separate from the latest production Varnish operation. Running Test Varnish no longer replaces the production last-invalidation state, and later production invalidations no longer make the dashboard forget the latest basic test.
+* Make the compact dashboard read connection and basic-test health from `advancedDiagnostics.basic`, treat configuration-changed proof as requiring a new test, and recognize direct, batch, queued, and site-flush operations as valid production invalidation results.
+* Align soft purge, stale-while-revalidate, and refresh-ahead guidance with the dedicated Soft purge / SWR diagnostic introduced in 2.59.09.102 instead of incorrectly directing administrators to the minimal Test Varnish action.
+* Derive stale-while-revalidate status directly from the independently fingerprinted soft-purge capability, and remove the obsolete shared-TTL and stale evaluator paths that still expected fields from the former combined behavior test.
+* Reuse the already normalized endpoint diagnostics from the Varnish CLI settings while building the dashboard payload instead of recalculating the same endpoint validation repeatedly.
+* Preserve the simplified runtime boundaries: no server-specific direct-origin routing, no advanced test traits in the normal Varnish facade, no diagnostic writes to production metrics, and no status-triggered queue or refresh-ahead lifecycle work.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/admin/js/varnish.js`, `includes/admin/js/varnish-refresh-ahead.js`, `includes/diagnostics/class-diagnostics-rest-trait.php`, `includes/integrations/varnish/class-varnish-behavior-test-trait.php`, `includes/integrations/varnish/class-varnish-flush-scope-test-trait.php`, `includes/integrations/varnish/class-varnish-origin-refill-trait.php`, `includes/integrations/varnish/class-varnish-settings-trait.php`, `includes/integrations/varnish/class-varnish-soft-purge-trait.php`, and `includes/integrations/varnish/class-varnish-stale-refresh-trait.php`.
+
+= 2.59.09.105 =
+* Replace the former full-page Varnish status matrix with one compact operational summary covering support, mode, connection, purge method, effective flush scope, the latest production invalidation result when available, refill state, current queue state, the latest error, and the latest basic test.
+* Group dashboard warnings by configuration, transport, invalidation, refill, VCL, and queue so each category contributes at most one concise message instead of repeating the same finding across multiple status rows.
+* Move endpoint details, method-contract evidence, refresh-ahead state, production counters, basic request steps, VCL fragments, and other technical information into the existing closed Advanced Varnish diagnostics accordion.
+* Keep the dashboard change presentation-only: no Varnish runtime, queue, capability, settings, metrics, or diagnostic execution behavior is changed.
+* Remove the obsolete expanded-status rendering branches and automatic status-accordion opening, reducing `includes/admin/js/varnish.js` by more than 200 lines.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/admin/js/varnish.js`, and `includes/admin/js/varnish-diagnostics.js`.
+
+= 2.59.09.104 =
+* Gate refresh-ahead with one portable runtime contract: enabled Varnish HTTP endpoint mode, verified soft purge, a positive stale-while-revalidate value, an effective soft strategy, and the explicit refresh-ahead switch.
+* Report refresh-ahead as unavailable in admin BAN mode and keep its candidate count, candidate sources, scan state, and recurring worker inactive whenever the runtime contract is not active.
+* Collect and persist refresh-ahead candidates only inside the active scanner. Targeted invalidation and refill requests no longer update the candidate registry during normal frontend or administrative operations.
+* Keep the shared cron worker scheduled for active refresh-ahead or real queue/site-warm work, and remove a refresh-ahead-only schedule during settings lifecycle synchronization when no other warm or Varnish work remains.
+* Preserve the shared `page_warm` queue contract: enqueue schedules work, the cron worker recovers expired leases, manual resume restores deferred work, and canonical local redirects continue as canonical queue jobs.
+* Simplify the refresh-ahead controls and status so candidate details are shown only while the scanner is active.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/integrations/varnish/class-varnish-refresh-ahead-trait.php`, `includes/integrations/varnish/class-varnish-refresh-candidates-trait.php`, `includes/integrations/varnish/class-varnish-invalidation-trait.php`, `includes/integrations/varnish/class-varnish-refill-trait.php`, `includes/maintenance/class-scheduled-maintenance-trait.php`, and `includes/admin/js/varnish-refresh-ahead.js`.
+
+= 2.59.09.103 =
+* Replace the unified Varnish capability fingerprint with independent transport, HTML invalidation, HTML variant, soft-purge, and public-refill contracts, so a TTL or media-policy change no longer invalidates unrelated connection or exact-invalidation proof.
+* Bind the basic test and every Advanced Varnish diagnostic only to the contracts it actually verifies; stored diagnostic results are marked configuration-changed only when one of their relevant contracts changes.
+* Reduce the persistent production metrics option to invalidation operations, successfully invalidated URLs, endpoint failures, refill attempts, refill successes, and refill failures. Current queue pending, processing, retrying, and terminal counts continue to come directly from the queue table.
+* Stop persisting endpoint latency/health history, refill contexts, batching estimates, queue intake/retention totals, recent operation history, and ban-list pressure inside production metrics; diagnostic results remain in their separate bounded non-autoload options.
+* Simplify the Varnish metrics UI to production invalidations, refill outcomes, endpoint failures, and the current queue lifecycle, without presenting diagnostic or historical counters as runtime health.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `includes/integrations/varnish/class-varnish-capability-fingerprint-trait.php`, `includes/integrations/varnish/class-varnish-settings-trait.php`, `includes/integrations/varnish/class-varnish-flush-scope-trait.php`, `includes/integrations/varnish/class-varnish-origin-refill-trait.php`, `includes/integrations/varnish/class-varnish-soft-purge-trait.php`, `includes/integrations/varnish/class-varnish-refresh-ahead-trait.php`, `includes/integrations/varnish/class-varnish-diagnostic-actions-trait.php`, `includes/integrations/varnish/class-varnish-metrics-trait.php`, `includes/diagnostics/class-diagnostics-rest-trait.php`, and `includes/admin/js/varnish-metrics.js`.
+
+= 2.59.09.102 =
+* Split the former combined Varnish audit into five independent manual Advanced diagnostics: flush scope, validators, Accept/VCL, soft purge/SWR, and multi-endpoint delivery. The minimal Test Varnish flow from 2.59.09.101 remains unchanged.
+* Lazy-load only the diagnostic runner and test traits required by the selected action. Advanced topology, validator, variant, soft-purge, and endpoint test code is no longer composed into the normal `Ultra_Cache_WP` frontend runtime.
+* Add dedicated infrastructure-protected REST actions and an Advanced Varnish diagnostics accordion. Soft-purge/SWR is shown only in HTTP endpoint mode and multi-endpoint testing only when multiple endpoints are configured.
+* Store each diagnostic result in its own bounded, non-autoload option with redaction, recursion, key, string, and global item limits; expose only its concise status, message, and last-run time in the main panel.
+* Keep diagnostic invalidations outside production endpoint/operation metrics and prevent advanced findings from changing configured runtime settings. Remove the obsolete eagerly loaded connection-test method and move soft-purge test-only code out of the runtime soft-purge trait.
+* Delete all six diagnostic result options from both WordPress uninstall and the dashboard Delete everything workflow.
+* Changed files: `ultracache.php`, `readme.txt`, `README.md`, `changelog.txt`, `uninstall.php`, `includes/integrations/class-varnish-trait.php`, `includes/integrations/varnish/class-varnish-diagnostic-actions-trait.php`, `includes/integrations/varnish/class-varnish-diagnostics-trait.php`, `includes/integrations/varnish/class-varnish-soft-purge-trait.php`, `includes/integrations/varnish/diagnostics/`, `includes/rest/class-rest-cache-trait.php`, `includes/rest/class-rest-routes-trait.php`, `includes/diagnostics/class-diagnostics-rest-trait.php`, `includes/admin/class-admin-trait.php`, `includes/admin/js/api.js`, `includes/admin/js/varnish-diagnostics.js`, `includes/admin/js/varnish.js`, `includes/admin/js/cache.js`, `includes/admin/js/dashboard-application.js`, `includes/cli/class-wp-cli-integrations-trait.php`, and `includes/lifecycle/class-plugin-data-cleanup-trait.php`.
+
+= 2.59.09.101 =
+* Reduce the primary Test Varnish action to one canonical front-page flow: one public request, one exact hard invalidation, one public refill request, and one follow-up request for visible MISS-to-HIT verification when cache signals are exposed.
+* Keep HTML/entire-host topology, second-page/static behavior, variants and Accept profiles, validators, soft purge, origin revalidation, refresh-ahead capability, and ban-pressure inspection as feature-specific diagnostic engines for the separate Advanced actions introduced next.
+* Store the run as a bounded `diagnostic-basic-test` result with the explicit outcomes Working, Working with hidden signals, authentication failure, invalidation failure, refill failure, or incomplete configuration.
+* Isolate diagnostic invalidation from production operation and endpoint metrics so Test Varnish no longer increases endpoint latency/failure counters or production terminal-operation totals.
+* Make the dashboard, queued REST action, and WP-CLI `varnish test` use the same minimal test, replace stale prior test fields instead of merging them, and show only the before-invalidation, after-invalidation, and refill-verification request steps.
+
+= 2.59.09.100 =
+* Make Varnish and shared warm-queue status generation read-only: aggregate queue counters no longer create or upgrade the queue table, recover workers, schedule cron events, or mutate queue ownership while the dashboard is loading.
+* Split targeted page-warm worker inspection from worker recovery. Status reports `idle`, `scheduled`, `blocked-manual`, or `unscheduled` from persisted state only, while enqueue, cron tick, manual-warm release, and settings/plugin lifecycle retain the explicit recovery path.
+* Stop refresh-ahead status from seeding static/menu/analytics candidates or updating the candidate registry; it now reports only the registry and capability state already produced by the active scanner.
+* Make manual warm-up status lease-aware without writing: an expired lease is presented as interrupted during passive reads, while persistence and deferred LCP/targeted queue resume occur only from runtime/lifecycle callers.
+* Add a read-only queue-schema availability check for status queries and keep schema creation, dbDelta, version updates, and worker scheduling in explicit operational paths.
+
+= 2.59.09.99 =
+* Replace topology-gated site-flush selection with a deterministic method contract: admin BAN and HTTP BAN use the explicit host plus HTML Content-Type expression for Automatic and manual HTML-only flushing, while HTTP PURGE uses entire-host site flushing unless a future provider-specific contract is explicitly implemented.
+* Expose independent transport, exact invalidation, HTML invalidation, host invalidation, and soft-purge capability fields; transport readiness remains separate from the selected method's supported invalidation scopes.
+* Keep the existing flush-topology run as optional diagnostic evidence only. Expired, inconclusive, hidden-header, static-route, or endpoint-behavior diagnostics no longer enable, disable, or change the effective runtime flush scope.
+* Prevent the optional HTML topology test from silently substituting an entire-host PURGE when the configured HTTP method has no portable HTML-only contract.
+* Update the Varnish scope control and status wording so HTML-only availability is based on the configured BAN contract rather than a successful topology test, while preserving the explicit Entire host action.
+
+= 2.59.09.98 =
+* Remove the server-environment direct-origin transport introduced in 2.59.09.97, including local listener derivation, forwarded Host routing, SERVER_ADDR/SERVER_PORT trust exceptions, and the direct-origin fallback branch in the warm runner; all portable warm and refill requests again use the canonical public WordPress URL through the existing guarded loopback contract.
+* Separate ordinary BAN/PURGE refill from strict origin revalidation: normal manual, cron, warm-after-flush, and targeted hard-invalidation work now completes from the public refill response plus optional HIT verification without evaluating or persisting two-stage origin proof.
+* Restrict authenticated origin revalidation and its VCL contract to HTTP soft/auto purge configurations, skip that test entirely in admin BAN and ordinary HTTP BAN/PURGE modes, and block fallback only when a claimed soft-purge job explicitly requires verified origin regeneration.
+* Remove the unused private inner-cache/refill wrapper that duplicated the page-warm pipeline, and expose one bounded refill result state (`success`, `warning`, `retryable_error`, `terminal_error`, or `not_applicable`) while retaining the existing queue compatibility fields.
+* Hide the Force refresh reached origin and Two-stage origin refill status rows when the active Varnish mode cannot use strict soft-purge origin revalidation.
+
+= 2.59.09.97 =
+* Try the current local PHP web-server listener directly for authenticated force-origin HTML rebuilds before using the public Varnish/VCL route, preserving the trusted public Host and forwarded scheme while limiting socket targets to loopback or the exact server addresses and port exposed by the active WordPress request.
+* Keep the public VCL pass contract as the fallback when a direct origin listener cannot be derived or does not expose the WordPress origin marker, and record which transport reached each active orig/WebP/AVIF bucket.
+* Correct conditional 304 validation so an ETag request requires its ETag and a Last-Modified request requires its Last-Modified value; a companion validator may be omitted by an upstream 304 but must remain coherent when present. Optional Content-Type metadata is reported as upstream-retained neutral metadata without turning an otherwise bodyless, validator-coherent 304 into a partial failure.
+* Give cold primary and secondary HTML topology probes a separate bounded timeout of up to 10 seconds, preventing a legitimate post-BAN WordPress MISS from being classified as failed merely because the endpoint transport timeout was configured at two seconds.
+* Advance the origin-revalidation, conditional-revalidation, HTML-flush, and topology capability contracts so the corrected live proof is regenerated by the next Test Varnish run.
+
+= 2.59.09.96 =
+* Delete the legacy `ultracache_varnish_html_ttl_default_migration_v1` option and site option from both the dashboard data-removal workflow and WordPress `uninstall.php`, preventing the obsolete Varnish HTML-TTL migration marker from remaining after a complete UltraCache removal.
+
+= 2.59.09.95 =
+* Give every authenticated force-origin HTML rebuild a unique bounded revalidation identity and active bucket marker, bypassing both Varnish object reuse and queryless Apache static delivery before the public orig/WebP/AVIF refill stage.
+* Keep advanced-cache background stale revalidation on the same unique internal-request contract and recognize the new control arguments across cache exclusion, security, and query-normalization paths.
+* Treat bodyless validator-coherent 304 responses as valid when an upstream retains optional representation metadata, record the exact Content-Type, Content-Encoding, or Content-Length headers separately, and add Apache rules that remove those headers from generated static 304 responses where the local server controls them.
+* Verify admin-mode HTML-only flushing when the public static route exposes no Varnish signals: require the explicit Content-Type HTML BAN expression, verified HTML MISS-to-HIT behavior, and a representation-stable opaque static probe, while continuing to label static cache internals as unobservable rather than claiming per-object Varnish proof.
+* Normalize targeted refill URLs before queue insertion, replace verified local redirect rows with their canonical target, and prevent a non-canonical queue identity from becoming a permanent terminal refill failure.
+* Recover orphaned pending targeted refills by reattaching them to the shared cron worker, expose the refill worker state in Varnish diagnostics, and keep manual-warm ownership as the only intentional scheduling blocker.
+* Expand Accept-normalization diagnostics with the first bounded canonical or browser profiles that failed bucket reuse, including expected bucket, observed bucket, and cache status, and advance the affected Varnish capability contract generations.
+
+= 2.59.09.94 =
+* Make expired shared warm-queue claims true ownership recovery: return the row to pending, clear its claim metadata, and decrement the attempt counter so an abandoned PHP worker does not consume an application retry.
+* Add a renewable manual warm-up ownership lease. Each dashboard page stage renews the lease; a closed tab, browser crash, or interrupted REST sequence releases cron priority and resumes preserved targeted/LCP queue work after expiry while retaining the owner token and browser checkpoint for an intentional resume.
+* Expose interrupted and lease-expiry state in the manual warm status, keep explicit Pause distinct from browser interruption, and preserve the existing pause behavior that deliberately blocks cron until the administrator resumes or ends the session.
+* Complete the 2.59.09.94 regression-build pass over the permanent contracts for Varnish-disabled composition, HTTP PURGE/BAN and admin-mode transport, single/multiple/partial endpoints, soft purge, hidden-header diagnostics, orig/WebP/AVIF isolation, Apache static generation, manual/cron/targeted warm ownership, refresh-ahead state, WooCommerce recently-viewed handling, TranslatePress output buffering, and multisite-aware capability identity.
+
+= 2.59.09.93 =
+* Replace the archive warm-discovery query builder with fixed prepared SQL templates for post-type, author, year, month, day, and taxonomy scopes; table identifiers use `%i`, every runtime value uses a placeholder, and no SQL query variable is passed into `$wpdb->prepare()` or an execution method.
+* Replace hardcoded `wp-content/plugins` and `wp-content/themes` profiler heuristics with the existing WordPress-derived plugin/theme public-path resolvers, and resolve the WordPress plugin API include through the centralized admin-include path helper instead of an `ABSPATH` string.
+* Restrict the Varnish native I/O PHPCS suppression to the authenticated, bounded admin-socket helper block and restore the rules immediately afterward; HTTP Varnish operations continue through the WordPress HTTP API.
+* Add explicit technical justification to every remaining single-line PHPCS suppression found by the compliance pass, covering post-render HTML transformation, public signed LCP telemetry, the WooCommerce-owned filter name, and managed wp-config.php string literals.
+* Complete the 2.59.09.93 identifier, storage, enqueue/output, REST-route, JSON, SQL, and changed-file compliance scan without adding packaged audit utilities or one-time runtime cleanup code.
+
+= 2.59.09.92 =
+* Replace the previous single-page HTML flush check with an empirical topology audit that uses the front page plus a second canonical public HTML URL, proving that exact URL invalidation leaves the second page cached while HTML-only and entire-host scopes invalidate both pages through MISS/STALE-to-HIT sequences.
+* Verify the explicit entire-host operation against the same HTML pages and public static probe, requiring static invalidation and refill when the asset is cached through Varnish or a stable BYPASS result when the static route is intentionally excluded.
+* Gate Automatic and manual HTML-only scope selection on one current capability result that proves the configured transport, exact invalidation, HTML-only behavior, entire-host behavior, endpoint completion, and an observable static delivery topology; unobservable or stale proof falls back to the entire-host scope.
+* Return authoritative full-success, partial-endpoint, and total-failure results for direct site-wide BAN/PURGE operations, including configured, successful, failed, and attempted endpoint target sets without collapsing partial outages into generic failure or success.
+* Keep multi-endpoint public behavior unverified unless the test can bind behavior to each individual Varnish node; accepting invalidation on every configured endpoint proves transport delivery but no longer overclaims per-node cache behavior.
+* Expand the Varnish dashboard with topology, transport, endpoint, per-endpoint behavior, exact URL, HTML-only, entire-host, static-route, and static-preservation results, and advance the flush-scope/topology capability contract generations.
+
+= 2.59.09.91 =
+* Preserve page-cache representation metadata when regenerated HTML or compressed output is byte-identical: atomic cache writes keep the existing payload while a bounded per-page freshness marker advances local TTL, stabilizing ETag and Last-Modified across no-change refreshes without leaving the object stale; Apache static aliases retain the same validator stability.
+* Emit the selected identity representation ETag and Last-Modified on successful frontend PHP STORE responses, honor If-None-Match precedence over If-Modified-Since after a verified origin rebuild, and return an explicitly bodyless 304 or HEAD response without skipping the cache-store lifecycle.
+* Keep 304 responses bodyless and metadata-focused across the WordPress engine and generated advanced-cache.php: preserve ETag, Last-Modified, Vary, and cache policy while removing Content-Type, Content-Encoding, and Content-Length from the conditional response.
+* Apply an explicit private/no-store shared-cache contract to Authorization, cookie, bypassed, lock-limited, uncacheable, empty, and failed-store frontend responses; positive s-maxage and UltraCache surrogate TTL headers remain limited to successfully stored or served public HTML.
+* Configure Apache static HTML files with stable MTime/Size validators and retain native conditional-request handling across identity, gzip, and Brotli aliases while preserving the same public TTL and Vary contracts used by PHP and advanced-cache delivery.
+* Expand Test Varnish with per-active-variant validator stability, coherent and representation-clean ETag/Last-Modified 304 metadata, If-None-Match precedence, cookie and Authorization private-policy probes, and soft-purged stale conditional requests; the stricter conditional-revalidation contract invalidates older capability proof.
+
+= 2.59.09.90 =
+* Parse exact `image/avif` and `image/webp` Accept media ranges with bounded quality handling across WordPress rendering, page-cache lookup, generated `advanced-cache.php`, media URL rewriting, and Apache static HTML delivery; explicit `q=0` refusals and token-like parameter text no longer select an optimized HTML bucket.
+* Keep exact media-format support checks request-local and bounded during full-document rewriting so the stricter parser is evaluated once per canonical Accept context rather than repeatedly for every rewritten image URL.
+* Update the generated Varnish Accept-normalization contract to match complete media-range tokens, preserve AVIF-before-WebP server preference only for accepted representations, and normalize refused AVIF/WebP profiles to the correct fallback bucket instead of creating cross-capability cache objects.
+* Align Apache static compression selection with exact `br`/`gzip` tokens: ordinary q-free browser headers keep Brotli-first delivery, while explicit encoding-quality headers use the identity cache object so Apache cannot contradict the quality-aware PHP/drop-in selector or serve compression for token substrings.
+* Strengthen canonical and non-canonical Varnish variant tests with q=0, parameter-token, and mixed-format profiles, requiring exact `X-UltraCache-Variant` identity and visible `Vary: Accept` evidence before declaring orig/WebP/AVIF isolation compatible.
+* Mark missing variant identity or Vary evidence as inconclusive, detect wrong-bucket HIT responses as fragmentation, and bind the stricter HTML-variant and Accept-normalization semantics to updated capability contract generations.
+
+= 2.59.09.89 =
+* Make advanced-cache stale revalidation single-owner with an atomic cache-root lease, then dispatch one bounded complete authenticated loopback request after the stale response is flushed so concurrent stale visitors cannot start duplicate WordPress rebuilds.
+* Send inner-cache background revalidation with the same internal, warm, force-refresh, revalidate, runtime-token, and site-specific VCL-signature request contract used by manual and queued origin refreshes.
+* Mark stale local HTML as private/no-store with Surrogate-Control no-store so an expired UltraCache disk object cannot repopulate Varnish as a fresh shared object; also suppress positive shared-cache contracts on Set-Cookie, Pragma no-cache, private/no-store/no-cache, and surrogate no-store responses.
+* Strengthen soft-purge proof with exact zero-redirect requests, HTTP stale-warning detection, high-confidence fresh-HIT evidence, bounded polling after the initial stale/grace response, and explicit revalidation-timeout/request-failure outcomes.
+* Evaluate the configured stale-while-revalidate directive against the actual soft-purge STALE-to-fresh-HIT sequence, exposing stale and fresh proof separately and binding the stronger origin-revalidation, soft-purge, and SWR semantics to new capability contract generations.
+
+= 2.59.09.88 =
+* Classify every shared-queue enqueue as accepted, inserted, coalesced, upgraded, rejected, duplicate, or failed using the authoritative WordPress database result instead of reporting every represented URL as a newly queued row.
+* Add permanent queue result levels for success, warning, partial, retrying, skipped, and terminal error outcomes, preserving lifecycle status separately from diagnostic severity for Varnish invalidation and targeted page-warm work.
+* Expose pending and processing invalidations/refills separately, report planned, processing, retrying, partial, warning, completed, skipped, and terminal queue states, and prevent partial or warning results from appearing as green success in the dashboard.
+* Retain completed/skipped auxiliary Varnish rows for one day and terminal errors for fourteen days by default, with bounded filters and cumulative pruning counters recorded in the existing non-autoload Varnish metrics state.
+* Aggregate queue intake, partial operations, warning operations, terminal errors, endpoint failures, and retention activity once per operation/request lifecycle; updating the persisted Last result with refill details no longer records the same invalidation twice.
+
+= 2.59.09.87 =
+* Replace separate endpoint/TTL-only Varnish capability signatures with one permanent SHA-256 fingerprint shared by HTML-only flush, authenticated two-stage refill, soft purge, refresh ahead, and the persisted behavior-test result.
+* Bind empirical proof to integration mode, normalized endpoint set, invalidation method and strategy, flush scope, shared HTML TTL, stale-while-revalidate value, active orig/WebP/AVIF policy, `Vary: Accept` requirement, WordPress home/site and multisite context, admin-secret presence, and versioned UltraCache VCL/runtime contracts.
+* Mark mismatched capability results as configuration-changed at read time so stale behavior tests lose verified/compatible/supported state and require a new Test Varnish run.
+* Include a secret-derived but non-reversible origin-revalidation identity only inside the final fingerprint so WordPress salt/runtime-token changes invalidate old VCL proof, while diagnostics expose neither the Varnish secret nor the revalidation identity.
+* Add bounded capability-fingerprint diagnostics and contract generations, keep endpoint ordering/case normalization stable, and exclude unrelated operational settings such as request timeout, warm switches, refresh limits, and pinned URLs from empirical capability identity.
+
+= 2.59.09.86 =
+* Redesign refresh ahead so the scanner performs only exact anonymous public Age probes and durable `page_warm` enqueue; it no longer soft-purges Varnish or changes cache state before a persistent queue row exists.
+* Move refresh-ahead eligibility recheck and soft purge into the atomic queue worker after claim ownership, then continue through the existing strict authenticated origin-refresh and all-bucket public refill pipeline only when the object is still near expiry or already stale.
+* Persist bounded refresh-ahead purge phases and failed endpoint subsets in the existing queue state, retry only failed endpoints, resume directly after a recorded completed purge, and invalidate stale endpoint state when the configured endpoint set changes.
+* Add fair per-candidate probe scheduling with `lastProbedAt`, `nextProbeAt`, `probeCount`, bucket, result, and Age state; never-probed and increasingly overdue candidates gain bounded priority so pinned/home pages cannot starve lower-priority sitemap or analytics candidates.
+* Keep site-flush refill selection priority-based and independent of refresh-ahead due scheduling, skip already queued URLs without consuming the run probe budget, and apply bounded next-probe timing for fresh HIT, MISS, transient error, pending, and queued outcomes.
+* Use WordPress HTTP APIs with zero redirects, an exact trusted local URL, no cookies, and no UltraCache internal markers or runtime token for refresh-ahead probes, preserving authenticated headers exclusively for actual internal origin rebuild and refill work.
+
+= 2.59.09.85 =
+* Stop page-warm, Varnish refill/verification, and CSS source loopbacks from following redirects; HTTP 301/302/303/307/308 now finish as explicit canonical-URL mismatches instead of warming or scanning a different final destination.
+* Require every UltraCache internal execution context to present both the internal marker and a valid runtime-control token, so public clients cannot alter page-build concurrency, lock waits, CSS on-entry behavior, or warm-request cookie handling by spoofing headers.
+* Authenticate ordinary warm requests as well as force-refresh requests, require the dedicated warm or CSS context marker where applicable, and reject CSS scan query flags that are not backed by the authenticated loopback contract.
+* Validate Varnish refill targets as exact trusted frontend loopback URLs before dispatch, fail closed when an internal token cannot be generated, and classify invalid-target/authentication failures as terminal rather than retrying them as network errors.
+* Report refused redirects with dedicated canonical failure classes and preserve the exact queued URL identity across HTML warm, Varnish variants, HIT verification, and CSS source discovery.
+
+= 2.59.09.84 =
+* Replace all-or-nothing queued Varnish invalidation results with authoritative per-URL/per-endpoint accounting for bounded admin/HTTP BAN batches, exact HTTP PURGE, and soft PURGE; partial endpoint success is no longer applied as the same result to every queue row.
+* Add permanent failed-endpoint retry state to the shared queue schema so each URL retries only the Varnish endpoints that actually failed, while a newer invalidation request clears the subset and runs every configured endpoint again.
+* Bind retry subsets to the endpoint configuration generation that produced them; when the configured endpoint set changes, the row discards the stale subset and invalidates the complete current endpoint set instead of silently omitting added or removed infrastructure targets.
+* Queue refill only for URLs whose required endpoint set completed successfully, keep partial/transient URLs pending with bounded retries, finish non-retryable endpoint/configuration failures as terminal errors, and report actual network request, completed, partial, retrying, and failed counts in the Varnish dashboard.
+* Keep detailed per-URL transport state in memory only for the active worker and exclude it from the persisted last-result transient, retaining bounded aggregate diagnostics without growing the stored Varnish result with every URL/endpoint combination.
+
+= 2.59.09.83 =
+* Rebuild Varnish admin-secret authentication so every retry opens a new CLI connection, reads that connection’s current challenge, and calculates a fresh SHA-256 authenticator from the matching secret material instead of reusing a token from an earlier challenge.
+* Preserve the exact externally defined admin secret bytes while retaining bounded LF/no-trailing-line-break compatibility attempts, without exposing the secret, challenge, or authenticator in diagnostics.
+* Add bounded complete-write handling for Varnish CLI commands and reject empty, oversized, or control-character-bearing BAN expressions before opening the admin connection, preventing command-boundary injection through malformed expressions.
+* Keep authenticated `ban` and bounded `ban.list` as the only admin commands issued by the transport, preserve direct VCLI `200` banner handling, and bound accepted secret, command, and response sizes.
+
+= 2.59.09.82 =
+* Renew the claimed queue lease and URL-scoped warm lock through bounded heartbeats around HTML variants, CSS generation, Varnish refill, and HIT verification; stop processing and preserve authoritative ownership when either token is lost.
+* Classify page-pipeline failures as transient or terminal so only network/time-budget, retryable HTTP, and cache-write failures receive bounded retries; ineligible endpoints, configuration failures, and strict origin-proof failures now finish without blind reruns.
+* Treat successful Varnish refill with bypassed, inconclusive, unavailable, or not-HIT verification as a completed pipeline with an explicit warning instead of repeating HTML, CSS, and refill work solely because diagnostic HIT evidence was incomplete.
+* Require every requested orig/WebP/AVIF HTML bucket to complete before the HTML stage succeeds, reporting partial-variant writes as failures instead of silently accepting a single cached bucket.
+* Keep manual warm-up verification non-destructive by returning warning metadata and displaying the actual HIT verification status without failing an otherwise completed manual page warm.
+
+= 2.59.09.81 =
+* Add atomic claim tokens and bounded processing leases to shared page-warm, CSS, LCP-refresh, and queued Varnish invalidation rows so a worker can persist a result only while it still owns the authoritative queue row.
+* Verify the permanent claim schema after `dbDelta()`, recover expired processing leases back to pending runtime state, preserve active claims during ordinary and scheduled retention cleanup, and expose processing separately from planned and retrying work.
+* Coalesce requests that arrive during processing by marking the owned row for one rerun instead of deleting or replacing it; the current worker releases ownership and the upgraded request runs with fresh attempts.
+* Increment attempts only after a row is actually claimed, condition completion updates on both processing status and claim token, and return lock-coalesced rows to pending without recording a failed execution.
+* Remove the remaining one-time Varnish HTML TTL migration hook and its obsolete marker option so the plugin contains no Varnish test-era migration or automatic cleanup path.
+
+= 2.59.09.80 =
+* Remove the one-time legacy Varnish refill migration and every runtime reference to the obsolete `varnish_refill`, `varnish_refill_soft`, `targeted_warm`, and `targeted_warm_soft` queue types; no automatic cleanup or conversion of test rows is performed.
+* Consolidate HTML warm work under the permanent `page_warm` queue type and store strict soft-purge origin requirements in the dedicated `requires_verified_origin` column instead of encoding behavior in separate job-type names.
+* Coalesce ordinary and targeted page-warm requests through the queue unique key without delete-and-reinsert behavior, preserving stricter origin requirements and targeted source context when the same URL is queued again.
+* Update Varnish queue statistics, refresh-ahead duplicate detection, queue priority, retention, and shared warm execution to use the new page-warm contract while leaving atomic worker claiming for the next version.
+
+= 2.59.09.79 =
+* Migrate pending/error legacy `varnish_refill` and `varnish_refill_soft` rows into the shared targeted page-warm pipeline, remove completed legacy rows, and stop every active producer from creating detached refill jobs.
+* Add unified warm queue lifecycle states for planned, retrying, completed, skipped, and failed page work, with bounded retry delays for transient per-page pipeline failures and terminal skipped handling for ineligible endpoints.
+* Aggregate Varnish refill outcomes by manual, cron, warm-after-flush, scheduled-cleanup, targeted-purge, refresh-ahead, and CLI context while retaining bounded overall metrics outside the queue table.
+* Prune completed auxiliary invalidation/page-warm rows after their retention window and keep the existing shared pipeline, per-URL lock, strict soft-purge origin proof, and orig/WebP/AVIF verification behavior unchanged.
+
+= 2.59.09.78 =
+* Route targeted Varnish invalidation follow-up work into the shared per-page warm pipeline instead of creating new detached `varnish_refill` rows.
+* Add shared targeted warm queue sources for hard invalidation and strict soft purge, using the existing cron/manual ownership model, feed/non-HTML preflight, orig/WebP/AVIF refill, and optional HIT verification.
+* Require verified authenticated origin refresh for strict soft-purge page warming and stop before public refill when that proof is unavailable; one-stage fallback remains blocked.
+* Coalesce targeted, site-warm, legacy refill, manual, cron, and warm-after-flush work by URL through queue upgrades and a shared per-URL pipeline lock so the same page is not processed concurrently by multiple sources.
+
+= 2.59.09.77 =
+* Run ordinary cron and warm-after-flush pages through the shared per-page HTML, optional CSS, direct Varnish variant refill, and optional HIT-verification pipeline before marking the same warm queue row complete.
+* Apply the existing Varnish-with-site-warm-up switch consistently to dashboard, cron, and warm-after-flush jobs, while keeping LCP-only refresh jobs outside the site Varnish warm flow.
+* Stop creating detached critical `varnish_refill` jobs after a site-wide flush; the configured warm-after-flush job now performs Varnish work per page, and known non-HTML targets finish as skipped instead of cron errors.
+* Give active dashboard/cron site warm-up priority over auxiliary persistent Varnish queue and refresh-ahead work so the requested per-page pipeline uses the current run budget first.
+
+= 2.59.09.76 =
+* Split dashboard full-site and menu warm jobs into resumable per-page HTML, optional CSS, direct Varnish orig/WebP/AVIF refill, and final HIT-verification stages, with the active URL and stage shown in the existing long-job modal.
+* Persist a checkpoint after every completed page stage so Pause, browser interruption, and Resume continue from the next unfinished stage without creating detached `varnish_refill` queue jobs for manual warm-up.
+* Prevent WooCommerce `woocommerce_recently_viewed` from making authenticated UltraCache internal warm and Varnish refill requests uncacheable, while leaving normal visitor cookie behavior unchanged.
+
+= 2.59.09.75 =
+* Add a unified per-page warm pipeline contract for dashboard/manual warm actions, preserving existing REST result fields while reporting HTML, CSS, Varnish refill, and HIT-verification stages separately.
+* Complete all selected stages for one page before reporting that page as successful; a selected Varnish or verification failure now fails the same manual warm item instead of creating detached follow-up work.
+* Reject known feed, REST, XML, JSON, RSS, Atom, sitemap, and XML-RPC endpoints before issuing an HTML warm request, while leaving cron and warm-after-flush consolidation for the next roadmap steps.
+
+= 2.59.09.74 =
+* Rotate refresh-ahead Age probes across the active orig, WebP, and AVIF HTML buckets instead of always probing AVIF first, while retaining all-bucket refill and optional HIT verification for eligible pages.
+* After a successful site-wide Varnish flush, queue a bounded highest-priority refill set from the existing multi-source candidate registry, capped at 25 URLs by default instead of attempting a full-site refill.
+* Add refill-queue deduplication/backpressure metadata and a bounded 100-URL pending cap so large invalidation bursts cannot create unbounded refill work.
+
+= 2.59.09.73 =
+* Replace the Cache Statistics-only refresh-ahead list with one bounded multi-source registry combining the front page, posts/shop pages, navigation menus, pinned critical URLs, recent purge/refill activity, optional analytics observations, and cursor-based WordPress sitemap discovery.
+* Add a visible pinned critical URLs field and candidate-source diagnostics, while allowing refresh ahead to operate without Cache Statistics and without adding a frontend beacon.
+* Store the candidate pool in one non-autoloaded capped option, reuse the existing cron/queue/lock flow, and remove the registry during plugin data cleanup and uninstall.
+
+= 2.59.09.72 =
+* Add a site-specific VCL pass contract for authenticated UltraCache force-refresh and revalidation requests, derived from WordPress salts without storing the signature in plugin settings.
+* Extend Test Varnish with explicit proof that every active HTML bucket reached the WordPress origin, and require that proof before soft purge can be verified or selected.
+* Preserve soft-purge refill semantics in the persistent queue and block the ordinary one-stage fallback when a soft-purged URL can no longer complete verified origin revalidation.
+
+= 2.59.09.71 =
+* Extend Test Varnish with bounded non-canonical browser Accept profiles and report raw Accept normalization as Normalized, Fragmented, Inconclusive, or Not required.
+* Add a policy-aware VCL fragment that collapses HTML document Accept headers to the active UltraCache orig/WebP/AVIF buckets without modifying server configuration automatically.
+* Add an Accept normalization status row and copyable VCL fragment inside the existing Varnish status accordion.
+
+= 2.59.09.70 =
+* Preserve explicit HTTP and HTTPS schemes for administrator-configured Varnish HTTP endpoints instead of silently forcing HTTP; scheme-less host:port endpoints remain HTTP for backward compatibility.
+* Treat Varnish admin CLI status 201 from ban.list as a successful truncated response, report Partial lower-bound ban-pressure metrics, and keep optional ban-list diagnostics separate from endpoint health.
+* Record manual dashboard Varnish refill verification in bounded aggregate metrics and present confirmed one-stage refill fallback and admin-BAN refresh-ahead availability accurately.
+
+= 2.59.09.69 =
+* Correct the unified Varnish test status so successful behavior verification also reports connection/authentication and invalidation-command stages as verified.
+* Normalize legacy or unreadable ban-pressure results to neutral Unavailable status instead of retaining the earlier error state.
+* Prefer the latest unified-test ban-pressure result in dashboard diagnostics so the accordion updates immediately and remains consistent after reload.
+
 = 2.59.09.68 =
 * Replace the two Varnish test buttons with one Test Varnish action that runs the complete public cache-behavior, invalidation, variant, TTL, conditional-revalidation, HTML-only, and optional admin diagnostic sequence.
 * Keep authenticated ban-list inspection as an optional diagnostic that no longer changes endpoint health when it is unavailable or unreadable.
