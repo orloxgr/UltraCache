@@ -11,60 +11,125 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
 {
-        private function get_urls_to_warm_for_post($post_id)
+        private function get_affected_url_plan_for_post($post_id)
         {
-            return $this->filter_post_save_warm_urls(
+            return $this->build_affected_url_plan(
                 $this->get_related_urls_for_post(
                     $post_id,
                     array(
-                        'includeFeeds'            => false,
-                        'includePagination'       => false,
-                        'includeAuthorArchive'    => false,
-                        'includeDateArchives'     => false,
-                        'includePostCommentsFeed' => false,
-                        'includeSiteFront'        => false,
+                        'includeFeeds'            => true,
+                        'includePagination'       => true,
+                        'includeAuthorArchive'    => true,
+                        'includeDateArchives'     => true,
+                        'includePostCommentsFeed' => true,
+                        'includeSiteFront'        => true,
                     )
-                ),
-                $post_id
+                )
             );
         }
-        private function filter_post_save_warm_urls(array $urls, $post_id)
+        private function get_affected_url_plan_for_term($term_id, $taxonomy)
         {
-            $post_id = (int) $post_id;
-            $filtered = array();
+            return $this->build_affected_url_plan(
+                $this->get_related_urls_for_term(
+                    $term_id,
+                    $taxonomy,
+                    array(
+                        'includeFeeds'      => true,
+                        'includePagination' => true,
+                        'includeSiteFront'  => true,
+                    )
+                )
+            );
+        }
+        private function get_affected_url_plan_for_term_assignment($post_id, $taxonomy, array $terms = array(), array $tt_ids = array(), array $old_tt_ids = array())
+        {
+            $plans = array($this->get_affected_url_plan_for_post($post_id));
+            $term_ids = array();
+
+            foreach (array_merge($tt_ids, $old_tt_ids) as $term_taxonomy_id) {
+                $term_taxonomy_id = absint($term_taxonomy_id);
+                if ($term_taxonomy_id < 1) {
+                    continue;
+                }
+
+                $term = get_term_by('term_taxonomy_id', $term_taxonomy_id, $taxonomy);
+                if ($term && !is_wp_error($term)) {
+                    $term_ids[(int) $term->term_id] = (int) $term->term_id;
+                }
+            }
+
+            foreach ($terms as $term_value) {
+                $term_exists = term_exists($term_value, $taxonomy);
+                if (is_array($term_exists) && !empty($term_exists['term_id'])) {
+                    $term_id = absint($term_exists['term_id']);
+                } elseif (is_numeric($term_exists)) {
+                    $term_id = absint($term_exists);
+                } else {
+                    $term_id = 0;
+                }
+
+                if ($term_id > 0) {
+                    $term_ids[$term_id] = $term_id;
+                }
+            }
+
+            foreach ($term_ids as $term_id) {
+                $plans[] = $this->get_affected_url_plan_for_term($term_id, $taxonomy);
+            }
+
+            return $this->merge_affected_url_plans($plans);
+        }
+        private function build_affected_url_plan(array $urls)
+        {
+            $purge_urls = array();
+            $warm_urls = array();
+
             foreach ($urls as $url) {
-                $url = $this->normalize_url($url);
-                if ('' === $url || !$this->is_cacheable_local_url($url)) {
+                $normalized_url = $this->normalize_url($url);
+                if ('' === $normalized_url || !$this->is_cacheable_local_url($normalized_url)) {
                     continue;
                 }
-                if ($this->is_feed_url($url)) {
-                    continue;
-                }
-                $filtered[$url] = $url;
-            }
 
-            $post = $post_id > 0 ? get_post($post_id) : null;
-            if ($post && 'page' === $post->post_type) {
-                $front_page_id = (int) get_option('page_on_front');
-                $posts_page_id = (int) get_option('page_for_posts');
-                if ($front_page_id > 0 && $front_page_id === $post_id) {
-                    foreach ($this->get_site_front_urls(false) as $front_url) {
-                        $front_url = $this->normalize_url($front_url);
-                        if ('' !== $front_url && !$this->is_feed_url($front_url) && $this->is_cacheable_local_url($front_url)) {
-                            $filtered[$front_url] = $front_url;
-                        }
-                    }
-                }
-                if ($posts_page_id > 0 && $posts_page_id === $post_id) {
-                    $posts_index_url = $this->get_posts_index_url();
-                    $posts_index_url = $this->normalize_url($posts_index_url);
-                    if ('' !== $posts_index_url && !$this->is_feed_url($posts_index_url) && $this->is_cacheable_local_url($posts_index_url)) {
-                        $filtered[$posts_index_url] = $posts_index_url;
-                    }
+                $purge_urls[$normalized_url] = $normalized_url;
+                if (!$this->is_feed_url($normalized_url)) {
+                    $warm_urls[$normalized_url] = $normalized_url;
                 }
             }
 
-            return array_values($filtered);
+            return array(
+                'purgeUrls' => array_values($purge_urls),
+                'warmUrls'  => array_values($warm_urls),
+            );
+        }
+        private function merge_affected_url_plans(array $plans)
+        {
+            $purge_urls = array();
+            $warm_urls = array();
+
+            foreach ($plans as $plan) {
+                if (!is_array($plan)) {
+                    continue;
+                }
+
+                foreach ((array) ($plan['purgeUrls'] ?? array()) as $url) {
+                    $normalized_url = $this->normalize_url($url);
+                    if ('' !== $normalized_url && $this->is_cacheable_local_url($normalized_url)) {
+                        $purge_urls[$normalized_url] = $normalized_url;
+                    }
+                }
+
+                foreach ((array) ($plan['warmUrls'] ?? array()) as $url) {
+                    $normalized_url = $this->normalize_url($url);
+                    if ('' !== $normalized_url && !$this->is_feed_url($normalized_url) && $this->is_cacheable_local_url($normalized_url)) {
+                        $warm_urls[$normalized_url] = $normalized_url;
+                    }
+                }
+            }
+
+            return array(
+                'purgeUrls' => array_values($purge_urls),
+                'warmUrls'  => array_values($warm_urls),
+            );
         }
         private function is_feed_url($url)
         {

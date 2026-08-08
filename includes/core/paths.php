@@ -43,6 +43,36 @@ function ultracache_storage_clean_relative_path($relative)
 }
 
 /**
+ * Normalize a parsed URL host into the canonical page-cache directory segment.
+ *
+ * This helper intentionally avoids sanitize_file_name(): WordPress treats
+ * intermediate dot-separated labels as filename extensions and can rewrite
+ * valid host labels. The early advanced-cache drop-in mirrors this algorithm.
+ *
+ * @param string $host Parsed URL host without a port.
+ * @return string
+ */
+function ultracache_normalize_cache_host_segment($host)
+{
+    $host = strtolower(rtrim(trim((string) $host), '.'));
+    if ('' === $host) {
+        return 'site';
+    }
+
+    if ('[' === substr($host, 0, 1) && ']' === substr($host, -1)) {
+        return 'ipv6-' . substr(hash('sha256', $host), 0, 32);
+    }
+
+    $host = preg_replace('/[^a-z0-9._-]+/', '-', $host);
+    $host = is_string($host) ? trim($host, '-') : '';
+    if ('' === $host || '.' === $host || '..' === $host) {
+        return 'site';
+    }
+
+    return $host;
+}
+
+/**
  * Join an absolute base path with a sanitized relative path.
  *
  * @param string $base     Absolute base path.
@@ -391,6 +421,66 @@ function ultracache_mu_plugins_public_path($relative = '')
     }
 
     return ultracache_public_path_from_url(ultracache_storage_join_url($root_url, $relative));
+}
+
+/**
+ * Return public-to-local theme root mappings from WordPress theme APIs.
+ *
+ * Specific stylesheet directories are ordered before the generic theme root so
+ * custom registered theme directories resolve to their exact filesystem owner.
+ *
+ * @return array<int,array{public_path:string,local_root:string,owner:string}>
+ */
+function ultracache_theme_public_root_mappings()
+{
+    static $mappings = null;
+    if (is_array($mappings)) {
+        return $mappings;
+    }
+
+    $indexed = array();
+    if (function_exists('wp_get_themes')) {
+        foreach ((array) wp_get_themes() as $theme) {
+            if (!is_object($theme) || !method_exists($theme, 'get_stylesheet_directory') || !method_exists($theme, 'get_stylesheet_directory_uri')) {
+                continue;
+            }
+            $local_root = (string) $theme->get_stylesheet_directory();
+            $public_path = ultracache_public_path_from_url((string) $theme->get_stylesheet_directory_uri());
+            if ('' === $local_root || '' === $public_path) {
+                continue;
+            }
+            $owner = method_exists($theme, 'get_stylesheet') ? sanitize_key((string) $theme->get_stylesheet()) : '';
+            $key = strtolower($public_path) . '|' . wp_normalize_path($local_root);
+            $indexed[$key] = array(
+                'public_path' => trailingslashit($public_path),
+                'local_root'  => trailingslashit(wp_normalize_path($local_root)),
+                'owner'       => $owner,
+            );
+        }
+    }
+
+    if (function_exists('get_theme_root') && function_exists('get_theme_root_uri')) {
+        $local_root = (string) get_theme_root();
+        $public_path = ultracache_public_path_from_url((string) get_theme_root_uri());
+        if ('' !== $local_root && '' !== $public_path) {
+            $key = strtolower($public_path) . '|' . wp_normalize_path($local_root);
+            $indexed[$key] = array(
+                'public_path' => trailingslashit($public_path),
+                'local_root'  => trailingslashit(wp_normalize_path($local_root)),
+                'owner'       => '',
+            );
+        }
+    }
+
+    $mappings = array_values($indexed);
+    usort(
+        $mappings,
+        static function ($left, $right) {
+            return strlen((string) ($right['public_path'] ?? '')) <=> strlen((string) ($left['public_path'] ?? ''));
+        }
+    );
+
+    return $mappings;
 }
 
 /**
@@ -971,14 +1061,14 @@ function ultracache_public_path_to_local_path($path, array $allowed_exts = array
         $candidates[] = array($mu_plugins_root, $relative);
     }
 
-    if (function_exists('get_theme_root')) {
-        foreach (ultracache_themes_public_paths() as $theme_path) {
-            if ('' === $theme_path || 0 !== strpos($path, $theme_path)) {
-                continue;
-            }
-            $relative = ltrim(substr($path, strlen($theme_path)), '/');
-            $candidates[] = array(get_theme_root(), $relative);
+    foreach (ultracache_theme_public_root_mappings() as $theme_mapping) {
+        $theme_path = (string) ($theme_mapping['public_path'] ?? '');
+        $theme_root = (string) ($theme_mapping['local_root'] ?? '');
+        if ('' === $theme_path || '' === $theme_root || 0 !== strpos($path, $theme_path)) {
+            continue;
         }
+        $relative = ltrim(substr($path, strlen($theme_path)), '/');
+        $candidates[] = array($theme_root, $relative);
     }
 
     $includes_path = (string) wp_parse_url(includes_url('/'), PHP_URL_PATH);
@@ -1027,6 +1117,187 @@ function ultracache_local_path_from_public_url($url, array $allowed_exts = array
     }
 
     return ultracache_public_path_to_local_path($path, $allowed_exts);
+}
+
+
+/**
+ * Resolve a canonical local public source descriptor through WordPress-derived roots.
+ *
+ * Generated UltraCache cache files are intentionally rejected so a rewritten output
+ * can never become a new conversion source. The returned relative path is scoped to
+ * the owning uploads, plugin, mu-plugin, theme, or WordPress-includes root.
+ *
+ * @param string $url          Public URL or root-relative URL.
+ * @param array  $allowed_exts Optional extension allow-list without dots.
+ * @return array{public_url:string,public_path:string,local_path:string,source_scope:string,source_owner:string,source_relative_path:string,source_extension:string,source_identity:string,source_fingerprint:string,source_mtime:int,source_size:int}|array{}
+ */
+function ultracache_local_public_source_descriptor($url, array $allowed_exts = array())
+{
+    $normalized_url = ultracache_normalize_public_url(
+        $url,
+        array(
+            'strip_query'    => true,
+            'strip_fragment' => true,
+        )
+    );
+    if ('' === $normalized_url || !ultracache_is_local_site_url($normalized_url)) {
+        return array();
+    }
+
+    $local_path = ultracache_local_path_from_public_url($normalized_url, $allowed_exts);
+    $local_real = '' !== $local_path ? realpath($local_path) : false;
+    if (!is_string($local_real) || '' === $local_real || !is_file($local_real) || !is_readable($local_real)) {
+        return array();
+    }
+    $local_path = wp_normalize_path($local_real);
+
+    $generated_roots = array(ultracache_content_cache_storage_dir());
+    if (function_exists('ultracache_optimized_images_storage_dir')) {
+        $generated_roots[] = ultracache_optimized_images_storage_dir();
+    }
+    foreach (array_filter(array_map('strval', $generated_roots)) as $generated_root) {
+        if (ultracache_path_is_within_root($local_path, $generated_root)) {
+            return array();
+        }
+    }
+
+    $candidates = array();
+    $uploads = ultracache_uploads_base_info();
+    if (!empty($uploads['basedir'])) {
+        $candidates[] = array(
+            'scope' => 'uploads',
+            'owner' => 'uploads',
+            'root'  => (string) $uploads['basedir'],
+        );
+    }
+
+    $plugins_root = ultracache_plugins_root_dir();
+    if ('' !== $plugins_root) {
+        $candidates[] = array(
+            'scope' => 'plugin',
+            'owner' => '',
+            'root'  => $plugins_root,
+        );
+    }
+
+    $mu_plugins_root = ultracache_mu_plugins_root_dir();
+    if ('' !== $mu_plugins_root) {
+        $candidates[] = array(
+            'scope' => 'mu-plugin',
+            'owner' => '',
+            'root'  => $mu_plugins_root,
+        );
+    }
+
+    foreach (ultracache_theme_public_root_mappings() as $theme_mapping) {
+        $candidates[] = array(
+            'scope' => 'theme',
+            'owner' => (string) ($theme_mapping['owner'] ?? ''),
+            'root'  => (string) ($theme_mapping['local_root'] ?? ''),
+        );
+    }
+
+    $includes_root = ultracache_wordpress_includes_dir();
+    if ('' !== $includes_root) {
+        $candidates[] = array(
+            'scope' => 'wordpress-includes',
+            'owner' => 'wp-includes',
+            'root'  => $includes_root,
+        );
+    }
+
+    usort(
+        $candidates,
+        static function ($left, $right) {
+            $left_root = realpath((string) ($left['root'] ?? ''));
+            $right_root = realpath((string) ($right['root'] ?? ''));
+            $left_length = is_string($left_root) ? strlen(wp_normalize_path($left_root)) : 0;
+            $right_length = is_string($right_root) ? strlen(wp_normalize_path($right_root)) : 0;
+            return $right_length <=> $left_length;
+        }
+    );
+
+    $matched = array();
+    foreach ($candidates as $candidate) {
+        $root_real = realpath((string) ($candidate['root'] ?? ''));
+        if (!is_string($root_real) || '' === $root_real) {
+            continue;
+        }
+        $root_path = untrailingslashit(wp_normalize_path($root_real));
+        if (!ultracache_path_is_within_root($local_path, $root_path)) {
+            continue;
+        }
+
+        $relative = ltrim(substr($local_path, strlen($root_path)), '/');
+        if ('' === $relative) {
+            continue;
+        }
+        foreach (explode('/', str_replace('\\', '/', $relative)) as $segment) {
+            if ('' === $segment || '.' === $segment || '..' === $segment) {
+                continue 2;
+            }
+        }
+
+        $scope = (string) ($candidate['scope'] ?? '');
+        $owner = sanitize_key((string) ($candidate['owner'] ?? ''));
+        if (in_array($scope, array('plugin', 'mu-plugin', 'theme'), true) && '' === $owner) {
+            $parts = explode('/', $relative, 2);
+            $owner = sanitize_key((string) $parts[0]);
+            if ('' === $owner) {
+                continue;
+            }
+            if (isset($parts[1]) && '' !== (string) $parts[1]) {
+                $relative = (string) $parts[1];
+            }
+        }
+
+        $matched = array(
+            'scope'    => $scope,
+            'owner'    => $owner,
+            'relative' => $relative,
+        );
+        break;
+    }
+
+    if (empty($matched['scope']) || empty($matched['relative'])) {
+        return array();
+    }
+
+    $public_url = ultracache_public_url_from_local_path($local_path);
+    if ('' === $public_url) {
+        $public_url = $normalized_url;
+    }
+    $public_path = (string) wp_parse_url($public_url, PHP_URL_PATH);
+    $public_path = '' !== $public_path ? '/' . ltrim(str_replace('\\', '/', rawurldecode($public_path)), '/') : '';
+
+    $extension = strtolower((string) pathinfo($local_path, PATHINFO_EXTENSION));
+    $mtime = function_exists('ultracache_safe_filemtime')
+        ? ultracache_safe_filemtime($local_path, 'local_public_source_descriptor_mtime')
+        : filemtime($local_path);
+    $size = function_exists('ultracache_safe_filesize')
+        ? ultracache_safe_filesize($local_path, 'local_public_source_descriptor_size')
+        : filesize($local_path);
+    $mtime = false === $mtime ? 0 : max(0, (int) $mtime);
+    $size = false === $size ? 0 : max(0, (int) $size);
+
+    $identity = hash(
+        'sha256',
+        (string) $matched['scope'] . '|' . (string) $matched['owner'] . '|' . str_replace('\\', '/', (string) $matched['relative'])
+    );
+
+    return array(
+        'public_url'           => $public_url,
+        'public_path'          => $public_path,
+        'local_path'           => $local_path,
+        'source_scope'         => (string) $matched['scope'],
+        'source_owner'         => (string) $matched['owner'],
+        'source_relative_path' => str_replace('\\', '/', (string) $matched['relative']),
+        'source_extension'     => $extension,
+        'source_identity'      => $identity,
+        'source_fingerprint'   => hash('sha256', $identity . '|' . $mtime . '|' . $size),
+        'source_mtime'         => $mtime,
+        'source_size'          => $size,
+    );
 }
 
 /**

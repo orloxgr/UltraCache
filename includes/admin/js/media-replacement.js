@@ -14,7 +14,7 @@
 		throw new Error('UltraCache admin core/api/jobs modules are required before media-replacement.js.');
 	}
 
-	const { useState, useEffect, useRef, __ } = core;
+	const { useState, useEffect, useRef, __, reportNonFatalAdminError } = core;
 	const { apiRequest } = api;
 	const { createJobRunner } = jobs;
 	const MEDIA_REPLACEMENT_SESSION_STORAGE_KEY = 'ultracache-media-replacement-session-v1';
@@ -39,7 +39,9 @@
 			} else {
 				window.sessionStorage.removeItem(MEDIA_REPLACEMENT_SESSION_STORAGE_KEY);
 			}
-		} catch (error) {}
+		} catch (error) {
+			reportNonFatalAdminError('media-replacement.session-token.persist', error, { severity: 'warning', dedupeKey: 'media-replacement.session-token.persist' });
+		}
 		return normalizedToken;
 	}
 
@@ -51,6 +53,30 @@
 		const [mediaLibraryReplacementPreviewOpen, setMediaLibraryReplacementPreviewOpen] = useState(false);
 		const [mediaLibraryReplacementDbPreview, setMediaLibraryReplacementDbPreview] = useState(null);
 		const [mediaLibraryReplacementDbPreviewOpen, setMediaLibraryReplacementDbPreviewOpen] = useState(false);
+		const [mediaLibraryReplacementBlockersModal, setMediaLibraryReplacementBlockersModal] = useState({
+			open: false,
+			loading: false,
+			payload: null,
+			error: '',
+		});
+		const mediaLibraryReplacementBlockers = mediaLibraryReplacementBlockersModal && mediaLibraryReplacementBlockersModal.payload
+			? mediaLibraryReplacementBlockersModal.payload
+			: null;
+		const mediaLibraryReplacementBlockersOpen = !!(
+			mediaLibraryReplacementBlockersModal
+			&& mediaLibraryReplacementBlockersModal.open
+			&& mediaLibraryReplacementBlockersModal.payload
+		);
+		const setMediaLibraryReplacementBlockersOpen = (nextOpen) => {
+			setMediaLibraryReplacementBlockersModal((current) => {
+				const currentState = current && typeof current === 'object' ? current : {};
+				const open = typeof nextOpen === 'function'
+					? !!nextOpen(!!currentState.open)
+					: !!nextOpen;
+				return Object.assign({}, currentState, { open: open && !!currentState.payload });
+			});
+		};
+		const [mediaLibraryReplacementBlockerDecisions, setMediaLibraryReplacementBlockerDecisions] = useState({});
 		const [mediaLibraryReplacementCleanupPreview, setMediaLibraryReplacementCleanupPreview] = useState(null);
 		const [mediaLibraryReplacementCleanupPreviewOpen, setMediaLibraryReplacementCleanupPreviewOpen] = useState(false);
 		const [mediaLibraryReplacementWarningAction, setMediaLibraryReplacementWarningAction] = useState('');
@@ -71,6 +97,13 @@
 			setMediaLibraryReplacementDbPreview,
 			mediaLibraryReplacementDbPreviewOpen,
 			setMediaLibraryReplacementDbPreviewOpen,
+			mediaLibraryReplacementBlockersModal,
+			setMediaLibraryReplacementBlockersModal,
+			mediaLibraryReplacementBlockers,
+			mediaLibraryReplacementBlockersOpen,
+			setMediaLibraryReplacementBlockersOpen,
+			mediaLibraryReplacementBlockerDecisions,
+			setMediaLibraryReplacementBlockerDecisions,
 			mediaLibraryReplacementCleanupPreview,
 			setMediaLibraryReplacementCleanupPreview,
 			mediaLibraryReplacementCleanupPreviewOpen,
@@ -99,6 +132,13 @@
 			setMediaLibraryReplacementDbPreview,
 			mediaLibraryReplacementDbPreviewOpen,
 			setMediaLibraryReplacementDbPreviewOpen,
+			mediaLibraryReplacementBlockersModal,
+			setMediaLibraryReplacementBlockersModal,
+			mediaLibraryReplacementBlockers,
+			mediaLibraryReplacementBlockersOpen,
+			setMediaLibraryReplacementBlockersOpen,
+			mediaLibraryReplacementBlockerDecisions,
+			setMediaLibraryReplacementBlockerDecisions,
 			mediaLibraryReplacementCleanupPreview,
 			setMediaLibraryReplacementCleanupPreview,
 			mediaLibraryReplacementCleanupPreviewOpen,
@@ -120,7 +160,7 @@
 			getMediaConversionTestCacheBust,
 		} = source;
 
-		async function refreshMediaLibraryReplacementWorkflowStatus(jobId = '') {
+		async function refreshMediaLibraryReplacementWorkflowStatus() {
 			if (mediaLibraryReplacementStatusRefreshInFlightRef.current) {
 				return mediaLibraryReplacementStatus || null;
 			}
@@ -129,7 +169,6 @@
 			try {
 				const response = await apiRequest('media_library_replacement_status', {
 					cacheBust: getMediaConversionTestCacheBust(),
-					jobId: jobId || getMediaLibraryReplacementCurrentJobId(),
 				});
 				setMediaLibraryReplacementStatus(response || null);
 				if (response && response.replacementSession && response.replacementSession.active === false) {
@@ -149,7 +188,9 @@
 				}
 				try {
 					await refreshMediaLibraryReplacementWorkflowStatus();
-				} catch (error) {}
+				} catch (error) {
+					reportNonFatalAdminError('media-replacement.status-refresh', error, { severity: 'debug', dedupeKey: 'media-replacement.status-refresh', dedupeWindowMs: 30000 });
+				}
 			};
 
 			refreshReplacementStatus();
@@ -160,10 +201,9 @@
 			};
 		}, []);
 
-		async function persistMediaLibraryReplacementWorkflowStage(stage, jobId = '', message = '') {
+		async function persistMediaLibraryReplacementWorkflowStage(stage, message = '') {
 			const response = await apiRequest('media_library_replacement_workflow_stage', {
 				cacheBust: getMediaConversionTestCacheBust(),
-				jobId: jobId || getMediaLibraryReplacementCurrentJobId(),
 				stage,
 				message,
 			});
@@ -171,10 +211,9 @@
 			return response;
 		}
 
-		async function loadMediaLibraryReplacementPreviewPage(offset = 0, jobId = '') {
+		async function loadMediaLibraryReplacementPreviewPage(offset = 0) {
 			const response = await apiRequest('media_library_replacement_preview', {
 				cacheBust: getMediaConversionTestCacheBust(),
-				jobId: jobId || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.jobId ? mediaLibraryReplacementStatus.jobId : ''),
 				limit: 200,
 				offset: Math.max(0, Number(offset || 0)),
 			});
@@ -208,11 +247,6 @@
 			const mappingSummary = mediaLibraryReplacementPreview && mediaLibraryReplacementPreview.summary && typeof mediaLibraryReplacementPreview.summary === 'object' ? mediaLibraryReplacementPreview.summary : {};
 			const dbSummary = mediaLibraryReplacementDbPreview && mediaLibraryReplacementDbPreview.summary && typeof mediaLibraryReplacementDbPreview.summary === 'object' ? mediaLibraryReplacementDbPreview.summary : (statusData.summary && typeof statusData.summary === 'object' ? statusData.summary : {});
 			const status = statusData.status ? String(statusData.status) : '';
-			const jobId = statusData.jobId || (mediaLibraryReplacementPreview && mediaLibraryReplacementPreview.jobId) || (mediaLibraryReplacementDbPreview && mediaLibraryReplacementDbPreview.jobId) || '';
-
-			if (!jobId) {
-				return 'prepare';
-			}
 			if (statusData.blocked || statusData.emptyRegistry || statusData.restartBlocked || status === 'blocked_no_candidates' || status === 'empty_registry') {
 				return 'restart';
 			}
@@ -374,16 +408,16 @@
 
 		function getMediaLibraryReplacementStepInactiveReason(step, stage) {
 			if (stage === 'complete') {
-				return __('Media Library replacement is complete for this job.', 'ultracache');
+				return __('Media Library replacement is complete for this workflow.', 'ultracache');
 			}
 			if (step === 'prepare') {
-				return stage === 'prepare' ? '' : __('Prepare is complete for the current job.', 'ultracache');
+				return stage === 'prepare' ? '' : __('Prepare is complete for the current workflow.', 'ultracache');
 			}
 			if (step === 'do') {
 				if (stage === 'prepare') {
 					return __('Prepare the replacement plan first.', 'ultracache');
 				}
-				return stage === 'do' ? '' : __('Do is complete for the current job.', 'ultracache');
+				return stage === 'do' ? '' : __('Do is complete for the current workflow.', 'ultracache');
 			}
 			if (step === 'verify') {
 				if (stage === 'prepare') {
@@ -392,7 +426,7 @@
 				if (stage === 'do') {
 					return __('Run Do first.', 'ultracache');
 				}
-				return stage === 'verify' ? '' : __('Verify is complete for the current job.', 'ultracache');
+				return stage === 'verify' ? '' : __('Verify is complete for the current workflow.', 'ultracache');
 			}
 			if (step === 'delete') {
 				if (stage === 'prepare') {
@@ -439,14 +473,14 @@
 			}
 
 			let latestReadiness = getMediaLibraryReplacementReadinessStatus();
-			let resetPending = !!forceRestart || !latestReadiness.generation || latestReadiness.status === 'idle' || latestReadiness.status === 'failed' || latestReadiness.inventoryComplete;
+			let resetPending = !!forceRestart || latestReadiness.status === 'idle' || latestReadiness.status === 'failed' || latestReadiness.inventoryComplete;
 			const job = {
 				type: 'media_replacement_readiness',
 				label: __('Checking Replacement Readiness', 'ultracache'),
 				processed: resetPending ? 0 : Math.max(0, Number(latestReadiness.scannedAttachments || 0)),
 				total: Math.max(0, Number(latestReadiness.candidateAttachments || 0)),
 				hasMore: true,
-				cursor: String(latestReadiness.generation || ''),
+				cursor: String(latestReadiness.status || ''),
 				batchSize: 1,
 				logs: [resetPending ? __('Starting a fresh replacement readiness inventory.', 'ultracache') : __('Resuming the server-side replacement readiness inventory.', 'ultracache')],
 				showWhenInactive: true,
@@ -505,7 +539,7 @@
 						total: Math.max(0, Number(latestReadiness.candidateAttachments || 0)),
 						processed: Math.max(0, Number(latestReadiness.scannedAttachments || 0)),
 						hasMore: !complete,
-						nextCursor: String(latestReadiness.generation || cursor || ''),
+						nextCursor: String(latestReadiness.status || cursor || ''),
 					};
 				},
 				getBatchStatePatch: (state, batch) => ({
@@ -533,11 +567,29 @@
 						failedIncrement: 0,
 					};
 				},
-				buildCompletionNotice: () => latestReadiness.readyForReplacement
-					? { type: 'success', text: continueToPrepare
-						? __('File readiness complete. Continuing automatically to Prepare.', 'ultracache')
-						: __('Replacement readiness complete. Every required target-format file is ready.', 'ultracache') }
-					: { type: 'warning', text: latestReadiness.message || __('Replacement readiness completed with blockers.', 'ultracache') },
+				buildCompletionNotice: () => {
+					if (latestReadiness.readyForReplacement) {
+						return { type: 'success', text: continueToPrepare
+							? __('File readiness complete. Continuing automatically to Prepare.', 'ultracache')
+							: __('Replacement readiness complete. Every required target-format file is ready.', 'ultracache') };
+					}
+					if (continueToPrepare && latestReadiness.inventoryComplete) {
+						return { type: 'warning', text: __('Readiness inventory complete. Continuing to Prepare so blocker groups can be classified and reviewed.', 'ultracache') };
+					}
+
+					const blockedVariants = Math.max(0,
+						Number(latestReadiness.missingVariants || 0)
+						+ Number(latestReadiness.staleVariants || 0)
+						+ Number(latestReadiness.failedVariants || 0)
+						+ Number(latestReadiness.pendingVariants || 0)
+					);
+					const guidance = blockedVariants > 0
+						? __('Please run “Scan Media Library & Repair Status” and rerun “Start / Resume Conversion”.', 'ultracache')
+						: '';
+					const message = latestReadiness.message || __('Replacement readiness completed with blockers.', 'ultracache');
+
+					return { type: 'warning', text: guidance ? message + ' ' + guidance : message };
+				},
 				onCompleted: async () => { await refreshMediaLibraryReplacementWorkflowStatus(); },
 				markProcessComplete: () => {
 					setProcess((current) => Object.assign({}, current, { active: false, complete: true, cancellable: false, cancelRequested: false, showWhenInactive: true }));
@@ -564,35 +616,37 @@
 				: {};
 		}
 
-		async function runMediaLibraryReplacementPrepare(forceRestart = false, readinessOverride = null, readinessJustCompleted = false) {
-			if (!isMediaLibraryReplacementPrepareRunnerReady() || busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) {
+		async function runMediaLibraryReplacementPrepare(forceRestart = false, readinessOverride = null, readinessJustCompleted = false, prepareOverride = null) {
+			if ((!prepareOverride && !isMediaLibraryReplacementPrepareRunnerReady()) || busy || mediaConversionTestBusy || (mediaLibraryReplacementBusy && !prepareOverride)) {
 				return;
 			}
 
 			const readiness = readinessOverride && typeof readinessOverride === 'object'
 				? readinessOverride
 				: getMediaLibraryReplacementReadinessStatus();
-			if (!readiness.inventoryComplete || !readiness.readyForReplacement) {
-				pushToast({ type: 'error', text: readiness.message || __('Prepare is blocked because one or more required replacement files are not ready.', 'ultracache') });
+			if (!readiness.inventoryComplete) {
+				pushToast({ type: 'error', text: readiness.message || __('Prepare is blocked until the readiness inventory is complete.', 'ultracache') });
 				return;
 			}
 
-			let latestPrepare = getMediaLibraryReplacementPrepareStatus();
-			let resetPending = !!forceRestart || !latestPrepare.jobId || latestPrepare.prepareFailed;
+			let latestPrepare = prepareOverride && typeof prepareOverride === 'object'
+				? prepareOverride
+				: getMediaLibraryReplacementPrepareStatus();
+			let resetPending = !!forceRestart || latestPrepare.prepareFailed || (!latestPrepare.activeStep && !latestPrepare.prepareComplete && Math.max(0, Number(latestPrepare.processed || 0)) === 0);
 			const job = {
 				type: 'media_replacement_prepare',
 				label: __('Preparing Media Library Replacement', 'ultracache'),
 				processed: resetPending ? 0 : Math.max(0, Number(latestPrepare.processed || 0)),
 				total: resetPending ? 0 : Math.max(0, Number(latestPrepare.total || 0)),
 				hasMore: true,
-				cursor: String(latestPrepare.generation || ''),
+				cursor: String(latestPrepare.activeStep || ''),
 				batchSize: 1,
 				logs: readinessJustCompleted
 					? [
 						__('File readiness complete. All required replacement files are valid and current.', 'ultracache'),
-						resetPending ? __('Continuing automatically with a fresh server-backed Prepare job.', 'ultracache') : __('Continuing automatically from the saved Prepare phase and cursor.', 'ultracache'),
+						resetPending ? __('Continuing automatically with a fresh server-backed Prepare plan.', 'ultracache') : __('Continuing automatically from the saved Prepare phase and cursor.', 'ultracache'),
 					]
-					: [resetPending ? __('Starting a fresh server-backed Prepare job.', 'ultracache') : __('Resuming Prepare from its saved server phase and cursor.', 'ultracache')],
+					: [resetPending ? __('Starting a fresh server-backed Prepare plan.', 'ultracache') : __('Resuming Prepare from its saved server phase and cursor.', 'ultracache')],
 				showWhenInactive: true,
 			};
 
@@ -640,15 +694,15 @@
 				},
 				shouldReleaseExclusiveSessionOnExit: () => true,
 				fetchBatch: async (type, cursor) => {
-					const workflow = await refreshMediaLibraryReplacementWorkflowStatus();
-					latestPrepare = workflow && workflow.prepare && typeof workflow.prepare === 'object' ? workflow.prepare : {};
 					const complete = !resetPending && !!latestPrepare.prepareComplete && !latestPrepare.hasMore;
+					const decisionsRequired = !resetPending && !!latestPrepare.decisionsRequired;
+					const stopped = complete || decisionsRequired;
 					return {
-						items: complete ? [] : [{ reset: resetPending }],
+						items: stopped ? [] : [{ reset: resetPending }],
 						total: Math.max(0, Number(latestPrepare.total || 0)),
 						processed: Math.max(0, Number(latestPrepare.processed || 0)),
-						hasMore: !complete,
-						nextCursor: String(latestPrepare.generation || cursor || ''),
+						hasMore: !stopped,
+						nextCursor: String(latestPrepare.activeStep || cursor || ''),
 					};
 				},
 				getBatchStatePatch: (state, batch) => ({
@@ -662,14 +716,18 @@
 					}
 					const response = await apiRequest('media_library_replacement_prepare', {
 						reset: !!(item && item.reset),
-						readinessGeneration: String(readiness.generation || ''),
-						sessionToken: String(token || ''),
+							sessionToken: String(token || ''),
+						collisionPolicy: 'block',
 						limit: 50,
 						time_budget: 15,
 					});
 					resetPending = false;
-					const workflow = await refreshMediaLibraryReplacementWorkflowStatus(response && response.jobId ? response.jobId : '');
-					latestPrepare = workflow && workflow.prepare && typeof workflow.prepare === 'object' ? workflow.prepare : (response || {});
+					latestPrepare = response && typeof response === 'object' ? response : {};
+					if (latestPrepare.decisionsRequired) {
+						setMediaLibraryReplacementStatus((current) => Object.assign({}, current || {}, {
+							prepare: latestPrepare,
+						}));
+					}
 					return {
 						line: response.message || __('Prepare chunk complete.', 'ultracache'),
 						progressIncrement: Math.max(0, Number(response.batchProcessed || 0)),
@@ -680,10 +738,21 @@
 				},
 				buildCompletionNotice: () => latestPrepare.prepareComplete
 					? { type: 'success', text: __('Prepare complete. The hard pre-Do guard passed and all files/plans are ready.', 'ultracache') }
-					: { type: 'warning', text: latestPrepare.message || __('Prepare stopped before completion.', 'ultracache') },
-				onCompleted: async () => { await refreshMediaLibraryReplacementWorkflowStatus(); },
+					: (latestPrepare.decisionsRequired
+						? { type: 'warning', text: latestPrepare.message || __('Prepare found blocker decisions that must be resolved.', 'ultracache') }
+						: { type: 'warning', text: latestPrepare.message || __('Prepare stopped before completion.', 'ultracache') }),
+				onCompleted: async () => {
+					setMediaLibraryReplacementStatus((current) => Object.assign({}, current || {}, {
+						prepare: latestPrepare,
+					}));
+					try {
+						await refreshMediaLibraryReplacementWorkflowStatus();
+					} catch (error) {
+						reportNonFatalAdminError('media-replacement.prepare-status-refresh', error, { severity: 'debug', dedupeKey: 'media-replacement.prepare-status-refresh', dedupeWindowMs: 30000 });
+					}
+				},
 				markProcessComplete: () => {
-					setProcess((current) => Object.assign({}, current, { active: false, complete: true, cancellable: false, cancelRequested: false, showWhenInactive: true }));
+					setProcess((current) => Object.assign({}, current, { active: false, complete: true, cancellable: false, cancelRequested: false, showWhenInactive: !latestPrepare.decisionsRequired }));
 				},
 				getFailureText: () => __('Media Library replacement Prepare failed.', 'ultracache'),
 				onReleaseFailure: () => pushToast({ type: 'warning', text: __('Prepare finished, but its dashboard lease could not be released immediately.', 'ultracache') }),
@@ -698,30 +767,37 @@
 
 		function getMediaLibraryReplacementPrepareLabel() {
 			if (mediaLibraryReplacementBusy && process && ['media_replacement_readiness', 'media_replacement_prepare'].includes(String(process.type || ''))) {
-				return __('Preparing…', 'ultracache');
+				return __('Preparing Replacement…', 'ultracache');
+			}
+
+			if (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.replacementPolicyChanged && !mediaLibraryReplacementStatus.formatLocked) {
+				return __('Rebuild Preparation', 'ultracache');
 			}
 
 			const prepare = getMediaLibraryReplacementPrepareStatus();
+			if (prepare.decisionsRequired) {
+				return __('Preparation Decisions Required', 'ultracache');
+			}
 			if (prepare.prepareComplete) {
-				return __('Prepare Complete', 'ultracache');
+				return __('Preparation Complete', 'ultracache');
 			}
 			if (prepare.prepareFailed) {
-				return __('Prepare Failed', 'ultracache');
+				return __('Preparation Failed', 'ultracache');
 			}
 
 			const readiness = getMediaLibraryReplacementReadinessStatus();
 			if (
 				readiness.status === 'scanning'
 				|| readiness.status === 'paused'
-				|| prepare.jobId
+				|| !!prepare.activeStep
 				|| ['registry_scan', 'copy', 'validate', 'metadata_plan', 'database_scan', 'database_match', 'database_preview', 'theme_css_scan', 'theme_css_preview', 'pre_do_validate', 'prepare_complete'].includes(String(prepare.activeStep || ''))
 			) {
-				return __('Resume Prepare', 'ultracache');
+				return __('Resume Preparation', 'ultracache');
 			}
 			if (readiness.inventoryComplete && !readiness.readyForReplacement) {
-				return __('Retry Prepare', 'ultracache');
+				return __('Continue Preparation', 'ultracache');
 			}
-			return __('Prepare Library Replacement', 'ultracache');
+			return __('Prepare Replacement', 'ultracache');
 		}
 
 		function isMediaLibraryReplacementDoRunnerReady() {
@@ -734,12 +810,14 @@
 				: {};
 		}
 
-		async function runMediaLibraryReplacementDo() {
-			if (!isMediaLibraryReplacementDoRunnerReady() || busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) {
+		async function runMediaLibraryReplacementDo(doOverride = null) {
+			if ((!doOverride && !isMediaLibraryReplacementDoRunnerReady()) || busy || mediaConversionTestBusy || (mediaLibraryReplacementBusy && !doOverride)) {
 				return;
 			}
 
-			let latestDo = getMediaLibraryReplacementDoStatus();
+			let latestDo = doOverride && typeof doOverride === 'object'
+				? doOverride
+				: getMediaLibraryReplacementDoStatus();
 			if (latestDo.doFailed) {
 				pushToast({ type: 'error', text: latestDo.message || __('Do failed after destructive work started. Resume the current recovery path or use explicit rollback/uninstall.', 'ultracache') });
 				return;
@@ -759,11 +837,11 @@
 				processed: Math.max(0, Number(latestDo.processed || 0)),
 				total: Math.max(0, Number(latestDo.total || 0)),
 				hasMore: true,
-				cursor: String(latestDo.generation || ''),
+				cursor: String(latestDo.activeStep || ''),
 				batchSize: 1,
 				logs: [latestDo.activeStep && latestDo.activeStep !== 'prepare_complete'
 					? __('Resuming Do from its saved server phase.', 'ultracache')
-					: __('Starting the server-backed Do job.', 'ultracache')],
+					: __('Starting the server-backed Do phase.', 'ultracache')],
 				showWhenInactive: true,
 			};
 
@@ -823,7 +901,7 @@
 						total: Math.max(0, Number(latestDo.total || 0)),
 						processed: Math.max(0, Number(latestDo.processed || 0)),
 						hasMore: !complete,
-						nextCursor: String(latestDo.generation || cursor || ''),
+						nextCursor: String(latestDo.activeStep || cursor || ''),
 					};
 				},
 				getBatchStatePatch: (state, batch) => ({
@@ -850,7 +928,7 @@
 					};
 				},
 				buildCompletionNotice: () => latestDo.doComplete
-					? { type: 'success', text: __('Do complete. Run Verify before deleting original JPG/PNG files.', 'ultracache') }
+					? { type: 'success', text: latestDo.message || __('Media Library replacement and Flush All completed. Run Verify before deleting original JPG/PNG files.', 'ultracache') }
 					: { type: 'warning', text: latestDo.message || __('Do stopped before completion.', 'ultracache') },
 				onCompleted: async () => { await refreshMediaLibraryReplacementWorkflowStatus(); },
 				markProcessComplete: () => {
@@ -869,19 +947,19 @@
 
 		function getMediaLibraryReplacementDoLabel() {
 			if (mediaLibraryReplacementBusy && process && String(process.type || '') === 'media_replacement_do') {
-				return __('Applying…', 'ultracache');
+				return __('Applying Replacement…', 'ultracache');
 			}
 			const doStatus = getMediaLibraryReplacementDoStatus();
 			if (doStatus.doComplete) {
-				return __('Do Complete', 'ultracache');
+				return __('Replacement Applied', 'ultracache');
 			}
 			if (doStatus.doFailed) {
-				return __('Do Failed', 'ultracache');
+				return __('Replacement Failed', 'ultracache');
 			}
 			if (['metadata_apply', 'database_apply', 'theme_css_apply'].includes(String(doStatus.activeStep || '')) || doStatus.runStatus === 'paused') {
-				return __('Resume Do', 'ultracache');
+				return __('Resume Replacement', 'ultracache');
 			}
-			return __('Run Do', 'ultracache');
+			return __('Apply Replacement', 'ultracache');
 		}
 
 
@@ -917,13 +995,13 @@
 				processed: retrying ? 0 : Math.max(0, Number(latestVerify.processed || 0)),
 				total: Math.max(0, Number(latestVerify.total || 0)),
 				hasMore: true,
-				cursor: String(latestVerify.generation || ''),
+				cursor: String(latestVerify.activeStep || ''),
 				batchSize: 1,
 				logs: [retrying
 					? __('Retrying Verify from a fresh destination and metadata validation pass.', 'ultracache')
 					: (latestVerify.activeStep && latestVerify.activeStep !== 'do_complete'
 						? __('Resuming Verify from its saved server phase.', 'ultracache')
-						: __('Starting the server-backed Verify job.', 'ultracache'))],
+						: __('Starting the server-backed Verify phase.', 'ultracache'))],
 				showWhenInactive: true,
 			};
 
@@ -980,7 +1058,7 @@
 						total: Math.max(0, Number(latestVerify.total || 0)),
 						processed: Math.max(0, Number(latestVerify.processed || 0)),
 						hasMore: !complete,
-						nextCursor: String(latestVerify.generation || cursor || ''),
+						nextCursor: String(latestVerify.activeStep || cursor || ''),
 					};
 				},
 				getBatchStatePatch: (state, batch) => ({
@@ -1046,19 +1124,19 @@
 
 		function getMediaLibraryReplacementVerifyLabel() {
 			if (mediaLibraryReplacementBusy && process && String(process.type || '') === 'media_replacement_verify') {
-				return __('Verifying…', 'ultracache');
+				return __('Verifying Replacement…', 'ultracache');
 			}
 			const verifyStatus = getMediaLibraryReplacementVerifyStatus();
 			if (verifyStatus.verifyComplete) {
-				return __('Verify Complete', 'ultracache');
+				return __('Verification Complete', 'ultracache');
 			}
 			if (verifyStatus.verifyFailed) {
-				return __('Retry Verify', 'ultracache');
+				return __('Retry Verification', 'ultracache');
 			}
 			if (['destination_verify', 'metadata_verify', 'database_verify', 'theme_css_verify', 'cleanup_preview'].includes(String(verifyStatus.activeStep || '')) || verifyStatus.runStatus === 'paused') {
-				return __('Resume Verify', 'ultracache');
+				return __('Resume Verification', 'ultracache');
 			}
-			return __('Run Verify', 'ultracache');
+			return __('Verify Replacement', 'ultracache');
 		}
 
 
@@ -1089,17 +1167,15 @@
 
 			const startingFresh = String(latestDelete.activeStep || '') === 'verify_complete';
 			if (startingFresh && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-				const confirmed = window.confirm(__('Delete all verified original JPG/PNG files for this replacement job? The copied AVIF/WebP files, switched attachment metadata, verified database references, and verified Theme CSS will remain. Keep an external backup until testing is complete.', 'ultracache'));
+				const confirmed = window.confirm(__('Delete all verified original JPG/PNG files for this replacement workflow? The copied AVIF/WebP files, switched attachment metadata, verified database references, and verified Theme CSS will remain. Keep an external backup until testing is complete.', 'ultracache'));
 				if (!confirmed) {
 					return;
 				}
 				try {
-					const confirmation = await apiRequest('media_library_replacement_delete_confirm', {
-						generation: String(latestDelete.generation || ''),
-					});
+					const confirmation = await apiRequest('media_library_replacement_delete_confirm', {});
 					latestDelete = confirmation && typeof confirmation === 'object' ? confirmation : latestDelete;
 					if (!confirmation || !confirmation.success) {
-						throw new Error(confirmation && confirmation.message ? confirmation.message : __('The server did not confirm the current verified cleanup generation.', 'ultracache'));
+						throw new Error(confirmation && confirmation.message ? confirmation.message : __('The server did not confirm the current verified cleanup plan.', 'ultracache'));
 					}
 				} catch (error) {
 					pushToast({ type: 'error', text: error && error.message ? error.message : __('Could not create a fresh Delete Originals confirmation.', 'ultracache') });
@@ -1114,13 +1190,13 @@
 				processed: Math.max(0, Number(latestDelete.processed || 0)),
 				total: Math.max(0, Number(latestDelete.total || 0)),
 				hasMore: true,
-				cursor: String(latestDelete.generation || ''),
+				cursor: String(latestDelete.activeStep || ''),
 				batchSize: 1,
 				logs: [retrying
 					? __('Retrying failed cleanup rows after revalidating each original and replacement file.', 'ultracache')
 					: (latestDelete.activeStep === 'delete_originals'
 						? __('Resuming Delete Originals from the remaining server rows.', 'ultracache')
-						: __('Starting the server-backed Delete Originals job.', 'ultracache'))],
+						: __('Starting the server-backed Delete Originals phase.', 'ultracache'))],
 				showWhenInactive: true,
 			};
 
@@ -1180,7 +1256,7 @@
 						total: Math.max(0, Number(latestDelete.total || 0)),
 						processed: Math.max(0, Number(latestDelete.processed || 0)),
 						hasMore: !complete,
-						nextCursor: String(latestDelete.generation || cursor || ''),
+						nextCursor: String(latestDelete.activeStep || cursor || ''),
 					};
 				},
 				getBatchStatePatch: (state, batch) => ({
@@ -1194,7 +1270,6 @@
 					}
 					const response = await apiRequest('media_library_replacement_delete', {
 						sessionToken: String(token || ''),
-						generation: String(latestDelete.generation || ''),
 						limit: 50,
 						time_budget: 15,
 					});
@@ -1227,19 +1302,19 @@
 
 		function getMediaLibraryReplacementDeleteLabel() {
 			if (mediaLibraryReplacementBusy && process && String(process.type || '') === 'media_replacement_delete') {
-				return __('Deleting…', 'ultracache');
+				return __('Deleting Original Files…', 'ultracache');
 			}
 			const deleteStatus = getMediaLibraryReplacementDeleteStatus();
 			if (deleteStatus.deleteComplete) {
-				return __('Delete Complete', 'ultracache');
+				return __('Original Files Deleted', 'ultracache');
 			}
 			if (deleteStatus.deleteFailed) {
-				return __('Retry Delete Originals', 'ultracache');
+				return __('Retry Original File Deletion', 'ultracache');
 			}
 			if (deleteStatus.activeStep === 'delete_originals' || deleteStatus.runStatus === 'paused') {
-				return __('Resume Delete Originals', 'ultracache');
+				return __('Resume Original File Deletion', 'ultracache');
 			}
-			return __('Delete Originals', 'ultracache');
+			return __('Delete Original Files', 'ultracache');
 		}
 
 		function isMediaLibraryReplacementRunnerReady() {
@@ -1269,7 +1344,7 @@
 
 		function shouldConfirmMediaLibraryReplacementPrepare() {
 			const prepare = getMediaLibraryReplacementPrepareStatus();
-			return !prepare.jobId || !!prepare.prepareFailed;
+			return (!prepare.activeStep && !prepare.prepareComplete) || !!prepare.prepareFailed;
 		}
 
 		async function confirmMediaLibraryReplacementWarning() {
@@ -1305,8 +1380,18 @@
 				const response = await apiRequest('media_library_replacement_restart', {});
 				mediaLibraryReplacementSessionTokenRef.current = persistMediaLibraryReplacementSessionToken('');
 				setMediaLibraryReplacementPreview(null);
+				setMediaLibraryReplacementPreviewOpen(false);
 				setMediaLibraryReplacementDbPreview(null);
+				setMediaLibraryReplacementDbPreviewOpen(false);
+				setMediaLibraryReplacementBlockersModal({
+					open: false,
+					loading: false,
+					payload: null,
+					error: '',
+				});
+				setMediaLibraryReplacementBlockerDecisions({});
 				setMediaLibraryReplacementCleanupPreview(null);
+				setMediaLibraryReplacementCleanupPreviewOpen(false);
 				setMediaLibraryReplacementStatus(response || null);
 				pushToast({ type: 'success', text: response && response.message ? response.message : __('The replacement plan was cleared.', 'ultracache') });
 			} catch (error) {
@@ -1315,6 +1400,54 @@
 				setMediaLibraryReplacementBusy(false);
 			}
 		}
+
+		async function recoverMediaLibraryReplacementWorkflow(mode) {
+			if (busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) {
+				return;
+			}
+
+			const recoveryMode = String(mode || 'continue') === 'restart_database' ? 'restart_database' : 'continue';
+			setMediaLibraryReplacementBusy(true);
+			let response = null;
+			try {
+				response = await apiRequest('media_library_replacement_recover', { mode: recoveryMode });
+				setMediaLibraryReplacementStatus(response || null);
+				pushToast({
+					type: response && response.success ? 'success' : 'error',
+					text: response && response.message ? response.message : __('Media Library replacement recovery is ready.', 'ultracache'),
+				});
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : __('Media Library replacement recovery failed.', 'ultracache') });
+				return;
+			} finally {
+				setMediaLibraryReplacementBusy(false);
+			}
+
+			if (!response || !response.success) {
+				return;
+			}
+
+			if (String(response.nextStage || '') === 'prepare') {
+				await runMediaLibraryReplacementPrepare(
+					false,
+					response.readiness && typeof response.readiness === 'object' ? response.readiness : getMediaLibraryReplacementReadinessStatus(),
+					false,
+					response.prepare && typeof response.prepare === 'object' ? response.prepare : null
+				);
+				const preparedWorkflow = await refreshMediaLibraryReplacementWorkflowStatus();
+				if (preparedWorkflow && preparedWorkflow.prepare && preparedWorkflow.prepare.prepareComplete) {
+					return runMediaLibraryReplacementDo(
+						preparedWorkflow.do && typeof preparedWorkflow.do === 'object' ? preparedWorkflow.do : null
+					);
+				}
+				return;
+			}
+
+			return runMediaLibraryReplacementDo(
+				response.do && typeof response.do === 'object' ? response.do : null
+			);
+		}
+
 
 		function getMediaLibraryReplacementRunnerUnavailableMessage() {
 			const guard = mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.startGuard
@@ -1341,15 +1474,20 @@
 			if (isMediaLibraryReplacementOwnedByAnotherDashboard()) {
 				const recovery = getMediaLibraryReplacementRecoveryStatus();
 				reason = recovery.leaseExpiresAt
-					? __('This replacement job is running in another dashboard. It can be resumed here after that lease is paused or expires.', 'ultracache')
-					: __('This replacement job is running in another dashboard.', 'ultracache');
+					? __('This replacement workflow is running in another dashboard. It can be resumed here after that lease is paused or expires.', 'ultracache')
+					: __('This replacement workflow is running in another dashboard.', 'ultracache');
 			} else if (step === 'prepare' && isMediaLibraryReplacementReadinessRunnerReady() && isMediaLibraryReplacementPrepareRunnerReady()) {
+				const replacementPolicyChanged = !!(mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.replacementPolicyChanged && !mediaLibraryReplacementStatus.formatLocked);
 				if (busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) {
 					reason = __('Media Library replacement is busy.', 'ultracache');
+				} else if (replacementPolicyChanged) {
+					reason = '';
 				} else if (prepareStatus.prepareFailed) {
-					reason = prepareStatus.message || __('Prepare failed. Use Restart Replacement Plan to clear the non-destructive plan explicitly.', 'ultracache');
+					reason = __('Preparation failed. Open Advanced / Manual Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again.', 'ultracache');
+				} else if (prepareStatus.decisionsRequired) {
+					reason = prepareStatus.message || __('Open Decide Blockers and resolve every blocker group to finalize Prepare.', 'ultracache');
 				} else if (prepareStatus.prepareComplete) {
-					reason = __('Prepare is complete for the current job.', 'ultracache');
+					reason = __('Prepare is complete for the current workflow.', 'ultracache');
 				} else if (!isCurrent) {
 					reason = getMediaLibraryReplacementStepInactiveReason(step, stage);
 				}
@@ -1397,15 +1535,7 @@
 		}
 
 
-		function getMediaLibraryReplacementCurrentJobId() {
-			return mediaLibraryReplacementCleanupPreview && mediaLibraryReplacementCleanupPreview.jobId
-				? String(mediaLibraryReplacementCleanupPreview.jobId)
-				: (mediaLibraryReplacementDbPreview && mediaLibraryReplacementDbPreview.jobId
-					? String(mediaLibraryReplacementDbPreview.jobId)
-					: (mediaLibraryReplacementPreview && mediaLibraryReplacementPreview.jobId
-						? String(mediaLibraryReplacementPreview.jobId)
-						: (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.jobId ? String(mediaLibraryReplacementStatus.jobId) : '')));
-		}
+
 
 		function getMediaLibraryReplacementDeleteDisabledReason() {
 			if (busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) {
@@ -1416,11 +1546,8 @@
 			}
 
 			const deleteStatus = getMediaLibraryReplacementDeleteStatus();
-			if (!getMediaLibraryReplacementCurrentJobId()) {
-				return __('Prepare the replacement plan first.', 'ultracache');
-			}
 			if (deleteStatus.deleteComplete) {
-				return __('Delete Originals is complete for this job.', 'ultracache');
+				return __('Delete Originals is complete for this workflow.', 'ultracache');
 			}
 			if (!deleteStatus.deleteReady) {
 				return deleteStatus.message || __('Run Verify first. Delete Originals unlocks only after verification and cleanup readiness are clean.', 'ultracache');
@@ -1440,16 +1567,16 @@
 			let readiness = getMediaLibraryReplacementReadinessStatus();
 			let readinessJustCompleted = false;
 
-			if (!readiness.inventoryComplete || !readiness.readyForReplacement) {
+			if (!readiness.inventoryComplete) {
 				await runMediaLibraryReplacementReadiness(!!forceRestart || !!readiness.inventoryComplete, true);
 				const workflow = await refreshMediaLibraryReplacementWorkflowStatus();
 				readiness = workflow && workflow.readiness && typeof workflow.readiness === 'object'
 					? workflow.readiness
 					: getMediaLibraryReplacementReadinessStatus();
-				readinessJustCompleted = !!readiness.inventoryComplete && !!readiness.readyForReplacement;
+				readinessJustCompleted = !!readiness.inventoryComplete;
 			}
 
-			if (!readiness.inventoryComplete || !readiness.readyForReplacement) {
+			if (!readiness.inventoryComplete) {
 				return;
 			}
 
@@ -1496,7 +1623,7 @@
 
 			setMediaLibraryReplacementBusy(true);
 			try {
-				await loadMediaLibraryReplacementPreviewPage(offset, mediaLibraryReplacementPreview && mediaLibraryReplacementPreview.jobId ? mediaLibraryReplacementPreview.jobId : '');
+				await loadMediaLibraryReplacementPreviewPage(offset);
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Media Library replacement preview page could not be loaded.' });
 			} finally {
@@ -1507,10 +1634,9 @@
 
 
 
-		async function loadMediaLibraryReplacementDbPreviewPage(offset = 0, jobId = '') {
+		async function loadMediaLibraryReplacementDbPreviewPage(offset = 0) {
 			const response = await apiRequest('media_library_replacement_db_preview', {
 				cacheBust: getMediaConversionTestCacheBust(),
-				jobId: jobId || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.jobId ? mediaLibraryReplacementStatus.jobId : ''),
 				limit: 200,
 				offset: Math.max(0, Number(offset || 0)),
 			});
@@ -1525,12 +1651,8 @@
 
 			setMediaLibraryReplacementBusy(true);
 			try {
-				const jobId = mediaLibraryReplacementPreview && mediaLibraryReplacementPreview.jobId
-					? String(mediaLibraryReplacementPreview.jobId)
-					: (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.jobId ? String(mediaLibraryReplacementStatus.jobId) : '');
-				const response = await loadMediaLibraryReplacementDbPreviewPage(0, jobId);
+				const response = await loadMediaLibraryReplacementDbPreviewPage(0);
 				setMediaLibraryReplacementDbPreview(response || null);
-				setMediaLibraryReplacementStatus(response || null);
 				setMediaLibraryReplacementDbPreviewOpen(true);
 				pushToast({
 					type: response && response.success && !response.blocked ? 'success' : 'error',
@@ -1550,7 +1672,7 @@
 
 			setMediaLibraryReplacementBusy(true);
 			try {
-				await loadMediaLibraryReplacementDbPreviewPage(offset, mediaLibraryReplacementDbPreview && mediaLibraryReplacementDbPreview.jobId ? mediaLibraryReplacementDbPreview.jobId : '');
+				await loadMediaLibraryReplacementDbPreviewPage(offset);
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Media Library replacement database preview page could not be loaded.' });
 			} finally {
@@ -1558,10 +1680,151 @@
 			}
 		}
 
-		async function loadMediaLibraryReplacementCleanupPreviewPage(offset = 0, jobId = '') {
+		function getMediaLibraryReplacementBlockerDecisionsFromResponse(response) {
+			const decisions = {};
+			(response && Array.isArray(response.groups) ? response.groups : []).forEach((group) => {
+				if (group && group.code && group.decision) {
+					decisions[String(group.code)] = String(group.decision);
+				}
+			});
+			(response && Array.isArray(response.items) ? response.items : []).forEach((item) => {
+				if (item && item.id && item.decision) {
+					decisions['item:' + String(item.id)] = String(item.decision);
+				}
+			});
+			return decisions;
+		}
+
+		function assertMediaLibraryReplacementBlockersResponse(response, minimumGroupCount = 0) {
+			if (!response || response.success !== true) {
+				throw new Error(response && response.message
+					? String(response.message)
+					: __('Blocker decisions could not be loaded.', 'ultracache'));
+			}
+			if (!Array.isArray(response.groups) || !Array.isArray(response.items)) {
+				throw new Error(__('The blocker response is incomplete. Refresh the workflow status and open Decide Blockers again.', 'ultracache'));
+			}
+			const groupCount = Math.max(0, Number(response.groupCount || 0));
+			if (groupCount !== response.groups.length) {
+				throw new Error(__('The blocker response group count is inconsistent. Refresh the workflow status and open Decide Blockers again.', 'ultracache'));
+			}
+			if (groupCount < Math.max(0, Number(minimumGroupCount || 0))) {
+				throw new Error(__('The blocker response did not contain the groups reported by Prepare. Refresh the workflow status and open Decide Blockers again.', 'ultracache'));
+			}
+			return response;
+		}
+
+		async function fetchMediaLibraryReplacementBlockersPage(offset = 0, blockerCode = '') {
+			return apiRequest('media_library_replacement_blockers', {
+				cacheBust: getMediaConversionTestCacheBust(),
+				blockerCode: blockerCode || '',
+				limit: 100,
+				offset: Math.max(0, Number(offset || 0)),
+			});
+		}
+
+		async function loadMediaLibraryReplacementBlockersPage(offset = 0, blockerCode = '', resetDecisions = false, openWhenLoaded = false, minimumGroupCount = 0) {
+			const response = await fetchMediaLibraryReplacementBlockersPage(offset, blockerCode);
+			assertMediaLibraryReplacementBlockersResponse(response, minimumGroupCount);
+			const decisions = getMediaLibraryReplacementBlockerDecisionsFromResponse(response);
+			if (resetDecisions) {
+				setMediaLibraryReplacementBlockerDecisions(decisions);
+			} else {
+				setMediaLibraryReplacementBlockerDecisions((current) => Object.assign({}, decisions, current || {}));
+			}
+			setMediaLibraryReplacementBlockersModal((current) => {
+				const currentState = current && typeof current === 'object' ? current : {};
+				return {
+					open: openWhenLoaded ? true : !!currentState.open,
+					loading: false,
+					payload: response,
+					error: '',
+				};
+			});
+			return response;
+		}
+
+		async function openMediaLibraryReplacementBlockersModal() {
+			if (busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) return;
+			const prepareStatus = mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.prepare && typeof mediaLibraryReplacementStatus.prepare === 'object'
+				? mediaLibraryReplacementStatus.prepare
+				: {};
+			const minimumGroupCount = Math.max(0, Number(prepareStatus.unresolvedBlockerGroups || 0)) > 0 || !!prepareStatus.decisionsRequired ? 1 : 0;
+			setMediaLibraryReplacementBusy(true);
+			setMediaLibraryReplacementBlockersModal({
+				open: false,
+				loading: true,
+				payload: null,
+				error: '',
+			});
+			try {
+				await loadMediaLibraryReplacementBlockersPage(0, '', true, true, minimumGroupCount);
+			} catch (error) {
+				const message = error && error.message ? error.message : __('Blocker decisions could not be loaded.', 'ultracache');
+				setMediaLibraryReplacementBlockersModal({
+					open: false,
+					loading: false,
+					payload: null,
+					error: message,
+				});
+				pushToast({ type: 'error', text: message });
+			} finally {
+				setMediaLibraryReplacementBusy(false);
+			}
+		}
+
+		async function changeMediaLibraryReplacementBlockersPage(offset, blockerCode = '') {
+			if (mediaLibraryReplacementBusy) return;
+			setMediaLibraryReplacementBusy(true);
+			try {
+				await loadMediaLibraryReplacementBlockersPage(offset, blockerCode, false, true, 0);
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : __('Blocker page could not be loaded.', 'ultracache') });
+			} finally {
+				setMediaLibraryReplacementBusy(false);
+			}
+		}
+
+		async function saveMediaLibraryReplacementBlockerDecisions() {
+			const preview = mediaLibraryReplacementBlockers && typeof mediaLibraryReplacementBlockers === 'object' ? mediaLibraryReplacementBlockers : {};
+			const groups = Array.isArray(preview.groups) ? preview.groups : [];
+			const decisionState = mediaLibraryReplacementBlockerDecisions || {};
+			const decisions = groups.map((group) => ({ blockerCode: String(group.code || ''), decision: String(decisionState[String(group.code || '')] || '') }));
+			const itemDecisions = Object.keys(decisionState).filter((key) => key.indexOf('item:') === 0 && String(decisionState[key] || '') !== '').map((key) => ({
+				itemId: Math.max(0, Number(key.slice(5) || 0)),
+				decision: String(decisionState[key] || ''),
+			})).filter((entry) => entry.itemId > 0);
+			if (decisions.some((entry) => !entry.blockerCode || !entry.decision)) {
+				pushToast({ type: 'error', text: __('Choose a group decision for every blocker group. Individual file decisions can then override the group policy.', 'ultracache') }); return;
+			}
+			setMediaLibraryReplacementBusy(true);
+			try {
+				const response = await apiRequest('media_library_replacement_blocker_decisions', { decisions, itemDecisions });
+				setMediaLibraryReplacementBlockersOpen(false);
+				pushToast({ type: 'success', text: response.message || __('Blocker decisions saved.', 'ultracache') });
+				if (response && response.resumePrepare) {
+					const resumeStep = String(response.resumeStep || 'pre_do_validate');
+					const prepareOverride = Object.assign({}, getMediaLibraryReplacementPrepareStatus(), {
+						activeStep: resumeStep,
+						decisionsRequired: false,
+						prepareComplete: false,
+						prepareFailed: false,
+						hasMore: true,
+						message: String(response.message || ''),
+					});
+					setMediaLibraryReplacementStatus((current) => Object.assign({}, current || {}, { prepare: prepareOverride }));
+					setMediaLibraryReplacementBusy(false);
+					return runMediaLibraryReplacementPrepare(false, getMediaLibraryReplacementReadinessStatus(), false, prepareOverride);
+				}
+				try { await refreshMediaLibraryReplacementWorkflowStatus(); }
+				catch (statusError) { reportNonFatalAdminError('media-replacement.blocker-save-status-refresh', statusError, { severity: 'debug', dedupeKey: 'media-replacement.blocker-save-status-refresh', dedupeWindowMs: 30000 }); }
+			} catch (error) { pushToast({ type: 'error', text: error && error.message ? error.message : __('Blocker decisions could not be saved.', 'ultracache') }); }
+			finally { setMediaLibraryReplacementBusy(false); }
+		}
+
+		async function loadMediaLibraryReplacementCleanupPreviewPage(offset = 0) {
 			const response = await apiRequest('media_library_replacement_cleanup_preview', {
 				cacheBust: getMediaConversionTestCacheBust(),
-				jobId: jobId || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.jobId ? mediaLibraryReplacementStatus.jobId : ''),
 				limit: 200,
 				offset: Math.max(0, Number(offset || 0)),
 			});
@@ -1577,9 +1840,7 @@
 
 			setMediaLibraryReplacementBusy(true);
 			try {
-				const jobId = getMediaLibraryReplacementCurrentJobId();
-				const response = await loadMediaLibraryReplacementCleanupPreviewPage(0, jobId);
-				setMediaLibraryReplacementStatus(response || null);
+				await loadMediaLibraryReplacementCleanupPreviewPage(0);
 				setMediaLibraryReplacementCleanupPreviewOpen(true);
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : __('Media Library replacement cleanup preview could not be loaded.', 'ultracache') });
@@ -1596,7 +1857,7 @@
 
 			setMediaLibraryReplacementBusy(true);
 			try {
-				await loadMediaLibraryReplacementCleanupPreviewPage(offset, mediaLibraryReplacementCleanupPreview && mediaLibraryReplacementCleanupPreview.jobId ? mediaLibraryReplacementCleanupPreview.jobId : '');
+				await loadMediaLibraryReplacementCleanupPreviewPage(offset);
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : 'Media Library replacement cleanup preview page could not be loaded.' });
 			} finally {
@@ -1608,10 +1869,6 @@
 			setMediaLibraryReplacementCleanupPreviewOpen(false);
 		}
 
-
-		async function applyMediaLibraryReplacementCleanup() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
 
 
 		async function copyMediaLibraryReplacementFiles() {
@@ -1656,14 +1913,11 @@
 
 			setMediaLibraryReplacementBusy(true);
 			try {
-				const jobId = mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.jobId ? String(mediaLibraryReplacementStatus.jobId) : '';
 				const response = await apiRequest('media_library_replacement_theme_css_preview', {
 					cacheBust: getMediaConversionTestCacheBust(),
-					jobId,
 					limit: 20,
 					offset: 0,
 				});
-				setMediaLibraryReplacementStatus(response || null);
 				pushToast({
 					type: response && response.success && !response.blocked ? 'success' : 'error',
 					text: response && response.message ? response.message : __('Theme CSS replacement preview completed.', 'ultracache'),
@@ -1732,13 +1986,13 @@
 			getMediaLibraryReplacementRecoveryStatus,
 			isMediaLibraryReplacementOwnedByAnotherDashboard,
 			restartMediaLibraryReplacementWorkflow,
+			recoverMediaLibraryReplacementWorkflow,
 			closeMediaLibraryReplacementWarning,
 			confirmMediaLibraryReplacementWarning,
 			getMediaLibraryReplacementRunnerUnavailableMessage,
 			showMediaLibraryReplacementRunnerUnavailable,
 			getMediaLibraryReplacementWorkflowButtonState,
 			getMediaLibraryReplacementWorkflowButtonClass,
-			getMediaLibraryReplacementCurrentJobId,
 			getMediaLibraryReplacementDeleteDisabledReason,
 			prepareMediaLibraryReplacementWorkflow,
 			doMediaLibraryReplacementWorkflow,
@@ -1750,11 +2004,14 @@
 			loadMediaLibraryReplacementDbPreviewPage,
 			openMediaLibraryReplacementDbPreviewModal,
 			changeMediaLibraryReplacementDbPreviewPage,
+			loadMediaLibraryReplacementBlockersPage,
+			openMediaLibraryReplacementBlockersModal,
+			changeMediaLibraryReplacementBlockersPage,
+			saveMediaLibraryReplacementBlockerDecisions,
 			loadMediaLibraryReplacementCleanupPreviewPage,
 			openMediaLibraryReplacementCleanupPreviewModal,
 			changeMediaLibraryReplacementCleanupPreviewPage,
 			closeMediaLibraryReplacementCleanupPreviewModal,
-			applyMediaLibraryReplacementCleanup,
 			copyMediaLibraryReplacementFiles,
 			prepareMediaLibraryReplacementMetadataUpdates,
 			applyMediaLibraryReplacementMetadataUpdates,

@@ -347,6 +347,16 @@ body.toplevel_page_ultracache.ultracache-admin-theme-native #wpbody-content {
 	color: #50575e;
 }
 
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-answer-title {
+	color: #1d2327;
+}
+
+#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-code {
+	border-color: #c3c4c7;
+	background: #f6f7f7;
+	color: #1d2327;
+}
+
 #uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__faq-count {
 	border-color: #c3c4c7;
 	background: #f6f7f7;
@@ -362,10 +372,6 @@ body.toplevel_page_ultracache.ultracache-admin-theme-native #wpbody-content {
 	outline-color: #2271b1;
 }
 
-#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__note {
-	color: #1d2327;
-}
-
 #uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__intro,
 #uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__section-copy,
 #uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__steps > li,
@@ -375,11 +381,6 @@ body.toplevel_page_ultracache.ultracache-admin-theme-native #wpbody-content {
 
 #uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__section {
 	border-top-color: #dcdcde;
-}
-
-#uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__note {
-	border-color: #c3c4c7;
-	background: #f6f7f7;
 }
 
 #uc-dashboard[data-uc-theme="native"] .uc-version-help-modal__support {

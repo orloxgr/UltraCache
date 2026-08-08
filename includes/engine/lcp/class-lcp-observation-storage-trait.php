@@ -11,9 +11,254 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
 {
+    private function get_lcp_page_manual_selector_option_key($page_hash)
+    {
+        $page_hash = strtolower(trim((string) $page_hash));
+        return preg_match('/^[a-f0-9]{64}$/', $page_hash)
+            ? 'ultracache_lcp_manual_selector_' . $page_hash
+            : '';
+    }
+
+    private function sanitize_lcp_page_manual_selector($selector)
+    {
+        $selector = preg_replace('/[\r\n\t]+/', ' ', (string) $selector);
+        $selector = trim(wp_strip_all_tags((string) $selector));
+        if (function_exists('mb_substr')) {
+            $selector = mb_substr($selector, 0, 500);
+        } else {
+            $selector = substr($selector, 0, 500);
+        }
+        return preg_match('/[\x00-\x1F\x7F]/', $selector) ? '' : $selector;
+    }
+
+    private function get_lcp_page_manual_selector_by_hash($page_hash)
+    {
+        $option_key = $this->get_lcp_page_manual_selector_option_key($page_hash);
+        if ('' === $option_key) {
+            return '';
+        }
+        return $this->sanitize_lcp_page_manual_selector(get_option($option_key, ''));
+    }
+
+    private function get_lcp_page_manual_selector_for_url($page_url)
+    {
+        $page_url = $this->normalize_lcp_observation_page_url($page_url);
+        return '' === $page_url ? '' : $this->get_lcp_page_manual_selector_by_hash(hash('sha256', $page_url));
+    }
+
+    private function replace_lcp_page_manual_selector_rows($table, $page_hash, $page_url, $selector)
+    {
+        global $wpdb;
+
+        $selector_hash = $this->get_lcp_observation_selector_hash($selector);
+        if (64 !== strlen($selector_hash)) {
+            return false;
+        }
+
+        $now = time();
+        $candidate_window = wp_json_encode(array());
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Creates the three authoritative viewport rows for one explicitly saved UltraCache manual LCP selector.
+        $inserted = $wpdb->query(
+            $wpdb->prepare(
+                "INSERT INTO %i (
+                    page_url_hash, page_url, selector_hash, selector, viewport, element_tag,
+                    resource_type, resource_url_hash, resource_url, observation_source,
+                    observation_count, status, learning_state, confirmation_count, candidate_window,
+                    locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at
+                ) VALUES
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %d, %s, %d, %d, %d, %d, %d, %d),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %d, %s, %d, %d, %d, %d, %d, %d),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %d, %s, %d, %d, %d, %d, %d, %d)
+                ON DUPLICATE KEY UPDATE
+                    page_url = VALUES(page_url),
+                    selector = VALUES(selector),
+                    element_tag = VALUES(element_tag),
+                    resource_type = VALUES(resource_type),
+                    resource_url_hash = VALUES(resource_url_hash),
+                    resource_url = VALUES(resource_url),
+                    observation_source = VALUES(observation_source),
+                    observation_count = VALUES(observation_count),
+                    status = VALUES(status),
+                    learning_state = VALUES(learning_state),
+                    confirmation_count = VALUES(confirmation_count),
+                    candidate_window = VALUES(candidate_window),
+                    locked_at = VALUES(locked_at),
+                    last_refresh_at = VALUES(last_refresh_at),
+                    first_seen = VALUES(first_seen),
+                    last_seen = VALUES(last_seen),
+                    confirmed_at = VALUES(confirmed_at),
+                    updated_at = VALUES(updated_at)",
+                $table,
+                $page_hash,
+                $page_url,
+                $selector_hash,
+                $selector,
+                'mobile',
+                '',
+                'unknown',
+                '',
+                '',
+                'manual',
+                0,
+                'confirmed',
+                'locked',
+                0,
+                $candidate_window,
+                $now,
+                0,
+                0,
+                0,
+                $now,
+                $now,
+                $page_hash,
+                $page_url,
+                $selector_hash,
+                $selector,
+                'tablet',
+                '',
+                'unknown',
+                '',
+                '',
+                'manual',
+                0,
+                'confirmed',
+                'locked',
+                0,
+                $candidate_window,
+                $now,
+                0,
+                0,
+                0,
+                $now,
+                $now,
+                $page_hash,
+                $page_url,
+                $selector_hash,
+                $selector,
+                'desktop',
+                '',
+                'unknown',
+                '',
+                '',
+                'manual',
+                0,
+                'confirmed',
+                'locked',
+                0,
+                $candidate_window,
+                $now,
+                0,
+                0,
+                0,
+                $now,
+                $now
+            )
+        );
+        if (false === $inserted) {
+            return false;
+        }
+
+        $this->ultracache_reset_lcp_page_probe_evidence($table, $page_hash, $page_url, $now);
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Stales only competing mappings for the same explicitly overridden page.
+        $staled = $wpdb->query(
+            $wpdb->prepare(
+                'UPDATE %i SET status = %s, updated_at = %d WHERE page_url_hash = %s AND selector_hash <> %s AND status IN (%s, %s)',
+                $table,
+                'stale',
+                $now,
+                $page_hash,
+                $selector_hash,
+                'confirmed',
+                'pending'
+            )
+        );
+
+        return false !== $staled;
+    }
+
+    public function save_lcp_page_manual_selector($page_hash, $selector)
+    {
+        global $wpdb;
+
+        $page_hash = strtolower(trim((string) $page_hash));
+        $selector = $this->sanitize_lcp_page_manual_selector($selector);
+        $option_key = $this->get_lcp_page_manual_selector_option_key($page_hash);
+        if ('' === $option_key) {
+            return new WP_Error('ultracache_invalid_lcp_page_hash', __('Invalid LCP page identifier.', 'ultracache'), array('status' => 400));
+        }
+        if (!($wpdb instanceof wpdb) || !self::ensure_lcp_observations_table()) {
+            return new WP_Error('ultracache_lcp_table_unavailable', __('The LCP observations table is unavailable.', 'ultracache'), array('status' => 500));
+        }
+
+        $table = self::get_lcp_observations_table_name();
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads one administrator-selected UltraCache-owned page scope.
+        $page_url = $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT page_url FROM %i WHERE page_url_hash = %s ORDER BY id ASC LIMIT 1',
+                $table,
+                $page_hash
+            )
+        );
+        $page_url = $this->normalize_lcp_observation_page_url((string) $page_url);
+        if ('' === $page_url || !$this->is_lcp_observation_page_cacheable_url($page_url)) {
+            return new WP_Error('ultracache_lcp_page_missing', __('The selected LCP URL no longer exists.', 'ultracache'), array('status' => 404));
+        }
+
+        if ('' === $selector) {
+            delete_option($option_key);
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Clears only the removed manual scope for one administrator-selected page.
+            $wpdb->delete(
+                $table,
+                array('page_url_hash' => $page_hash, 'observation_source' => 'manual'),
+                array('%s', '%s')
+            );
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reopens the page for automatic discovery after its manual override is cleared.
+            $wpdb->update(
+                $table,
+                array(
+                    'learning_state'     => 'learning',
+                    'confirmation_count' => 0,
+                    'candidate_window'   => wp_json_encode(array()),
+                    'locked_at'          => 0,
+                    'updated_at'         => time(),
+                ),
+                array('page_url_hash' => $page_hash),
+                array('%s', '%d', '%s', '%d', '%d'),
+                array('%s')
+            );
+        } else {
+            if (!$this->replace_lcp_page_manual_selector_rows($table, $page_hash, $page_url, $selector)) {
+                return new WP_Error('ultracache_lcp_manual_mapping_failed', __('The LCP mapping could not be updated.', 'ultracache'), array('status' => 500));
+            }
+            update_option($option_key, $selector, false);
+        }
+
+        $purged = method_exists($this, 'purge_page_cache_url_only')
+            ? (bool) $this->purge_page_cache_url_only($page_url)
+            : (method_exists($this, 'purge_url') ? (bool) $this->purge_url($page_url) : false);
+        $refresh_queued = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'enqueue_lcp_refresh_url')
+            ? (bool) Ultra_Cache_WP::enqueue_lcp_refresh_url($page_url)
+            : null;
+
+        return array(
+            'success'        => true,
+            'pageHash'       => $page_hash,
+            'pageUrl'        => $page_url,
+            'manualSelector' => $selector,
+            'purged'         => $purged,
+            'refreshQueued'  => $refresh_queued,
+            'message'        => '' === $selector
+                ? __('Manual LCP selector cleared for this URL.', 'ultracache')
+                : __('Manual LCP selector saved for this URL.', 'ultracache'),
+        );
+    }
+
     public static function get_lcp_observations_db_version()
     {
-        return '3';
+        return '5';
     }
 
     public static function get_lcp_observations_db_version_option_key()
@@ -116,6 +361,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
             resource_type varchar(20) NOT NULL DEFAULT 'unknown',
             resource_url_hash char(64) NOT NULL DEFAULT '',
             resource_url text NULL,
+            request_credentials_mode varchar(20) NOT NULL DEFAULT 'unknown',
             observation_source varchar(32) NOT NULL DEFAULT 'browser',
             observation_count bigint(20) unsigned NOT NULL DEFAULT 1,
             status varchar(20) NOT NULL DEFAULT 'confirmed',
@@ -128,12 +374,18 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
             last_seen bigint(20) unsigned NOT NULL DEFAULT 0,
             confirmed_at bigint(20) unsigned NOT NULL DEFAULT 0,
             updated_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            page_probe_state varchar(20) NOT NULL DEFAULT '',
+            page_probe_count smallint(5) unsigned NOT NULL DEFAULT 0,
+            page_probe_last_status smallint(5) unsigned NOT NULL DEFAULT 0,
+            page_probe_last_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            page_probe_next_at bigint(20) unsigned NOT NULL DEFAULT 0,
             PRIMARY KEY  (id),
             UNIQUE KEY page_selector_viewport (page_url_hash, selector_hash, viewport),
             KEY page_viewport (page_url_hash, viewport),
             KEY status_last_seen (status, last_seen),
             KEY updated_id (updated_at, id),
             KEY status_updated (status, updated_at, id),
+            KEY status_learning_probe (status, learning_state, page_probe_next_at, updated_at, id),
             KEY learning_state_updated (learning_state, updated_at, id),
             KEY source_updated (observation_source, updated_at, id),
             KEY viewport_updated (viewport, updated_at, id),
@@ -144,7 +396,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         self::invalidate_lcp_observations_table_exists_cache();
 
         if (self::lcp_observations_table_exists()) {
-            if ('3' !== $version) {
+            if ((int) $version < 3) {
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Additive migration preserves existing confirmed mappings as locked winners.
                 $wpdb->query(
                     $wpdb->prepare(
@@ -220,7 +472,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads one UltraCache-owned LCP mapping row for comparison before an atomic upsert.
         return $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT page_url, selector_hash, selector, viewport, element_tag, resource_type, resource_url, observation_source, observation_count, status, learning_state, confirmation_count, candidate_window, locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at FROM %i WHERE page_url_hash = %s AND page_url = %s AND selector_hash = %s AND viewport = %s LIMIT 1',
+                'SELECT page_url, selector_hash, selector, viewport, element_tag, resource_type, resource_url, request_credentials_mode, observation_source, observation_count, status, learning_state, confirmation_count, candidate_window, locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at FROM %i WHERE page_url_hash = %s AND page_url = %s AND selector_hash = %s AND viewport = %s LIMIT 1',
                 $table,
                 $page_url_hash,
                 $page_url,
@@ -278,7 +530,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads the bounded set of confirmed UltraCache-owned LCP mappings for one exact page before matching configured manual selector hashes in PHP.
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, page_url, selector_hash, selector, viewport, element_tag, resource_type, resource_url, observation_source, observation_count, status, learning_state, confirmation_count, candidate_window, locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at FROM %i WHERE page_url_hash = %s AND page_url = %s AND status = %s ORDER BY confirmed_at DESC, updated_at DESC, observation_count DESC, id DESC',
+                'SELECT id, page_url, selector_hash, selector, viewport, element_tag, resource_type, resource_url, request_credentials_mode, observation_source, observation_count, status, learning_state, confirmation_count, candidate_window, locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at FROM %i WHERE page_url_hash = %s AND page_url = %s AND status = %s ORDER BY confirmed_at DESC, updated_at DESC, observation_count DESC, id DESC',
                 $table,
                 $page_url_hash,
                 $page_url,
@@ -336,7 +588,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads confirmed automatic UltraCache LCP mappings for one page.
         return $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, page_url, selector_hash, selector, viewport, element_tag, resource_type, resource_url, observation_source, observation_count, status, learning_state, confirmation_count, candidate_window, locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at FROM %i WHERE page_url_hash = %s AND page_url = %s AND observation_source = %s AND status = %s ORDER BY confirmed_at DESC, updated_at DESC, observation_count DESC, id DESC',
+                'SELECT id, page_url, selector_hash, selector, viewport, element_tag, resource_type, resource_url, request_credentials_mode, observation_source, observation_count, status, learning_state, confirmation_count, candidate_window, locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at FROM %i WHERE page_url_hash = %s AND page_url = %s AND observation_source = %s AND status = %s ORDER BY confirmed_at DESC, updated_at DESC, observation_count DESC, id DESC',
                 $table,
                 $page_url_hash,
                 $page_url,
@@ -380,7 +632,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads the active UltraCache LCP winner for one page and viewport.
         return $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT page_url, selector_hash, selector, viewport, element_tag, resource_type, resource_url, observation_source, observation_count, status, learning_state, confirmation_count, candidate_window, locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at FROM %i WHERE page_url_hash = %s AND page_url = %s AND viewport = %s AND status = %s ORDER BY confirmed_at DESC, updated_at DESC, observation_count DESC, id DESC LIMIT 1',
+                'SELECT page_url, selector_hash, selector, viewport, element_tag, resource_type, resource_url, request_credentials_mode, observation_source, observation_count, status, learning_state, confirmation_count, candidate_window, locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at FROM %i WHERE page_url_hash = %s AND page_url = %s AND viewport = %s AND status = %s ORDER BY confirmed_at DESC, updated_at DESC, observation_count DESC, id DESC LIMIT 1',
                 $table,
                 $page_url_hash,
                 $page_url,
@@ -439,12 +691,12 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
             $wpdb->prepare(
                 "INSERT INTO %i (
                     page_url_hash, page_url, selector_hash, selector, viewport, element_tag,
-                    resource_type, resource_url_hash, resource_url, observation_source,
+                    resource_type, resource_url_hash, resource_url, request_credentials_mode, observation_source,
                     observation_count, status, learning_state, confirmation_count, candidate_window,
                     locked_at, last_refresh_at, first_seen, last_seen, confirmed_at, updated_at
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
                     %d, %s, %s, %d, %s,
                     %d, %d, %d, %d, %d, %d
                 ) ON DUPLICATE KEY UPDATE
@@ -455,6 +707,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
                     resource_type = VALUES(resource_type),
                     resource_url_hash = VALUES(resource_url_hash),
                     resource_url = VALUES(resource_url),
+                    request_credentials_mode = VALUES(request_credentials_mode),
                     observation_source = VALUES(observation_source),
                     observation_count = VALUES(observation_count),
                     status = VALUES(status),
@@ -476,6 +729,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
                 $record['resource_type'],
                 $record['resource_url_hash'],
                 $record['resource_url'],
+                $record['request_credentials_mode'],
                 $record['observation_source'],
                 $record['observation_count'],
                 $record['status'],
@@ -529,6 +783,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         $resource_type = sanitize_key((string) ($record['resource_type'] ?? 'unknown'));
         $resource_url = esc_url_raw((string) ($record['resource_url'] ?? ''));
         $resource_url_hash = '' === $resource_url ? '' : hash('sha256', $resource_url);
+        $request_credentials_mode = $this->normalize_lcp_request_credentials_mode($record['request_credentials_mode'] ?? 'unknown');
         $observation_source = sanitize_key((string) ($record['observation_source'] ?? 'manual'));
         $observation_count = max(1, absint($record['observation_count'] ?? 1));
         $status = sanitize_key((string) ($record['status'] ?? 'confirmed'));
@@ -549,7 +804,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
             || 64 !== strlen($selector_hash)
             || '' === $selector
             || !in_array($viewport, array('mobile', 'tablet', 'desktop'), true)
-            || !in_array($resource_type, array('text', 'image', 'background', 'poster', 'unknown'), true)
+            || !in_array($resource_type, array('text', 'image', 'background', 'poster', 'video', 'unknown'), true)
             || !in_array($observation_source, array('manual', 'automatic', 'browser'), true)
             || !in_array($status, array('pending', 'confirmed'), true)
             || !in_array($learning_state, array('learning', 'locked'), true)
@@ -566,8 +821,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
             'element_tag'        => $element_tag,
             'resource_type'      => $resource_type,
             'resource_url_hash'  => $resource_url_hash,
-            'resource_url'       => $resource_url,
-            'observation_source' => $observation_source,
+            'resource_url'             => $resource_url,
+            'request_credentials_mode' => $request_credentials_mode,
+            'observation_source'       => $observation_source,
             'observation_count'  => $observation_count,
             'status'             => $status,
             'learning_state'     => $learning_state,
@@ -587,6 +843,8 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         if (false === $result) {
             return false;
         }
+
+        $this->ultracache_reset_lcp_page_probe_evidence($table, $page_url_hash, $page_url, $now);
 
         if ('confirmed' === $status) {
             $this->stale_competing_lcp_observations($table, $now, $page_url_hash, $page_url, $viewport, $selector_hash);
@@ -736,7 +994,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         }
 
         $resource_type = sanitize_key((string) ($query['resourceType'] ?? $query['resource_type'] ?? 'all'));
-        if (!in_array($resource_type, array('all', 'text', 'image', 'background', 'poster', 'unknown'), true)) {
+        if (!in_array($resource_type, array('all', 'text', 'image', 'background', 'poster', 'video', 'unknown'), true)) {
             $resource_type = 'all';
         }
 
@@ -1305,6 +1563,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
     public function get_lcp_observation_diagnostics_detail_snapshot($page_hash)
     {
         global $wpdb;
+        static $manual_mapping_repairing = array();
 
         $page_hash = strtolower(trim((string) $page_hash));
         $fallback = array(
@@ -1340,6 +1599,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
                         o.element_tag,
                         o.resource_type,
                         o.resource_url,
+                        o.request_credentials_mode,
                         o.observation_source,
                         o.observation_count,
                         o.status,
@@ -1382,6 +1642,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
                         element_tag,
                         resource_type,
                         resource_url,
+                        request_credentials_mode,
                         observation_source,
                         observation_count,
                         status,
@@ -1408,6 +1669,29 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
             );
         }
         $rows = is_array($rows) ? $rows : array();
+        $unfiltered_rows = $rows;
+        $manual_selector = $this->get_lcp_page_manual_selector_by_hash($page_hash);
+        if ('' !== $manual_selector) {
+            $manual_selector_hash = $this->get_lcp_observation_selector_hash($manual_selector);
+            $rows = array_values(array_filter($rows, static function ($row) use ($manual_selector_hash) {
+                return is_array($row)
+                    && 'manual' === sanitize_key((string) ($row['observation_source'] ?? ''))
+                    && 'confirmed' === sanitize_key((string) ($row['status'] ?? ''))
+                    && hash_equals($manual_selector_hash, strtolower((string) ($row['selector_hash'] ?? '')));
+            }));
+
+            if (!$rows && !isset($manual_mapping_repairing[$page_hash]) && !empty($unfiltered_rows)) {
+                $repair_page_url = $this->normalize_lcp_observation_page_url((string) ($unfiltered_rows[0]['page_url'] ?? ''));
+                if ('' !== $repair_page_url && $this->is_lcp_observation_page_cacheable_url($repair_page_url)) {
+                    $manual_mapping_repairing[$page_hash] = true;
+                    $repaired = $this->replace_lcp_page_manual_selector_rows($table, $page_hash, $repair_page_url, $manual_selector);
+                    unset($manual_mapping_repairing[$page_hash]);
+                    if ($repaired) {
+                        return $this->get_lcp_observation_diagnostics_detail_snapshot($page_hash);
+                    }
+                }
+            }
+        }
         if (!$rows) {
             return $fallback;
         }
@@ -1454,8 +1738,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
                 'viewport'             => sanitize_key((string) ($row['viewport'] ?? '')),
                 'elementTag'           => sanitize_key((string) ($row['element_tag'] ?? '')),
                 'resourceType'         => sanitize_key((string) ($row['resource_type'] ?? 'unknown')),
-                'resourceUrl'          => esc_url_raw((string) ($row['resource_url'] ?? '')),
-                'observationSource'    => sanitize_key((string) ($row['observation_source'] ?? 'browser')),
+                'resourceUrl'             => esc_url_raw((string) ($row['resource_url'] ?? '')),
+                'requestCredentialsMode' => $this->normalize_lcp_request_credentials_mode($row['request_credentials_mode'] ?? 'unknown'),
+                'observationSource'       => sanitize_key((string) ($row['observation_source'] ?? 'browser')),
                 'observationCount'     => absint($row['observation_count'] ?? 0),
                 'status'               => sanitize_key((string) ($row['status'] ?? '')),
                 'learningState'        => sanitize_key((string) ($row['learning_state'] ?? 'locked')),
@@ -1477,9 +1762,10 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         return array(
             'available' => true,
             'message'   => __('Full mapping details were loaded only for the selected URL.', 'ultracache'),
-            'pageHash'  => $page_hash,
-            'pageUrl'   => $page_url,
-            'mappings'  => $mappings,
+            'pageHash'       => $page_hash,
+            'pageUrl'        => $page_url,
+            'manualSelector' => $manual_selector,
+            'mappings'       => $mappings,
         );
     }
 
@@ -1669,6 +1955,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
                         o.element_tag,
                         o.resource_type,
                         o.resource_url,
+                        o.request_credentials_mode,
                         o.observation_source,
                         o.observation_count,
                         o.status,
@@ -1785,6 +2072,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
                         o.element_tag,
                         o.resource_type,
                         o.resource_url,
+                        o.request_credentials_mode,
                         o.observation_source,
                         o.observation_count,
                         o.status,
@@ -1880,8 +2168,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
                 'viewport'             => sanitize_key((string) ($row['viewport'] ?? '')),
                 'elementTag'           => sanitize_key((string) ($row['element_tag'] ?? '')),
                 'resourceType'         => sanitize_key((string) ($row['resource_type'] ?? 'unknown')),
-                'resourceUrl'          => esc_url_raw((string) ($row['resource_url'] ?? '')),
-                'observationSource'    => sanitize_key((string) ($row['observation_source'] ?? 'browser')),
+                'resourceUrl'             => esc_url_raw((string) ($row['resource_url'] ?? '')),
+                'requestCredentialsMode' => $this->normalize_lcp_request_credentials_mode($row['request_credentials_mode'] ?? 'unknown'),
+                'observationSource'       => sanitize_key((string) ($row['observation_source'] ?? 'browser')),
                 'observationCount'     => absint($row['observation_count'] ?? 0),
                 'status'               => sanitize_key((string) ($row['status'] ?? '')),
                 'learningState'        => sanitize_key((string) ($row['learning_state'] ?? 'locked')),
@@ -2046,16 +2335,414 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         );
     }
 
+    private function ultracache_get_lcp_orphan_probe_minimum_age_seconds()
+    {
+        $seconds = (int) apply_filters('ultracache_lcp_orphan_probe_minimum_age_seconds', 7 * DAY_IN_SECONDS);
+        return max(DAY_IN_SECONDS, $seconds);
+    }
+
+    private function ultracache_get_lcp_orphan_probe_interval_seconds()
+    {
+        $seconds = (int) apply_filters('ultracache_lcp_orphan_probe_interval_seconds', 6 * HOUR_IN_SECONDS);
+        return max(HOUR_IN_SECONDS, $seconds);
+    }
+
+    private function ultracache_get_lcp_orphan_probe_batch_limit()
+    {
+        $limit = (int) apply_filters('ultracache_lcp_orphan_probe_batch_limit', 5);
+        return max(1, min(20, $limit));
+    }
+
+    private function ultracache_get_lcp_orphan_confirmation_threshold()
+    {
+        $threshold = (int) apply_filters('ultracache_lcp_orphan_confirmation_threshold', 2);
+        return max(2, min(5, $threshold));
+    }
+
+    private function ultracache_classify_lcp_page_probe_status($status_code)
+    {
+        $status_code = absint($status_code);
+        if (in_array($status_code, array(404, 410), true)) {
+            return 'missing';
+        }
+        if (in_array($status_code, array(301, 308), true)) {
+            return 'redirect';
+        }
+        if (($status_code >= 200 && $status_code < 300) || in_array($status_code, array(304, 401, 403), true)) {
+            return 'live';
+        }
+        return 'indeterminate';
+    }
+
+    private function ultracache_build_lcp_page_probe_transition($previous_state, $previous_count, $status_code, $now)
+    {
+        $previous_state = sanitize_key((string) $previous_state);
+        $previous_count = max(0, absint($previous_count));
+        $status_code = absint($status_code);
+        $now = max(1, absint($now));
+        $state = $this->ultracache_classify_lcp_page_probe_status($status_code);
+        $threshold = $this->ultracache_get_lcp_orphan_confirmation_threshold();
+        $count = 0;
+        $action = 'none';
+
+        if (in_array($state, array('missing', 'redirect'), true)) {
+            $count = $state === $previous_state ? $previous_count + 1 : 1;
+            if ($count >= $threshold) {
+                $action = 'missing' === $state ? 'delete' : 'stale';
+            }
+        }
+
+        $next_at = $now + (
+            'live' === $state
+                ? $this->ultracache_get_lcp_orphan_probe_minimum_age_seconds()
+                : $this->ultracache_get_lcp_orphan_probe_interval_seconds()
+        );
+
+        return array(
+            'state'      => $state,
+            'count'      => $count,
+            'statusCode' => $status_code,
+            'lastAt'     => $now,
+            'nextAt'     => $next_at,
+            'action'     => $action,
+            'threshold'  => $threshold,
+        );
+    }
+
+    private function ultracache_reset_lcp_page_probe_evidence($table, $page_url_hash, $page_url, $now = 0)
+    {
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb) || '' === (string) $table || 64 !== strlen((string) $page_url_hash) || '' === (string) $page_url) {
+            return false;
+        }
+
+        $now = max(1, absint($now ?: time()));
+        $next_at = $now + $this->ultracache_get_lcp_orphan_probe_minimum_age_seconds();
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Resets bounded page-lifecycle evidence only for one exact UltraCache-owned LCP page after a live WordPress event or observation.
+        return false !== $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE %i SET page_probe_state = %s, page_probe_count = 0, page_probe_last_status = 0, page_probe_last_at = %d, page_probe_next_at = %d WHERE page_url_hash = %s AND page_url = %s AND (page_probe_state <> %s OR page_probe_count > 0 OR page_probe_last_status > 0 OR page_probe_next_at = 0 OR page_probe_next_at <= %d)",
+                $table,
+                '',
+                $now,
+                $next_at,
+                $page_url_hash,
+                $page_url,
+                '',
+                $now
+            )
+        );
+    }
+
+    private function ultracache_delete_lcp_observations_for_page_url($page_url)
+    {
+        global $wpdb;
+
+        $page_url = $this->normalize_lcp_observation_page_url($page_url);
+        $page_url_hash = $this->get_lcp_observation_page_hash($page_url);
+        if ('' === $page_url || 64 !== strlen($page_url_hash)) {
+            return array('success' => false, 'rowsDeleted' => 0, 'pageUrl' => '');
+        }
+
+        $option_key = $this->get_lcp_page_manual_selector_option_key($page_url_hash);
+        if ('' !== $option_key) {
+            delete_option($option_key);
+        }
+
+        if (!($wpdb instanceof wpdb) || !self::ensure_lcp_observations_table()) {
+            return array('success' => false, 'rowsDeleted' => 0, 'pageUrl' => $page_url);
+        }
+
+        $table = self::get_lcp_observations_table_name();
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Deletes only the exact UltraCache-owned LCP page scope proven by both its canonical URL and SHA-256 hash.
+        $deleted = $wpdb->query(
+            $wpdb->prepare(
+                'DELETE FROM %i WHERE page_url_hash = %s AND page_url = %s',
+                $table,
+                $page_url_hash,
+                $page_url
+            )
+        );
+
+        return array(
+            'success'     => false !== $deleted,
+            'rowsDeleted' => false === $deleted ? 0 : absint($deleted),
+            'pageUrl'     => $page_url,
+        );
+    }
+
+    public function ultracache_delete_lcp_observations_for_post($post_id)
+    {
+        $post_id = absint($post_id);
+        if ($post_id < 1 || !function_exists('get_permalink')) {
+            return array('success' => false, 'rowsDeleted' => 0, 'pageUrl' => '');
+        }
+        $page_url = get_permalink($post_id);
+        return $this->ultracache_delete_lcp_observations_for_page_url(is_string($page_url) ? $page_url : '');
+    }
+
+    public function ultracache_reset_lcp_observation_lifecycle_for_post($post_id)
+    {
+        global $wpdb;
+
+        $post_id = absint($post_id);
+        if ($post_id < 1 || !function_exists('get_permalink') || !($wpdb instanceof wpdb) || !self::ensure_lcp_observations_table()) {
+            return false;
+        }
+
+        $page_url = get_permalink($post_id);
+        $page_url = $this->normalize_lcp_observation_page_url(is_string($page_url) ? $page_url : '');
+        $page_url_hash = $this->get_lcp_observation_page_hash($page_url);
+        if ('' === $page_url || 64 !== strlen($page_url_hash)) {
+            return false;
+        }
+
+        return $this->ultracache_reset_lcp_page_probe_evidence(
+            self::get_lcp_observations_table_name(),
+            $page_url_hash,
+            $page_url,
+            time()
+        );
+    }
+
+    private function ultracache_select_lcp_orphan_probe_candidates($table, $now, $limit)
+    {
+        global $wpdb;
+
+        $now = max(1, absint($now));
+        $limit = max(1, min(20, absint($limit)));
+        $eligible_before = max(0, $now - $this->ultracache_get_lcp_orphan_probe_minimum_age_seconds());
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Selects a bounded set of exact UltraCache-owned confirmed page scopes for lifecycle verification.
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT page_url_hash, page_url, MIN(page_probe_state) AS page_probe_state, MAX(page_probe_state) AS page_probe_state_max, MIN(page_probe_count) AS page_probe_count, MAX(page_probe_count) AS page_probe_count_max, MIN(page_probe_last_status) AS page_probe_last_status, MIN(page_probe_last_at) AS page_probe_last_at, MIN(page_probe_next_at) AS page_probe_next_at FROM %i WHERE status = %s AND learning_state = %s AND updated_at <= %d AND (page_probe_next_at = 0 OR page_probe_next_at <= %d) GROUP BY page_url_hash, page_url ORDER BY MIN(page_probe_next_at) ASC, MIN(id) ASC LIMIT %d",
+                $table,
+                'confirmed',
+                'locked',
+                $eligible_before,
+                $now,
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    private function ultracache_probe_lcp_observation_page_url($page_url)
+    {
+        if (!function_exists('wp_safe_remote_head')) {
+            return array('statusCode' => 0, 'method' => 'none');
+        }
+
+        $args = array(
+            'timeout'     => 5,
+            'redirection' => 0,
+            'headers'     => array(
+                'Accept'     => 'text/html,application/xhtml+xml',
+                'User-Agent' => 'UltraCache-LCP-Lifecycle/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown'),
+            ),
+        );
+        $response = wp_safe_remote_head($page_url, $args);
+        $method = 'HEAD';
+        if (is_wp_error($response)) {
+            return array('statusCode' => 0, 'method' => $method);
+        }
+
+        $status_code = absint(wp_remote_retrieve_response_code($response));
+        if (in_array($status_code, array(405, 501), true) && function_exists('wp_safe_remote_get')) {
+            $args['limit_response_size'] = 1;
+            $response = wp_safe_remote_get($page_url, $args);
+            $method = 'GET';
+            $status_code = is_wp_error($response) ? 0 : absint(wp_remote_retrieve_response_code($response));
+        }
+
+        return array('statusCode' => $status_code, 'method' => $method);
+    }
+
+    private function ultracache_store_lcp_page_probe_transition($table, array $candidate, array $transition)
+    {
+        global $wpdb;
+
+        $page_url_hash = (string) ($candidate['page_url_hash'] ?? '');
+        $page_url = (string) ($candidate['page_url'] ?? '');
+        $previous_state = sanitize_key((string) ($candidate['page_probe_state'] ?? ''));
+        $previous_count = max(0, absint($candidate['page_probe_count'] ?? 0));
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Compare-and-swap update prevents stale lifecycle probes from overriding a newer live-page reset.
+        return $wpdb->query(
+            $wpdb->prepare(
+                'UPDATE %i SET page_probe_state = %s, page_probe_count = %d, page_probe_last_status = %d, page_probe_last_at = %d, page_probe_next_at = %d WHERE page_url_hash = %s AND page_url = %s AND page_probe_state = %s AND page_probe_count = %d',
+                $table,
+                (string) ($transition['state'] ?? 'indeterminate'),
+                absint($transition['count'] ?? 0),
+                absint($transition['statusCode'] ?? 0),
+                absint($transition['lastAt'] ?? time()),
+                absint($transition['nextAt'] ?? time()),
+                $page_url_hash,
+                $page_url,
+                $previous_state,
+                $previous_count
+            )
+        );
+    }
+
+    private function ultracache_apply_lcp_page_probe_terminal_action($table, array $candidate, array $transition)
+    {
+        global $wpdb;
+
+        $action = sanitize_key((string) ($transition['action'] ?? 'none'));
+        if (!in_array($action, array('delete', 'stale'), true)) {
+            return array('action' => 'none', 'rows' => 0);
+        }
+
+        $page_url_hash = (string) ($candidate['page_url_hash'] ?? '');
+        $page_url = (string) ($candidate['page_url'] ?? '');
+        $state = sanitize_key((string) ($transition['state'] ?? ''));
+        $threshold = max(2, absint($transition['threshold'] ?? 2));
+        $now = max(1, absint($transition['lastAt'] ?? time()));
+
+        if ('delete' === $action) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Deletes only an exact page scope after the persisted consecutive-missing proof reaches the configured threshold.
+            $rows = $wpdb->query(
+                $wpdb->prepare(
+                    'DELETE FROM %i WHERE page_url_hash = %s AND page_url = %s AND page_probe_state = %s AND page_probe_count >= %d',
+                    $table,
+                    $page_url_hash,
+                    $page_url,
+                    $state,
+                    $threshold
+                )
+            );
+        } else {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Stales only an exact page scope after repeated permanent-redirect proof; normal stale retention performs eventual deletion.
+            $rows = $wpdb->query(
+                $wpdb->prepare(
+                    'UPDATE %i SET status = %s, updated_at = %d WHERE page_url_hash = %s AND page_url = %s AND page_probe_state = %s AND page_probe_count >= %d AND status IN (%s, %s)',
+                    $table,
+                    'stale',
+                    $now,
+                    $page_url_hash,
+                    $page_url,
+                    $state,
+                    $threshold,
+                    'confirmed',
+                    'pending'
+                )
+            );
+        }
+
+        $rows = false === $rows ? 0 : absint($rows);
+        if ($rows > 0) {
+            $option_key = $this->get_lcp_page_manual_selector_option_key($page_url_hash);
+            if ('' !== $option_key) {
+                delete_option($option_key);
+            }
+        }
+
+        return array('action' => $rows > 0 ? $action : 'none', 'rows' => $rows);
+    }
+
+    public function ultracache_run_lcp_observation_lifecycle_cleanup(array $args = array())
+    {
+        global $wpdb;
+
+        $summary = array(
+            'success'       => false,
+            'candidates'    => 0,
+            'probed'        => 0,
+            'live'          => 0,
+            'missing'       => 0,
+            'redirect'      => 0,
+            'indeterminate' => 0,
+            'deletedPages'  => 0,
+            'deletedRows'   => 0,
+            'staledPages'   => 0,
+            'staledRows'    => 0,
+            'raceSkipped'   => 0,
+            'invalidSkipped'=> 0,
+        );
+        if (!($wpdb instanceof wpdb) || !self::ensure_lcp_observations_table()) {
+            return $summary;
+        }
+
+        $now = max(1, absint($args['now'] ?? time()));
+        $limit = isset($args['limit']) ? max(1, min(20, absint($args['limit']))) : $this->ultracache_get_lcp_orphan_probe_batch_limit();
+        $table = self::get_lcp_observations_table_name();
+        $candidates = $this->ultracache_select_lcp_orphan_probe_candidates($table, $now, $limit);
+        $this->maybe_cleanup_lcp_observations_table();
+        $summary['success'] = true;
+        $summary['candidates'] = count($candidates);
+
+        foreach ($candidates as $candidate) {
+            $page_url = $this->normalize_lcp_observation_page_url((string) ($candidate['page_url'] ?? ''));
+            $page_url_hash = $this->get_lcp_observation_page_hash($page_url);
+            if ('' === $page_url || !hash_equals((string) ($candidate['page_url_hash'] ?? ''), $page_url_hash) || !$this->is_lcp_observation_page_cacheable_url($page_url)) {
+                $summary['invalidSkipped']++;
+                continue;
+            }
+            if (
+                (string) ($candidate['page_probe_state'] ?? '') !== (string) ($candidate['page_probe_state_max'] ?? '')
+                || absint($candidate['page_probe_count'] ?? 0) !== absint($candidate['page_probe_count_max'] ?? 0)
+            ) {
+                $this->ultracache_reset_lcp_page_probe_evidence($table, $page_url_hash, $page_url, $now);
+                $summary['raceSkipped']++;
+                continue;
+            }
+
+            $probe = $this->ultracache_probe_lcp_observation_page_url($page_url);
+            $transition = $this->ultracache_build_lcp_page_probe_transition(
+                (string) ($candidate['page_probe_state'] ?? ''),
+                absint($candidate['page_probe_count'] ?? 0),
+                absint($probe['statusCode'] ?? 0),
+                $now
+            );
+            $summary['probed']++;
+            $state = (string) ($transition['state'] ?? 'indeterminate');
+            if (isset($summary[$state])) {
+                $summary[$state]++;
+            }
+
+            $stored = $this->ultracache_store_lcp_page_probe_transition($table, $candidate, $transition);
+            if (false === $stored || 0 === absint($stored)) {
+                $summary['raceSkipped']++;
+                continue;
+            }
+
+            $terminal = $this->ultracache_apply_lcp_page_probe_terminal_action($table, $candidate, $transition);
+            if ('delete' === ($terminal['action'] ?? '')) {
+                $summary['deletedPages']++;
+                $summary['deletedRows'] += absint($terminal['rows'] ?? 0);
+            } elseif ('stale' === ($terminal['action'] ?? '')) {
+                $summary['staledPages']++;
+                $summary['staledRows'] += absint($terminal['rows'] ?? 0);
+            }
+        }
+
+        return $summary;
+    }
+
     private function maybe_cleanup_lcp_observations_table()
     {
         global $wpdb;
 
         $cleanup_key = 'ultracache_lcp_observations_cleanup_v2';
-        if (get_transient($cleanup_key) || !self::ensure_lcp_observations_table()) {
+        if (!self::ensure_lcp_observations_table() || !function_exists('ultracache_acquire_lock')) {
             return;
         }
 
-        set_transient($cleanup_key, 1, MINUTE_IN_SECONDS);
+        $cleanup_token = 'lcp-cleanup-' . wp_generate_uuid4();
+        if (!ultracache_acquire_lock(
+            $cleanup_key,
+            $cleanup_token,
+            MINUTE_IN_SECONDS,
+            array('type' => 'lcp_observations_cleanup', 'phase' => 'running')
+        )) {
+            return;
+        }
+
         $now = time();
         $stale_retention = max(DAY_IN_SECONDS, $this->get_stale_lcp_observation_retention_seconds());
         $pending_retention = max(DAY_IN_SECONDS, $this->get_pending_lcp_observation_retention_seconds());
@@ -2072,6 +2759,18 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         $pending_deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE status = %s AND last_seen > 0 AND last_seen < %d LIMIT 500', $table, 'pending', $pending_cutoff));
 
         $more_batches_may_exist = 500 === absint($stale_deleted) || 500 === absint($pending_deleted);
-        set_transient($cleanup_key, 1, $more_batches_may_exist ? 5 * MINUTE_IN_SECONDS : 6 * HOUR_IN_SECONDS);
+        if (function_exists('ultracache_renew_lock')) {
+            ultracache_renew_lock(
+                $cleanup_key,
+                $cleanup_token,
+                $more_batches_may_exist ? 5 * MINUTE_IN_SECONDS : 6 * HOUR_IN_SECONDS,
+                array(
+                    'type' => 'lcp_observations_cleanup',
+                    'phase' => 'cooldown',
+                    'moreBatchesMayExist' => $more_batches_may_exist,
+                    'completedAt' => time(),
+                )
+            );
+        }
     }
 }

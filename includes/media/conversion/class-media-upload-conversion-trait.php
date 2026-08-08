@@ -10,6 +10,44 @@ if (!defined('ABSPATH')) {
 trait Ultra_Cache_Media_Upload_Conversion_Trait
 {
 		/**
+		 * Keep generated-media source stems unique across supported image extensions.
+		 *
+		 * WordPress already resolves exact filename collisions. UltraCache extends
+		 * that result so photo.jpg and photo.png cannot create the same generated
+		 * photo.avif/photo.webp destination for new files.
+		 *
+		 * @param string        $filename                 WordPress-selected filename.
+		 * @param string        $ext                      File extension including the dot.
+		 * @param string        $dir                      Destination directory.
+		 * @param callable|null $unique_filename_callback Optional custom callback.
+		 * @param string[]      $alt_filenames            Alternate filenames checked by WordPress.
+		 * @param int|string    $number                   Highest suffix used by WordPress.
+		 * @return string
+		 */
+		public function filter_cross_extension_unique_image_filename($filename, $ext, $dir, $unique_filename_callback = null, $alt_filenames = array(), $number = '') {
+			unset($ext, $alt_filenames, $number);
+
+			if ($unique_filename_callback && is_callable($unique_filename_callback)) {
+				return (string) $filename;
+			}
+
+			if (!function_exists('ultracache_get_cross_extension_unique_image_filename')) {
+				return (string) $filename;
+			}
+
+			$uploads = function_exists('ultracache_uploads_base_info')
+				? ultracache_uploads_base_info()
+				: wp_upload_dir(null, false);
+			$base_dir = !empty($uploads['basedir']) ? untrailingslashit(wp_normalize_path((string) $uploads['basedir'])) : '';
+			$dir = untrailingslashit(wp_normalize_path((string) $dir));
+			if ('' === $base_dir || '' === $dir || ($dir !== $base_dir && 0 !== strpos($dir . '/', trailingslashit($base_dir)))) {
+				return (string) $filename;
+			}
+
+			return ultracache_get_cross_extension_unique_image_filename($dir, (string) $filename);
+		}
+
+		/**
 		 * Convert the actual uploaded file during the WordPress upload flow.
 		 *
 		 * @param array<string,mixed> $upload  WordPress upload result.
@@ -55,17 +93,47 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 				);
 			}
 
+			$semantic_skip_reason = $this->get_media_source_conversion_skip_reason($source_file, $this->resolve_upload_conversion_target_format());
+			if ('' !== $semantic_skip_reason) {
+				ultracache_debug_log('upload conversion skipped', array(
+					'reason' => $semantic_skip_reason,
+					'file'   => wp_basename($source_file),
+					'mime'   => $source_mime,
+				));
+				return $upload;
+			}
+
 			$target_format = $this->resolve_upload_conversion_target_format();
 			if (!in_array($target_format, array('avif', 'webp'), true)) {
 				return $this->fail_uploaded_image_conversion($upload, __('UltraCache upload conversion could not resolve the requested output format.', 'ultracache'), $source_file);
 			}
 
-			if ('avif' === $target_format && !$this->supports_avif()) {
+			$profile_inspection = $this->inspect_media_source_color_profile($source_file);
+			$profile_requires_imagick = !$this->should_ignore_media_color_profile_preservation()
+				&& (empty($profile_inspection['determinate']) || !empty($profile_inspection['hasProfile']));
+			if ($profile_requires_imagick) {
+				$profile_encoder_available = ('avif' === $target_format)
+					? $this->supports_imagick_avif()
+					: (('image/avif' === $source_mime) ? $this->supports_imagick_avif_to_webp() : $this->supports_imagick_webp());
+				if ('avif' === $target_format && !empty($profile_inspection['hasProfile'])) {
+					$profile_encoder_available = $profile_encoder_available && $this->supports_imagick_avif_color_profiles();
+				}
+				if (!$profile_encoder_available) {
+					ultracache_debug_log('upload conversion skipped', array(
+						'reason' => 'color_profile_requires_imagick',
+						'file'   => wp_basename($source_file),
+						'mime'   => $source_mime,
+					));
+					return $upload;
+				}
+			}
+
+			if (!$profile_requires_imagick && 'avif' === $target_format && !$this->supports_avif()) {
 				return $this->fail_uploaded_image_conversion($upload, __('UltraCache upload conversion requires a verified AVIF encoder for the selected output format.', 'ultracache'), $source_file);
 			}
 
-			if ('webp' === $target_format && !$this->supports_webp()) {
-				return $this->fail_uploaded_image_conversion($upload, __('UltraCache upload conversion requires a WebP encoder for the selected output format.', 'ultracache'), $source_file);
+			if (!$profile_requires_imagick && 'webp' === $target_format && (!$this->supports_webp() || !$this->is_source_file_supported_for_format($source_file, 'webp'))) {
+				return $this->fail_uploaded_image_conversion($upload, __('UltraCache upload conversion requires a verified decoder and WebP encoder for the uploaded image format.', 'ultracache'), $source_file);
 			}
 
 			$result = $this->convert_uploaded_image_with_existing_media_converter($upload, $source_file, $source_mime, $target_format, $this->get_upload_conversion_max_side());
@@ -112,13 +180,13 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 
 			if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
 				$settings = Ultra_Cache_WP::get_settings();
-				if (isset($settings['media_output_mode'])) {
-					$mode = strtolower(trim((string) $settings['media_output_mode']));
+				if (isset($settings['media_upload_format'])) {
+					$mode = strtolower(trim((string) $settings['media_upload_format']));
 				}
 			} else {
 				$settings = get_option(defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY : 'ultracache_settings', array());
-				if (isset($settings['mediaOutputMode'])) {
-					$mode = strtolower(trim((string) $settings['mediaOutputMode']));
+				if (isset($settings['mediaUploadFormat'])) {
+					$mode = strtolower(trim((string) $settings['mediaUploadFormat']));
 				}
 			}
 
@@ -164,7 +232,7 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 				}
 			}
 
-			$prepared_source = $this->prepare_upload_conversion_source_file($source_file, $source_mime, $width, $height, $max_side);
+			$prepared_source = $this->prepare_upload_conversion_source_file($source_file, $source_mime, $width, $height, $max_side, $target_format);
 			if (is_wp_error($prepared_source)) {
 				return $prepared_source;
 			}
@@ -174,11 +242,12 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 			$prepared_width    = isset($prepared_source['width']) ? absint($prepared_source['width']) : $width;
 			$prepared_height   = isset($prepared_source['height']) ? absint($prepared_source['height']) : $height;
 			$resize_editor     = isset($prepared_source['editor_class']) ? (string) $prepared_source['editor_class'] : '';
+			$imagick_resize_max_side = isset($prepared_source['imagick_resize_max_side']) ? absint($prepared_source['imagick_resize_max_side']) : 0;
 
 			$this->reset_last_media_conversion_failure($conversion_source, $target_format);
 			$this->reset_media_diagnostic_state();
 
-			$encoded = $this->convert_upload_image_with_existing_encoder($conversion_source, $dest_file, $target_format);
+			$encoded = $this->convert_upload_image_with_existing_encoder($conversion_source, $dest_file, $target_format, $imagick_resize_max_side);
 			if (!$encoded) {
 				$failure = $this->get_last_media_conversion_failure();
 				$details = array(
@@ -214,6 +283,15 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 				}
 				if ($dest_file !== $source_file && is_readable($dest_file)) {
 					wp_delete_file($dest_file);
+				}
+
+				if (!empty($failure['skippedReason'])) {
+					ultracache_debug_log('upload conversion preserved original', array(
+						'reason' => (string) $failure['skippedReason'],
+						'file'   => wp_basename($source_file),
+						'mime'   => $source_mime,
+					));
+					return $upload;
 				}
 
 				return new WP_Error(
@@ -272,16 +350,18 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 		}
 
 		/**
-		 * Prepare the source file for upload conversion. Resizing is the only step
-		 * that uses the WordPress image editor; final AVIF/WebP encoding is handled
-		 * by the existing UltraCache converter chain.
+		 * Prepare the source file for upload conversion. Unprofiled images may use
+		 * the WordPress editor for an intermediate resize. Profiled or indeterminate
+		 * sources keep the original file and resize inside the color-managed Imagick
+		 * decode so profile metadata cannot be lost before final encoding.
 		 *
 		 * @return array<string,mixed>|WP_Error
 		 */
-		private function prepare_upload_conversion_source_file($source_file, $source_mime, $width, $height, $max_side) {
-			$width    = absint($width);
-			$height   = absint($height);
-			$max_side = max(1, min(8192, absint($max_side)));
+		private function prepare_upload_conversion_source_file($source_file, $source_mime, $width, $height, $max_side, $target_format = '') {
+			$width         = absint($width);
+			$height        = absint($height);
+			$max_side      = max(1, min(8192, absint($max_side)));
+			$target_format = strtolower((string) $target_format);
 
 			if ($width <= 0 || $height <= 0 || max($width, $height) <= $max_side) {
 				return array(
@@ -290,6 +370,32 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 					'width'       => $width,
 					'height'      => $height,
 					'editor_class'=> '',
+					'imagick_resize_max_side' => 0,
+				);
+			}
+
+			$imagick_can_resize_avif = 'image/avif' === $source_mime
+				&& (('webp' === $target_format && $this->supports_imagick_avif_to_webp())
+					|| ('avif' === $target_format && $this->supports_imagick_avif()));
+			if ($imagick_can_resize_avif) {
+				return array(
+					'file'        => (string) $source_file,
+					'temporary'   => false,
+					'width'       => $width,
+					'height'      => $height,
+					'editor_class'=> 'Imagick',
+					'imagick_resize_max_side' => $max_side,
+				);
+			}
+
+			if ($this->media_source_requires_color_managed_encoder($source_file)) {
+				return array(
+					'file'        => (string) $source_file,
+					'temporary'   => false,
+					'width'       => $width,
+					'height'      => $height,
+					'editor_class'=> 'Imagick',
+					'imagick_resize_max_side' => $max_side,
 				);
 			}
 
@@ -329,7 +435,9 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 
 			$source_ext = strtolower((string) pathinfo((string) $source_file, PATHINFO_EXTENSION));
 			if ('' === $source_ext) {
-				$source_ext = ('image/png' === $source_mime) ? 'png' : (('image/webp' === $source_mime) ? 'webp' : 'jpg');
+				$source_ext = ('image/png' === $source_mime)
+					? 'png'
+					: (('image/webp' === $source_mime) ? 'webp' : (('image/avif' === $source_mime) ? 'avif' : 'jpg'));
 			}
 
 			$base = sanitize_file_name((string) pathinfo((string) $source_file, PATHINFO_FILENAME));
@@ -366,35 +474,53 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 				'width'       => isset($prepared_size['width']) ? absint($prepared_size['width']) : 0,
 				'height'      => isset($prepared_size['height']) ? absint($prepared_size['height']) : 0,
 				'editor_class'=> is_object($editor) ? get_class($editor) : '',
+				'imagick_resize_max_side' => 0,
 			);
 		}
 
-		private function convert_upload_image_with_existing_encoder($source_file, $dest_file, $target_format) {
+		private function convert_upload_image_with_existing_encoder($source_file, $dest_file, $target_format, $imagick_resize_max_side = 0) {
 			$target_format = strtolower((string) $target_format);
 			$success = false;
 			$quality = $this->get_media_encoder_quality($target_format);
+			$profile_inspection = $this->inspect_media_source_color_profile($source_file);
+			$profile_requires_imagick = !$this->should_ignore_media_color_profile_preservation()
+				&& (empty($profile_inspection['determinate']) || !empty($profile_inspection['hasProfile']));
 
 			if ('avif' === $target_format) {
-				if ($this->supports_imagick_avif()) {
-					$success = $this->convert_with_imagick($source_file, $dest_file, 'avif', $quality);
+				$imagick_supported = $this->supports_imagick_avif();
+				if ($profile_requires_imagick && !empty($profile_inspection['hasProfile'])) {
+					$imagick_supported = $imagick_supported && $this->supports_imagick_avif_color_profiles();
+				}
+				if ($imagick_supported) {
+					$success = $this->convert_with_imagick($source_file, $dest_file, 'avif', $quality, $imagick_resize_max_side);
 				}
 
-				if (!$success && $this->supports_gd_avif()) {
+				if (!$success && !$profile_requires_imagick && $this->supports_gd_avif()) {
 					$success = $this->convert_with_gd($source_file, $dest_file, 'avif', $quality);
 				}
 			} elseif ('webp' === $target_format) {
-				$success = $this->convert_webp_with_wp_image_editor($source_file, $dest_file, $quality);
+				$source_is_avif = $this->source_file_matches_target_format($source_file, 'avif');
+				$imagick_supported = $source_is_avif ? $this->supports_imagick_avif_to_webp() : $this->supports_imagick_webp();
+				$gd_supported = $source_is_avif ? $this->supports_gd_avif_to_webp() : $this->supports_gd_webp();
 
-				if (!$success && $this->supports_imagick_webp()) {
-					$success = $this->convert_with_imagick($source_file, $dest_file, 'webp', $quality);
+				if (!$source_is_avif && !$profile_requires_imagick) {
+					$success = $this->convert_webp_with_wp_image_editor($source_file, $dest_file, $quality);
 				}
 
-				if (!$success && $this->supports_gd_webp()) {
+				if (!$success && $imagick_supported) {
+					$success = $this->convert_with_imagick($source_file, $dest_file, 'webp', $quality, $imagick_resize_max_side);
+				}
+
+				if (!$success && !$profile_requires_imagick && $gd_supported) {
 					$success = $this->convert_with_gd($source_file, $dest_file, 'webp', $quality);
 				}
 			}
 
-			if (!$success && empty($this->last_media_conversion_failure['failureCode'])) {
+			if (!$success && $profile_requires_imagick && empty($this->last_media_conversion_failure['failureCode']) && empty($this->last_media_conversion_failure['skippedReason'])) {
+				$this->record_media_conversion_skip('color_profile_requires_imagick', $this->get_color_profile_encoder_skip_message());
+			}
+
+			if (!$success && empty($this->last_media_conversion_failure['failureCode']) && empty($this->last_media_conversion_failure['skippedReason'])) {
 				$this->record_media_conversion_failure('encoder', 'all_encoders_failed', __('All available encoders failed to generate the requested image format.', 'ultracache'), 'encode');
 			}
 
@@ -634,6 +760,13 @@ trait Ultra_Cache_Media_Upload_Conversion_Trait
 		private function get_wp_image_editor_size($source_file) {
 			$editor = wp_get_image_editor($source_file);
 			if (is_wp_error($editor)) {
+				$inspection = $this->inspect_media_source_for_decode($source_file);
+				if (!empty($inspection['valid']) && !empty($inspection['width']) && !empty($inspection['height'])) {
+					return array(
+						'width'  => absint($inspection['width']),
+						'height' => absint($inspection['height']),
+					);
+				}
 				return $editor;
 			}
 

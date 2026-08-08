@@ -27,6 +27,13 @@ trait Ultra_Cache_Engine_Update_Cache_Purge_Trait
         }
 
         try {
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'reset_cron_warmup_queue_after_cache_flush')) {
+                $queue_reset = Ultra_Cache_WP::reset_cron_warmup_queue_after_cache_flush('update_purge');
+                if (is_array($queue_reset) && empty($queue_reset['queueResetSuccess'])) {
+                    return false;
+                }
+            }
+
             $this->purge_cache_directory_preserving_google_fonts();
             if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'mark_all_cache_asset_refs_inactive')) {
                 Ultra_Cache_WP::mark_all_cache_asset_refs_inactive();
@@ -38,10 +45,6 @@ trait Ultra_Cache_Engine_Update_Cache_Purge_Trait
             $this->delete_frontpage_css_bundle();
             $this->clear_runtime_font_css_map_cache();
             self::ensure_cache_directories();
-
-            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'reset_cron_warmup_queue_after_cache_flush')) {
-                Ultra_Cache_WP::reset_cron_warmup_queue_after_cache_flush('update_purge');
-            }
 
             $this->invalidate_dashboard_cache_activity_snapshot();
             $payload = array(

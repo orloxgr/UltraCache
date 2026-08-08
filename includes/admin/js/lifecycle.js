@@ -22,6 +22,8 @@
 		useState,
 		__,
 		getLocalStorageSafe,
+		ignoreExpectedAdminFailure,
+		reportNonFatalAdminError,
 	} = core;
 
 	function buildAdvancedForm(settings, getDefaultScheduledWarmLimit) {
@@ -37,8 +39,8 @@
 			scheduledWarmLimit: typeof source.scheduledWarmLimit === 'undefined'
 				? (typeof getDefaultScheduledWarmLimit === 'function' ? getDefaultScheduledWarmLimit() : 0)
 				: source.scheduledWarmLimit,
-			cacheFreshTtlMinutes: source.cacheFreshTtlMinutes || 15,
-			cacheMaxStaleMinutes: source.cacheMaxStaleMinutes || 720,
+			cacheFreshTtlMinutes: source.cacheFreshTtlMinutes || 1440,
+			cacheMaxStaleMinutes: source.cacheMaxStaleMinutes || 2880,
 		};
 	}
 
@@ -47,20 +49,21 @@
 		const mode = source.varnishCliMode || 'http';
 		return {
 			varnishCliEnabled: !!source.varnishCliEnabled,
+			varnishConnectionConfigured: !!source.varnishConnectionConfigured,
 			varnishCliMode: mode,
 			varnishCliServers: source.varnishCliServers || (typeof getDefaultVarnishServersForMode === 'function' ? getDefaultVarnishServersForMode(mode) : ''),
 			varnishCliTimeoutSeconds: source.varnishCliTimeoutSeconds || 2,
+			varnishInvalidationsPerMinute: typeof source.varnishInvalidationsPerMinute === 'undefined' ? 10 : source.varnishInvalidationsPerMinute,
 			varnishCliMethod: source.varnishCliMethod || 'BAN',
 			varnishInvalidationStrategy: source.varnishInvalidationStrategy || String(source.varnishCliMethod || 'BAN').toLowerCase(),
 			varnishFlushScope: source.varnishFlushScope || 'auto',
-			varnishHtmlTtlMinutes: typeof source.varnishHtmlTtlMinutes === 'undefined' ? 1440 : Number(source.varnishHtmlTtlMinutes),
-			varnishStaleWhileRevalidateSeconds: Number(source.varnishStaleWhileRevalidateSeconds || 0),
-			varnishRefillAfterTargetedInvalidation: !!source.varnishRefillAfterTargetedInvalidation,
-			varnishWarmDuringManualWarmup: !!source.varnishWarmDuringManualWarmup,
-			varnishRefreshAheadEnabled: !!source.varnishRefreshAheadEnabled,
-			varnishRefreshAheadThresholdPercent: Number(source.varnishRefreshAheadThresholdPercent || 85),
-			varnishRefreshAheadMaxPages: Number(source.varnishRefreshAheadMaxPages || 5),
-			varnishRefreshAheadPinnedUrls: source.varnishRefreshAheadPinnedUrls || '',
+			liteSpeedRefillAfterTargetedInvalidation: !!source.liteSpeedRefillAfterTargetedInvalidation,
+			liteSpeedWarmDuringSiteWarmup: !!source.liteSpeedWarmDuringSiteWarmup,
+			liteSpeedStalePurgeEnabled: !!source.liteSpeedStalePurgeEnabled,
+			liteSpeedRefreshAheadEnabled: !!source.liteSpeedRefreshAheadEnabled,
+			liteSpeedRefreshAheadThresholdPercent: Number(source.liteSpeedRefreshAheadThresholdPercent || 85),
+			liteSpeedRefreshAheadMaxPages: Number(source.liteSpeedRefreshAheadMaxPages || 5),
+			liteSpeedRefreshAheadPinnedUrls: source.liteSpeedRefreshAheadPinnedUrls || '',
 			varnishCliKey: '',
 			clearVarnishCliKey: false,
 			varnishCliKeyConfigured: !!source.varnishCliKeyConfigured,
@@ -282,7 +285,9 @@
 		}
 		try {
 			storage.setItem(getSystemNoticeStorageKey(id), String(Date.now()));
-		} catch (error) {}
+		} catch (error) {
+			ignoreExpectedAdminFailure(error);
+		}
 	}
 
 	function getPersistentDismissalStorageKey(id) {
@@ -304,7 +309,9 @@
 		}
 		try {
 			storage.setItem(getPersistentDismissalStorageKey(id), '1');
-		} catch (error) {}
+		} catch (error) {
+			ignoreExpectedAdminFailure(error);
+		}
 	}
 
 	function useDashboardLifecycle(options) {
@@ -324,7 +331,9 @@
 				if (pending) {
 					window.sessionStorage.removeItem('ultracacheObjectCacheActivationProbe');
 				}
-			} catch (error) {}
+			} catch (error) {
+				reportNonFatalAdminError('lifecycle.object-cache-activation-probe.read', error, { severity: 'warning', dedupeKey: 'lifecycle.object-cache-activation-probe.read' });
+			}
 
 			if (!pending) {
 				return;
@@ -483,7 +492,9 @@
 				config.statsRefreshInFlightRef.current = true;
 				try {
 					await config.refreshStats({ force: true });
-				} catch (error) {}
+				} catch (error) {
+					reportNonFatalAdminError('lifecycle.stats-refresh', error, { severity: 'debug', dedupeKey: 'lifecycle.stats-refresh', dedupeWindowMs: 30000 });
+				}
 				finally {
 					config.statsRefreshInFlightRef.current = false;
 				}
@@ -541,20 +552,21 @@
 			config.setVarnishForm(buildVarnishForm(settings, config.getDefaultVarnishServersForMode));
 		}, [
 			settings.varnishCliEnabled,
+			settings.varnishConnectionConfigured,
 			settings.varnishCliMode,
 			settings.varnishCliServers,
 			settings.varnishCliTimeoutSeconds,
+			settings.varnishInvalidationsPerMinute,
 			settings.varnishCliMethod,
 			settings.varnishInvalidationStrategy,
 			settings.varnishFlushScope,
-			settings.varnishHtmlTtlMinutes,
-			settings.varnishStaleWhileRevalidateSeconds,
-			settings.varnishRefillAfterTargetedInvalidation,
-			settings.varnishWarmDuringManualWarmup,
-			settings.varnishRefreshAheadEnabled,
-			settings.varnishRefreshAheadThresholdPercent,
-			settings.varnishRefreshAheadMaxPages,
-			settings.varnishRefreshAheadPinnedUrls,
+			settings.liteSpeedRefillAfterTargetedInvalidation,
+			settings.liteSpeedWarmDuringSiteWarmup,
+			settings.liteSpeedStalePurgeEnabled,
+			settings.liteSpeedRefreshAheadEnabled,
+			settings.liteSpeedRefreshAheadThresholdPercent,
+			settings.liteSpeedRefreshAheadMaxPages,
+			settings.liteSpeedRefreshAheadPinnedUrls,
 			settings.varnishCliKeyConfigured,
 			settings.varnishCliKeyManaged,
 			settings.varnishCliKeyExternal,

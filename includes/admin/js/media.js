@@ -85,6 +85,7 @@
 		let alreadyOptimized = false;
 		let queueStatus = '';
 		let conversionFailureAttempts = 0;
+		const semanticSkips = {};
 
 		while (!complete) {
 			if (typeof shouldCancel === 'function' && shouldCancel()) {
@@ -154,6 +155,12 @@
 			webpCount += Math.max(0, Number(response.webp || 0));
 			queueStatus = response.queueStatus ? String(response.queueStatus) : '';
 			alreadyOptimized = alreadyOptimized || !!response.alreadyOptimized || response.skippedReason === 'already_optimized';
+			if (response.skippedReason && response.skippedReason !== 'already_optimized' && response.skippedReason !== 'no_supported_work') {
+				const skippedFormat = response.skippedFormat ? String(response.skippedFormat).toUpperCase() : 'FORMAT';
+				const skippedReason = String(response.skippedReason);
+				const skippedDetail = response.skipDetail ? String(response.skipDetail) : '';
+				semanticSkips[skippedFormat + '|' + skippedReason] = skippedFormat + ' skipped (' + skippedReason + ')' + (skippedDetail ? ': ' + skippedDetail : '');
+			}
 			complete = !!response.complete || queueStatus === 'done' || queueStatus === 'skipped';
 
 			if (!complete) {
@@ -164,13 +171,15 @@
 		const skipped = queueStatus === 'skipped';
 		const verb = alreadyOptimized ? 'Already optimized attachment #' : (skipped ? 'Checked attachment #' : 'Processed attachment #');
 		const statusSuffix = alreadyOptimized ? ' · up to date' : (queueStatus ? ' · ' + queueStatus : '');
+		const semanticSkipSuffix = Object.keys(semanticSkips).length ? ' · ' + Object.values(semanticSkips).join(' · ') : '';
 		return {
 			line:
 				verb + item
 					+ ' · ' + totalUnits + ' unit' + (totalUnits === 1 ? '' : 's')
 					+ ' completed · AVIF ' + avifCount
 					+ ' · WebP ' + webpCount
-					+ statusSuffix,
+					+ statusSuffix
+					+ semanticSkipSuffix,
 			progressIncrement: 1,
 			attachmentIncrement: 1,
 			unitIncrement: totalUnits,
@@ -758,7 +767,7 @@
 		}
 
 		async function retryFailedMediaQueue() {
-			await runMediaQueueRestAction('media_queue_retry_failed', 'Retrying Failed Media Items', 'Failed media items moved back to pending.');
+			await runMediaQueueRestAction('media_queue_retry_failed', 'Retrying Failed Media Items', 'Interrupted and failed media items moved back to pending.');
 		}
 
 		async function clearCompletedMediaQueue() {

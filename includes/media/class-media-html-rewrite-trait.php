@@ -107,20 +107,104 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 		 * @return string
 		 */
 		public function rewrite_html_image_urls_with_accept($html, $accept_header) {
+			return $this->rewrite_html_image_urls_with_context($html, array(
+				'accept' => is_string($accept_header) ? $accept_header : '',
+			));
+		}
+
+		/**
+		 * Rewrite one final HTML document with the explicit cache-storage context.
+		 *
+		 * Background warm/cron/CLI workers do not inherit the public page's
+		 * REQUEST_URI or Accept header. Keep both values scoped to this rewrite so
+		 * missing image variants are queued against the correct affected page and
+		 * the generated HTML uses the intended orig/WebP/AVIF bucket.
+		 *
+		 * @param string $html    Full frontend HTML.
+		 * @param array  $context Cache-storage context.
+		 * @return string
+		 */
+		public function rewrite_html_image_urls_with_context($html, array $context = array()) {
 			$previous_accept = $this->media_rewrite_accept_context;
-			$this->media_rewrite_accept_context = is_string($accept_header) ? $accept_header : '';
+			$previous_generation_context = $this->media_generation_context;
+			$previous_page_url = $this->media_rewrite_page_url_context;
+
+			$this->media_rewrite_accept_context = isset($context['accept']) && is_string($context['accept'])
+				? (string) $context['accept']
+				: '';
+			$this->media_generation_context = $this->normalize_media_rewrite_generation_context(
+				(string) ($context['source'] ?? '')
+			);
+			$this->media_rewrite_page_url_context = $this->normalize_media_rewrite_page_url_context(
+				(string) ($context['url'] ?? ($context['request_url'] ?? ''))
+			);
+			$this->reset_media_discovery_scope_for_page($this->media_rewrite_page_url_context);
 
 			try {
 				$rewritten = $this->rewrite_html_image_urls($html);
 			} finally {
 				$this->media_rewrite_accept_context = $previous_accept;
+				$this->media_generation_context = $previous_generation_context;
+				$this->media_rewrite_page_url_context = $previous_page_url;
 			}
 
 			return is_string($rewritten) ? $rewritten : $html;
 		}
 
+		private function reset_media_discovery_scope_for_page($page_url) {
+			$page_url = esc_url_raw((string) $page_url);
+			if ('' === $page_url || $page_url === (string) $this->media_rewrite_discovery_page_context) {
+				return;
+			}
+
+			$this->media_rewrite_discovery_page_context = $page_url;
+			$this->on_demand_queue_discovery_seen = array();
+			$this->on_demand_queue_discovery_count = 0;
+		}
+
+		private function normalize_media_rewrite_generation_context($source) {
+			$source = sanitize_key((string) $source);
+			if (in_array($source, array('warm', 'warm_url', 'warm-after-flush', 'targeted-purge', 'affected-save'), true)) {
+				return 'warm';
+			}
+			if (in_array($source, array('cron', 'scheduled-cleanup'), true)) {
+				return 'cron';
+			}
+			if (in_array($source, array('stale', 'revalidate', 'refresh-ahead'), true)) {
+				return 'stale';
+			}
+			if (in_array($source, array('manual', 'cli'), true)) {
+				return 'manual';
+			}
+
+			return 'frontend';
+		}
+
+		private function normalize_media_rewrite_page_url_context($url) {
+			$url = trim((string) $url);
+			if ('' === $url) {
+				return '';
+			}
+			if (0 === strpos($url, '/') && 0 !== strpos($url, '//')) {
+				$url = home_url($url);
+			}
+			$url = remove_query_arg(
+				array('ultracache_action', '_wpnonce', 'ultracache_odq_test', 'ultracache_cache_bust', 'ultracache_revalidate', 'ultracache_rt', 'ultracache_rv', 'ultracache_bucket'),
+				$url
+			);
+			$url = esc_url_raw($url);
+			if ('' === $url) {
+				return '';
+			}
+			if (function_exists('ultracache_is_strict_frontend_loopback_url') && !ultracache_is_strict_frontend_loopback_url($url)) {
+				return '';
+			}
+
+			return $url;
+		}
+
 		/**
-		 * Rewrite local upload image URLs in full frontend HTML/cache-storage output.
+		 * Rewrite canonical local image URLs in full frontend HTML/cache-storage output.
 		 *
 		 * Full-document cache rewrites use a request-local replacement map so builder
 		 * markup, scripts, and JSON-like payloads keep their original structure.
@@ -139,25 +223,17 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				return $html;
 			}
 
-			$uploads = ultracache_uploads_base_info();
-			if (empty($uploads['baseurl'])) {
+			if (!$this->html_contains_local_image_candidate($html)) {
 				return $html;
 			}
 
-			// 2.56.180: do not require the full uploads base URL to be present. Many optimized
-			// cached pages use root-relative uploads image URLs, especially behind
-			// HTTPS offload or reverse proxies. The per-URL resolver below validates same-site
-			// uploads paths safely, so the final HTML pass can scan the current page HTML without
-			// doing a global media-library walk.
-			if (!$this->html_contains_upload_candidate($html, $uploads)) {
-				return $html;
-			}
-
-			// 2.57.137: avoid stacking multiple full-document regex/tag passes during
-			// cache STORE, warm and frontend snippet filters. Discover local uploads
-			// once, resolve each source URL through the request-level lookup manifest,
-			// then apply the accumulated replacement map in one str_replace pass.
-			return $this->rewrite_html_upload_image_urls_with_single_pass_map($html, $uploads);
+			// Full-document output uses the same tag-aware policy as filtered fragments.
+			// Do not apply a global URL map: identical local image URLs can legitimately
+			// appear in image markup, download links, social metadata, and JSON with
+			// different semantics. Only explicitly supported media attributes and CSS
+			// background declarations inside real <style> blocks change.
+			$rewritten = $this->rewrite_html_image_urls_with_tag_processor($html);
+			return $this->rewrite_inline_style_block_image_urls($rewritten);
 		}
 
 		/**
@@ -165,7 +241,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 		 *
 		 * These callbacks return markup that WordPress renders immediately, so each
 		 * UltraCache-generated replacement is inserted through tag/attribute-aware
-		 * paths instead of the full-document str_replace map used by cache storage.
+		 * paths. Full-document and filtered-fragment output share this same semantic policy.
 		 *
 		 * @param string $html Existing filtered HTML fragment.
 		 * @return string HTML fragment with context-escaped image URL replacements.
@@ -179,189 +255,176 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				return $html;
 			}
 
-			$uploads = ultracache_uploads_base_info();
-			if (empty($uploads['baseurl']) || !$this->html_contains_upload_candidate($html, $uploads)) {
+			if (!$this->html_contains_local_image_candidate($html)) {
 				return $html;
 			}
 
-			return $this->rewrite_html_image_urls_with_tag_processor($html);
+			$rewritten = $this->rewrite_html_image_urls_with_tag_processor($html);
+			return $this->rewrite_inline_style_block_image_urls($rewritten);
 		}
 
-		private function html_contains_upload_candidate($html, array $uploads) {
+		private function html_contains_local_image_candidate($html) {
 			$html = (string) $html;
-			if ('' === $html) {
+			if ('' === $html || !preg_match('~\.(?:jpe?g|png|webp|avif)(?:[?#][^\s<>"\']*)?(?:[\s<>"\'(),;]|$)~iu', $html)) {
 				return false;
 			}
 
-			$baseurl = !empty($uploads['baseurl']) ? untrailingslashit($this->normalize_public_url($uploads['baseurl'])) : '';
-			if ('' !== $baseurl && false !== strpos($html, $baseurl)) {
-				return true;
+			$markers = array();
+			if (function_exists('ultracache_uploads_public_path')) {
+				$markers[] = ultracache_uploads_public_path();
 			}
-
-			$base_path = '';
-			if ('' !== $baseurl) {
-				$base_path = (string) wp_parse_url($baseurl, PHP_URL_PATH);
+			if (function_exists('ultracache_plugins_public_path')) {
+				$markers[] = ultracache_plugins_public_path();
 			}
-			if ('' === $base_path && function_exists('ultracache_uploads_public_path')) {
-				$base_path = rtrim(ultracache_uploads_public_path(), '/');
+			if (function_exists('ultracache_mu_plugins_public_path')) {
+				$markers[] = ultracache_mu_plugins_public_path();
 			}
-
-			$base_path = '/' . ltrim(str_replace('\\', '/', (string) $base_path), '/');
-			$base_path = rtrim($base_path, '/');
-			if ('' !== $base_path && '/' !== $base_path && false !== strpos($html, $base_path . '/')) {
-				return true;
+			if (function_exists('ultracache_wordpress_includes_public_path')) {
+				$markers[] = ultracache_wordpress_includes_public_path();
 			}
-
-			return function_exists('ultracache_uploads_public_path') ? false !== strpos($html, ultracache_uploads_public_path()) : false;
-		}
-
-		private function rewrite_html_upload_image_urls_with_single_pass_map($html, array $uploads) {
-			$html = (string) $html;
-			if ('' === $html) {
-				return $html;
-			}
-
-			$base_path = $this->get_uploads_public_base_path_for_html_rewrite($uploads);
-			if ('' === $base_path || '/' === $base_path) {
-				return $html;
-			}
-
-			$tokens = $this->discover_upload_image_url_tokens_for_rewrite($html, $base_path);
-			if (empty($tokens)) {
-				return $html;
-			}
-
-			foreach ($tokens as $token => $slash_escaped) {
-				$this->rewrite_single_upload_image_url_token($token, (bool) $slash_escaped);
-			}
-
-			return $this->apply_optimized_image_url_rewrite_map($html);
-		}
-
-		private function get_uploads_public_base_path_for_html_rewrite(array $uploads) {
-			$baseurl = !empty($uploads['baseurl']) ? untrailingslashit($this->normalize_public_url($uploads['baseurl'])) : '';
-			$base_path = '' !== $baseurl ? (string) wp_parse_url($baseurl, PHP_URL_PATH) : '';
-			if ('' === $base_path && function_exists('ultracache_uploads_public_path')) {
-				$base_path = ultracache_uploads_public_path();
-			}
-
-			$base_path = '/' . ltrim(str_replace('\\', '/', (string) $base_path), '/');
-			return rtrim($base_path, '/');
-		}
-
-		private function discover_upload_image_url_tokens_for_rewrite($html, $base_path) {
-			$html = (string) $html;
-			$base_path = '/' . trim(str_replace('\\', '/', (string) $base_path), '/');
-			if ('' === $html || '' === $base_path || '/' === $base_path) {
-				return array();
-			}
-
-			$tokens = array();
-			$unescaped = '~(?<![A-Za-z0-9_./:-])((?:https?://[^/\s"\x27<>\)]+)?' . preg_quote($base_path, '~') . '/[^\s"\x27<>\),]+\.(?:jpe?g|png|webp)(?:\?[^\s"\x27<>\),]*)?)~iu';
-			if (preg_match_all($unescaped, $html, $matches)) {
-				foreach ((array) $matches[1] as $match) {
-					$match = trim((string) $match);
-					if ('' !== $match && false === strpos($match, '/ultracache/images/')) {
-						$tokens[$match] = false;
-					}
+			if (function_exists('ultracache_theme_public_root_mappings')) {
+				foreach (ultracache_theme_public_root_mappings() as $mapping) {
+					$markers[] = (string) ($mapping['public_path'] ?? '');
 				}
 			}
 
-			if (false !== strpos($html, '\/')) {
-				$decoded_html = str_replace('\/', '/', $html);
-				if (preg_match_all($unescaped, $decoded_html, $matches)) {
-					foreach ((array) $matches[1] as $match) {
-						$match = trim((string) $match);
-						if ('' === $match || false !== strpos($match, '/ultracache/images/')) {
-							continue;
-						}
-
-						$escaped_match = str_replace('/', '\/', $match);
-						if ('' !== $escaped_match && false !== strpos($html, $escaped_match)) {
-							$tokens[$escaped_match] = true;
-						}
-					}
+			$decoded_html = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+			foreach (array_unique(array_filter(array_map('strval', $markers))) as $marker) {
+				$marker = rtrim(str_replace('\\', '/', $marker), '/');
+				if ('' !== $marker && (false !== strpos($html, $marker . '/') || false !== strpos($decoded_html, $marker . '/'))) {
+					return true;
 				}
 			}
 
-			if (count($tokens) > 500) {
-				$tokens = array_slice($tokens, 0, 500, true);
-			}
-
-			return $tokens;
+			return false;
 		}
 
 		private function rewrite_html_image_urls_with_tag_processor($html) {
 			$processor = new WP_HTML_Tag_Processor($html);
-			$single_url_attributes = array('src', 'data-src', 'data-lazy-src', 'href', 'data-href', 'data-lg-src', 'data-mfp-src');
-			$srcset_attributes = array('srcset', 'data-srcset', 'data-lazy-srcset');
+			$srcset_attributes = array('srcset', 'data-srcset', 'data-lazy-srcset', 'data-lazyload-srcset');
 			$background_attributes = array('data-bg', 'data-background', 'data-bg-image', 'data-background-image');
-			$meta_keys = array('og:image', 'twitter:image', 'twitter:image:src');
+			$lightbox_attributes = array('data-lg-src', 'data-mfp-src');
+			$image_tags = array('IMG', 'AMP-IMG');
+			$slider_image_attributes = array('data-dbsrc', 'data-lazyload', 'data-image', 'data-origin');
+			$srcset_tags = array('IMG', 'SOURCE', 'AMP-IMG');
+			$background_excluded_tags = array('META', 'LINK', 'SCRIPT', 'STYLE');
 
 			while ($processor->next_tag()) {
+				$tag = strtoupper((string) $processor->get_tag());
+				$single_url_attributes = array();
+
+				if (in_array($tag, $image_tags, true)) {
+					$single_url_attributes = array('src', 'data-src', 'data-lazy-src', 'data-lazyload', 'data-image', 'data-origin');
+				} elseif ('INPUT' === $tag && 'image' === strtolower(trim((string) $processor->get_attribute('type')))) {
+					$single_url_attributes = array('src');
+				} elseif ('VIDEO' === $tag) {
+					$single_url_attributes = array('poster');
+				} elseif (preg_match('/^(?:SR7|RS)-/', $tag)) {
+					$single_url_attributes = $slider_image_attributes;
+				}
+
 				foreach ($single_url_attributes as $attribute) {
-					$current = $processor->get_attribute($attribute);
-					if (!is_string($current) || '' === $current) {
-						continue;
-					}
+					$this->rewrite_tag_processor_single_url_attribute($processor, $attribute);
+				}
 
-					$replacement = $this->get_best_url_from_public_url($current);
-					$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
-					if ($replacement && $replacement !== $current) {
-						$processor->set_attribute($attribute, $replacement);
+				if (in_array($tag, $srcset_tags, true)) {
+					foreach ($srcset_attributes as $attribute) {
+						$current = $processor->get_attribute($attribute);
+						if (!is_string($current) || '' === $current) {
+							continue;
+						}
+
+						$rewritten = $this->rewrite_srcset_string($current);
+						if ($rewritten !== $current) {
+							$processor->set_attribute($attribute, $rewritten);
+						}
 					}
 				}
 
-				foreach ($srcset_attributes as $attribute) {
-					$current = $processor->get_attribute($attribute);
-					if (!is_string($current) || '' === $current) {
-						continue;
-					}
-
-					$rewritten = $this->rewrite_srcset_string($current);
-					if ($rewritten !== $current) {
-						$processor->set_attribute($attribute, $rewritten);
+				if (!in_array($tag, $background_excluded_tags, true)) {
+					foreach ($lightbox_attributes as $attribute) {
+						$this->rewrite_tag_processor_single_url_attribute($processor, $attribute);
 					}
 				}
 
-				foreach ($background_attributes as $attribute) {
-					$current = $processor->get_attribute($attribute);
-					if (!is_string($current) || '' === $current) {
-						continue;
+				if (!in_array($tag, $background_excluded_tags, true)) {
+					foreach ($background_attributes as $attribute) {
+						$this->rewrite_tag_processor_single_url_attribute($processor, $attribute);
 					}
 
-					$replacement = $this->get_best_url_from_public_url($current);
-					$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
-					if ($replacement && $replacement !== $current) {
-						$processor->set_attribute($attribute, $replacement);
-					}
-				}
-
-				$style = $processor->get_attribute('style');
-				if (is_string($style) && '' !== $style) {
-					$rewritten_style = $this->rewrite_inline_style_urls($style);
-					if ($rewritten_style !== $style) {
-						$processor->set_attribute('style', $rewritten_style);
-					}
-				}
-
-				if ('META' === strtoupper((string) $processor->get_tag())) {
-					$property = strtolower(trim((string) $processor->get_attribute('property')));
-					$name = strtolower(trim((string) $processor->get_attribute('name')));
-					if (in_array($property, $meta_keys, true) || in_array($name, $meta_keys, true)) {
-						$content = $processor->get_attribute('content');
-						if (is_string($content) && '' !== $content) {
-							$replacement = $this->get_best_url_from_public_url($content);
-							$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
-							if ($replacement && $replacement !== $content) {
-								$processor->set_attribute('content', $replacement);
-							}
+					$style = $processor->get_attribute('style');
+					if (is_string($style) && '' !== $style) {
+						$rewritten_style = $this->rewrite_inline_style_urls($style);
+						if ($rewritten_style !== $style) {
+							$processor->set_attribute('style', $rewritten_style);
 						}
 					}
 				}
 			}
 
 			return $processor->get_updated_html();
+		}
+
+
+		/**
+		 * Rewrite local upload background URLs inside rendered inline CSS blocks.
+		 *
+		 * Page builders such as WPBakery emit row and category backgrounds in
+		 * document-level <style> elements instead of style attributes or linked
+		 * stylesheets. Those declarations must use the same generated media
+		 * variants as the rest of the final cached document.
+		 *
+		 * @param string $html Full frontend HTML.
+		 * @return string
+		 */
+		private function rewrite_inline_style_block_image_urls($html) {
+			if (!is_string($html) || '' === $html || false === stripos($html, '<style') || false === stripos($html, 'url(')) {
+				return $html;
+			}
+
+			$source_url = '' !== (string) $this->media_rewrite_page_url_context
+				? (string) $this->media_rewrite_page_url_context
+				: home_url('/');
+			$updated = preg_replace_callback(
+				'/<style\b([^>]*)>([\s\S]*?)<\/style>/i',
+				function ($matches) use ($source_url) {
+					$attrs = isset($matches[1]) ? (string) $matches[1] : '';
+					$css = isset($matches[2]) ? (string) $matches[2] : '';
+					if ('' === $css || false === stripos($css, 'url(')) {
+						return (string) ($matches[0] ?? '');
+					}
+					if (preg_match('/\btype\s*=\s*(["\'])(.*?)\1/i', $attrs, $type_match)) {
+						$type = strtolower(trim((string) ($type_match[2] ?? '')));
+						if ('' !== $type && 'text/css' !== $type) {
+							return (string) ($matches[0] ?? '');
+						}
+					}
+
+					$stats = array();
+					$rewritten_css = $this->rewrite_css_image_urls_for_stylesheet($css, $source_url, $stats);
+					if (!is_string($rewritten_css) || $rewritten_css === $css || empty($stats['cssImageUrlsRewritten'])) {
+						return (string) ($matches[0] ?? '');
+					}
+
+					return '<style' . $attrs . '>' . $rewritten_css . '</style>';
+				},
+				$html
+			);
+
+			return is_string($updated) && '' !== $updated ? $updated : $html;
+		}
+
+		private function rewrite_tag_processor_single_url_attribute($processor, $attribute) {
+			$current = $processor->get_attribute($attribute);
+			if (!is_string($current) || '' === $current) {
+				return;
+			}
+
+			$replacement = $this->get_best_url_from_public_url($current);
+			$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
+			if ($replacement && $replacement !== $current) {
+				$processor->set_attribute($attribute, $replacement);
+			}
 		}
 
 
@@ -398,18 +461,6 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			return $url;
 		}
 
-		private function sanitize_srcset_descriptor($descriptor) {
-			$descriptor = trim((string) $descriptor);
-			if ('' === $descriptor) {
-				return '';
-			}
-
-			if (preg_match('/^(?:[1-9][0-9]*w|(?:[0-9]+(?:\.[0-9]+)?)x)$/', $descriptor)) {
-				return $descriptor;
-			}
-
-			return '';
-		}
 
 		private function rewrite_inline_style_urls($style) {
 			$style = (string) $style;
@@ -560,7 +611,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				}
 			}
 
-			if (!preg_match('~\.(?:jpe?g|png|webp)(?:[?#].*)?$~iu', $candidate)) {
+			if (!preg_match('~\.(?:jpe?g|png|webp|avif)(?:[?#].*)?$~iu', $candidate)) {
 				return '';
 			}
 
@@ -633,7 +684,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			}
 			if ('' !== $original_url) {
 				$extension = strtolower((string) pathinfo((string) wp_parse_url($original_url, PHP_URL_PATH), PATHINFO_EXTENSION));
-				$mime = 'png' === $extension ? 'image/png' : ('webp' === $extension ? 'image/webp' : 'image/jpeg');
+				$mime = 'png' === $extension ? 'image/png' : ('webp' === $extension ? 'image/webp' : ('avif' === $extension ? 'image/avif' : 'image/jpeg'));
 				$candidates[] = 'url("' . $original_url . '") type("' . $mime . '")';
 			}
 
@@ -672,7 +723,7 @@ private function rewrite_single_css_url_function_match($original_match, $inner) 
 				return $original_match;
 			}
 
-			if (!preg_match('~(?:^https?://|^/).+\.(?:jpe?g|png|webp)(?:\?.*)?$~iu', $candidate)) {
+			if (!preg_match('~(?:^https?://|^/).+\.(?:jpe?g|png|webp|avif)(?:\?.*)?$~iu', $candidate)) {
 				return $original_match;
 			}
 
@@ -699,169 +750,15 @@ private function rewrite_single_css_url_function_match($original_match, $inner) 
 				return $srcset;
 			}
 
-			$parts = array_map('trim', explode(',', $srcset));
-			foreach ($parts as $index => $part) {
-				if ('' === $part) {
-					continue;
+			return ultracache_rewrite_srcset_urls(
+				$srcset,
+				function ($url) {
+					$replacement = $this->get_best_url_from_public_url($url);
+					$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
+					return '' !== $replacement ? $replacement : false;
 				}
-
-				$segments = preg_split('/\s+/', $part, 2);
-				$url      = isset($segments[0]) ? $segments[0] : '';
-				$descriptor = isset($segments[1]) ? $segments[1] : '';
-				$replacement = $this->get_best_url_from_public_url($url);
-				$replacement = $this->sanitize_rewritten_public_url_raw($replacement);
-				$descriptor = $this->sanitize_srcset_descriptor($descriptor);
-				$parts[$index] = $replacement ? trim($replacement . ('' !== $descriptor ? ' ' . $descriptor : '')) : $part;
-			}
-
-			return implode(', ', $parts);
+			);
 		}
-
-		private function remember_optimized_image_url_rewrite($source_url, $optimized_url) {
-			$source_url = (string) $source_url;
-			$optimized_url = (string) $optimized_url;
-			if ('' === $source_url || '' === $optimized_url) {
-				return;
-			}
-
-			$source_url = html_entity_decode(str_replace('\/', '/', $source_url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-			$source_url = trim($source_url);
-			$optimized_url = html_entity_decode(str_replace('\/', '/', $optimized_url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-			$optimized_url = $this->sanitize_rewritten_public_url_raw($optimized_url);
-			if ('' === $source_url || '' === $optimized_url || false === strpos($optimized_url, '/ultracache/images/')) {
-				return;
-			}
-
-			$optimized_is_avif = (bool) preg_match('/\.avif(?:$|\?)/i', $optimized_url);
-			foreach ($this->build_upload_image_url_rewrite_variants($source_url) as $variant) {
-				if ('' === $variant) {
-					continue;
-				}
-
-				$existing = isset($this->optimized_image_url_rewrite_map[$variant]) ? (string) $this->optimized_image_url_rewrite_map[$variant] : '';
-				if ('' !== $existing && $existing !== $optimized_url && !$optimized_is_avif) {
-					// Do not downgrade an AVIF decision to WebP later in the same request.
-					continue;
-				}
-
-				$this->optimized_image_url_rewrite_map[$variant] = $optimized_url;
-				$escaped_variant = str_replace('/', '\/', $variant);
-				if ($escaped_variant !== $variant) {
-					$this->optimized_image_url_rewrite_map[$escaped_variant] = str_replace('/', '\/', $optimized_url);
-				}
-			}
-		}
-
-		private function build_upload_image_url_rewrite_variants($url) {
-			$url = trim((string) $url);
-			if ('' === $url) {
-				return array();
-			}
-
-			$variants = array($url);
-			$normalized = $this->normalize_public_url($url);
-			if ('' !== $normalized) {
-				$variants[] = $normalized;
-			}
-
-			$parts = wp_parse_url($normalized ?: $url);
-			$path = is_array($parts) && !empty($parts['path']) ? '/' . ltrim(rawurldecode((string) $parts['path']), '/') : '';
-			$uploads_marker = function_exists('ultracache_uploads_public_path') ? ultracache_uploads_public_path() : '';
-			if ('' !== $path && '' !== $uploads_marker && 0 === strpos($path, $uploads_marker) && preg_match('~\.(?:jpe?g|png|webp)(?:$|\?)~i', $path)) {
-				$variants[] = $path;
-
-				$hosts = array();
-				if (is_array($parts) && !empty($parts['host'])) {
-					$hosts[] = strtolower((string) $parts['host']);
-				}
-				foreach (array(home_url('/'), site_url('/'), content_url('/')) as $candidate_base) {
-					$host = strtolower((string) wp_parse_url((string) $candidate_base, PHP_URL_HOST));
-					if ('' !== $host) {
-						$hosts[] = $host;
-					}
-				}
-				foreach (array_unique(array_filter($hosts)) as $host) {
-					$variants[] = 'https://' . $host . $path;
-					$variants[] = 'http://' . $host . $path;
-				}
-			}
-
-			$clean = array();
-			foreach ($variants as $variant) {
-				$variant = trim((string) $variant);
-				if ('' === $variant || false !== strpos($variant, '/ultracache/images/')) {
-					continue;
-				}
-				$clean[$variant] = $variant;
-			}
-
-			return array_values($clean);
-		}
-
-		private function apply_optimized_image_url_rewrite_map($html) {
-			$html = (string) $html;
-			if ('' === $html || empty($this->optimized_image_url_rewrite_map) || !is_array($this->optimized_image_url_rewrite_map)) {
-				return $html;
-			}
-
-			$map = array();
-			foreach ($this->optimized_image_url_rewrite_map as $from => $to) {
-				$from = (string) $from;
-				$slash_escaped = false !== strpos($from, '\/');
-				$to = $this->sanitize_rewritten_public_url_raw($to);
-				if ('' === $from || '' === $to || $from === $to) {
-					continue;
-				}
-				$map[$from] = $slash_escaped ? str_replace('/', '\/', $to) : $to;
-			}
-
-			if (empty($map)) {
-				return $html;
-			}
-
-			uksort($map, static function ($a, $b) {
-				return strlen((string) $b) <=> strlen((string) $a);
-			});
-
-			// Replacement values are validated by sanitize_rewritten_public_url_raw()
-			// before the str_replace map is built; the original HTML is otherwise
-			// preserved to avoid breaking blocks, builders, shortcodes, or scripts.
-			return str_replace(array_keys($map), array_values($map), $html);
-		}
-
-
-private function rewrite_single_upload_image_url_token($current, $slash_escaped = false) {
-            $current = (string) $current;
-            if ('' === $current) {
-                return $current;
-            }
-
-            $already_optimized = $slash_escaped
-                ? (false !== strpos($current, '\\/ultracache/images\\/'))
-                : (false !== strpos($current, '/ultracache/images/'));
-            if ($already_optimized) {
-                return $current;
-            }
-
-            $candidate = $slash_escaped ? str_replace('\\/', '/', $current) : $current;
-            $candidate = html_entity_decode($candidate, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $candidate = trim($candidate);
-            if ('' === $candidate || !preg_match('~(?:^https?://|^/).+\.(?:jpe?g|png|webp)(?:\?.*)?$~iu', $candidate)) {
-                return $current;
-            }
-
-            $replacement = $this->get_best_url_from_public_url($candidate);
-            if (!$replacement) {
-                return $current;
-            }
-
-            $replacement = $this->sanitize_rewritten_public_url_raw($replacement);
-	            if (!$replacement) {
-	                return $current;
-	            }
-
-	            return $slash_escaped ? str_replace('/', '\/', $replacement) : $replacement;
-        }
 
 
 private function can_serve_avif() {

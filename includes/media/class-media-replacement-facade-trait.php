@@ -36,6 +36,23 @@ trait Ultra_Cache_Media_Replacement_Facade_Trait {
 	}
 
 	/**
+	 * Read the independent Media Library replacement target format.
+	 *
+	 * @return string
+	 */
+	private function get_media_replacement_format() {
+		if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
+			$settings = Ultra_Cache_WP::get_settings();
+			$format = isset($settings['media_replacement_format']) ? strtolower(trim((string) $settings['media_replacement_format'])) : 'webp';
+		} else {
+			$settings = get_option(defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY : 'ultracache_settings', array());
+			$format = isset($settings['mediaReplacementFormat']) ? strtolower(trim((string) $settings['mediaReplacementFormat'])) : 'webp';
+		}
+
+		return in_array($format, array('avif', 'webp'), true) ? $format : 'webp';
+	}
+
+	/**
 	 * Get the Media Library replacement service.
 	 *
 	 * @return Ultra_Cache_Media_Replacement_Manager
@@ -49,11 +66,8 @@ trait Ultra_Cache_Media_Replacement_Facade_Trait {
 					'get_avif_path_from_source'                     => function ($source_file) {
 						return $this->get_avif_path_from_source($source_file);
 					},
-					'get_media_fallback_format'                     => function () {
-						return $this->get_media_fallback_format();
-					},
-					'get_media_output_mode'                         => function () {
-						return $this->get_media_output_mode();
+					'get_media_replacement_format'                 => function () {
+						return $this->get_media_replacement_format();
 					},
 					'get_media_queue_table_name'                    => function () {
 						return $this->get_media_queue_table_name();
@@ -91,6 +105,12 @@ trait Ultra_Cache_Media_Replacement_Facade_Trait {
 					'path_is_within_root'                           => function ($path, $root) {
 						return $this->path_is_within_root($path, $root);
 					},
+					'reconcile_media_queue_units_for_attachment'     => function ($attachment_id, $format, $create_parent = false) {
+						return $this->reconcile_media_queue_units_for_attachment($attachment_id, $format, $create_parent);
+					},
+					'get_media_queue_readiness_diagnostics'       => function ($attachment_ids, $format) {
+						return $this->get_media_queue_readiness_diagnostics($attachment_ids, $format);
+					},
 				)
 			);
 		}
@@ -104,10 +124,6 @@ trait Ultra_Cache_Media_Replacement_Facade_Trait {
 
 	public function get_media_library_replacement_cleanup_preview($args = array()) {
 		return $this->get_media_replacement_manager()->get_media_library_replacement_cleanup_preview($args);
-	}
-
-	public function apply_media_library_replacement_cleanup($args = array()) {
-		return $this->get_media_replacement_manager()->apply_media_library_replacement_cleanup($args);
 	}
 
 	public function scan_media_library_replacement_database_references($args = array()) {
@@ -162,6 +178,14 @@ trait Ultra_Cache_Media_Replacement_Facade_Trait {
 		return $this->get_media_replacement_manager()->scan_media_library_replacement_readiness_inventory($args);
 	}
 
+	public function get_media_library_replacement_blockers($args = array()) {
+		return $this->get_media_replacement_manager()->get_media_library_replacement_blockers($args);
+	}
+
+	public function save_media_library_replacement_blocker_decisions($args = array()) {
+		return $this->get_media_replacement_manager()->save_media_library_replacement_blocker_decisions($args);
+	}
+
 	public function scan_media_library_replacement_eligible_items($args = array()) {
 		return $this->get_media_replacement_manager()->scan_media_library_replacement_eligible_items($args);
 	}
@@ -180,6 +204,10 @@ trait Ultra_Cache_Media_Replacement_Facade_Trait {
 
 	public function restart_media_library_replacement_workflow() {
 		return $this->get_media_replacement_manager()->restart_media_library_replacement_workflow();
+	}
+
+	public function recover_media_library_replacement_do($mode = 'continue') {
+		return $this->get_media_replacement_manager()->recover_media_library_replacement_do($mode);
 	}
 
 	public function manage_media_library_replacement_session($action, $token = '', $active_step = 'readiness', $owner = 'dashboard') {

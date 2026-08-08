@@ -15,6 +15,8 @@ interface Ultra_Cache_Object_Cache_Backend_Interface {
 	public function incr($key, $offset = 1, $group = 'default');
 	public function decr($key, $offset = 1, $group = 'default');
 	public function flush();
+	public function flush_runtime();
+	public function reset_runtime();
 	public function flush_group($group);
 	public function health();
 }

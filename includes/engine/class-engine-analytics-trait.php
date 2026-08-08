@@ -1189,6 +1189,22 @@ trait Ultra_Cache_Engine_Analytics_Trait
                 $payload
             );
 
-            set_transient('ultracache_last_cache_event', $event, DAY_IN_SECONDS);
+            if (!function_exists('ultracache_mutate_state_record')) {
+                return;
+            }
+
+            $payload = array(
+                'event' => $event,
+                'recordedAt' => time(),
+                'contractVersion' => 1,
+            );
+            ultracache_mutate_state_record(
+                'ultracache_state:dashboard.last_cache_event',
+                static function () use ($payload) {
+                    return $payload;
+                },
+                3,
+                $payload
+            );
         }
 }

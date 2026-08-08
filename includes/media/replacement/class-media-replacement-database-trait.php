@@ -50,10 +50,18 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return substr($identifier, 0, $max_length);
     }
 
+    private function is_media_replacement_safe_identifier($identifier)
+    {
+        $identifier = (string) $identifier;
+        return '' !== $identifier
+            && $identifier === $this->sanitize_media_replacement_db_identifier($identifier, 191);
+    }
+
     private function get_media_replacement_own_table_names()
     {
         return array_filter(array(
             $this->get_media_replacement_items_table_name(),
+            $this->get_media_replacement_attachment_plans_table_name(),
             $this->get_media_replacement_refs_table_name(),
             $this->get_media_replacement_ref_index_table_name(),
             $this->get_media_replacement_file_refs_table_name(),
@@ -70,12 +78,396 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return in_array($table_name, $this->get_media_replacement_own_table_names(), true);
     }
 
+    private function is_media_replacement_ultracache_owned_database_table_name($table_name)
+    {
+        global $wpdb;
+
+        $table_name = $this->sanitize_media_replacement_db_identifier((string) $table_name, 191);
+        if ('' === $table_name || !($wpdb instanceof wpdb)) {
+            return false;
+        }
+
+        if (function_exists('ultracache_is_allowed_custom_table_name') && ultracache_is_allowed_custom_table_name($table_name)) {
+            return true;
+        }
+
+        $prefix = (string) $wpdb->prefix . 'ultracache_';
+        return '' !== $prefix && 0 === strpos($table_name, $prefix);
+    }
+
+    private function is_media_replacement_ultracache_owned_option_name($option_name)
+    {
+        $option_name = (string) $option_name;
+        return '' !== $option_name
+            && (
+                0 === strpos($option_name, 'ultracache_')
+                || 0 === strpos($option_name, '_transient_ultracache_')
+                || 0 === strpos($option_name, '_site_transient_ultracache_')
+            );
+    }
+
+    private function get_media_replacement_database_ref_option_name(array $ref)
+    {
+        global $wpdb;
+
+        if (!$this->is_media_replacement_options_database_ref($ref)) {
+            return '';
+        }
+
+        $planned_option_name = substr((string) ($ref['row_identity'] ?? ''), 0, 191);
+        if ('' !== $planned_option_name) {
+            return $planned_option_name;
+        }
+
+        $table_name = isset($ref['table_name']) ? (string) $ref['table_name'] : '';
+        $primary_value = isset($ref['primary_key_value']) ? absint($ref['primary_key_value']) : 0;
+        if (!($wpdb instanceof wpdb) || (string) $wpdb->options !== $table_name || $primary_value <= 0) {
+            return '';
+        }
+
+        return (string) $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT option_name FROM %i WHERE option_id = %d LIMIT 1',
+                $wpdb->options,
+                $primary_value
+            )
+        );
+    }
+
+    private function is_media_replacement_options_database_ref(array $ref)
+    {
+        global $wpdb;
+
+        $table_name = (string) ($ref['table_name'] ?? '');
+        $row_identity = substr((string) ($ref['row_identity'] ?? ''), 0, 191);
+        $has_option_shape = 'option_id' === (string) ($ref['primary_key_column'] ?? '')
+            && 'option_value' === (string) ($ref['column_name'] ?? '')
+            && absint($ref['primary_key_value'] ?? 0) > 0;
+
+        if (!$has_option_shape) {
+            return false;
+        }
+
+        /*
+         * Persisted row_identity is written only for WordPress option rows during
+         * reference discovery. Keep recognizing that plan even if switch_to_blog()
+         * changes $wpdb->options before Apply/Verify/Rollback, so it can fail closed
+         * instead of falling through to the generic database-row writer.
+         */
+        return '' !== $row_identity
+            || ($wpdb instanceof wpdb && (string) $wpdb->options === $table_name);
+    }
+
+    private function get_media_replacement_database_ref_row_identity(array $ref)
+    {
+        if (!$this->is_media_replacement_options_database_ref($ref)) {
+            return '';
+        }
+
+        return substr((string) ($ref['row_identity'] ?? ''), 0, 191);
+    }
+
+    private function get_media_replacement_option_row_context(array $ref)
+    {
+        global $wpdb;
+
+        if (!$this->is_media_replacement_options_database_ref($ref) || !($wpdb instanceof wpdb)) {
+            return null;
+        }
+
+        $table_name = isset($ref['table_name']) ? $this->sanitize_media_replacement_db_identifier((string) $ref['table_name'], 191) : '';
+        $option_id = absint($ref['primary_key_value'] ?? 0);
+        $planned_option_name = $this->get_media_replacement_database_ref_row_identity($ref);
+        if ($option_id <= 0 || '' === $planned_option_name) {
+            return array(
+                'valid'   => false,
+                'message' => __('This planned option replacement has no persisted option-name identity. Restart Prepare Replacement before applying it.', 'ultracache'),
+            );
+        }
+
+        if ('' === $table_name || (string) $wpdb->options !== $table_name) {
+            return array(
+                'valid'   => false,
+                'message' => __('The WordPress blog context changed after Prepare Replacement. The option plan was preserved and no generic database write was attempted.', 'ultracache'),
+            );
+        }
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                'SELECT option_id, option_name, option_value, autoload FROM %i WHERE option_id = %d LIMIT 1',
+                $table_name,
+                $option_id
+            ),
+            ARRAY_A
+        );
+
+        if (!is_array($row) || empty($row['option_name'])) {
+            return array(
+                'valid'   => false,
+                'message' => __('The planned WordPress option row no longer exists.', 'ultracache'),
+            );
+        }
+
+        $current_option_name = (string) $row['option_name'];
+        if (!hash_equals($planned_option_name, $current_option_name)) {
+            return array(
+                'valid'   => false,
+                'message' => __('The option ID now belongs to a different option name. The newer row was preserved; restart Prepare Replacement.', 'ultracache'),
+            );
+        }
+
+        return array(
+            'valid'        => true,
+            'option_id'    => $option_id,
+            'option_name'  => $current_option_name,
+            'option_value' => isset($row['option_value']) ? (string) $row['option_value'] : '',
+            'autoload'     => isset($row['autoload']) ? (string) $row['autoload'] : '',
+        );
+    }
+
+    private function validate_media_replacement_database_ref_identity(array $ref)
+    {
+        if (!$this->is_media_replacement_options_database_ref($ref)) {
+            return array('valid' => true, 'message' => '');
+        }
+
+        $context = $this->get_media_replacement_option_row_context($ref);
+        if (!is_array($context) || empty($context['valid'])) {
+            return array(
+                'valid'   => false,
+                'message' => is_array($context) && isset($context['message'])
+                    ? (string) $context['message']
+                    : __('The planned WordPress option identity could not be verified.', 'ultracache'),
+            );
+        }
+
+        return array('valid' => true, 'message' => '', 'context' => $context);
+    }
+
+    private function is_media_replacement_option_autoloaded($autoload)
+    {
+        $autoload = (string) $autoload;
+        if (function_exists('wp_autoload_values_to_autoload')) {
+            return in_array($autoload, (array) wp_autoload_values_to_autoload(), true);
+        }
+
+        return in_array($autoload, array('yes', 'on', 'auto-on', 'auto'), true);
+    }
+
+    private function invalidate_media_replacement_option_runtime_cache($option_name)
+    {
+        $option_name = (string) $option_name;
+        if ('' === $option_name) {
+            return;
+        }
+
+        wp_cache_delete($option_name, 'options');
+        wp_cache_delete('alloptions', 'options');
+        wp_cache_delete('notoptions', 'options');
+    }
+
+    private function prepare_media_replacement_option_lifecycle_value($option_name, $old_raw_value, $new_raw_value)
+    {
+        $option_name = (string) $option_name;
+        $old_value = maybe_unserialize((string) $old_raw_value);
+        $new_value = maybe_unserialize((string) $new_raw_value);
+
+        if (is_object($old_value)) {
+            $old_value = clone $old_value;
+        }
+        if (is_object($new_value)) {
+            $new_value = clone $new_value;
+        }
+
+        $new_value = sanitize_option($option_name, $new_value);
+        $new_value = apply_filters("pre_update_option_{$option_name}", $new_value, $old_value, $option_name);
+        $new_value = apply_filters('pre_update_option', $new_value, $option_name, $old_value);
+        $filtered_raw_value = maybe_serialize($new_value);
+
+        if (!is_string($filtered_raw_value) || !hash_equals((string) $new_raw_value, $filtered_raw_value)) {
+            return array(
+                'valid'   => false,
+                'message' => __('A WordPress option sanitization or pre-update filter changed the planned replacement value. No database value was written.', 'ultracache'),
+            );
+        }
+
+        return array(
+            'valid'     => true,
+            'old_value' => $old_value,
+            'new_value' => $new_value,
+        );
+    }
+
+    private function compare_and_swap_media_replacement_option_value(array $ref, $expected_value, $new_value)
+    {
+        global $wpdb;
+
+        $context = $this->get_media_replacement_option_row_context($ref);
+        if (!is_array($context) || empty($context['valid'])) {
+            return array(
+                'updated'  => false,
+                'conflict' => false,
+                'error'    => true,
+                'message'  => is_array($context) && isset($context['message'])
+                    ? (string) $context['message']
+                    : __('The WordPress option row could not be resolved.', 'ultracache'),
+            );
+        }
+
+        if (!hash_equals((string) $expected_value, (string) $context['option_value'])) {
+            return array(
+                'updated'  => false,
+                'conflict' => true,
+                'error'    => false,
+                'message'  => __('The WordPress option value changed after it was read. The newer value was preserved.', 'ultracache'),
+            );
+        }
+
+        $lifecycle = $this->prepare_media_replacement_option_lifecycle_value(
+            (string) $context['option_name'],
+            (string) $expected_value,
+            (string) $new_value
+        );
+        if (empty($lifecycle['valid'])) {
+            return array(
+                'updated'  => false,
+                'conflict' => false,
+                'error'    => true,
+                'message'  => isset($lifecycle['message']) ? (string) $lifecycle['message'] : __('The WordPress option lifecycle rejected the planned value.', 'ultracache'),
+            );
+        }
+
+        /*
+         * Match the native update_option() lifecycle: the generic pre-update
+         * action runs immediately before the database mutation, while the
+         * option-specific and generic updated actions are published only after
+         * the atomic write and runtime cache verification succeed.
+         */
+        do_action(
+            'update_option',
+            (string) $context['option_name'],
+            $lifecycle['old_value'],
+            $lifecycle['new_value']
+        );
+
+        $updated = $wpdb->query(
+            $wpdb->prepare(
+                'UPDATE %i SET option_value = %s WHERE option_id = %d AND option_name = %s AND CAST(option_value AS BINARY) = CAST(%s AS BINARY)',
+                $wpdb->options,
+                (string) $new_value,
+                (int) $context['option_id'],
+                (string) $context['option_name'],
+                (string) $expected_value
+            )
+        );
+
+        if (false === $updated) {
+            return array('updated' => false, 'conflict' => false, 'error' => true, 'message' => __('The WordPress option row could not be updated.', 'ultracache'));
+        }
+        if (0 === (int) $updated) {
+            return array('updated' => false, 'conflict' => true, 'error' => false, 'message' => __('The WordPress option row changed before the atomic update. The newer value was preserved.', 'ultracache'));
+        }
+
+        $this->invalidate_media_replacement_option_runtime_cache((string) $context['option_name']);
+
+        return array(
+            'updated'        => true,
+            'conflict'       => false,
+            'error'          => false,
+            'option_write'   => true,
+            'option_name'    => (string) $context['option_name'],
+            'autoload'       => (string) $context['autoload'],
+            'old_value'      => $lifecycle['old_value'],
+            'new_value'      => $lifecycle['new_value'],
+            'expected_value' => (string) $expected_value,
+            'written_value'  => (string) $new_value,
+            'message'        => '',
+        );
+    }
+
+    private function verify_media_replacement_option_runtime_state(array $ref, $expected_raw_value)
+    {
+        if (!$this->is_media_replacement_options_database_ref($ref)) {
+            return array('verified' => true, 'message' => '');
+        }
+
+        $context = $this->get_media_replacement_option_row_context($ref);
+        if (!is_array($context) || empty($context['valid'])) {
+            return array(
+                'verified' => false,
+                'message'  => is_array($context) && isset($context['message'])
+                    ? (string) $context['message']
+                    : __('The WordPress option identity could not be verified.', 'ultracache'),
+            );
+        }
+
+        $expected_raw_value = (string) $expected_raw_value;
+        if (!hash_equals($expected_raw_value, (string) $context['option_value'])) {
+            return array('verified' => false, 'message' => __('The WordPress option database value does not match the expected replacement value.', 'ultracache'));
+        }
+
+        $option_name = (string) $context['option_name'];
+        $this->invalidate_media_replacement_option_runtime_cache($option_name);
+
+        if ($this->is_media_replacement_option_autoloaded((string) $context['autoload'])) {
+            $alloptions = wp_load_alloptions();
+            if (!is_array($alloptions) || !array_key_exists($option_name, $alloptions) || !hash_equals($expected_raw_value, (string) $alloptions[$option_name])) {
+                return array('verified' => false, 'message' => __('The autoloaded WordPress option cache did not contain the exact replacement value.', 'ultracache'));
+            }
+        } else {
+            get_option($option_name, null);
+            $found = false;
+            $cached_value = wp_cache_get($option_name, 'options', false, $found);
+            if (!$found || !hash_equals($expected_raw_value, (string) $cached_value)) {
+                return array('verified' => false, 'message' => __('The WordPress option cache did not contain the exact replacement value.', 'ultracache'));
+            }
+        }
+
+        $notoptions = wp_cache_get('notoptions', 'options');
+        if (is_array($notoptions) && isset($notoptions[$option_name])) {
+            return array('verified' => false, 'message' => __('The WordPress notoptions cache still marked the replaced option as missing.', 'ultracache'));
+        }
+
+        return array('verified' => true, 'message' => '');
+    }
+
+    private function finalize_media_replacement_option_write(array $write_result)
+    {
+        if (empty($write_result['option_write']) || empty($write_result['option_name'])) {
+            return;
+        }
+
+        $option_name = (string) $write_result['option_name'];
+        $old_value = $write_result['old_value'] ?? null;
+        $new_value = $write_result['new_value'] ?? null;
+
+        do_action("update_option_{$option_name}", $old_value, $new_value, $option_name);
+        do_action('updated_option', $option_name, $old_value, $new_value);
+    }
+
+    private function is_media_replacement_internal_database_ref(array $ref)
+    {
+        $table_name = isset($ref['table_name']) ? (string) $ref['table_name'] : '';
+        if ($this->is_media_replacement_ultracache_owned_database_table_name($table_name)) {
+            return true;
+        }
+
+        return $this->is_media_replacement_ultracache_owned_option_name(
+            $this->get_media_replacement_database_ref_option_name($ref)
+        );
+    }
+
     private function is_media_replacement_allowed_database_table_name($table_name)
     {
         global $wpdb;
 
         $table_name = $this->sanitize_media_replacement_db_identifier((string) $table_name, 191);
-        if ('' === $table_name || !($wpdb instanceof wpdb) || $this->is_media_replacement_own_table_name($table_name)) {
+        if (
+            '' === $table_name
+            || !($wpdb instanceof wpdb)
+            || $this->is_media_replacement_own_table_name($table_name)
+            || $this->is_media_replacement_ultracache_owned_database_table_name($table_name)
+        ) {
             return false;
         }
 
@@ -107,23 +499,21 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return (bool) preg_match('/\b(char|varchar|text|tinytext|mediumtext|longtext|json)\b/', $column_type);
     }
 
-    private function get_media_replacement_reference_rows($job_id, $limit = 10)
+    private function get_media_replacement_reference_rows($limit = 10)
     {
         global $wpdb;
 
         $items_table = $this->get_media_replacement_items_table_name();
-        $job_id      = sanitize_key((string) $job_id);
         $limit       = max(1, min(100, absint($limit)));
 
-        if ('' === $items_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, attachment_id, item_scope, size_name, old_relative_path, old_url, new_relative_path, new_url, status FROM %i WHERE job_id = %s AND status = %s ORDER BY id ASC LIMIT %d',
+                'SELECT id, attachment_id, item_scope, size_name, old_relative_path, old_url, new_relative_path, new_url, status FROM %i WHERE status = %s ORDER BY id ASC LIMIT %d',
                 $items_table,
-                $job_id,
                 'metadata_updated',
                 $limit
             ),
@@ -198,15 +588,14 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return JSON_ERROR_NONE === json_last_error();
     }
 
-    private function insert_media_replacement_reference_row($job_id, $item_id, $table_name, $primary_key_column, $primary_key_value, $column_name, $old_fragment, $new_fragment, $stored_value)
+    private function insert_media_replacement_reference_row($item_id, $table_name, $primary_key_column, $primary_key_value, $column_name, $old_fragment, $new_fragment, $stored_value)
     {
         global $wpdb;
 
         $refs_table = $this->get_media_replacement_refs_table_name();
-        $job_id     = sanitize_key((string) $job_id);
         $item_id    = absint($item_id);
 
-        if ('' === $refs_table || '' === $job_id || $item_id <= 0 || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || $item_id <= 0 || !($wpdb instanceof wpdb)) {
             return false;
         }
 
@@ -217,21 +606,33 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $old_fragment       = (string) $old_fragment;
         $new_fragment       = (string) $new_fragment;
         $stored_value       = (string) $stored_value;
+        $row_identity       = '';
+        if ((string) $wpdb->options === $table_name && 'option_id' === $primary_key_column && 'option_value' === $column_name) {
+            $row_identity = (string) $wpdb->get_var(
+                $wpdb->prepare(
+                    'SELECT option_name FROM %i WHERE option_id = %d LIMIT 1',
+                    $wpdb->options,
+                    absint($primary_key_value)
+                )
+            );
+            $row_identity = substr($row_identity, 0, 191);
+        }
 
         if ('' === $table_name || '' === $primary_key_column || '' === $primary_key_value || '' === $column_name || '' === $old_fragment || '' === $new_fragment) {
             return false;
         }
 
         $now      = current_time('mysql', true);
-        $ref_hash = md5($job_id . '|' . $item_id . '|' . $table_name . '|' . $primary_key_column . '|' . $primary_key_value . '|' . $column_name . '|' . md5($old_fragment));
+        $ref_hash = md5($item_id . '|' . $table_name . '|' . $primary_key_column . '|' . $primary_key_value . '|' . $row_identity . '|' . $column_name . '|' . md5($old_fragment));
 
         $row = array(
-            'job_id'             => $job_id,
+            'job_id'             => '',
             'item_id'            => $item_id,
             'ref_hash'           => $ref_hash,
             'table_name'         => $table_name,
             'primary_key_column' => $primary_key_column,
             'primary_key_value'  => $primary_key_value,
+            'row_identity'       => $row_identity,
             'column_name'        => $column_name,
             'old_value_hash'     => md5($stored_value),
             'new_value_hash'     => md5($new_fragment),
@@ -248,7 +649,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return false !== $wpdb->replace(
             $refs_table,
             $row,
-            array('%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s')
+            array('%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s')
         );
     }
 
@@ -310,7 +711,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                         }
 
                         if ($this->insert_media_replacement_reference_row(
-                            isset($row['job_id']) ? (string) $row['job_id'] : '',
                             $item_id,
                             $table_name,
                             $primary,
@@ -355,22 +755,20 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
-    private function get_media_replacement_reference_scan_summary($job_id)
+    private function get_media_replacement_reference_scan_summary()
     {
         global $wpdb;
 
         $items_table = $this->get_media_replacement_items_table_name();
         $refs_table  = $this->get_media_replacement_refs_table_name();
-        $job_id      = sanitize_key((string) $job_id);
-        if ('' === $items_table || '' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || '' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $item_rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT status, COUNT(*) AS item_count FROM %i WHERE job_id = %s GROUP BY status',
-                $items_table,
-                $job_id
+                'SELECT status, COUNT(*) AS item_count FROM %i GROUP BY status',
+                $items_table
             ),
             ARRAY_A
         );
@@ -401,9 +799,9 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         $ref_row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT COUNT(*) AS refs_found, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE job_id = %s',
+                'SELECT COUNT(*) AS refs_found, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE status <> %s',
                 $refs_table,
-                $job_id
+                'excluded'
             ),
             ARRAY_A
         );
@@ -422,15 +820,9 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
     }
 
 
-    private function get_media_replacement_ref_index_scan_option_name()
-    {
-        return 'ultracache_media_replacement_ref_index_scan_v1';
-    }
-
     private function get_media_replacement_ref_index_default_state()
     {
         return array(
-            'job_id'                => '',
             'status'                => 'idle',
             'cursor_spec_index'     => 0,
             'cursor_offset'         => 0,
@@ -442,6 +834,12 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             'indexed_refs'          => 0,
             'serialized_refs'       => 0,
             'json_refs'             => 0,
+            'current_table'         => '',
+            'current_column'        => '',
+            'current_pagination'    => '',
+            'last_query_ms'         => 0,
+            'last_batch_rows'       => 0,
+            'last_batch_refs'       => 0,
             'created_at'            => '',
             'updated_at'            => '',
             'completed_at'          => '',
@@ -452,7 +850,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
     {
         $state = is_array($state) ? $state : array();
         $state = array_merge($this->get_media_replacement_ref_index_default_state(), $state);
-        $state['job_id']               = sanitize_key((string) $state['job_id']);
         $state['status']               = in_array((string) $state['status'], array('idle', 'indexing', 'completed', 'failed'), true) ? (string) $state['status'] : 'idle';
         $state['cursor_spec_index']    = max(0, absint($state['cursor_spec_index']));
         $state['cursor_offset']        = max(0, absint($state['cursor_offset']));
@@ -464,82 +861,70 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $state['indexed_refs']         = max(0, (int) $state['indexed_refs']);
         $state['serialized_refs']      = max(0, (int) $state['serialized_refs']);
         $state['json_refs']            = max(0, (int) $state['json_refs']);
+        $state['current_table']        = $this->sanitize_media_replacement_db_identifier((string) $state['current_table'], 191);
+        $state['current_column']       = $this->sanitize_media_replacement_db_identifier((string) $state['current_column'], 64);
+        $state['current_pagination']   = in_array((string) $state['current_pagination'], array('keyset', 'offset'), true) ? (string) $state['current_pagination'] : '';
+        $state['last_query_ms']        = max(0, (int) $state['last_query_ms']);
+        $state['last_batch_rows']      = max(0, (int) $state['last_batch_rows']);
+        $state['last_batch_refs']      = max(0, (int) $state['last_batch_refs']);
         return $state;
     }
 
     private function get_media_replacement_ref_index_state()
     {
-        return $this->normalize_media_replacement_ref_index_state(get_option($this->get_media_replacement_ref_index_scan_option_name(), array()));
+        return $this->normalize_media_replacement_ref_index_state($this->get_media_replacement_workflow_section('database_index_scan'));
     }
 
     private function update_media_replacement_ref_index_state(array $state)
     {
         $state = $this->normalize_media_replacement_ref_index_state($state);
-        update_option($this->get_media_replacement_ref_index_scan_option_name(), $state, false);
+        $this->update_media_replacement_workflow_section('database_index_scan', $state);
         return $state;
     }
 
-    private function reset_media_replacement_ref_index_registry($job_id)
+    private function reset_media_replacement_ref_index_registry($unused_context = '')
     {
         global $wpdb;
-
-        $job_id          = sanitize_key((string) $job_id);
         $refs_table      = $this->get_media_replacement_refs_table_name();
         $ref_index_table = $this->get_media_replacement_ref_index_table_name();
-        if ('' === $job_id || '' === $refs_table || '' === $ref_index_table || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || '' === $ref_index_table || !($wpdb instanceof wpdb)) {
             return false;
         }
-
-        $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE job_id = %s AND status IN (%s, %s)', $refs_table, $job_id, 'pending', 'failed'));
-        $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE job_id = %s', $ref_index_table, $job_id));
-        return true;
+        $refs_deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE status IN (%s, %s, %s)', $refs_table, 'pending', 'failed', 'verify_failed'));
+        $index_deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i', $ref_index_table));
+        return false !== $refs_deleted && false !== $index_deleted;
     }
 
-
-    private function get_media_replacement_ref_index_specs_option_name()
-    {
-        return 'ultracache_media_replacement_ref_index_specs_v1';
-    }
 
     private function get_media_replacement_database_specs_hash(array $specs)
     {
         return md5((string) wp_json_encode(array_values($specs)));
     }
 
-    private function save_media_replacement_database_reference_specs($job_id, array $specs)
+    private function save_media_replacement_database_reference_specs(array $specs)
     {
-        $job_id = sanitize_key((string) $job_id);
-        if ('' === $job_id) {
-            return array();
-        }
-
         $manifest = array(
-            'job_id'       => $job_id,
-            'initialized'  => true,
-            'specs_hash'   => $this->get_media_replacement_database_specs_hash($specs),
-            'specs'        => array_values($specs),
-            'created_at'   => current_time('mysql', true),
+            'initialized' => true,
+            'specs_hash'  => $this->get_media_replacement_database_specs_hash($specs),
+            'specs'       => array_values($specs),
+            'created_at'  => current_time('mysql', true),
         );
-        update_option($this->get_media_replacement_ref_index_specs_option_name(), $manifest, false);
+        $this->update_media_replacement_workflow_section('database_reference_specs', $manifest);
         return $manifest;
     }
 
-    private function get_saved_media_replacement_database_reference_specs($job_id)
+    private function get_saved_media_replacement_database_reference_specs()
     {
-        $job_id = sanitize_key((string) $job_id);
-        $saved = get_option($this->get_media_replacement_ref_index_specs_option_name(), array());
-        if ('' === $job_id || !is_array($saved) || empty($saved['initialized']) || $job_id !== sanitize_key((string) ($saved['job_id'] ?? ''))) {
+        $saved = $this->get_media_replacement_workflow_section('database_reference_specs');
+        if (empty($saved['initialized'])) {
             return array();
         }
-
         $specs = isset($saved['specs']) && is_array($saved['specs']) ? array_values($saved['specs']) : array();
         $hash = isset($saved['specs_hash']) && preg_match('/^[a-f0-9]{32}$/', (string) $saved['specs_hash']) ? (string) $saved['specs_hash'] : '';
         if ('' === $hash || !hash_equals($hash, $this->get_media_replacement_database_specs_hash($specs))) {
             return array();
         }
-
         return array(
-            'job_id'      => $job_id,
             'initialized' => true,
             'specs_hash'  => $hash,
             'specs'       => $specs,
@@ -548,7 +933,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
     private function clear_media_replacement_database_reference_specs()
     {
-        delete_option($this->get_media_replacement_ref_index_specs_option_name());
+        $this->clear_media_replacement_workflow_section('database_reference_specs');
     }
 
     private function get_media_replacement_database_reference_specs()
@@ -688,55 +1073,153 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
     }
 
 
+    private function is_media_replacement_reference_token_delimiter($character)
+    {
+        if ('' === $character) {
+            return true;
+        }
+
+        $ord = ord($character);
+        return $ord <= 32
+            || '"' === $character
+            || "'" === $character
+            || '<' === $character
+            || '>' === $character;
+    }
+
     private function extract_media_replacement_image_references_from_value($value)
     {
         $value = (string) $value;
-        if ('' === $value || !preg_match('/\.(?:jpe?g|png)/i', $value)) {
+        $value_length = strlen($value);
+        if ($value_length < 4) {
             return array();
         }
 
-        $scan_values = array($value);
-        $unescaped_slashes = str_replace(array('\\/', '\/'), '/', $value);
-        if ($unescaped_slashes !== $value) {
-            $scan_values[] = $unescaped_slashes;
-        }
-
         $references = array();
-        foreach ($scan_values as $scan_value) {
-            if (!preg_match_all("~[^\\s\"'<>]+?\\.(?:jpe?g|png)(?:\\?[^\\s\"'<>#]*)?(?:#[^\\s\"'<>]*)?~i", (string) $scan_value, $matches)) {
+        $position = 0;
+        $max_fragment_length = 2000;
+
+        while ($position < $value_length) {
+            $dot_offset = strpos($value, '.', $position);
+            if (false === $dot_offset || $dot_offset + 3 >= $value_length) {
+                break;
+            }
+
+            $extension_length = 0;
+            $extension_four = strtolower(substr($value, $dot_offset, 4));
+            if ('.jpg' === $extension_four || '.png' === $extension_four) {
+                $extension_length = 4;
+            } elseif ($dot_offset + 4 < $value_length && '.jpeg' === strtolower(substr($value, $dot_offset, 5))) {
+                $extension_length = 5;
+            }
+
+            if (0 === $extension_length) {
+                $position = $dot_offset + 1;
                 continue;
             }
 
-            foreach ((array) $matches[0] as $fragment) {
-                $normalized = $this->normalize_media_replacement_reference_fragment_for_index($fragment);
-                if (empty($normalized['raw']) || empty($normalized['match'])) {
-                    continue;
-                }
+            $fragment_end = $dot_offset + $extension_length;
+            $forward_limit = min($value_length, $dot_offset + $max_fragment_length + 1);
+            $cursor = $fragment_end;
 
-                $match = (string) $normalized['match'];
-                if (!preg_match('/\.(?:jpe?g|png)$/i', $match)) {
-                    continue;
+            if ($cursor < $value_length && '?' === $value[$cursor]) {
+                $cursor++;
+                while ($cursor < $forward_limit
+                    && '#' !== $value[$cursor]
+                    && !$this->is_media_replacement_reference_token_delimiter($value[$cursor])) {
+                    $cursor++;
                 }
-
-                if (strlen($normalized['raw']) > 2000 || strlen($normalized['normalized']) > 2000 || strlen($match) > 2000) {
-                    continue;
-                }
-
-                $key = md5($match . '|' . $normalized['raw']);
-                $references[$key] = $normalized;
             }
+
+            if ($cursor < $value_length && '#' === $value[$cursor]) {
+                $cursor++;
+                while ($cursor < $forward_limit
+                    && !$this->is_media_replacement_reference_token_delimiter($value[$cursor])) {
+                    $cursor++;
+                }
+            }
+
+            if ($cursor >= $forward_limit && $cursor < $value_length
+                && !$this->is_media_replacement_reference_token_delimiter($value[$cursor])) {
+                $position = $dot_offset + $extension_length;
+                continue;
+            }
+            $fragment_end = $cursor;
+
+            $fragment_start = $dot_offset;
+            $backward_limit = max(0, $fragment_end - $max_fragment_length);
+            while ($fragment_start > $backward_limit
+                && !$this->is_media_replacement_reference_token_delimiter($value[$fragment_start - 1])) {
+                $fragment_start--;
+            }
+
+            if ($fragment_start === $backward_limit && $backward_limit > 0
+                && !$this->is_media_replacement_reference_token_delimiter($value[$backward_limit - 1])) {
+                $position = $dot_offset + $extension_length;
+                continue;
+            }
+
+            $fragment_length = $fragment_end - $fragment_start;
+            if ($fragment_length <= 0 || $fragment_length > $max_fragment_length) {
+                $position = $dot_offset + $extension_length;
+                continue;
+            }
+
+            $fragment = substr($value, $fragment_start, $fragment_length);
+            $normalized = $this->normalize_media_replacement_reference_fragment_for_index($fragment);
+            if (empty($normalized['raw']) || empty($normalized['match'])) {
+                $position = $dot_offset + $extension_length;
+                continue;
+            }
+
+            $raw = (string) $normalized['raw'];
+            $data_offset = stripos($raw, 'data:');
+            if (0 === $data_offset
+                || (false !== $data_offset
+                    && $data_offset > 0
+                    && in_array($raw[$data_offset - 1], array('=', ':', '('), true))) {
+                $position = $dot_offset + $extension_length;
+                continue;
+            }
+
+            $match = (string) $normalized['match'];
+            $match_length = strlen($match);
+            if ($match_length < 4) {
+                $position = $dot_offset + $extension_length;
+                continue;
+            }
+
+            $match_suffix_four = strtolower(substr($match, -4));
+            $match_has_image_extension = '.jpg' === $match_suffix_four || '.png' === $match_suffix_four;
+            if (!$match_has_image_extension && $match_length >= 5) {
+                $match_has_image_extension = '.jpeg' === strtolower(substr($match, -5));
+            }
+            if (!$match_has_image_extension) {
+                $position = $dot_offset + $extension_length;
+                continue;
+            }
+
+            if (strlen($raw) > $max_fragment_length
+                || strlen((string) $normalized['normalized']) > $max_fragment_length
+                || $match_length > $max_fragment_length) {
+                $position = $dot_offset + $extension_length;
+                continue;
+            }
+
+            $key = md5($match . '|' . $raw);
+            $references[$key] = $normalized;
+            $position = $dot_offset + $extension_length;
         }
 
         return array_values($references);
     }
 
-    private function insert_media_replacement_ref_index_row($job_id, array $spec, $primary_key_value, array $reference, $stored_value)
+    private function insert_media_replacement_ref_index_row(array $spec, $primary_key_value, array $reference, $stored_value, $row_identity = '')
     {
         global $wpdb;
 
         $ref_index_table = $this->get_media_replacement_ref_index_table_name();
-        $job_id          = sanitize_key((string) $job_id);
-        if ('' === $ref_index_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $ref_index_table || !($wpdb instanceof wpdb)) {
             return false;
         }
 
@@ -748,6 +1231,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $primary    = $this->sanitize_media_replacement_db_identifier($primary, 64);
         $column     = $this->sanitize_media_replacement_db_identifier($column, 64);
         $primary_key_value = substr(sanitize_text_field((string) $primary_key_value), 0, 191);
+        $row_identity = substr((string) $row_identity, 0, 191);
 
         $raw        = isset($reference['raw']) ? (string) $reference['raw'] : '';
         $normalized = isset($reference['normalized']) ? (string) $reference['normalized'] : '';
@@ -765,34 +1249,59 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         $now = current_time('mysql', true);
         $url_path_hash = md5($match);
-        $ref_hash = md5($job_id . '|' . $table_name . '|' . $primary . '|' . $primary_key_value . '|' . $column . '|' . $url_path_hash . '|' . md5($raw));
+        $ref_hash = md5($table_name . '|' . $primary . '|' . $primary_key_value . '|' . $row_identity . '|' . $column . '|' . $url_path_hash . '|' . md5($raw));
+        $serialized = function_exists('is_serialized') && is_serialized((string) $stored_value) ? 1 : 0;
+        $json_detected = $this->is_media_replacement_json_like_value($stored_value) ? 1 : 0;
 
-        $row = array(
-            'job_id'             => $job_id,
-            'ref_hash'           => $ref_hash,
-            'table_name'         => $table_name,
-            'primary_key_column' => $primary,
-            'primary_key_value'  => $primary_key_value,
-            'column_name'        => $column,
-            'reference_type'     => $type,
-            'raw_fragment'       => $raw,
-            'normalized_fragment'=> $normalized,
-            'url_path_hash'      => $url_path_hash,
-            'serialized'         => function_exists('is_serialized') && is_serialized((string) $stored_value) ? 1 : 0,
-            'json_detected'      => $this->is_media_replacement_json_like_value($stored_value) ? 1 : 0,
-            'matched_item_id'    => 0,
-            'status'             => 'indexed',
-            'error_message'      => null,
-            'created_at'         => $now,
-            'updated_at'         => $now,
+        /*
+         * The scan cursor may be replayed after a terminated HTTP request. INSERT IGNORE
+         * preserves any already matched row and reports 1 only for a genuinely new index row.
+         */
+        $inserted = $wpdb->query(
+            $wpdb->prepare(
+                'INSERT IGNORE INTO %i (job_id, ref_hash, table_name, primary_key_column, primary_key_value, row_identity, column_name, reference_type, raw_fragment, normalized_fragment, url_path_hash, serialized, json_detected, matched_item_id, status, error_message, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %d, %d, %s, NULL, %s, %s)',
+                $ref_index_table,
+                '',
+                $ref_hash,
+                $table_name,
+                $primary,
+                $primary_key_value,
+                $row_identity,
+                $column,
+                $type,
+                $raw,
+                $normalized,
+                $url_path_hash,
+                $serialized,
+                $json_detected,
+                0,
+                'indexed',
+                $now,
+                $now
+            )
         );
 
-        return false !== $wpdb->replace(
-            $ref_index_table,
-            $row,
-            array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d', '%s', '%s', '%s', '%s')
-        );
+        return false === $inserted ? false : (int) $inserted;
     }
+
+    private function get_media_replacement_database_reference_window_limit(array $spec, $remaining)
+    {
+        $type = strtolower((string) ($spec['type'] ?? ''));
+        $remaining = max(1, min(1000, absint($remaining)));
+
+        if (false !== strpos($type, 'longtext')) {
+            return min(100, $remaining);
+        }
+        if (false !== strpos($type, 'mediumtext') || false !== strpos($type, 'json')) {
+            return min(200, $remaining);
+        }
+        if (false !== strpos($type, 'text')) {
+            return min(500, $remaining);
+        }
+
+        return min(1000, $remaining);
+    }
+
 
     private function get_media_replacement_database_reference_candidate_rows(array $spec, $limit, $offset, $cursor_primary_value = '')
     {
@@ -806,72 +1315,340 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $offset = max(0, absint($offset));
         $cursor_primary_value = substr(sanitize_text_field((string) $cursor_primary_value), 0, 191);
 
-        if ('' === $table || '' === $column || !($wpdb instanceof wpdb) || !$this->is_media_replacement_allowed_database_table_name($table)) {
-            return array();
+        if (
+            !($wpdb instanceof wpdb)
+            || !$this->is_media_replacement_allowed_database_table_name($table)
+            || !$this->is_media_replacement_safe_identifier($column)
+            || ('' !== $primary && !$this->is_media_replacement_safe_identifier($primary))
+        ) {
+            return array(
+                'success' => false,
+                'rows' => array(),
+                'scanPrimaryValues' => array(),
+                'scannedRows' => 0,
+                'nextPrimary' => $cursor_primary_value,
+                'nextOffset' => $offset,
+                'exhausted' => true,
+                'queryMs' => 0,
+                'pagination' => $pagination,
+            );
         }
 
+        $is_attachment_meta_value = (string) $wpdb->postmeta === $table && 'meta_value' === $column;
+        $is_options_value = (string) $wpdb->options === $table && 'option_value' === $column && 'option_id' === $primary;
+        $use_keyset = 'keyset' === $pagination && '' !== $primary;
+        $ultracache_option_like = $wpdb->esc_like('ultracache_') . '%';
+        $ultracache_transient_like = $wpdb->esc_like('_transient_ultracache_') . '%';
+        $ultracache_site_transient_like = $wpdb->esc_like('_site_transient_ultracache_') . '%';
         $jpg_like = '%' . $wpdb->esc_like('.jpg') . '%';
         $jpeg_like = '%' . $wpdb->esc_like('.jpeg') . '%';
         $png_like = '%' . $wpdb->esc_like('.png') . '%';
-        $is_attachment_meta_value = (string) $wpdb->postmeta === $table && 'meta_value' === $column;
-        $use_keyset = 'keyset' === $pagination && '' !== $primary && '' !== $cursor_primary_value;
+        $query_started = microtime(true);
 
-        if ($use_keyset && $is_attachment_meta_value) {
-            $rows = $wpdb->get_results(
-                $wpdb->prepare(
-                    'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE %i > %s AND (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) AND meta_key NOT IN (%s, %s, %s) ORDER BY %i ASC LIMIT %d',
-                    $primary,
-                    $column,
-                    $table,
-                    $primary,
-                    '' !== $cursor_primary_value ? $cursor_primary_value : '0',
-                    $column,
-                    $jpg_like,
-                    $column,
-                    $jpeg_like,
-                    $column,
-                    $png_like,
-                    '_wp_attached_file',
-                    '_wp_attachment_metadata',
-                    '_wp_attachment_backup_sizes',
-                    $primary,
-                    $limit
-                ),
-                ARRAY_A
+        if ($use_keyset) {
+            /*
+             * Resolve one bounded physical primary-key window first. The image
+             * predicate is then evaluated only inside that window, so a sparse
+             * column can never make MariaDB scan an unbounded tail of the table.
+             */
+            if ($is_options_value) {
+                if ('' !== $cursor_primary_value) {
+                    $primary_rows = $wpdb->get_col(
+                        $wpdb->prepare(
+                            'SELECT %i FROM %i WHERE %i > %s AND option_name NOT LIKE %s AND option_name NOT LIKE %s AND option_name NOT LIKE %s ORDER BY %i ASC LIMIT %d',
+                            $primary,
+                            $table,
+                            $primary,
+                            $cursor_primary_value,
+                            $ultracache_option_like,
+                            $ultracache_transient_like,
+                            $ultracache_site_transient_like,
+                            $primary,
+                            $limit
+                        )
+                    );
+                } else {
+                    $primary_rows = $wpdb->get_col(
+                        $wpdb->prepare(
+                            'SELECT %i FROM %i WHERE option_name NOT LIKE %s AND option_name NOT LIKE %s AND option_name NOT LIKE %s ORDER BY %i ASC LIMIT %d',
+                            $primary,
+                            $table,
+                            $ultracache_option_like,
+                            $ultracache_transient_like,
+                            $ultracache_site_transient_like,
+                            $primary,
+                            $limit
+                        )
+                    );
+                }
+            } elseif ($is_attachment_meta_value) {
+                if ('' !== $cursor_primary_value) {
+                    $primary_rows = $wpdb->get_col(
+                        $wpdb->prepare(
+                            'SELECT %i FROM %i WHERE %i > %s AND meta_key NOT IN (%s, %s, %s) ORDER BY %i ASC LIMIT %d',
+                            $primary,
+                            $table,
+                            $primary,
+                            $cursor_primary_value,
+                            '_wp_attached_file',
+                            '_wp_attachment_metadata',
+                            '_wp_attachment_backup_sizes',
+                            $primary,
+                            $limit
+                        )
+                    );
+                } else {
+                    $primary_rows = $wpdb->get_col(
+                        $wpdb->prepare(
+                            'SELECT %i FROM %i WHERE meta_key NOT IN (%s, %s, %s) ORDER BY %i ASC LIMIT %d',
+                            $primary,
+                            $table,
+                            '_wp_attached_file',
+                            '_wp_attachment_metadata',
+                            '_wp_attachment_backup_sizes',
+                            $primary,
+                            $limit
+                        )
+                    );
+                }
+            } else {
+                if ('' !== $cursor_primary_value) {
+                    $primary_rows = $wpdb->get_col(
+                        $wpdb->prepare(
+                            'SELECT %i FROM %i WHERE %i > %s ORDER BY %i ASC LIMIT %d',
+                            $primary,
+                            $table,
+                            $primary,
+                            $cursor_primary_value,
+                            $primary,
+                            $limit
+                        )
+                    );
+                } else {
+                    $primary_rows = $wpdb->get_col(
+                        $wpdb->prepare(
+                            'SELECT %i FROM %i ORDER BY %i ASC LIMIT %d',
+                            $primary,
+                            $table,
+                            $primary,
+                            $limit
+                        )
+                    );
+                }
+            }
+
+            if (!is_array($primary_rows)) {
+                return array(
+                    'success' => false,
+                    'rows' => array(),
+                    'scanPrimaryValues' => array(),
+                    'scannedRows' => 0,
+                    'nextPrimary' => $cursor_primary_value,
+                    'nextOffset' => $offset,
+                    'exhausted' => false,
+                    'queryMs' => max(0, (int) round((microtime(true) - $query_started) * 1000)),
+                    'pagination' => 'keyset',
+                );
+            }
+
+            $primary_rows = array_values(array_map('strval', $primary_rows));
+            $scanned_rows = count($primary_rows);
+            if (0 === $scanned_rows) {
+                return array(
+                    'success' => true,
+                    'rows' => array(),
+                    'scanPrimaryValues' => array(),
+                    'scannedRows' => 0,
+                    'nextPrimary' => $cursor_primary_value,
+                    'nextOffset' => 0,
+                    'exhausted' => true,
+                    'queryMs' => max(0, (int) round((microtime(true) - $query_started) * 1000)),
+                    'pagination' => 'keyset',
+                );
+            }
+
+            $window_end = (string) end($primary_rows);
+            if ($is_options_value) {
+                if ('' !== $cursor_primary_value) {
+                    $rows = $wpdb->get_results(
+                        $wpdb->prepare(
+                            'SELECT %i AS primary_value, %i AS scanned_value, option_name AS row_identity FROM %i WHERE %i > %s AND %i <= %s AND (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) AND option_name NOT LIKE %s AND option_name NOT LIKE %s AND option_name NOT LIKE %s ORDER BY %i ASC',
+                            $primary,
+                            $column,
+                            $table,
+                            $primary,
+                            $cursor_primary_value,
+                            $primary,
+                            $window_end,
+                            $column,
+                            $jpg_like,
+                            $column,
+                            $jpeg_like,
+                            $column,
+                            $png_like,
+                            $ultracache_option_like,
+                            $ultracache_transient_like,
+                            $ultracache_site_transient_like,
+                            $primary
+                        ),
+                        ARRAY_A
+                    );
+                } else {
+                    $rows = $wpdb->get_results(
+                        $wpdb->prepare(
+                            'SELECT %i AS primary_value, %i AS scanned_value, option_name AS row_identity FROM %i WHERE %i <= %s AND (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) AND option_name NOT LIKE %s AND option_name NOT LIKE %s AND option_name NOT LIKE %s ORDER BY %i ASC',
+                            $primary,
+                            $column,
+                            $table,
+                            $primary,
+                            $window_end,
+                            $column,
+                            $jpg_like,
+                            $column,
+                            $jpeg_like,
+                            $column,
+                            $png_like,
+                            $ultracache_option_like,
+                            $ultracache_transient_like,
+                            $ultracache_site_transient_like,
+                            $primary
+                        ),
+                        ARRAY_A
+                    );
+                }
+            } elseif ($is_attachment_meta_value) {
+                if ('' !== $cursor_primary_value) {
+                    $rows = $wpdb->get_results(
+                        $wpdb->prepare(
+                            'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE %i > %s AND %i <= %s AND (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) AND meta_key NOT IN (%s, %s, %s) ORDER BY %i ASC',
+                            $primary,
+                            $column,
+                            $table,
+                            $primary,
+                            $cursor_primary_value,
+                            $primary,
+                            $window_end,
+                            $column,
+                            $jpg_like,
+                            $column,
+                            $jpeg_like,
+                            $column,
+                            $png_like,
+                            '_wp_attached_file',
+                            '_wp_attachment_metadata',
+                            '_wp_attachment_backup_sizes',
+                            $primary
+                        ),
+                        ARRAY_A
+                    );
+                } else {
+                    $rows = $wpdb->get_results(
+                        $wpdb->prepare(
+                            'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE %i <= %s AND (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) AND meta_key NOT IN (%s, %s, %s) ORDER BY %i ASC',
+                            $primary,
+                            $column,
+                            $table,
+                            $primary,
+                            $window_end,
+                            $column,
+                            $jpg_like,
+                            $column,
+                            $jpeg_like,
+                            $column,
+                            $png_like,
+                            '_wp_attached_file',
+                            '_wp_attachment_metadata',
+                            '_wp_attachment_backup_sizes',
+                            $primary
+                        ),
+                        ARRAY_A
+                    );
+                }
+            } else {
+                if ('' !== $cursor_primary_value) {
+                    $rows = $wpdb->get_results(
+                        $wpdb->prepare(
+                            'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE %i > %s AND %i <= %s AND (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) ORDER BY %i ASC',
+                            $primary,
+                            $column,
+                            $table,
+                            $primary,
+                            $cursor_primary_value,
+                            $primary,
+                            $window_end,
+                            $column,
+                            $jpg_like,
+                            $column,
+                            $jpeg_like,
+                            $column,
+                            $png_like,
+                            $primary
+                        ),
+                        ARRAY_A
+                    );
+                } else {
+                    $rows = $wpdb->get_results(
+                        $wpdb->prepare(
+                            'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE %i <= %s AND (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) ORDER BY %i ASC',
+                            $primary,
+                            $column,
+                            $table,
+                            $primary,
+                            $window_end,
+                            $column,
+                            $jpg_like,
+                            $column,
+                            $jpeg_like,
+                            $column,
+                            $png_like,
+                            $primary
+                        ),
+                        ARRAY_A
+                    );
+                }
+            }
+
+            return array(
+                'success' => is_array($rows),
+                'rows' => is_array($rows) ? $rows : array(),
+                'scanPrimaryValues' => $primary_rows,
+                'scannedRows' => $scanned_rows,
+                'nextPrimary' => $window_end,
+                'nextOffset' => 0,
+                'exhausted' => $scanned_rows < $limit,
+                'queryMs' => max(0, (int) round((microtime(true) - $query_started) * 1000)),
+                'pagination' => 'keyset',
             );
-        } elseif ($use_keyset) {
+        }
+
+        /*
+         * Unsupported table shapes retain bounded OFFSET traversal. These rows
+         * are read directly because there is no stable single integer key from
+         * which to construct a bounded range predicate.
+         */
+        if ('' !== $primary && $is_options_value) {
             $rows = $wpdb->get_results(
                 $wpdb->prepare(
-                    'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE %i > %s AND (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) ORDER BY %i ASC LIMIT %d',
+                    'SELECT %i AS primary_value, %i AS scanned_value, option_name AS row_identity FROM %i WHERE option_name NOT LIKE %s AND option_name NOT LIKE %s AND option_name NOT LIKE %s ORDER BY %i ASC LIMIT %d OFFSET %d',
                     $primary,
                     $column,
                     $table,
+                    $ultracache_option_like,
+                    $ultracache_transient_like,
+                    $ultracache_site_transient_like,
                     $primary,
-                    '' !== $cursor_primary_value ? $cursor_primary_value : '0',
-                    $column,
-                    $jpg_like,
-                    $column,
-                    $jpeg_like,
-                    $column,
-                    $png_like,
-                    $primary,
-                    $limit
+                    $limit,
+                    $offset
                 ),
                 ARRAY_A
             );
         } elseif ('' !== $primary && $is_attachment_meta_value) {
             $rows = $wpdb->get_results(
                 $wpdb->prepare(
-                    'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) AND meta_key NOT IN (%s, %s, %s) ORDER BY %i ASC LIMIT %d OFFSET %d',
+                    'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE meta_key NOT IN (%s, %s, %s) ORDER BY %i ASC LIMIT %d OFFSET %d',
                     $primary,
                     $column,
                     $table,
-                    $column,
-                    $jpg_like,
-                    $column,
-                    $jpeg_like,
-                    $column,
-                    $png_like,
                     '_wp_attached_file',
                     '_wp_attachment_metadata',
                     '_wp_attachment_backup_sizes',
@@ -884,16 +1661,10 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         } elseif ('' !== $primary) {
             $rows = $wpdb->get_results(
                 $wpdb->prepare(
-                    'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) ORDER BY %i ASC LIMIT %d OFFSET %d',
+                    'SELECT %i AS primary_value, %i AS scanned_value FROM %i ORDER BY %i ASC LIMIT %d OFFSET %d',
                     $primary,
                     $column,
                     $table,
-                    $column,
-                    $jpg_like,
-                    $column,
-                    $jpeg_like,
-                    $column,
-                    $png_like,
                     $primary,
                     $limit,
                     $offset
@@ -903,15 +1674,9 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         } else {
             $rows = $wpdb->get_results(
                 $wpdb->prepare(
-                    'SELECT %i AS scanned_value FROM %i WHERE (%i LIKE %s OR %i LIKE %s OR %i LIKE %s) LIMIT %d OFFSET %d',
+                    'SELECT %i AS scanned_value FROM %i LIMIT %d OFFSET %d',
                     $column,
                     $table,
-                    $column,
-                    $jpg_like,
-                    $column,
-                    $jpeg_like,
-                    $column,
-                    $png_like,
                     $limit,
                     $offset
                 ),
@@ -919,33 +1684,45 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             );
         }
 
-        return is_array($rows) ? $rows : array();
+        $query_success = is_array($rows);
+        $rows = $query_success ? $rows : array();
+        return array(
+            'success' => $query_success,
+            'rows' => $rows,
+            'scanPrimaryValues' => array(),
+            'scannedRows' => count($rows),
+            'nextPrimary' => $cursor_primary_value,
+            'nextOffset' => $offset + count($rows),
+            'exhausted' => count($rows) < $limit,
+            'queryMs' => max(0, (int) round((microtime(true) - $query_started) * 1000)),
+            'pagination' => 'offset',
+        );
     }
 
-    private function get_media_replacement_ref_index_summary($job_id)
+
+    private function get_media_replacement_ref_index_summary()
     {
         global $wpdb;
 
         $ref_index_table = $this->get_media_replacement_ref_index_table_name();
-        $job_id = sanitize_key((string) $job_id);
-        if ('' === $ref_index_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $ref_index_table || !($wpdb instanceof wpdb)) {
             return array('total' => 0, 'serialized' => 0, 'json' => 0, 'matched' => 0, 'tables' => 0);
         }
 
         $row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT COUNT(*) AS total_refs, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs, SUM(CASE WHEN matched_item_id > 0 THEN 1 ELSE 0 END) AS matched_refs FROM %i WHERE job_id = %s',
+                'SELECT COUNT(*) AS total_refs, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs, SUM(CASE WHEN matched_item_id > 0 THEN 1 ELSE 0 END) AS matched_refs FROM %i WHERE status <> %s',
                 $ref_index_table,
-                $job_id
+                'excluded'
             ),
             ARRAY_A
         );
 
         $table_count = (int) $wpdb->get_var(
             $wpdb->prepare(
-                'SELECT COUNT(DISTINCT table_name) FROM %i WHERE job_id = %s',
+                'SELECT COUNT(DISTINCT table_name) FROM %i WHERE status <> %s',
                 $ref_index_table,
-                $job_id
+                'excluded'
             )
         );
 
@@ -958,6 +1735,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
+
     public function scan_media_library_replacement_database_references($args = array())
     {
         if (!$this->ensure_media_replacement_tables()) {
@@ -968,15 +1746,8 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array(
-                'success' => false,
-                'message' => __('Complete replacement metadata planning before scanning database references.', 'ultracache'),
-            );
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            return $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for database reference scanning.', 'ultracache'));
+        if (!$this->media_replacement_has_registry_rows()) {
+            return $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for database reference scanning.', 'ultracache'));
         }
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 250;
@@ -986,14 +1757,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $deadline = microtime(true) + $time_budget;
 
         $state = $this->get_media_replacement_ref_index_state();
-        $start_new = '' === $state['job_id'] || $state['job_id'] !== $job_id || !empty($args['reset']) || !empty($args['start']);
+        $start_new = 'idle' === $state['status'] || !empty($args['reset']) || !empty($args['start']);
         if ($start_new) {
             $specs = $this->get_media_replacement_database_reference_specs();
-            $manifest = $this->save_media_replacement_database_reference_specs($job_id, $specs);
+            $manifest = $this->save_media_replacement_database_reference_specs($specs);
             $specs_hash = isset($manifest['specs_hash']) ? (string) $manifest['specs_hash'] : '';
-            $this->reset_media_replacement_ref_index_registry($job_id);
+            $this->reset_media_replacement_ref_index_registry();
             $state = $this->update_media_replacement_ref_index_state(array(
-                'job_id'               => $job_id,
                 'status'               => 'indexing',
                 'cursor_spec_index'    => 0,
                 'cursor_offset'        => 0,
@@ -1010,14 +1780,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 'completed_at'         => '',
             ));
         } else {
-            $manifest = $this->get_saved_media_replacement_database_reference_specs($job_id);
+            $manifest = $this->get_saved_media_replacement_database_reference_specs();
             if (empty($manifest['initialized'])) {
                 return array(
                     'success' => false,
                     'blocked' => true,
                     'status'  => 'database_scan_manifest_missing',
                     'message' => __('The persisted database scan manifest is missing or invalid. Restart Prepare to rebuild it.', 'ultracache'),
-                    'jobId'   => $job_id,
                     'hasMore' => false,
                 );
             }
@@ -1032,17 +1801,15 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 'blocked' => true,
                 'status'  => 'database_scan_spec_changed',
                 'message' => __('The persisted database scan specification changed. Restart Prepare to create a consistent plan.', 'ultracache'),
-                'jobId'   => $job_id,
                 'hasMore' => false,
             );
         }
         if ('completed' === $state['status']) {
-            $summary = $this->get_media_replacement_ref_index_summary($job_id);
+            $summary = $this->get_media_replacement_ref_index_summary();
             return array(
                 'success' => true,
                 /* translators: %d: indexed database reference count. */
                 'message' => sprintf(__('Database reference index is already complete with %d indexed JPG/PNG references.', 'ultracache'), (int) $summary['total']),
-                'jobId' => $job_id,
                 'status' => 'ref_indexed',
                 'hasMore' => false,
                 'batchScannedRows' => 0,
@@ -1065,7 +1832,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return array(
                 'success' => true,
                 'message' => __('Database reference index found no text-like WordPress table columns to scan.', 'ultracache'),
-                'jobId' => $job_id,
                 'status' => 'ref_indexed',
                 'hasMore' => false,
                 'referencesFound' => 0,
@@ -1084,10 +1850,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $batch_serialized = 0;
         $batch_json = 0;
         $batch_columns_completed = 0;
+        $batch_query_ms = 0;
         $iterations = 0;
         $last_pagination = 'offset';
+        $current_table = '';
+        $current_column = '';
 
-        while ($remaining > 0 && $state['cursor_spec_index'] < $total_specs && $iterations < 25 && ($batch_rows === 0 || microtime(true) < $deadline)) {
+        while ($remaining > 0 && $state['cursor_spec_index'] < $total_specs && $iterations < 25 && (0 === $iterations || microtime(true) < $deadline)) {
             $spec = isset($specs[$state['cursor_spec_index']]) ? $specs[$state['cursor_spec_index']] : null;
             if (!is_array($spec)) {
                 $state['cursor_spec_index']++;
@@ -1099,35 +1868,71 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
             $pagination = isset($spec['pagination']) && 'keyset' === (string) $spec['pagination'] ? 'keyset' : 'offset';
             $last_pagination = $pagination;
-            $query_limit = $remaining;
-            $rows = $this->get_media_replacement_database_reference_candidate_rows(
+            $current_table = $this->sanitize_media_replacement_db_identifier((string) ($spec['table'] ?? ''), 191);
+            $current_column = $this->sanitize_media_replacement_db_identifier((string) ($spec['column'] ?? ''), 64);
+            $query_limit = $this->get_media_replacement_database_reference_window_limit($spec, $remaining);
+            $page = $this->get_media_replacement_database_reference_candidate_rows(
                 $spec,
                 $query_limit,
                 $state['cursor_offset'],
                 $state['cursor_primary_value']
             );
-            $fetched_count = count($rows);
-            $processed_in_spec = 0;
-            $last_primary_value = '';
+
+            if (empty($page['success'])) {
+                return array(
+                    'success' => false,
+                    'blocked' => true,
+                    'status' => 'database_scan_query_failed',
+                    'message' => sprintf(
+                        /* translators: 1: database table, 2: database column. */
+                        __('The bounded database reference query failed for %1$s.%2$s. Restart Prepare after correcting the database error.', 'ultracache'),
+                        $current_table,
+                        $current_column
+                    ),
+                        'hasMore' => false,
+                );
+            }
+
+            $batch_query_ms += max(0, (int) ($page['queryMs'] ?? 0));
+            $rows = isset($page['rows']) && is_array($page['rows']) ? $page['rows'] : array();
+            $processed_candidates = 0;
+            $last_processed_primary = '';
 
             foreach ($rows as $db_row) {
-                if ($batch_rows > 0 && microtime(true) >= $deadline) {
+                if ($processed_candidates > 0 && microtime(true) >= $deadline) {
                     break;
                 }
+
                 $stored_value = isset($db_row['scanned_value']) ? (string) $db_row['scanned_value'] : '';
                 $primary_value = isset($db_row['primary_value']) ? (string) $db_row['primary_value'] : '';
                 if ('' === $primary_value) {
-                    $primary_value = 'offset-' . (string) ($state['cursor_offset'] + $processed_in_spec);
+                    $primary_value = 'offset-' . (string) ($state['cursor_offset'] + $processed_candidates);
                 } elseif ('keyset' === $pagination) {
-                    $last_primary_value = $primary_value;
+                    $last_processed_primary = $primary_value;
                 }
 
-                if ('' !== $stored_value) {
+                if ('' !== $stored_value && preg_match('/\.(?:jpe?g|png)/i', $stored_value)) {
                     $references = $this->extract_media_replacement_image_references_from_value($stored_value);
                     $row_serialized = function_exists('is_serialized') && is_serialized($stored_value);
                     $row_json = $this->is_media_replacement_json_like_value($stored_value);
                     foreach ($references as $reference) {
-                        if ($this->insert_media_replacement_ref_index_row($job_id, $spec, $primary_value, $reference, $stored_value)) {
+                        $inserted = $this->insert_media_replacement_ref_index_row(
+                                        $spec,
+                            $primary_value,
+                            $reference,
+                            $stored_value,
+                            isset($db_row['row_identity']) ? (string) $db_row['row_identity'] : ''
+                        );
+                        if (false === $inserted) {
+                            return array(
+                                'success' => false,
+                                'blocked' => true,
+                                'status' => 'database_reference_index_write_failed',
+                                'message' => __('A database reference could not be persisted in the replacement index. Restart Prepare after correcting the database error.', 'ultracache'),
+                                                'hasMore' => false,
+                            );
+                        }
+                        if ($inserted > 0) {
                             $batch_refs++;
                             if ($row_serialized) {
                                 $batch_serialized++;
@@ -1138,35 +1943,74 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                         }
                     }
                 }
-                $processed_in_spec++;
-                $batch_rows++;
-                $state['scanned_rows']++;
-                $remaining--;
+
+                $processed_candidates++;
             }
 
-            if ('keyset' === $pagination && '' !== $last_primary_value) {
-                $state['cursor_primary_value'] = $last_primary_value;
-            } elseif ('offset' === $pagination) {
-                $state['cursor_offset'] += $processed_in_spec;
+            $candidate_count = count($rows);
+            $all_candidates_processed = $processed_candidates >= $candidate_count;
+            $advanced_rows = 0;
+
+            if ('keyset' === $pagination) {
+                $scan_primary_values = isset($page['scanPrimaryValues']) && is_array($page['scanPrimaryValues'])
+                    ? array_values(array_map('strval', $page['scanPrimaryValues']))
+                    : array();
+
+                if ($all_candidates_processed) {
+                    $state['cursor_primary_value'] = (string) ($page['nextPrimary'] ?? $state['cursor_primary_value']);
+                    $advanced_rows = max(0, (int) ($page['scannedRows'] ?? count($scan_primary_values)));
+                } elseif ('' !== $last_processed_primary) {
+                    $state['cursor_primary_value'] = $last_processed_primary;
+                    $position = array_search($last_processed_primary, $scan_primary_values, true);
+                    $advanced_rows = false === $position ? 1 : ((int) $position + 1);
+                }
+            } else {
+                $advanced_rows = $processed_candidates;
+                $state['cursor_offset'] += $advanced_rows;
             }
 
-            if ($processed_in_spec < $fetched_count) {
+            $advanced_rows = min($remaining, max(0, $advanced_rows));
+            $batch_rows += $advanced_rows;
+            $state['scanned_rows'] += $advanced_rows;
+            $remaining -= $advanced_rows;
+
+            if (!$all_candidates_processed) {
                 break;
             }
 
-            if ($fetched_count < $query_limit) {
+            if (!empty($page['exhausted'])) {
                 $state['cursor_spec_index']++;
                 $state['cursor_offset'] = 0;
                 $state['cursor_primary_value'] = '';
                 $state['scanned_columns']++;
                 $batch_columns_completed++;
+            } elseif (0 === $advanced_rows) {
+                return array(
+                    'success' => false,
+                    'blocked' => true,
+                    'status' => 'database_scan_no_progress',
+                    'message' => sprintf(
+                        /* translators: 1: database table, 2: database column. */
+                        __('The bounded database reference cursor made no progress for %1$s.%2$s. Restart Prepare after checking the table key.', 'ultracache'),
+                        $current_table,
+                        $current_column
+                    ),
+                        'hasMore' => false,
+                );
             }
+
             $iterations++;
         }
 
         $state['indexed_refs'] += $batch_refs;
         $state['serialized_refs'] += $batch_serialized;
         $state['json_refs'] += $batch_json;
+        $state['current_table'] = $current_table;
+        $state['current_column'] = $current_column;
+        $state['current_pagination'] = $last_pagination;
+        $state['last_query_ms'] = $batch_query_ms;
+        $state['last_batch_rows'] = $batch_rows;
+        $state['last_batch_refs'] = $batch_refs;
         $has_more = $state['cursor_spec_index'] < $total_specs;
         if (!$has_more) {
             $live_specs = $this->get_media_replacement_database_reference_specs();
@@ -1180,8 +2024,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                     'blocked' => true,
                     'status' => 'database_scan_schema_changed',
                     'message' => __('The database schema changed while the reference index was running. Restart Prepare to rebuild a consistent plan.', 'ultracache'),
-                    'jobId' => $job_id,
-                    'hasMore' => false,
+                        'hasMore' => false,
                 );
             }
             $state['status'] = 'completed';
@@ -1189,6 +2032,9 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             $state['cursor_spec_index'] = $total_specs;
             $state['cursor_offset'] = 0;
             $state['cursor_primary_value'] = '';
+            $state['current_table'] = '';
+            $state['current_column'] = '';
+            $state['current_pagination'] = '';
         } else {
             $state['status'] = 'indexing';
         }
@@ -1210,7 +2056,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 'tables' => count($completed_tables),
             );
         } else {
-            $summary = $this->get_media_replacement_ref_index_summary($job_id);
+            $summary = $this->get_media_replacement_ref_index_summary();
         }
 
         $progress = $total_specs > 0 ? min(100, round((min($state['cursor_spec_index'], $total_specs) / $total_specs) * 100, 1)) : 100;
@@ -1218,10 +2064,20 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             'success'             => true,
             'message'             => $has_more
                 /* translators: %1$d: completed column count; %2$d: total column count; %3$d: indexed reference count. */
-                ? sprintf(__('Database reference index: %1$d of %2$d text-like columns complete, %3$d references indexed.', 'ultracache'), (int) min($state['cursor_spec_index'], $total_specs), $total_specs, (int) $summary['total'])
+                ? sprintf(
+                    /* translators: 1: completed columns, 2: total columns, 3: rows scanned in this request, 4: total rows scanned, 5: indexed references, 6: current table, 7: current column, 8: current keyset/offset cursor. */
+                    __('Database reference index: %1$d of %2$d text-like columns complete; %3$d rows scanned in this request, %4$d total; %5$d references indexed. Current: %6$s.%7$s · cursor %8$s.', 'ultracache'),
+                    (int) min($state['cursor_spec_index'], $total_specs),
+                    $total_specs,
+                    $batch_rows,
+                    (int) $state['scanned_rows'],
+                    (int) $summary['total'],
+                    '' !== $current_table ? $current_table : '—',
+                    '' !== $current_column ? $current_column : '—',
+                    'keyset' === $last_pagination ? (string) $state['cursor_primary_value'] : (string) $state['cursor_offset']
+                )
                 /* translators: %d: indexed database reference count. */
                 : sprintf(__('Database reference index completed with %d JPG/PNG references.', 'ultracache'), (int) $summary['total']),
-            'jobId'               => $job_id,
             'status'              => $has_more ? 'ref_indexing' : 'ref_indexed',
             'hasMore'             => $has_more,
             'batchSize'           => $limit,
@@ -1238,6 +2094,11 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             'matchedRefs'         => (int) $summary['matched'],
             'indexedTables'       => (int) $summary['tables'],
             'databaseScanPagination' => $last_pagination,
+            'databaseScanTable'  => $current_table,
+            'databaseScanColumn' => $current_column,
+            'databaseScanCursorPrimary' => (string) $state['cursor_primary_value'],
+            'databaseScanCursorOffset' => (int) $state['cursor_offset'],
+            'databaseScanQueryMs' => $batch_query_ms,
             'progressPercent'     => $progress,
             'databaseReferenceIndexReady' => !$has_more,
             'databaseReferencesScanned' => !$has_more,
@@ -1248,20 +2109,19 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
-    private function get_media_replacement_ref_match_summary($job_id)
+    private function get_media_replacement_ref_match_summary()
     {
         global $wpdb;
 
         $ref_index_table = $this->get_media_replacement_ref_index_table_name();
         $refs_table      = $this->get_media_replacement_refs_table_name();
-        $job_id          = sanitize_key((string) $job_id);
-        if ('' === $ref_index_table || '' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $ref_index_table || '' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $index_row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT COUNT(*) AS total_indexed, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS indexed_pending, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS matched_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS unmatched_refs, SUM(CASE WHEN status = %s AND matched_item_id = 0 THEN 1 ELSE 0 END) AS unmatched_ignored, SUM(CASE WHEN status = %s AND matched_item_id > 0 THEN 1 ELSE 0 END) AS unmatched_relevant, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refs, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE job_id = %s',
+                'SELECT COUNT(*) AS total_indexed, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS indexed_pending, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS matched_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS unmatched_refs, SUM(CASE WHEN status = %s AND matched_item_id = 0 THEN 1 ELSE 0 END) AS unmatched_ignored, SUM(CASE WHEN status = %s AND matched_item_id > 0 THEN 1 ELSE 0 END) AS unmatched_relevant, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refs, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE status <> %s',
                 'indexed',
                 'matched',
                 'unmatched',
@@ -1269,16 +2129,16 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 'unmatched',
                 'failed',
                 $ref_index_table,
-                $job_id
+                'excluded'
             ),
             ARRAY_A
         );
 
         $refs_row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT COUNT(*) AS planned_refs, SUM(serialized) AS planned_serialized, SUM(json_detected) AS planned_json FROM %i WHERE job_id = %s',
+                'SELECT COUNT(*) AS planned_refs, SUM(serialized) AS planned_serialized, SUM(json_detected) AS planned_json FROM %i WHERE status <> %s',
                 $refs_table,
-                $job_id
+                'excluded'
             ),
             ARRAY_A
         );
@@ -1299,28 +2159,26 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
-    private function get_media_replacement_ref_index_match_rows($job_id, $limit = 250)
+    private function get_media_replacement_ref_index_match_rows($limit = 250)
     {
         global $wpdb;
 
         $items_table     = $this->get_media_replacement_items_table_name();
         $ref_index_table = $this->get_media_replacement_ref_index_table_name();
-        $job_id          = sanitize_key((string) $job_id);
         $limit           = max(1, min(1000, absint($limit)));
-        if ('' === $items_table || '' === $ref_index_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || '' === $ref_index_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT x.id AS index_id, x.ref_hash AS index_ref_hash, x.table_name, x.primary_key_column, x.primary_key_value, x.column_name, x.reference_type, x.raw_fragment, x.normalized_fragment, x.url_path_hash, x.serialized, x.json_detected, i.id AS item_id, i.attachment_id, i.old_relative_path, i.old_url, i.new_relative_path, i.new_url FROM %i x LEFT JOIN %i i ON i.job_id = x.job_id AND i.old_path_hash = x.url_path_hash AND i.status IN (%s, %s, %s, %s) WHERE x.job_id = %s AND x.status = %s ORDER BY x.id ASC LIMIT %d',
+                'SELECT x.id AS index_id, x.ref_hash AS index_ref_hash, x.table_name, x.primary_key_column, x.primary_key_value, x.row_identity, x.column_name, x.reference_type, x.raw_fragment, x.normalized_fragment, x.url_path_hash, x.serialized, x.json_detected, i.id AS item_id, i.attachment_id, i.old_relative_path, i.old_url, i.new_relative_path, i.new_url FROM %i x LEFT JOIN %i i ON i.old_path_hash = x.url_path_hash AND i.status IN (%s, %s, %s, %s) WHERE x.status = %s ORDER BY x.id ASC LIMIT %d',
                 $ref_index_table,
                 $items_table,
                 'metadata_ready',
                 'metadata_updated',
                 'refs_scanned',
                 'copied',
-                $job_id,
                 'indexed',
                 $limit
             ),
@@ -1378,32 +2236,32 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return false;
         }
 
-        $job_id            = isset($row['job_id']) ? sanitize_key((string) $row['job_id']) : '';
         $item_id           = isset($row['item_id']) ? absint($row['item_id']) : 0;
         $table_name        = isset($row['table_name']) ? $this->sanitize_media_replacement_db_identifier((string) $row['table_name'], 191) : '';
         $primary_column    = isset($row['primary_key_column']) ? $this->sanitize_media_replacement_db_identifier((string) $row['primary_key_column'], 64) : '';
         $primary_value     = isset($row['primary_key_value']) ? substr(sanitize_text_field((string) $row['primary_key_value']), 0, 191) : '';
+        $row_identity      = isset($row['row_identity']) ? substr((string) $row['row_identity'], 0, 191) : '';
         $column_name       = isset($row['column_name']) ? $this->sanitize_media_replacement_db_identifier((string) $row['column_name'], 64) : '';
         $old_fragment      = isset($row['raw_fragment']) ? (string) $row['raw_fragment'] : '';
         $new_fragment      = (string) $new_fragment;
 
-        if ('' === $job_id || $item_id <= 0 || '' === $table_name || '' === $primary_column || '' === $primary_value || '' === $column_name || '' === $old_fragment || '' === $new_fragment || $old_fragment === $new_fragment || !$this->is_media_replacement_allowed_database_table_name($table_name)) {
+        if ($item_id <= 0 || '' === $table_name || '' === $primary_column || '' === $primary_value || '' === $column_name || '' === $old_fragment || '' === $new_fragment || $old_fragment === $new_fragment || !$this->is_media_replacement_allowed_database_table_name($table_name)) {
             return false;
         }
 
         $old_value_hash = md5($old_fragment);
         $new_value_hash = md5($new_fragment);
         $now            = current_time('mysql', true);
-        $ref_hash       = md5($job_id . '|' . $table_name . '|' . $primary_column . '|' . $primary_value . '|' . $column_name . '|' . $old_value_hash . '|' . $new_value_hash);
+        $ref_hash       = md5($table_name . '|' . $primary_column . '|' . $primary_value . '|' . $row_identity . '|' . $column_name . '|' . $old_value_hash . '|' . $new_value_hash);
 
         $existing_id = $wpdb->get_var(
             $wpdb->prepare(
-                'SELECT id FROM %i WHERE job_id = %s AND table_name = %s AND primary_key_column = %s AND primary_key_value = %s AND column_name = %s AND old_value_hash = %s AND new_value_hash = %s LIMIT 1',
+                'SELECT id FROM %i WHERE table_name = %s AND primary_key_column = %s AND primary_key_value = %s AND row_identity = %s AND column_name = %s AND old_value_hash = %s AND new_value_hash = %s LIMIT 1',
                 $refs_table,
-                $job_id,
                 $table_name,
                 $primary_column,
                 $primary_value,
+                $row_identity,
                 $column_name,
                 $old_value_hash,
                 $new_value_hash
@@ -1414,23 +2272,25 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return false !== $wpdb->update(
                 $refs_table,
                 array(
+                    'row_identity'  => $row_identity,
                     'serialized'    => !empty($row['serialized']) ? 1 : 0,
                     'json_detected' => !empty($row['json_detected']) ? 1 : 0,
                     'updated_at'    => $now,
                 ),
                 array('id' => absint($existing_id)),
-                array('%d', '%d', '%s'),
+                array('%s', '%d', '%d', '%s'),
                 array('%d')
             );
         }
 
         $row_data = array(
-            'job_id'             => $job_id,
+            'job_id'             => '',
             'item_id'            => $item_id,
             'ref_hash'           => $ref_hash,
             'table_name'         => $table_name,
             'primary_key_column' => $primary_column,
             'primary_key_value'  => $primary_value,
+            'row_identity'       => $row_identity,
             'column_name'        => $column_name,
             'old_value_hash'     => $old_value_hash,
             'new_value_hash'     => $new_value_hash,
@@ -1447,25 +2307,23 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return false !== $wpdb->replace(
             $refs_table,
             $row_data,
-            array('%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s')
+            array('%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s')
         );
     }
 
-    private function deduplicate_media_replacement_database_reference_rows($job_id)
+    private function deduplicate_media_replacement_database_reference_rows()
     {
         global $wpdb;
 
         $refs_table = $this->get_media_replacement_refs_table_name();
-        $job_id     = sanitize_key((string) $job_id);
-        if ('' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
             return 0;
         }
 
         $groups = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT MIN(id) AS keep_id, COUNT(*) AS duplicate_count, table_name, primary_key_column, primary_key_value, column_name, old_value_hash, new_value_hash FROM %i WHERE job_id = %s GROUP BY table_name, primary_key_column, primary_key_value, column_name, old_value_hash, new_value_hash HAVING COUNT(*) > 1',
-                $refs_table,
-                $job_id
+                'SELECT MIN(id) AS keep_id, COUNT(*) AS duplicate_count, table_name, primary_key_column, primary_key_value, row_identity, column_name, old_value_hash, new_value_hash FROM %i GROUP BY table_name, primary_key_column, primary_key_value, row_identity, column_name, old_value_hash, new_value_hash HAVING COUNT(*) > 1',
+                $refs_table
             ),
             ARRAY_A
         );
@@ -1480,6 +2338,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             $table_name     = isset($group['table_name']) ? $this->sanitize_media_replacement_db_identifier((string) $group['table_name'], 191) : '';
             $primary_column = isset($group['primary_key_column']) ? $this->sanitize_media_replacement_db_identifier((string) $group['primary_key_column'], 64) : '';
             $primary_value  = isset($group['primary_key_value']) ? substr(sanitize_text_field((string) $group['primary_key_value']), 0, 191) : '';
+            $row_identity   = isset($group['row_identity']) ? substr((string) $group['row_identity'], 0, 191) : '';
             $column_name    = isset($group['column_name']) ? $this->sanitize_media_replacement_db_identifier((string) $group['column_name'], 64) : '';
             $old_hash       = isset($group['old_value_hash']) ? preg_replace('/[^a-f0-9]/', '', strtolower((string) $group['old_value_hash'])) : '';
             $new_hash       = isset($group['new_value_hash']) ? preg_replace('/[^a-f0-9]/', '', strtolower((string) $group['new_value_hash'])) : '';
@@ -1490,13 +2349,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
             $result = $wpdb->query(
                 $wpdb->prepare(
-                    'DELETE FROM %i WHERE job_id = %s AND id <> %d AND table_name = %s AND primary_key_column = %s AND primary_key_value = %s AND column_name = %s AND old_value_hash = %s AND new_value_hash = %s',
+                    'DELETE FROM %i WHERE id <> %d AND table_name = %s AND primary_key_column = %s AND primary_key_value = %s AND row_identity = %s AND column_name = %s AND old_value_hash = %s AND new_value_hash = %s',
                     $refs_table,
-                    $job_id,
-                    $keep_id,
+                        $keep_id,
                     $table_name,
                     $primary_column,
                     $primary_value,
+                    $row_identity,
                     $column_name,
                     $old_hash,
                     $new_hash
@@ -1547,15 +2406,8 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array(
-                'success' => false,
-                'message' => __('Complete the database reference index before matching references.', 'ultracache'),
-            );
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            return $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for database reference matching.', 'ultracache'));
+        if (!$this->media_replacement_has_registry_rows()) {
+            return $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for database reference matching.', 'ultracache'));
         }
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 250;
@@ -1563,7 +2415,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
         $time_budget = max(1.0, min(30.0, $time_budget));
         $deadline = microtime(true) + $time_budget;
-        $rows = $this->get_media_replacement_ref_index_match_rows($job_id, $limit);
+        $rows = $this->get_media_replacement_ref_index_match_rows($limit);
 
         $batch_processed = 0;
         $batch_matched = 0;
@@ -1594,8 +2446,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 continue;
             }
 
-            $row['job_id'] = $job_id;
-            $new_fragment = $this->build_media_replacement_new_fragment_for_index($row, $row);
+                $new_fragment = $this->build_media_replacement_new_fragment_for_index($row, $row);
             if ('' === $new_fragment) {
                 $this->update_media_replacement_ref_index_match_result($index_id, $item_id, 'failed', __('Could not build a same-style replacement fragment for the indexed reference.', 'ultracache'));
                 $batch_failed++;
@@ -1611,8 +2462,8 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             }
         }
 
-        $duplicates_removed = $this->deduplicate_media_replacement_database_reference_rows($job_id);
-        $summary = $this->get_media_replacement_ref_match_summary($job_id);
+        $duplicates_removed = $this->deduplicate_media_replacement_database_reference_rows();
+        $summary = $this->get_media_replacement_ref_match_summary();
         $remaining = max(0, (int) ($summary['indexedPending'] ?? 0));
         $total = max(0, (int) ($summary['indexedTotal'] ?? 0));
         $failed_total = max(0, (int) ($summary['failedIndexed'] ?? 0));
@@ -1630,7 +2481,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                     ? sprintf(__('Database reference matching: %1$d planned replacements from %2$d indexed references.', 'ultracache'), (int) $summary['plannedRefs'], $total)
                     /* translators: %1$d: planned replacement count; %2$d: indexed reference count. */
                     : sprintf(__('Database reference matching completed with %1$d planned replacements from %2$d indexed references.', 'ultracache'), (int) $summary['plannedRefs'], $total)),
-            'jobId'                => $job_id,
             'status'               => $failed_total > 0 ? 'refs_match_failed' : ($has_more ? 'refs_matching' : 'refs_matched'),
             'hasMore'              => $has_more,
             'batchSize'            => $limit,
@@ -1658,28 +2508,26 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
     }
 
 
-    private function get_media_replacement_database_apply_summary($job_id)
+    private function get_media_replacement_database_apply_summary()
     {
-        return $this->get_media_replacement_database_preview_summary($job_id);
+        return $this->get_media_replacement_database_preview_summary();
     }
 
-    private function get_media_replacement_database_apply_rows($job_id, $limit = 50)
+    private function get_media_replacement_database_apply_rows($limit = 50)
     {
         global $wpdb;
 
         $refs_table = $this->get_media_replacement_refs_table_name();
-        $job_id     = sanitize_key((string) $job_id);
         $limit      = max(1, min(250, absint($limit)));
 
-        if ('' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, item_id, table_name, primary_key_column, primary_key_value, column_name, old_fragment, new_fragment, serialized, json_detected, status FROM %i WHERE job_id = %s AND status = %s ORDER BY id ASC LIMIT %d',
+                'SELECT id, item_id, table_name, primary_key_column, primary_key_value, row_identity, column_name, old_fragment, new_fragment, serialized, json_detected, status FROM %i WHERE status = %s ORDER BY id ASC LIMIT %d',
                 $refs_table,
-                $job_id,
                 'pending',
                 $limit
             ),
@@ -1695,7 +2543,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         $refs_table = $this->get_media_replacement_refs_table_name();
         $ref_id     = absint($ref_id);
-        $status     = in_array((string) $status, array('replaced', 'failed'), true) ? (string) $status : 'failed';
+        $status     = in_array((string) $status, array('replaced', 'failed', 'excluded'), true) ? (string) $status : 'failed';
 
         if ('' === $refs_table || $ref_id <= 0 || !($wpdb instanceof wpdb)) {
             return false;
@@ -1712,6 +2560,127 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             array('%s', '%s', '%s'),
             array('%d')
         );
+    }
+
+
+    private function exclude_media_replacement_internal_database_references()
+    {
+        global $wpdb;
+
+        $refs_table = $this->get_media_replacement_refs_table_name();
+        $ref_index_table = $this->get_media_replacement_ref_index_table_name();
+        if ('' === $refs_table || '' === $ref_index_table || !($wpdb instanceof wpdb)) {
+            return 0;
+        }
+
+        $excluded = 0;
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT id, table_name, primary_key_column, primary_key_value, row_identity FROM %i WHERE status <> %s',
+                $refs_table,
+                'excluded'
+            ),
+            ARRAY_A
+        );
+        foreach ((array) $rows as $row) {
+            if (!$this->is_media_replacement_internal_database_ref((array) $row)) {
+                continue;
+            }
+            if (false !== $wpdb->update(
+                $refs_table,
+                array(
+                    'status'        => 'excluded',
+                    'error_message' => __('UltraCache operational state was excluded from the Media Library replacement content plan.', 'ultracache'),
+                    'updated_at'    => current_time('mysql', true),
+                ),
+                array('id' => absint($row['id'] ?? 0)),
+                array('%s', '%s', '%s'),
+                array('%d')
+            )) {
+                $excluded++;
+            }
+        }
+
+        $index_rows = $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT id, table_name, primary_key_column, primary_key_value, row_identity FROM %i WHERE status <> %s',
+                $ref_index_table,
+                'excluded'
+            ),
+            ARRAY_A
+        );
+        foreach ((array) $index_rows as $row) {
+            if (!$this->is_media_replacement_internal_database_ref((array) $row)) {
+                continue;
+            }
+            $wpdb->update(
+                $ref_index_table,
+                array(
+                    'status'          => 'excluded',
+                    'matched_item_id' => 0,
+                    'error_message'   => __('UltraCache operational state was excluded from the Media Library replacement content index.', 'ultracache'),
+                    'updated_at'      => current_time('mysql', true),
+                ),
+                array('id' => absint($row['id'] ?? 0)),
+                array('%s', '%d', '%s', '%s'),
+                array('%d')
+            );
+        }
+
+        return $excluded;
+    }
+
+    private function retry_media_replacement_failed_database_references()
+    {
+        global $wpdb;
+
+        $refs_table = $this->get_media_replacement_refs_table_name();
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
+            return 0;
+        }
+
+        $retried = 0;
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT id, table_name, primary_key_column, primary_key_value, row_identity FROM %i WHERE status IN (%s, %s)',
+                $refs_table,
+                'failed',
+                'verify_failed'
+            ),
+            ARRAY_A
+        );
+        foreach ((array) $rows as $row) {
+            if ($this->is_media_replacement_internal_database_ref((array) $row)) {
+                continue;
+            }
+            if (false !== $wpdb->update(
+                $refs_table,
+                array(
+                    'status'        => 'pending',
+                    'error_message' => null,
+                    'updated_at'    => current_time('mysql', true),
+                ),
+                array('id' => absint($row['id'] ?? 0)),
+                array('%s', '%s', '%s'),
+                array('%d')
+            )) {
+                $retried++;
+            }
+        }
+
+        return $retried;
+    }
+
+    private function reset_media_replacement_database_plan_for_restart()
+    {
+        if (!$this->reset_media_replacement_ref_index_registry()) {
+            return false;
+        }
+
+        $this->clear_media_replacement_workflow_section('database_index_scan');
+        $this->clear_media_replacement_database_reference_specs();
+        $this->clear_media_replacement_destructive_authorization('database_apply');
+        return true;
     }
 
     private function media_replacement_value_contains_object($value)
@@ -1795,6 +2764,52 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         }
 
         return $value;
+    }
+
+    private function resolve_media_replacement_database_value_encoding($stored_value, $planned_serialized = false, $planned_json_detected = false)
+    {
+        $stored_value          = (string) $stored_value;
+        $planned_serialized    = !empty($planned_serialized);
+        $planned_json_detected = !empty($planned_json_detected);
+
+        if (function_exists('is_serialized') && is_serialized($stored_value)) {
+            return array(
+                'mode'          => 'serialized',
+                'serialized'    => true,
+                'json_detected' => false,
+            );
+        }
+
+        if ($this->is_media_replacement_json_like_value($stored_value)) {
+            return array(
+                'mode'          => 'json',
+                'serialized'    => false,
+                'json_detected' => true,
+            );
+        }
+
+        // Preserve the stricter planned mode when a previously structured value is now malformed.
+        if ($planned_serialized) {
+            return array(
+                'mode'          => 'serialized',
+                'serialized'    => true,
+                'json_detected' => false,
+            );
+        }
+
+        if ($planned_json_detected) {
+            return array(
+                'mode'          => 'json',
+                'serialized'    => false,
+                'json_detected' => true,
+            );
+        }
+
+        return array(
+            'mode'          => 'raw',
+            'serialized'    => false,
+            'json_detected' => false,
+        );
     }
 
     private function validate_media_replacement_database_built_value($replacement_value, $old_fragment, $new_fragment, $serialized, $json_detected)
@@ -1965,6 +2980,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return null;
         }
 
+        if ($this->is_media_replacement_options_database_ref($ref)) {
+            $context = $this->get_media_replacement_option_row_context($ref);
+            return is_array($context) && !empty($context['valid'])
+                ? (string) $context['option_value']
+                : null;
+        }
+
         return $wpdb->get_var(
             $wpdb->prepare(
                 'SELECT %i FROM %i WHERE %i = %s LIMIT 1',
@@ -1976,7 +2998,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
-    private function update_media_replacement_database_row_value(array $ref, $new_value)
+    private function compare_and_swap_media_replacement_database_row_value(array $ref, $expected_value, $new_value)
     {
         global $wpdb;
 
@@ -1986,20 +3008,39 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $column_name    = isset($ref['column_name']) ? $this->sanitize_media_replacement_db_identifier((string) $ref['column_name'], 64) : '';
 
         if ('' === $table_name || '' === $primary_column || '' === $primary_value || '' === $column_name || !($wpdb instanceof wpdb)) {
-            return false;
+            return array('updated' => false, 'conflict' => false, 'error' => true);
         }
 
         if (!$this->is_media_replacement_allowed_database_table_name($table_name)) {
-            return false;
+            return array('updated' => false, 'conflict' => false, 'error' => true);
         }
 
-        return false !== $wpdb->update(
-            $table_name,
-            array($column_name => (string) $new_value),
-            array($primary_column => $primary_value),
-            array('%s'),
-            array('%s')
+        if ($this->is_media_replacement_options_database_ref($ref)) {
+            return $this->compare_and_swap_media_replacement_option_value($ref, $expected_value, $new_value);
+        }
+
+        $updated = $wpdb->query(
+            $wpdb->prepare(
+                'UPDATE %i SET %i = %s WHERE %i = %s AND CAST(%i AS BINARY) = CAST(%s AS BINARY)',
+                $table_name,
+                $column_name,
+                (string) $new_value,
+                $primary_column,
+                $primary_value,
+                $column_name,
+                (string) $expected_value
+            )
         );
+
+        if (false === $updated) {
+            return array('updated' => false, 'conflict' => false, 'error' => true);
+        }
+
+        if (0 === (int) $updated) {
+            return array('updated' => false, 'conflict' => true, 'error' => false);
+        }
+
+        return array('updated' => true, 'conflict' => false, 'error' => false);
     }
 
     private function apply_media_replacement_database_ref(array $ref)
@@ -2012,22 +3053,44 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return array('applied' => false, 'message' => __('Invalid planned database replacement row.', 'ultracache'));
         }
 
+        if ($this->is_media_replacement_internal_database_ref($ref)) {
+            return array(
+                'applied'  => false,
+                'excluded' => true,
+                'message'  => __('UltraCache operational state is outside the Media Library replacement content scope.', 'ultracache'),
+            );
+        }
+
+        $identity = $this->validate_media_replacement_database_ref_identity($ref);
+        if (empty($identity['valid'])) {
+            return array('applied' => false, 'message' => isset($identity['message']) ? (string) $identity['message'] : __('The planned database-row identity could not be verified.', 'ultracache'));
+        }
+
         $stored_value = $this->get_media_replacement_database_row_value($ref);
         if (null === $stored_value) {
             return array('applied' => false, 'message' => __('The database row for this replacement could not be read.', 'ultracache'));
         }
 
         $stored_value = (string) $stored_value;
+        $encoding     = $this->resolve_media_replacement_database_value_encoding(
+            $stored_value,
+            !empty($ref['serialized']),
+            !empty($ref['json_detected'])
+        );
         if (false === strpos($stored_value, $old_fragment)) {
             if (false !== strpos($stored_value, $new_fragment)) {
                 $already_applied = $this->validate_media_replacement_database_built_value(
                     $stored_value,
                     $old_fragment,
                     $new_fragment,
-                    !empty($ref['serialized']),
-                    !empty($ref['json_detected'])
+                    $encoding['serialized'],
+                    $encoding['json_detected']
                 );
                 if (!empty($already_applied['valid'])) {
+                    $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $stored_value);
+                    if (empty($runtime_verification['verified'])) {
+                        return array('applied' => false, 'message' => isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified for the already-applied value.', 'ultracache'));
+                    }
                     return array('applied' => true, 'already_applied' => true, 'message' => '', 'count' => 0);
                 }
                 return array('applied' => false, 'message' => isset($already_applied['message']) ? (string) $already_applied['message'] : __('The already-replaced database value failed validation.', 'ultracache'));
@@ -2039,8 +3102,8 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             $stored_value,
             $old_fragment,
             $new_fragment,
-            !empty($ref['serialized']),
-            !empty($ref['json_detected'])
+            $encoding['serialized'],
+            $encoding['json_detected']
         );
 
         if (empty($replacement['changed'])) {
@@ -2051,26 +3114,34 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             isset($replacement['value']) ? (string) $replacement['value'] : '',
             $old_fragment,
             $new_fragment,
-            !empty($ref['serialized']),
-            !empty($ref['json_detected'])
+            $encoding['serialized'],
+            $encoding['json_detected']
         );
         if (empty($prewrite_validation['valid'])) {
             return array('applied' => false, 'message' => isset($prewrite_validation['message']) ? (string) $prewrite_validation['message'] : __('The built database replacement value failed pre-write validation.', 'ultracache'));
         }
 
-        if (!$this->update_media_replacement_database_row_value($ref, (string) $replacement['value'])) {
-            return array('applied' => false, 'message' => __('The database row could not be updated.', 'ultracache'));
+        $replacement_value = (string) $replacement['value'];
+        $write_result      = $this->compare_and_swap_media_replacement_database_row_value($ref, $stored_value, $replacement_value);
+        if (empty($write_result['updated'])) {
+            return array(
+                'applied'  => false,
+                'conflict' => !empty($write_result['conflict']),
+                'message'  => !empty($write_result['conflict'])
+                    ? __('The database row changed after it was read. No replacement was written; run the database replacement step again with a fresh plan.', 'ultracache')
+                    : (!empty($write_result['message']) ? (string) $write_result['message'] : __('The database row could not be updated.', 'ultracache')),
+            );
         }
 
-        $restore_and_fail = function ($message) use ($ref, $stored_value) {
-            $restored = $this->update_media_replacement_database_row_value($ref, $stored_value);
+        $restore_and_fail = function ($message) use ($ref, $stored_value, $replacement_value) {
+            $restore_result = $this->compare_and_swap_media_replacement_database_row_value($ref, $replacement_value, $stored_value);
             return array(
                 'applied' => false,
-                'message' => $restored
+                'message' => !empty($restore_result['updated'])
                     ? (string) $message
                     : sprintf(
                         /* translators: %s: failure reason. */
-                        __('%s The original database value could not be restored automatically.', 'ultracache'),
+                        __('%s The original database value was not restored because the row changed again or the restore query failed.', 'ultracache'),
                         (string) $message
                     ),
             );
@@ -2086,7 +3157,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return $restore_and_fail(__('The old image reference is still present after the database row update.', 'ultracache'));
         }
 
-        if (!empty($ref['serialized'])) {
+        if (!empty($encoding['serialized'])) {
             $serialized_check = $this->verify_media_replacement_serialized_database_value($verified_value);
             if (empty($serialized_check['verified'])) {
                 return $restore_and_fail(__('The serialized database value could not be decoded immediately after replacement.', 'ultracache'));
@@ -2097,12 +3168,19 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             }
         }
 
-        if (!empty($ref['json_detected'])) {
+        if (!empty($encoding['json_detected'])) {
             json_decode($verified_value, true);
             if (JSON_ERROR_NONE !== json_last_error()) {
                 return $restore_and_fail(__('The JSON-like database value could not be decoded immediately after replacement.', 'ultracache'));
             }
         }
+
+        $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $verified_value);
+        if (empty($runtime_verification['verified'])) {
+            return $restore_and_fail(isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified after replacement.', 'ultracache'));
+        }
+
+        $this->finalize_media_replacement_option_write($write_result);
 
         return array('applied' => true, 'message' => '', 'count' => isset($replacement['count']) ? absint($replacement['count']) : 1);
     }
@@ -2117,20 +3195,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array(
-                'success' => false,
-                'message' => __('Run Preview DB Replacements before applying database replacements.', 'ultracache'),
-            );
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            return $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for database replacement apply. Restore the database backup or roll back attachment metadata, then run Restart Replacement Plan again.', 'ultracache'));
+        if (!$this->media_replacement_has_registry_rows()) {
+            return $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for database replacement apply. Restore the database backup or roll back attachment metadata, then run Restart Replacement Plan again.', 'ultracache'));
         }
 
-        $confirmation = $this->validate_media_replacement_confirmation_token($job_id, 'database_apply', $args);
-        if (empty($confirmation['success'])) {
-            return $confirmation;
+        $authorization = $this->authorize_media_replacement_destructive_action('database_apply', $args);
+        if (empty($authorization['success'])) {
+            return $authorization;
         }
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
@@ -2138,12 +3209,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
         $time_budget = max(1.0, min(30.0, $time_budget));
         $deadline = microtime(true) + $time_budget;
-        $duplicates_removed = $this->deduplicate_media_replacement_database_reference_rows($job_id);
-        $rows = $this->get_media_replacement_database_apply_rows($job_id, $limit);
+        $duplicates_removed = $this->deduplicate_media_replacement_database_reference_rows();
+        $rows = $this->get_media_replacement_database_apply_rows($limit);
 
         $batch_processed = 0;
         $batch_replaced  = 0;
         $batch_failed    = 0;
+        $batch_excluded  = 0;
         $registry_sync_failed = 0;
 
         foreach ($rows as $row) {
@@ -2159,6 +3231,12 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 } else {
                     $registry_sync_failed++;
                 }
+            } elseif (!empty($result['excluded'])) {
+                if ($this->update_media_replacement_database_apply_ref_result($ref_id, 'excluded', isset($result['message']) ? (string) $result['message'] : '')) {
+                    $batch_excluded++;
+                } else {
+                    $registry_sync_failed++;
+                }
             } else {
                 if ($this->update_media_replacement_database_apply_ref_result($ref_id, 'failed', isset($result['message']) ? (string) $result['message'] : __('Database replacement failed.', 'ultracache'))) {
                     $batch_failed++;
@@ -2168,7 +3246,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             }
         }
 
-        $summary = $this->get_media_replacement_database_apply_summary($job_id);
+        $summary = $this->get_media_replacement_database_apply_summary();
         $summary['duplicateRefsSkipped'] = (int) $duplicates_removed;
         $total = isset($summary['totalRefs']) ? max(0, (int) $summary['totalRefs']) : 0;
         $pending = isset($summary['pendingRefs']) ? max(0, (int) $summary['pendingRefs']) : 0;
@@ -2184,14 +3262,18 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 'blocked'            => true,
                 'retryRequired'      => true,
                 'message'            => __('Database values were processed, but one or more replacement registry rows could not be persisted. Resume Do to reconcile the current database values.', 'ultracache'),
-                'jobId'              => $job_id,
                 'status'             => 'database_reconcile_required',
                 'hasMore'            => true,
                 'batchProcessedRefs' => $batch_processed,
                 'batchReplacedRefs'  => $batch_replaced,
                 'batchFailedRefs'    => $batch_failed,
+                'batchExcludedRefs'  => $batch_excluded,
                 'registrySyncFailed' => $registry_sync_failed,
             );
+        }
+
+        if (!$has_more) {
+            $this->clear_media_replacement_destructive_authorization('database_apply');
         }
 
         return array(
@@ -2209,7 +3291,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                     (int) $replaced,
                     (int) $failed
                 ),
-            'jobId'                => $job_id,
             'status'               => $has_more ? 'db_replacing' : 'db_replaced',
             'hasMore'              => $has_more,
             'batchSize'            => $limit,
@@ -2222,6 +3303,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             'pendingRefs'          => $pending,
             'replacedRefs'         => $replaced,
             'failedRefs'           => $failed,
+            'excludedRefs'         => isset($summary['excludedRefs']) ? (int) $summary['excludedRefs'] : 0,
             'serializedRefs'       => isset($summary['serializedRefs']) ? (int) $summary['serializedRefs'] : 0,
             'jsonRefs'             => isset($summary['jsonRefs']) ? (int) $summary['jsonRefs'] : 0,
             'refsScanned'          => $processed,
@@ -2236,23 +3318,21 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
     }
 
 
-    private function get_media_replacement_database_verify_rows($job_id, $limit = 50)
+    private function get_media_replacement_database_verify_rows($limit = 50)
     {
         global $wpdb;
 
         $refs_table = $this->get_media_replacement_refs_table_name();
-        $job_id     = sanitize_key((string) $job_id);
         $limit      = max(1, min(250, absint($limit)));
 
-        if ('' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, item_id, table_name, primary_key_column, primary_key_value, column_name, old_fragment, new_fragment, serialized, json_detected, status FROM %i WHERE job_id = %s AND status IN (%s, %s) ORDER BY id ASC LIMIT %d',
+                'SELECT id, item_id, table_name, primary_key_column, primary_key_value, row_identity, column_name, old_fragment, new_fragment, serialized, json_detected, status FROM %i WHERE status IN (%s, %s) ORDER BY id ASC LIMIT %d',
                 $refs_table,
-                $job_id,
                 'replaced',
                 'verify_failed',
                 $limit
@@ -2288,26 +3368,25 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
-    private function get_media_replacement_database_verify_summary($job_id)
+    private function get_media_replacement_database_verify_summary()
     {
         global $wpdb;
 
         $refs_table = $this->get_media_replacement_refs_table_name();
-        $job_id     = sanitize_key((string) $job_id);
-        if ('' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT COUNT(*) AS total_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_verify, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS verified_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS verify_failed_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refs, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE job_id = %s',
+                'SELECT COUNT(*) AS total_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_verify, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS verified_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS verify_failed_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refs, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE status <> %s',
                 'replaced',
                 'verified',
                 'verify_failed',
                 'pending',
                 'failed',
                 $refs_table,
-                $job_id
+                'excluded'
             ),
             ARRAY_A
         );
@@ -2432,12 +3511,22 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return array('verified' => false, 'message' => __('Invalid planned database replacement row.', 'ultracache'));
         }
 
+        $identity = $this->validate_media_replacement_database_ref_identity($ref);
+        if (empty($identity['valid'])) {
+            return array('verified' => false, 'message' => isset($identity['message']) ? (string) $identity['message'] : __('The planned database-row identity could not be verified.', 'ultracache'));
+        }
+
         $stored_value = $this->get_media_replacement_database_row_value($ref);
         if (null === $stored_value) {
             return array('verified' => false, 'message' => __('The database row for this replacement could not be read.', 'ultracache'));
         }
 
         $stored_value = (string) $stored_value;
+        $encoding     = $this->resolve_media_replacement_database_value_encoding(
+            $stored_value,
+            !empty($ref['serialized']),
+            !empty($ref['json_detected'])
+        );
         if (false !== strpos($stored_value, $old_fragment)) {
             return array('verified' => false, 'message' => __('The old image reference is still present in the database row.', 'ultracache'));
         }
@@ -2446,7 +3535,8 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return array('verified' => false, 'message' => __('The new image reference is missing from the database row.', 'ultracache'));
         }
 
-        if (!empty($ref['serialized'])) {
+        $repair_write_result = array();
+        if (!empty($encoding['serialized'])) {
             $serialized_check = $this->verify_media_replacement_serialized_database_value($stored_value);
             if (empty($serialized_check['verified'])) {
                 return array('verified' => false, 'message' => __('The serialized database value could not be decoded after replacement.', 'ultracache'));
@@ -2455,8 +3545,15 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             if (!empty($serialized_check['repaired']) && isset($serialized_check['value']) && is_string($serialized_check['value'])) {
                 $repaired_value = (string) $serialized_check['value'];
                 if ($repaired_value !== $stored_value) {
-                    if (!$this->update_media_replacement_database_row_value($ref, $repaired_value)) {
-                        return array('verified' => false, 'message' => __('The serialized database value was repaired in memory but could not be saved.', 'ultracache'));
+                    $repair_result = $this->compare_and_swap_media_replacement_database_row_value($ref, $stored_value, $repaired_value);
+                    if (empty($repair_result['updated'])) {
+                        return array(
+                            'verified' => false,
+                            'conflict' => !empty($repair_result['conflict']),
+                            'message'  => !empty($repair_result['conflict'])
+                                ? __('The serialized database row changed while its string lengths were being repaired. The newer value was preserved.', 'ultracache')
+                                : (!empty($repair_result['message']) ? (string) $repair_result['message'] : __('The serialized database value was repaired in memory but could not be saved.', 'ultracache')),
+                        );
                     }
 
                     $stored_value = $repaired_value;
@@ -2466,16 +3563,24 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                     if (false === strpos($stored_value, $new_fragment)) {
                         return array('verified' => false, 'message' => __('The new image reference is missing from the repaired serialized database row.', 'ultracache'));
                     }
+                    $repair_write_result = $repair_result;
                 }
             }
         }
 
-        if (!empty($ref['json_detected']) && $this->is_media_replacement_json_like_value($stored_value)) {
+        if (!empty($encoding['json_detected'])) {
             json_decode($stored_value, true);
             if (JSON_ERROR_NONE !== json_last_error()) {
                 return array('verified' => false, 'message' => __('The JSON database value could not be decoded after replacement.', 'ultracache'));
             }
         }
+
+        $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $stored_value);
+        if (empty($runtime_verification['verified'])) {
+            return array('verified' => false, 'message' => isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified.', 'ultracache'));
+        }
+
+        $this->finalize_media_replacement_option_write($repair_write_result);
 
         return array('verified' => true, 'message' => '');
     }
@@ -2490,20 +3595,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array(
-                'success' => false,
-                'message' => __('Run Apply DB Replacements before verifying database replacements.', 'ultracache'),
-            );
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            return $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for database replacement verification. Restore the database backup or roll back attachment metadata, then run Restart Replacement Plan again.', 'ultracache'));
+        if (!$this->media_replacement_has_registry_rows()) {
+            return $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for database replacement verification. Restore the database backup or roll back attachment metadata, then run Restart Replacement Plan again.', 'ultracache'));
         }
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $limit = max(10, min(250, $limit));
-        $rows  = $this->get_media_replacement_database_verify_rows($job_id, $limit);
+        $rows  = $this->get_media_replacement_database_verify_rows($limit);
 
         $batch_processed = 0;
         $batch_verified  = 0;
@@ -2522,7 +3620,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             }
         }
 
-        $summary = $this->get_media_replacement_database_verify_summary($job_id);
+        $summary = $this->get_media_replacement_database_verify_summary();
         $total = isset($summary['totalRefs']) ? max(0, (int) $summary['totalRefs']) : 0;
         $pending_verify = isset($summary['pendingVerify']) ? max(0, (int) $summary['pendingVerify']) : 0;
         $verified = isset($summary['verifiedRefs']) ? max(0, (int) $summary['verifiedRefs']) : 0;
@@ -2546,7 +3644,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                     (int) $verified,
                     (int) $verify_failed
                 ),
-            'jobId'                => $job_id,
             'status'               => $has_more ? 'db_verifying' : 'db_verified',
             'hasMore'              => $has_more,
             'batchSize'            => $limit,
@@ -2571,28 +3668,26 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             'databaseVerified'     => !$has_more,
             'nextStep'             => $has_more
                 ? __('Continue verifying database replacements in chunks. Do not interrupt this step on large sites.', 'ultracache')
-                : __('Next step: run Cleanup Preview, then Cleanup Apply only after reviewing the candidates.', 'ultracache'),
+                : __('Next step: run Cleanup Preview, then use Delete Originals only after reviewing the candidates.', 'ultracache'),
         );
     }
 
 
-    private function get_media_replacement_database_rollback_rows($job_id, $limit = 50)
+    private function get_media_replacement_database_rollback_rows($limit = 50)
     {
         global $wpdb;
 
         $refs_table = $this->get_media_replacement_refs_table_name();
-        $job_id     = sanitize_key((string) $job_id);
         $limit      = max(1, min(250, absint($limit)));
 
-        if ('' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, item_id, table_name, primary_key_column, primary_key_value, column_name, old_fragment, new_fragment, serialized, json_detected, status FROM %i WHERE job_id = %s AND status IN (%s, %s, %s) ORDER BY id DESC LIMIT %d',
+                'SELECT id, item_id, table_name, primary_key_column, primary_key_value, row_identity, column_name, old_fragment, new_fragment, serialized, json_detected, status FROM %i WHERE status IN (%s, %s, %s) ORDER BY id DESC LIMIT %d',
                 $refs_table,
-                $job_id,
                 'verified',
                 'replaced',
                 'verify_failed',
@@ -2629,19 +3724,18 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
-    private function get_media_replacement_database_rollback_summary($job_id)
+    private function get_media_replacement_database_rollback_summary()
     {
         global $wpdb;
 
         $refs_table = $this->get_media_replacement_refs_table_name();
-        $job_id     = sanitize_key((string) $job_id);
-        if ('' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT COUNT(*) AS total_refs, SUM(CASE WHEN status IN (%s, %s, %s) THEN 1 ELSE 0 END) AS pending_rollback, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS restored_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS rollback_failed_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refs, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE job_id = %s',
+                'SELECT COUNT(*) AS total_refs, SUM(CASE WHEN status IN (%s, %s, %s) THEN 1 ELSE 0 END) AS pending_rollback, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS restored_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS rollback_failed_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refs, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE status <> %s',
                 'verified',
                 'replaced',
                 'verify_failed',
@@ -2650,7 +3744,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 'pending',
                 'failed',
                 $refs_table,
-                $job_id
+                'excluded'
             ),
             ARRAY_A
         );
@@ -2677,14 +3771,44 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return array('restored' => false, 'message' => __('Invalid planned database rollback row.', 'ultracache'));
         }
 
+        $identity = $this->validate_media_replacement_database_ref_identity($ref);
+        if (empty($identity['valid'])) {
+            return array('restored' => false, 'message' => isset($identity['message']) ? (string) $identity['message'] : __('The planned database-row identity could not be verified.', 'ultracache'));
+        }
+
         $stored_value = $this->get_media_replacement_database_row_value($ref);
         if (null === $stored_value) {
             return array('restored' => false, 'message' => __('The database row for this rollback could not be read.', 'ultracache'));
         }
 
         $stored_value = (string) $stored_value;
+        $encoding     = $this->resolve_media_replacement_database_value_encoding(
+            $stored_value,
+            !empty($ref['serialized']),
+            !empty($ref['json_detected'])
+        );
         if (false !== strpos($stored_value, $old_fragment) && false === strpos($stored_value, $new_fragment)) {
-            return array('restored' => true, 'message' => '', 'count' => 0, 'alreadyRestored' => true);
+            $already_restored = $this->validate_media_replacement_database_built_value(
+                $stored_value,
+                $new_fragment,
+                $old_fragment,
+                $encoding['serialized'],
+                $encoding['json_detected']
+            );
+            if (!empty($already_restored['valid'])) {
+                $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $stored_value);
+                if (empty($runtime_verification['verified'])) {
+                    return array('restored' => false, 'message' => isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified for the already-restored value.', 'ultracache'));
+                }
+                return array('restored' => true, 'message' => '', 'count' => 0, 'alreadyRestored' => true);
+            }
+
+            return array(
+                'restored' => false,
+                'message'  => isset($already_restored['message'])
+                    ? (string) $already_restored['message']
+                    : __('The already-restored database value failed validation.', 'ultracache'),
+            );
         }
 
         if (false === strpos($stored_value, $new_fragment)) {
@@ -2695,8 +3819,8 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             $stored_value,
             $new_fragment,
             $old_fragment,
-            !empty($ref['serialized']),
-            !empty($ref['json_detected'])
+            $encoding['serialized'],
+            $encoding['json_detected']
         );
 
         if (empty($replacement['changed'])) {
@@ -2707,26 +3831,34 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             isset($replacement['value']) ? (string) $replacement['value'] : '',
             $new_fragment,
             $old_fragment,
-            !empty($ref['serialized']),
-            !empty($ref['json_detected'])
+            $encoding['serialized'],
+            $encoding['json_detected']
         );
         if (empty($prewrite_validation['valid'])) {
             return array('restored' => false, 'message' => isset($prewrite_validation['message']) ? (string) $prewrite_validation['message'] : __('The built database rollback value failed pre-write validation.', 'ultracache'));
         }
 
-        if (!$this->update_media_replacement_database_row_value($ref, (string) $replacement['value'])) {
-            return array('restored' => false, 'message' => __('The database row could not be restored.', 'ultracache'));
-        }
-
-        $restore_and_fail = function ($message) use ($ref, $stored_value) {
-            $restored = $this->update_media_replacement_database_row_value($ref, $stored_value);
+        $replacement_value = (string) $replacement['value'];
+        $write_result      = $this->compare_and_swap_media_replacement_database_row_value($ref, $stored_value, $replacement_value);
+        if (empty($write_result['updated'])) {
             return array(
                 'restored' => false,
-                'message'  => $restored
+                'conflict' => !empty($write_result['conflict']),
+                'message'  => !empty($write_result['conflict'])
+                    ? __('The database row changed after it was read. The newer value was preserved and rollback did not write.', 'ultracache')
+                    : (!empty($write_result['message']) ? (string) $write_result['message'] : __('The database row could not be restored.', 'ultracache')),
+            );
+        }
+
+        $restore_and_fail = function ($message) use ($ref, $stored_value, $replacement_value) {
+            $restore_result = $this->compare_and_swap_media_replacement_database_row_value($ref, $replacement_value, $stored_value);
+            return array(
+                'restored' => false,
+                'message'  => !empty($restore_result['updated'])
                     ? (string) $message
                     : sprintf(
                         /* translators: %s: failure reason. */
-                        __('%s The replaced database value could not be restored automatically after rollback validation failed.', 'ultracache'),
+                        __('%s The replaced database value was not restored because the row changed again or the recovery query failed.', 'ultracache'),
                         (string) $message
                     ),
             );
@@ -2742,7 +3874,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return $restore_and_fail(__('The replacement image reference is still present after database rollback.', 'ultracache'));
         }
 
-        if (!empty($ref['serialized'])) {
+        if (!empty($encoding['serialized'])) {
             $serialized_check = $this->verify_media_replacement_serialized_database_value($verified_value);
             if (empty($serialized_check['verified'])) {
                 return $restore_and_fail(__('The serialized database value could not be decoded immediately after rollback.', 'ultracache'));
@@ -2752,12 +3884,19 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             }
         }
 
-        if (!empty($ref['json_detected'])) {
+        if (!empty($encoding['json_detected'])) {
             json_decode($verified_value, true);
             if (JSON_ERROR_NONE !== json_last_error()) {
                 return $restore_and_fail(__('The JSON-like database value could not be decoded immediately after rollback.', 'ultracache'));
             }
         }
+
+        $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $verified_value);
+        if (empty($runtime_verification['verified'])) {
+            return $restore_and_fail(isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified after rollback.', 'ultracache'));
+        }
+
+        $this->finalize_media_replacement_option_write($write_result);
 
         return array('restored' => true, 'message' => '', 'count' => isset($replacement['count']) ? absint($replacement['count']) : 1);
     }
@@ -2772,20 +3911,13 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array(
-                'success' => false,
-                'message' => __('Run Verify DB Replacements before rolling back database replacements.', 'ultracache'),
-            );
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            return $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for database rollback. Restore the database backup, then run Restart Replacement Plan again.', 'ultracache'));
+        if (!$this->media_replacement_has_registry_rows()) {
+            return $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for database rollback. Restore the database backup, then run Restart Replacement Plan again.', 'ultracache'));
         }
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $limit = max(10, min(250, $limit));
-        $rows  = $this->get_media_replacement_database_rollback_rows($job_id, $limit);
+        $rows  = $this->get_media_replacement_database_rollback_rows($limit);
 
         $batch_processed = 0;
         $batch_restored  = 0;
@@ -2804,7 +3936,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             }
         }
 
-        $summary = $this->get_media_replacement_database_rollback_summary($job_id);
+        $summary = $this->get_media_replacement_database_rollback_summary();
         $total = isset($summary['totalRefs']) ? max(0, (int) $summary['totalRefs']) : 0;
         $pending_rollback = isset($summary['pendingRollback']) ? max(0, (int) $summary['pendingRollback']) : 0;
         $restored = isset($summary['restoredRefs']) ? max(0, (int) $summary['restoredRefs']) : 0;
@@ -2828,7 +3960,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                     (int) $restored,
                     (int) $rollback_failed
                 ),
-            'jobId'                => $job_id,
             'status'               => $has_more ? 'db_rollback_running' : 'db_rollback_complete',
             'hasMore'              => $has_more,
             'batchSize'            => $limit,
@@ -2858,13 +3989,12 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
     }
 
 
-    private function get_media_replacement_database_preview_summary($job_id)
+    private function get_media_replacement_database_preview_summary()
     {
         global $wpdb;
 
         $refs_table = $this->get_media_replacement_refs_table_name();
-        $job_id     = sanitize_key((string) $job_id);
-        if ('' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
@@ -2877,6 +4007,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             'verifyFailedRefs' => 0,
             'restoredRefs'     => 0,
             'rollbackFailedRefs' => 0,
+            'excludedRefs'     => 0,
             'serializedRefs'   => 0,
             'jsonRefs'         => 0,
             'plainRefs'        => 0,
@@ -2885,9 +4016,8 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT status, COUNT(*) AS ref_count, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE job_id = %s GROUP BY status',
-                $refs_table,
-                $job_id
+                'SELECT status, COUNT(*) AS ref_count, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i GROUP BY status',
+                $refs_table
             ),
             ARRAY_A
         );
@@ -2895,6 +4025,11 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         foreach ((array) $rows as $row) {
             $status = isset($row['status']) ? sanitize_key((string) $row['status']) : '';
             $count  = isset($row['ref_count']) ? max(0, (int) $row['ref_count']) : 0;
+            if ('excluded' === $status) {
+                $summary['excludedRefs'] += $count;
+                continue;
+            }
+
             $summary['totalRefs'] += $count;
             if ('pending' === $status) {
                 $summary['pendingRefs'] += $count;
@@ -2922,9 +4057,9 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         $table_rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT table_name, COUNT(*) AS ref_count FROM %i WHERE job_id = %s GROUP BY table_name ORDER BY ref_count DESC, table_name ASC',
+                'SELECT table_name, COUNT(*) AS ref_count FROM %i WHERE status <> %s GROUP BY table_name ORDER BY ref_count DESC, table_name ASC',
                 $refs_table,
-                $job_id
+                'excluded'
             ),
             ARRAY_A
         );
@@ -2944,26 +4079,25 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return $summary;
     }
 
-    private function get_media_replacement_database_preview_rows($job_id, $limit = 200, $offset = 0)
+    private function get_media_replacement_database_preview_rows($limit = 200, $offset = 0)
     {
         global $wpdb;
 
         $items_table = $this->get_media_replacement_items_table_name();
         $refs_table  = $this->get_media_replacement_refs_table_name();
-        $job_id      = sanitize_key((string) $job_id);
         $limit       = max(1, min(500, absint($limit)));
         $offset      = max(0, absint($offset));
 
-        if ('' === $items_table || '' === $refs_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || '' === $refs_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT r.id, r.item_id, r.table_name, r.primary_key_column, r.primary_key_value, r.column_name, r.old_fragment, r.new_fragment, r.serialized, r.json_detected, r.status, r.error_message, i.attachment_id, i.old_relative_path, i.new_relative_path FROM %i r LEFT JOIN %i i ON r.item_id = i.id WHERE r.job_id = %s ORDER BY r.id ASC LIMIT %d OFFSET %d',
+                'SELECT r.id, r.item_id, r.table_name, r.primary_key_column, r.primary_key_value, r.column_name, r.old_fragment, r.new_fragment, r.serialized, r.json_detected, r.status, r.error_message, i.attachment_id, i.old_relative_path, i.new_relative_path FROM %i r LEFT JOIN %i i ON r.item_id = i.id WHERE r.status <> %s ORDER BY r.id ASC LIMIT %d OFFSET %d',
                 $refs_table,
                 $items_table,
-                $job_id,
+                'excluded',
                 $limit,
                 $offset
             ),
@@ -2990,6 +4124,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 'tableName'        => isset($row['table_name']) ? $this->sanitize_media_replacement_db_identifier((string) $row['table_name'], 191) : '',
                 'primaryKeyColumn' => isset($row['primary_key_column']) ? $this->sanitize_media_replacement_db_identifier((string) $row['primary_key_column'], 64) : '',
                 'primaryKeyValue'  => isset($row['primary_key_value']) ? substr(sanitize_text_field((string) $row['primary_key_value']), 0, 191) : '',
+                'rowIdentity'      => isset($row['row_identity']) ? substr((string) $row['row_identity'], 0, 191) : '',
                 'columnName'       => isset($row['column_name']) ? $this->sanitize_media_replacement_db_identifier((string) $row['column_name'], 64) : '',
                 'oldFragment'      => isset($row['old_fragment']) ? wp_strip_all_tags((string) $row['old_fragment']) : '',
                 'newFragment'      => isset($row['new_fragment']) ? wp_strip_all_tags((string) $row['new_fragment']) : '',
@@ -3013,16 +4148,9 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array(
-                'success' => false,
-                'message' => __('Run Scan Database References before previewing database replacements.', 'ultracache'),
-                'hasReplacementPreview' => false,
-            );
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            $empty = $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for database replacement preview. Restore the database backup or roll back attachment metadata, then run Restart Replacement Plan again.', 'ultracache'));
+        $issue_confirmation_token = !array_key_exists('issue_confirmation_token', $args) || !empty($args['issue_confirmation_token']);
+        if (!$this->media_replacement_has_registry_rows()) {
+            $empty = $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for database replacement preview. Restore the database backup or roll back attachment metadata, then run Restart Replacement Plan again.', 'ultracache'));
             $empty['hasReplacementPreview'] = false;
             return $empty;
         }
@@ -3032,13 +4160,12 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $limit  = max(1, min(500, $limit));
         $offset = max(0, $offset);
 
-        $duplicates_removed = $this->deduplicate_media_replacement_database_reference_rows($job_id);
-        $summary = $this->get_media_replacement_database_preview_summary($job_id);
+        $duplicates_removed = $this->deduplicate_media_replacement_database_reference_rows();
+        $summary = $this->get_media_replacement_database_preview_summary();
         if (empty($summary)) {
             return array(
                 'success' => false,
-                'message' => __('Database replacement preview is not available for the active Media Library replacement job.', 'ultracache'),
-                'jobId' => $job_id,
+                'message' => __('Database replacement preview is not available for the current Media Library replacement workflow.', 'ultracache'),
                 'hasReplacementPreview' => false,
             );
         }
@@ -3052,7 +4179,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $rollback_failed_refs = isset($summary['rollbackFailedRefs']) ? max(0, (int) $summary['rollbackFailedRefs']) : 0;
         $replaced_refs = isset($summary['replacedRefs']) ? max(0, (int) $summary['replacedRefs']) : 0;
         $pending_verify_refs = max(0, $replaced_refs - $verified_refs);
-        $items = $total > 0 ? $this->get_media_replacement_database_preview_rows($job_id, $limit, $offset) : array();
+        $items = $total > 0 ? $this->get_media_replacement_database_preview_rows($limit, $offset) : array();
         $has_more = ($offset + count($items)) < $total;
         $database_replaced = $total > 0 && 0 === $pending_refs;
 
@@ -3092,21 +4219,20 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 $restored_refs
             );
         } elseif ($total > 0) {
-            $next_step = __('Next step: run Cleanup Preview, then Cleanup Apply only after reviewing the candidates.', 'ultracache');
+            $next_step = __('Next step: run Cleanup Preview, then use Delete Originals only after reviewing the candidates.', 'ultracache');
             $message = sprintf(
                 /* translators: %d: verified database reference count. */
                 __('Media Library replacement has verified %d database replacements.', 'ultracache'),
                 $verified_refs
             );
         } else {
-            $next_step = __('No database replacements are pending for this job. The next step is verification/cleanup planning, not DB replacement.', 'ultracache');
-            $message = __('Media Library replacement database replacement preview found no old image references to apply. No database content changes are needed for this job.', 'ultracache');
+            $next_step = __('No database replacements are pending for this workflow. The next step is verification/cleanup planning, not DB replacement.', 'ultracache');
+            $message = __('Media Library replacement database replacement preview found no old image references to apply. No database content changes are needed for this workflow.', 'ultracache');
         }
 
         $response = array(
             'success'               => true,
             'message'               => $message,
-            'jobId'                 => $job_id,
             'hasReplacementPreview' => true,
             'summary'               => $summary,
             'items'                 => $items,
@@ -3123,7 +4249,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             'nextStep'              => $next_step,
         );
 
-        return $this->add_media_replacement_confirmation_token_to_response($response, $job_id, 'database_apply', $pending_refs > 0);
+        return $this->add_media_replacement_confirmation_token_to_response($response, 'database_apply', $issue_confirmation_token && $pending_refs > 0);
     }
 
 }

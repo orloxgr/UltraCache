@@ -185,7 +185,7 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                     }
 
                     $processor->set_attribute('media', 'print');
-                    $processor->set_attribute('onload', 'this.media=' . wp_json_encode($target_media));
+                    $processor->set_attribute('data-ultracache-target-media', $target_media);
                     $processor->set_attribute('data-ultracache-async-css', '1');
                     if (!empty($is_ultracache_generated_css_link) || '' !== $role) {
                         $processor->set_attribute('data-ultracache-generated-css-async', '1');

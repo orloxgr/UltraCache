@@ -25,7 +25,7 @@ trait ULTRACACHE_CLI_Media_Replacement_Trait
      * : Per-chunk server time budget. Default: 15.
      *
      * [--max-batches=<number>]
-     * : Stop after N chunks and leave the job paused. Default: unlimited.
+     * : Stop after N chunks and leave the workflow paused. Default: unlimited.
      *
      * [--reset]
      * : Restart the readiness inventory before scanning. Valid only with --stage=readiness.
@@ -231,21 +231,20 @@ trait ULTRACACHE_CLI_Media_Replacement_Trait
                 $delete_status = method_exists($media, 'get_media_library_replacement_delete_status')
                     ? $media->get_media_library_replacement_delete_status()
                     : array();
+                $starting_fresh = 'verify_complete' === (string) ($delete_status['activeStep'] ?? '');
                 $confirmation_token = (string) ($delete_status['confirmationTokens']['cleanupApply'] ?? '');
-                if (empty($delete_status['deleteActive']) && empty($delete_status['deleteFailed']) && !$confirmation_token) {
+                if ($starting_fresh && '' === $confirmation_token) {
                     if (!method_exists($media, 'confirm_media_library_replacement_delete')) {
                         throw new RuntimeException('Delete Originals confirmation is not available.');
                     }
-                    $confirmation = $media->confirm_media_library_replacement_delete(array(
-                        'generation' => (string) ($delete_status['generation'] ?? ''),
-                    ));
+$confirmation = $media->confirm_media_library_replacement_delete();
                     if (empty($confirmation['success'])) {
                         throw new RuntimeException((string) ($confirmation['message'] ?? 'Delete Originals confirmation failed.'));
                     }
                     $confirmation_token = (string) ($confirmation['confirmationTokens']['cleanupApply'] ?? '');
                 }
-                if ('' === $confirmation_token) {
-                    throw new RuntimeException('Delete Originals confirmation token is missing.');
+                if ($starting_fresh && '' === $confirmation_token) {
+                    throw new RuntimeException('Delete Originals start-confirmation token is missing.');
                 }
             }
 
@@ -348,10 +347,8 @@ trait ULTRACACHE_CLI_Media_Replacement_Trait
         }
 
         if ('prepare' === $stage) {
-            $readiness = $media->get_media_library_replacement_readiness_status();
             return $media->run_media_library_replacement_prepare_chunk(array(
                 'reset' => false,
-                'readiness_generation' => (string) ($readiness['generation'] ?? ''),
                 'session_token' => $token,
                 'limit' => $batch_size,
                 'time_budget' => $time_budget,
@@ -374,10 +371,8 @@ trait ULTRACACHE_CLI_Media_Replacement_Trait
             ));
         }
 
-        $delete = $media->get_media_library_replacement_delete_status();
         return $media->run_media_library_replacement_delete_chunk(array(
             'session_token' => $token,
-            'generation' => (string) ($delete['generation'] ?? ''),
             'limit' => min(100, $batch_size),
             'time_budget' => $time_budget,
             'confirmationToken' => $confirmation_token,
@@ -493,7 +488,7 @@ trait ULTRACACHE_CLI_Media_Replacement_Trait
         $result = $media->manage_media_library_replacement_session('pause', '', $stage, 'cli');
         $this->print_media_replacement_cli_status($media->get_media_library_replacement_workflow_status(), $format);
         if (empty($result['success'])) {
-            WP_CLI::error((string) ($result['message'] ?? 'Could not mark the replacement job paused.'));
+            WP_CLI::error((string) ($result['message'] ?? 'Could not mark the replacement workflow paused.'));
         }
         if ('json' !== $format && 'yaml' !== $format) {
             WP_CLI::success('No active CLI lease was running; the saved replacement stage is paused.');
@@ -544,7 +539,6 @@ trait ULTRACACHE_CLI_Media_Replacement_Trait
         $session = isset($workflow['replacementSession']) && is_array($workflow['replacementSession']) ? $workflow['replacementSession'] : array();
         $recovery = isset($workflow['recovery']) && is_array($workflow['recovery']) ? $workflow['recovery'] : array();
         $rows = array(
-            array('key' => 'Job ID', 'value' => (string) ($workflow['jobId'] ?? '')),
             array('key' => 'Workflow stage', 'value' => (string) ($workflow['workflowStage'] ?? '')),
             array('key' => 'Run status', 'value' => (string) ($workflow['runStatus'] ?? '')),
             array('key' => 'Active step', 'value' => (string) ($workflow['activeStep'] ?? '')),

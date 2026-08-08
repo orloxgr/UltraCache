@@ -124,9 +124,17 @@ private function inject_critical_preload_link_candidates($html, array $candidate
         return $this->insert_html_before_closing_head($html, implode("\n", $tags));
     }
 
-private function inject_safe_lcp_priority_preloads($html)
+private function inject_safe_lcp_priority_preloads($html, $require_observed_credentials = false)
     {
         if (!is_string($html) || '' === $html || false === stripos($html, '</head')) {
+            return $html;
+        }
+
+        // Slider-safe pages must not emit a server-guessed image preload while
+        // the runtime request credentials mode is unknown. The browser-observed
+        // preload path runs before this method and becomes authoritative once an
+        // exact none/anonymous/use-credentials mode has been persisted.
+        if ($require_observed_credentials) {
             return $html;
         }
 
@@ -425,31 +433,13 @@ private function prefer_existing_lcp_preload_equivalent_url($url)
         }
 
         $preferred_path = (string) wp_parse_url($preferred, PHP_URL_PATH);
-        if ('' === $path || '' === $preferred_path) {
+        $format = strtolower((string) pathinfo($preferred_path, PATHINFO_EXTENSION));
+        if (!in_array($format, array('avif', 'webp'), true) || !function_exists('ultracache_get_optimized_media_variant_lookup_for_public_url')) {
             return $url;
         }
 
-        $original_base = preg_replace('/\.(?:png|jpe?g|webp|avif)$/i', '', $path);
-        $preferred_base = preg_replace('/\.(?:png|jpe?g|webp|avif)$/i', '', $preferred_path);
-        if (!is_string($original_base) || !is_string($preferred_base) || '' === $original_base || '' === $preferred_base) {
-            return $url;
-        }
-
-        $uploads_marker = $this->get_uploads_public_path_marker();
-        $avif_marker = $this->get_ultracache_optimized_images_public_path_marker('avif');
-        $webp_marker = $this->get_ultracache_optimized_images_public_path_marker('webp');
-        $original_relative = false !== strpos($original_base, $uploads_marker) ? substr($original_base, strpos($original_base, $uploads_marker) + strlen($uploads_marker)) : '';
-        $preferred_relative = '';
-        if (false !== strpos($preferred_base, $avif_marker)) {
-            $preferred_relative = substr($preferred_base, strpos($preferred_base, $avif_marker) + strlen($avif_marker));
-        } elseif (false !== strpos($preferred_base, $webp_marker)) {
-            $preferred_relative = substr($preferred_base, strpos($preferred_base, $webp_marker) + strlen($webp_marker));
-        }
-
-        if ('' === $original_relative || '' === $preferred_relative || $original_relative !== $preferred_relative) {
-            return $url;
-        }
-
-        return $preferred;
+        $lookup = ultracache_get_optimized_media_variant_lookup_for_public_url($url, $format);
+        $expected = !empty($lookup['url']) ? $this->normalize_public_resource_url((string) $lookup['url']) : '';
+        return '' !== $expected && $expected === $preferred ? $preferred : $url;
     }
 }

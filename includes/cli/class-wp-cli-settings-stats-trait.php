@@ -54,8 +54,11 @@ trait ULTRACACHE_CLI_Settings_Stats_Trait
                 WP_CLI::error('Configure Redis and Varnish passwords from the UltraCache dashboard or directly in wp-config.php constants.');
             }
             $value = $this->coerce_setting_value($key, $args[2]);
-            $next = $current;
-            $next[$key] = $value;
+            $patch = array($key => $value);
+            if (method_exists('Ultra_Cache_WP', 'normalize_page_delivery_mode_patch')) {
+                $patch = Ultra_Cache_WP::normalize_page_delivery_mode_patch($patch);
+            }
+            $next = array_merge($current, $patch);
             $response = Ultra_Cache_WP::persist_dashboard_settings($next);
 
             if (is_wp_error($response)) {

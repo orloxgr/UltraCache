@@ -566,3 +566,137 @@
 }
 
 
+
+.uc-integration-accordion {
+	padding: 0;
+	overflow: hidden;
+}
+
+.uc-integration-accordion__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 24px;
+	padding: 22px 24px;
+}
+
+.uc-integration-accordion__summary {
+	appearance: none;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	padding: 0;
+	margin: 0;
+	min-width: 0;
+	flex: 1 1 auto;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.uc-integration-accordion__summary:disabled {
+	cursor: default;
+}
+
+.uc-integration-accordion__copy {
+	min-width: 0;
+	display: block;
+}
+
+.uc-integration-accordion__title {
+	display: block;
+	font-size: 18px;
+	font-weight: 700;
+	line-height: 1.25;
+	color: var(--uc-text);
+}
+
+.uc-integration-accordion__description {
+	display: block;
+	margin-top: 4px;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.5;
+	letter-spacing: 0.04em;
+	color: var(--uc-text-dim);
+}
+
+.uc-integration-accordion__status {
+	display: inline-flex;
+	margin-top: 9px;
+	padding: 3px 8px;
+	border: 1px solid var(--uc-border);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--uc-text-dim);
+}
+
+.uc-integration-accordion__chevron {
+	flex: 0 0 auto;
+	font-size: 16px;
+	line-height: 1;
+	color: var(--uc-text-dim);
+	transition: transform 0.18s ease;
+}
+
+.uc-integration-accordion__chevron.is-open {
+	transform: rotate(90deg);
+}
+
+.uc-integration-accordion__main-switch {
+	flex: 0 0 min(390px, 42%);
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 14px;
+	min-width: 260px;
+}
+
+.uc-integration-accordion__main-switch.is-locked {
+	opacity: 0.55;
+	filter: grayscale(1);
+	cursor: help;
+}
+
+.uc-integration-accordion__main-switch-label {
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.4;
+	color: var(--uc-text-soft);
+	text-align: right;
+}
+
+.uc-integration-accordion__body {
+	padding: 0 24px 24px;
+	border-top: 1px solid var(--uc-border);
+}
+
+.uc-setting-row--locked {
+	opacity: 0.55;
+	filter: grayscale(1);
+	cursor: help;
+}
+
+@media (max-width: 782px) {
+	.uc-integration-accordion__header {
+		align-items: stretch;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.uc-integration-accordion__main-switch {
+		flex: 0 0 auto;
+		min-width: 0;
+		width: 100%;
+		justify-content: space-between;
+	}
+
+	.uc-integration-accordion__main-switch-label {
+		text-align: left;
+	}
+}

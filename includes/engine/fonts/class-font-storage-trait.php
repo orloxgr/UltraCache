@@ -37,9 +37,9 @@ trait Ultra_Cache_Engine_Font_Storage_Trait
     }
 
 
-    private function get_google_fonts_cache_write_failure_key($hash = '')
+    private function get_google_fonts_cache_write_failure_lock_name($hash = '')
     {
-        $hash = preg_replace('/[^a-z0-9_\\-]/i', '', (string) $hash);
+        $hash = preg_replace('/[^a-z0-9_\-]/i', '', (string) $hash);
         if ('' === $hash) {
             $hash = 'global';
         }
@@ -50,24 +50,21 @@ trait Ultra_Cache_Engine_Font_Storage_Trait
 
     private function get_google_fonts_cache_write_failure_status($hash = '')
     {
-        $stored = get_transient($this->get_google_fonts_cache_write_failure_key($hash));
-        if (false === $stored) {
+        if (!function_exists('ultracache_get_lock_read_only')) {
             return array();
         }
 
-        if (!is_array($stored)) {
-            return array(
-                'active' => true,
-                'retryIn' => 15,
-                'message' => 'Recent Google Fonts cache write failure retry guard is active.',
-            );
+        $stored = ultracache_get_lock_read_only($this->get_google_fonts_cache_write_failure_lock_name($hash));
+        if (empty($stored) || !empty($stored['expired'])) {
+            return array();
         }
 
-        $retry_in = isset($stored['expiresAt']) ? max(0, (int) $stored['expiresAt'] - time()) : 15;
+        $payload = is_array($stored['payload'] ?? null) ? $stored['payload'] : array();
+        $retry_in = max(0, (int) ($stored['expiresAt'] ?? 0) - time());
         return array(
             'active' => true,
-            'retryIn' => min(15, max(0, $retry_in)),
-            'message' => sanitize_text_field((string) ($stored['message'] ?? 'Recent Google Fonts cache write failure retry guard is active.')),
+            'retryIn' => min(15, $retry_in),
+            'message' => sanitize_text_field((string) ($payload['message'] ?? 'Recent Google Fonts cache write failure retry guard is active.')),
         );
     }
 
@@ -81,17 +78,23 @@ trait Ultra_Cache_Engine_Font_Storage_Trait
 
     private function mark_google_fonts_cache_write_failure($hash = '', $ttl = 15, $message = 'Recent Google Fonts cache write failure retry guard is active.')
     {
+        if (!function_exists('ultracache_acquire_lock')) {
+            return;
+        }
+
         $ttl = max(10, min(15, (int) $ttl));
-        set_transient(
-            $this->get_google_fonts_cache_write_failure_key($hash),
-            array(
-                'createdAt' => time(),
-                'expiresAt' => time() + $ttl,
-                'ttl' => $ttl,
-                'message' => sanitize_text_field((string) $message),
-            ),
-            $ttl
+        $lock_name = $this->get_google_fonts_cache_write_failure_lock_name($hash);
+        $token = 'gf-write-failure-' . substr(hash('sha256', $lock_name), 0, 40);
+        $payload = array(
+            'type' => 'google_fonts_write_failure',
+            'createdAt' => time(),
+            'ttl' => $ttl,
+            'message' => sanitize_text_field((string) $message),
         );
+
+        if (!ultracache_acquire_lock($lock_name, $token, $ttl, $payload) && function_exists('ultracache_renew_lock')) {
+            ultracache_renew_lock($lock_name, $token, $ttl, $payload);
+        }
     }
 
 
@@ -1332,17 +1335,14 @@ trait Ultra_Cache_Engine_Font_Storage_Trait
     }
 
 
-    private function get_runtime_font_css_map_cache_key()
-    {
-        return 'ultracache_runtime_font_css_url_map_v3';
-    }
-
-
     private function clear_runtime_font_css_map_cache()
     {
         $this->runtime_font_css_url_map = null;
         $this->runtime_font_css_url_map_current_request = array();
-        delete_transient($this->get_runtime_font_css_map_cache_key());
+
+        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'deactivate_css_rewrite_maps_by_optimization_type')) {
+            Ultra_Cache_WP::deactivate_css_rewrite_maps_by_optimization_type('css-font-mix');
+        }
     }
 
 
@@ -1352,18 +1352,22 @@ trait Ultra_Cache_Engine_Font_Storage_Trait
             return $this->runtime_font_css_url_map;
         }
 
-        $cached = get_transient($this->get_runtime_font_css_map_cache_key());
-        if (is_array($cached)) {
-            $normalized = $this->normalize_runtime_font_css_url_map($cached);
-            $filtered = $this->filter_runtime_font_css_url_map_to_existing_targets($normalized);
-            if ($filtered !== $normalized) {
-                set_transient($this->get_runtime_font_css_map_cache_key(), $filtered, DAY_IN_SECONDS);
+        $map = array();
+        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_css_rewrite_maps_by_optimization_type')) {
+            $rows = Ultra_Cache_WP::get_css_rewrite_maps_by_optimization_type('css-font-mix', 5000);
+            foreach ((array) $rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $source_url = isset($row['source_url']) ? (string) $row['source_url'] : '';
+                $generated_url = isset($row['generated_url']) ? (string) $row['generated_url'] : '';
+                if ('' !== $source_url && '' !== $generated_url) {
+                    $map[$source_url] = $generated_url;
+                }
             }
-            $this->runtime_font_css_url_map = $filtered;
-            return $this->runtime_font_css_url_map;
         }
 
-        $this->runtime_font_css_url_map = array();
+        $this->runtime_font_css_url_map = $this->filter_runtime_font_css_url_map_to_existing_targets($map);
         return $this->runtime_font_css_url_map;
     }
 
@@ -1431,6 +1435,9 @@ trait Ultra_Cache_Engine_Font_Storage_Trait
                 continue;
             }
 
+            if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'deactivate_css_rewrite_map')) {
+                Ultra_Cache_WP::deactivate_css_rewrite_map($source_url, 'css-font-mix');
+            }
             ultracache_debug_log('runtime font CSS map stale target removed', array(
                 'source_url' => $source_url,
                 'css_url'    => $css_url,
@@ -1445,7 +1452,6 @@ trait Ultra_Cache_Engine_Font_Storage_Trait
     {
         $map = $this->filter_runtime_font_css_url_map_to_existing_targets($map);
         $this->runtime_font_css_url_map = $map;
-        set_transient($this->get_runtime_font_css_map_cache_key(), $map, DAY_IN_SECONDS);
         return $map;
     }
 

@@ -1,6 +1,6 @@
 <?php
 /**
- * Capability-gated stale-while-refresh diagnostics for UltraCache Varnish.
+ * Automation-owned stale-grace diagnostics for UltraCache Varnish.
  *
  * @package UltraCache
  */
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 trait Ultra_Cache_WP_Varnish_Stale_Refresh_Trait
 {
     /**
-     * Return the effective stale-while-revalidate diagnostic status.
+     * Return the configured response-driven Varnish grace diagnostic status.
      *
      * @param array $settings Optional dashboard settings.
      * @return array
@@ -23,42 +23,42 @@ trait Ultra_Cache_WP_Varnish_Stale_Refresh_Trait
             $settings = self::get_dashboard_settings();
         }
 
-        $seconds = max(0, min(86400, absint($settings['varnishStaleWhileRevalidateSeconds'] ?? 0)));
-        $ttl_minutes = max(0, min(525600, absint($settings['varnishHtmlTtlMinutes'] ?? 0)));
-        $varnish_enabled = !empty($settings['varnishCliEnabled']);
+        $automation = self::get_varnish_automation_policy($settings);
+        $seconds = max(0, min(86400, absint($automation['staleWhileRevalidateSeconds'] ?? 0)));
+        $varnish_enabled = self::is_varnish_runtime_enabled($settings);
         $cli_settings = self::get_varnish_cli_settings();
-        $capability = self::get_varnish_soft_purge_capability($cli_settings);
+        $soft_purge_capability = self::get_varnish_soft_purge_capability($cli_settings);
 
         if ($seconds <= 0) {
             $status = 'disabled';
-            $message = __('0 disables the UltraCache stale-while-revalidate response directive.', 'ultracache');
+            $message = __('Varnish grace follows the Automation & Scheduling lifetime settings and is currently 0 seconds.', 'ultracache');
         } elseif (!$varnish_enabled) {
             $status = 'inactive';
-            $message = __('Stale-while-revalidate is configured but inactive because Varnish integration is disabled.', 'ultracache');
-        } elseif ($ttl_minutes <= 0) {
-            $status = 'requires-ttl';
-            $message = __('Set a positive Varnish HTML TTL before enabling stale-while-revalidate.', 'ultracache');
-        } elseif (empty($capability['supported'])) {
-            $status = sanitize_key((string) ($capability['status'] ?? 'capability-unverified'));
-            $message = (string) ($capability['message'] ?? __('Stale-while-revalidate requires an active HTTP soft-purge capability.', 'ultracache'));
+            $message = __('Varnish grace is configured by Automation & Scheduling but inactive because Varnish integration is disabled.', 'ultracache');
         } else {
-            $status = 'observed';
-            $message = (string) ($capability['message'] ?? __('Soft purge and the stale-to-fresh refill sequence are verified.', 'ultracache'));
+            $status = 'configured';
+            $message = sprintf(
+                /* translators: %d: Configured Varnish stale-while-revalidate window in seconds. */
+                __('Varnish grace is configured from the Automation & Scheduling stale window: %d seconds.', 'ultracache'),
+                $seconds
+            );
         }
 
-        $observed = !empty($capability['supported'])
-            && !empty($capability['staleVerified'])
-            && !empty($capability['freshHitVerified']);
+        $observed = !empty($soft_purge_capability['supported'])
+            && !empty($soft_purge_capability['staleVerified'])
+            && !empty($soft_purge_capability['freshHitVerified']);
 
         return array(
             'configuredSeconds' => $seconds,
-            'enabled' => $varnish_enabled && $ttl_minutes > 0 && $seconds > 0 && !empty($capability['supported']),
+            'freshTtlMinutes' => max(1, absint($automation['freshTtlMinutes'] ?? 1)),
+            'maxStaleMinutes' => max(1, absint($automation['maxStaleMinutes'] ?? 1)),
+            'enabled' => $varnish_enabled && $seconds > 0,
             'status' => $status,
             'observed' => $observed,
-            'staleVerified' => !empty($capability['staleVerified']),
-            'freshHitVerified' => !empty($capability['freshHitVerified']),
-            'verificationAttemptCount' => absint($capability['verificationAttemptCount'] ?? 0),
-            'softPurgeCapability' => $capability,
+            'staleVerified' => !empty($soft_purge_capability['staleVerified']),
+            'freshHitVerified' => !empty($soft_purge_capability['freshHitVerified']),
+            'verificationAttemptCount' => absint($soft_purge_capability['verificationAttemptCount'] ?? 0),
+            'softPurgeCapability' => $soft_purge_capability,
             'message' => $message,
         );
     }

@@ -7,6 +7,47 @@ defined('ABSPATH') || exit;
 
 trait ULTRACACHE_CLI_Cache_Trait
 {
+    private $ultracache_cli_warm_token = '';
+    private $ultracache_cli_warm_generation = 0;
+    private $ultracache_cli_warm_shutdown_registered = false;
+    private $ultracache_cli_warm_preempted = false;
+
+    private function ensure_cli_warm_session()
+    {
+        if ('' !== (string) $this->ultracache_cli_warm_token) {
+            return (string) $this->ultracache_cli_warm_token;
+        }
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'begin_foreground_warmup_session')) {
+            return '';
+        }
+
+        $result = Ultra_Cache_WP::begin_foreground_warmup_session('cli', 'cli_warm');
+        if (empty($result['success']) || empty($result['token'])) {
+            WP_CLI::error(!empty($result['message']) ? (string) $result['message'] : 'WP-CLI warm-up ownership could not be acquired.');
+        }
+
+        $this->ultracache_cli_warm_token = (string) $result['token'];
+        $this->ultracache_cli_warm_generation = max(0, (int) ($result['generation'] ?? 0));
+        if (!$this->ultracache_cli_warm_shutdown_registered) {
+            $this->ultracache_cli_warm_shutdown_registered = true;
+            register_shutdown_function(array($this, 'release_cli_warm_session'));
+        }
+        return $this->ultracache_cli_warm_token;
+    }
+
+    public function release_cli_warm_session()
+    {
+        $token = (string) $this->ultracache_cli_warm_token;
+        if ('' === $token) {
+            return;
+        }
+        $this->ultracache_cli_warm_token = '';
+        $this->ultracache_cli_warm_generation = 0;
+        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'end_foreground_warmup_session')) {
+            Ultra_Cache_WP::end_foreground_warmup_session($token, 'cli', 'completed');
+        }
+    }
+
     public function purge($args, $assoc_args)
     {
         $engine = $this->get_engine();
@@ -39,6 +80,7 @@ trait ULTRACACHE_CLI_Cache_Trait
             WP_CLI::error('Full purge is not available.');
         }
 
+        $purge_started_at = time();
         $purged = (bool) $engine->purge_all();
         if (!$purged) {
             WP_CLI::error('Full cache purge is already running or the purge lock could not be acquired.');
@@ -46,18 +88,63 @@ trait ULTRACACHE_CLI_Cache_Trait
 
         if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')) {
             $settings = Ultra_Cache_WP::get_dashboard_settings();
-            if (!empty($settings['varnishCliEnabled']) && empty($settings['flushAllIncludeVarnish'])) {
+            $varnish_configured = method_exists('Ultra_Cache_WP', 'is_varnish_runtime_enabled')
+                && Ultra_Cache_WP::is_varnish_runtime_enabled($settings);
+            if ($varnish_configured && empty($settings['flushAllIncludeVarnish'])) {
                 WP_CLI::warning('Varnish integration is enabled, but Flush All Include Varnish is OFF. The local UltraCache cache was purged, but reverse-proxy/Varnish cache was not purged.');
             }
-            if (!empty($settings['varnishCliEnabled']) && !empty($settings['flushAllIncludeVarnish'])) {
-                $varnish_result = get_transient('ultracache_varnish_last_result');
-                if (is_array($varnish_result) && empty($varnish_result['success'])) {
+            if ($varnish_configured && !empty($settings['flushAllIncludeVarnish'])) {
+                $varnish_result = method_exists('Ultra_Cache_WP', 'get_varnish_last_operation_result')
+                    ? Ultra_Cache_WP::get_varnish_last_operation_result()
+                    : array();
+                $varnish_result_time = max(0, (int) ($varnish_result['time'] ?? 0));
+                if ($varnish_result_time < ($purge_started_at - 1)) {
+                    WP_CLI::warning('Varnish purge did not publish a current persistent operation result.');
+                } elseif (empty($varnish_result['success'])) {
                     WP_CLI::warning(!empty($varnish_result['message']) ? (string) $varnish_result['message'] : 'Varnish purge did not report success.');
                 }
             }
         }
 
         WP_CLI::success('Purged the full cache.');
+    }
+
+    /**
+     * Return external-cache stages selected for direct WP-CLI warm commands.
+     *
+     * @return array<string,mixed>
+     */
+    private function get_cli_warm_pipeline_args()
+    {
+        $token = $this->ensure_cli_warm_session();
+        $include_varnish = class_exists('Ultra_Cache_WP')
+            && method_exists('Ultra_Cache_WP', 'should_include_varnish_in_site_warmup')
+            && Ultra_Cache_WP::should_include_varnish_in_site_warmup();
+        $include_litespeed = class_exists('Ultra_Cache_WP')
+            && method_exists('Ultra_Cache_WP', 'should_include_litespeed_in_site_warmup')
+            && Ultra_Cache_WP::should_include_litespeed_in_site_warmup();
+
+        $heartbeat = null;
+        if ('' !== $token && method_exists('Ultra_Cache_WP', 'renew_foreground_warmup_session')) {
+            $generation = max(0, (int) $this->ultracache_cli_warm_generation);
+            $heartbeat = function ($stage = '') use ($token, $generation) {
+                $renewed = Ultra_Cache_WP::renew_foreground_warmup_session($token, 'cli', $stage, '', $generation);
+                if (empty($renewed['success'])) {
+                    $this->ultracache_cli_warm_preempted = true;
+                    $this->ultracache_cli_warm_token = '';
+                    $this->ultracache_cli_warm_generation = 0;
+                    return false;
+                }
+                return true;
+            };
+        }
+
+        return array(
+            'include_varnish' => $include_varnish,
+            'include_litespeed' => $include_litespeed,
+            'warm_context' => 'cli',
+            '_queue_lease_heartbeat' => $heartbeat,
+        );
     }
 
     private function get_warm_buckets_from_assoc_args($assoc_args)
@@ -77,39 +164,420 @@ trait ULTRACACHE_CLI_Cache_Trait
         return $buckets;
     }
 
+    private function run_cli_warm_pipeline_with_lock_retry($engine, $url, array $warm_args)
+    {
+        $max_retries = max(0, min(10, (int) apply_filters('ultracache_cli_warm_lock_retries', 5)));
+        $attempt = 0;
+
+        do {
+            $result = method_exists($engine, 'warm_page_pipeline')
+                ? $engine->warm_page_pipeline($url, $warm_args)
+                : $engine->warm_url($url, $warm_args);
+            if (empty($result['coalesced']) || $attempt >= $max_retries) {
+                return is_array($result) ? $result : array(
+                    'success' => false,
+                    'message' => 'Warm pipeline returned an invalid result.',
+                );
+            }
+
+            sleep(min(3, $attempt + 1));
+            ++$attempt;
+        } while (true);
+    }
+
+    private function get_cli_css_asset_inventory()
+    {
+        $inventory = array(
+            'available' => false,
+            'error' => '',
+            'manifestEntries' => 0,
+            'manifestValidEntries' => 0,
+            'mainBundles' => array(),
+            'leftoverBundles' => array(),
+            'fontMixBundles' => array(),
+            'delayedFontBundles' => array(),
+            'fontCssFiles' => array(),
+            'optimizedCssFiles' => array(),
+            'googleFontsCssFiles' => array(),
+            'googleFontsWoff2Files' => array(),
+        );
+
+        if (!function_exists('ultracache_generated_asset_dir')) {
+            $inventory['error'] = 'Generated asset storage is not available.';
+            return $inventory;
+        }
+
+        try {
+            $css_bundle_dir = ultracache_generated_asset_dir('css-bundles');
+            $manifest_file = '' !== (string) $css_bundle_dir ? trailingslashit($css_bundle_dir) . 'manifest.json' : '';
+            if ('' !== $manifest_file && is_readable($manifest_file) && function_exists('ultracache_safe_file_get_contents')) {
+                $raw = ultracache_safe_file_get_contents($manifest_file);
+                $manifest = is_string($raw) && '' !== $raw ? json_decode($raw, true) : array();
+                if (is_array($manifest) && !empty($manifest['entries']) && is_array($manifest['entries'])) {
+                    $inventory['manifestEntries'] = count($manifest['entries']);
+                    foreach ($manifest['entries'] as $entry) {
+                        if (!is_array($entry) || empty($entry['bundleFile'])) {
+                            continue;
+                        }
+                        $bundle_file = wp_normalize_path((string) $entry['bundleFile']);
+                        $bundle_size = is_readable($bundle_file) ? @filesize($bundle_file) : false;
+                        if (false !== $bundle_size && $bundle_size > 0) {
+                            ++$inventory['manifestValidEntries'];
+                        }
+                    }
+                }
+            }
+
+            $bucket_extensions = array(
+                'css-bundles' => array('css'),
+                'font-css' => array('css'),
+                'optimized-css' => array('css'),
+                'google-fonts' => array('css', 'woff2'),
+            );
+
+            foreach ($bucket_extensions as $bucket => $extensions) {
+                $dir = ultracache_generated_asset_dir($bucket);
+                if (!is_dir($dir)) {
+                    continue;
+                }
+
+                $iterator = new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+                    RecursiveIteratorIterator::LEAVES_ONLY,
+                    RecursiveIteratorIterator::CATCH_GET_CHILD
+                );
+
+                foreach ($iterator as $file_info) {
+                    if (!$file_info instanceof SplFileInfo || !$file_info->isFile()) {
+                        continue;
+                    }
+                    $extension = strtolower((string) $file_info->getExtension());
+                    if (!in_array($extension, $extensions, true)) {
+                        continue;
+                    }
+
+                    $file = wp_normalize_path((string) $file_info->getPathname());
+                    $name = strtolower((string) $file_info->getFilename());
+                    if ('css-bundles' === $bucket) {
+                        if (0 === strpos($name, 'bundle-leftover-')) {
+                            $inventory['leftoverBundles'][$file] = true;
+                        } elseif (0 === strpos($name, 'bundle-font-mix-')) {
+                            $inventory['fontMixBundles'][$file] = true;
+                        } elseif (false !== strpos($name, '-delayed-fonts.css')) {
+                            $inventory['delayedFontBundles'][$file] = true;
+                        } elseif (0 === strpos($name, 'bundle-')) {
+                            $inventory['mainBundles'][$file] = true;
+                        }
+                    } elseif ('font-css' === $bucket) {
+                        $inventory['fontCssFiles'][$file] = true;
+                    } elseif ('optimized-css' === $bucket) {
+                        $inventory['optimizedCssFiles'][$file] = true;
+                    } elseif ('google-fonts' === $bucket) {
+                        if ('css' === $extension) {
+                            $inventory['googleFontsCssFiles'][$file] = true;
+                        } elseif ('woff2' === $extension) {
+                            $inventory['googleFontsWoff2Files'][$file] = true;
+                        }
+                    }
+                }
+            }
+
+            $inventory['available'] = true;
+        } catch (Throwable $error) {
+            $inventory['error'] = sanitize_text_field((string) $error->getMessage());
+        }
+
+        return $inventory;
+    }
+
+    private function inspect_cli_cached_css_files(array $files)
+    {
+        $result = array(
+            'variantCount' => 0,
+            'mainBundleVariants' => 0,
+            'leftoverBundleVariants' => 0,
+            'fontMixBundleVariants' => 0,
+            'fontCssVariants' => 0,
+            'optimizedCssVariants' => 0,
+            'googleFontsVariants' => 0,
+            'stylesheetLinks' => 0,
+        );
+
+        if (!function_exists('ultracache_safe_file_get_contents')) {
+            return $result;
+        }
+
+        foreach (array_values(array_unique(array_filter(array_map('strval', $files)))) as $file) {
+            $html = ultracache_safe_file_get_contents($file);
+            if (!is_string($html) || '' === $html) {
+                continue;
+            }
+
+            ++$result['variantCount'];
+            $lower = strtolower($html);
+            if (
+                false !== strpos($lower, 'data-ultracache-page-css-bundle=')
+                || false !== strpos($lower, 'data-ultracache-frontpage-css=')
+                || false !== strpos($lower, 'id="ultracache-page-css-bundle"')
+                || false !== strpos($lower, "id='ultracache-page-css-bundle'")
+            ) {
+                ++$result['mainBundleVariants'];
+            }
+            if (false !== strpos($lower, 'data-ultracache-leftover-css-bundle=')) {
+                ++$result['leftoverBundleVariants'];
+            }
+            if (false !== strpos($lower, 'data-ultracache-font-mix-css-bundle=')) {
+                ++$result['fontMixBundleVariants'];
+            }
+            if (false !== strpos($lower, '/ultracache/font-css/')) {
+                ++$result['fontCssVariants'];
+            }
+            if (false !== strpos($lower, '/ultracache/optimized-css/')) {
+                ++$result['optimizedCssVariants'];
+            }
+            if (false !== strpos($lower, '/ultracache/google-fonts/')) {
+                ++$result['googleFontsVariants'];
+            }
+
+            $link_count = preg_match_all('/<link\b[^>]*\brel\s*=\s*(["\'])[^"\']*stylesheet[^"\']*\1[^>]*>/i', $html, $matches);
+            if (false !== $link_count) {
+                $result['stylesheetLinks'] += (int) $link_count;
+            }
+        }
+
+        return $result;
+    }
+
+    private function print_cli_css_warm_summary(array $summary, array $inventory_after)
+    {
+        $css = isset($summary['css']) && is_array($summary['css']) ? $summary['css'] : array();
+        $html = isset($summary['cachedHtml']) && is_array($summary['cachedHtml']) ? $summary['cachedHtml'] : array();
+
+        WP_CLI::log('CSS warm-up summary:');
+        WP_CLI::log(sprintf(
+            '  Per-page CSS: %d built, %d reused, %d skipped, %d failed.',
+            (int) ($css['built'] ?? 0),
+            (int) ($css['reused'] ?? 0),
+            (int) ($css['skipped'] ?? 0),
+            (int) ($css['failed'] ?? 0)
+        ));
+        WP_CLI::log(sprintf(
+            '  Built bundle input: %d stylesheet(s), %d byte(s) across this run.',
+            (int) ($css['sourceStylesheets'] ?? 0),
+            (int) ($css['bundleBytes'] ?? 0)
+        ));
+        WP_CLI::log(sprintf(
+            '  Cached HTML checked: %d URL(s), %d variant file(s). Main bundle on all variants: %d URL(s); partial: %d; missing: %d.',
+            (int) ($html['urlsInspected'] ?? 0),
+            (int) ($html['variantsInspected'] ?? 0),
+            (int) ($html['urlsMainAll'] ?? 0),
+            (int) ($html['urlsMainPartial'] ?? 0),
+            (int) ($html['urlsMainNone'] ?? 0)
+        ));
+        WP_CLI::log(sprintf(
+            '  Additional CSS in cached HTML: leftover %d URL(s), font mix %d, font-css %d, optimized-css %d, local Google Fonts %d.',
+            (int) ($html['urlsLeftover'] ?? 0),
+            (int) ($html['urlsFontMix'] ?? 0),
+            (int) ($html['urlsFontCss'] ?? 0),
+            (int) ($html['urlsOptimizedCss'] ?? 0),
+            (int) ($html['urlsGoogleFonts'] ?? 0)
+        ));
+
+        $homepage = isset($summary['homepage']) && is_array($summary['homepage']) ? $summary['homepage'] : array();
+        if (!empty($homepage['included']) && !empty($homepage['variantCount'])) {
+            WP_CLI::log(sprintf(
+                '  Homepage verification: %d/%d cached variant(s) contain the main CSS bundle; leftover %d, font mix %d, font-css %d, optimized-css %d, local Google Fonts %d.',
+                (int) ($homepage['mainBundleVariants'] ?? 0),
+                (int) ($homepage['variantCount'] ?? 0),
+                (int) ($homepage['leftoverBundleVariants'] ?? 0),
+                (int) ($homepage['fontMixBundleVariants'] ?? 0),
+                (int) ($homepage['fontCssVariants'] ?? 0),
+                (int) ($homepage['optimizedCssVariants'] ?? 0),
+                (int) ($homepage['googleFontsVariants'] ?? 0)
+            ));
+        } elseif (!empty($homepage['included'])) {
+            WP_CLI::log('  Homepage verification: homepage was processed, but no readable cached variant file was available for CSS inspection.');
+        } else {
+            WP_CLI::log('  Homepage verification: homepage was not included in the selected crawl set.');
+        }
+
+        WP_CLI::log('CSS asset inventory after warm-up:');
+        if (empty($inventory_after['available'])) {
+            $message = !empty($inventory_after['error']) ? ' ' . (string) $inventory_after['error'] : '';
+            WP_CLI::warning('Final CSS asset inventory is unavailable.' . $message);
+            return;
+        }
+
+        WP_CLI::log(sprintf(
+            '  Manifest entries: %d total, %d valid.',
+            (int) ($inventory_after['manifestEntries'] ?? 0),
+            (int) ($inventory_after['manifestValidEntries'] ?? 0)
+        ));
+        WP_CLI::log(sprintf(
+            '  css-bundles: %d main, %d leftover, %d font-mix, %d delayed-font companion.',
+            count((array) ($inventory_after['mainBundles'] ?? array())),
+            count((array) ($inventory_after['leftoverBundles'] ?? array())),
+            count((array) ($inventory_after['fontMixBundles'] ?? array())),
+            count((array) ($inventory_after['delayedFontBundles'] ?? array()))
+        ));
+        WP_CLI::log(sprintf(
+            '  Font assets: %d font-css CSS, %d optimized-css CSS, %d Google Fonts CSS, %d Google Fonts WOFF2.',
+            count((array) ($inventory_after['fontCssFiles'] ?? array())),
+            count((array) ($inventory_after['optimizedCssFiles'] ?? array())),
+            count((array) ($inventory_after['googleFontsCssFiles'] ?? array())),
+            count((array) ($inventory_after['googleFontsWoff2Files'] ?? array()))
+        ));
+    }
+
     private function warm_url_list($engine, array $urls, $buckets = null, $purge_first = false, $build_css_bundle = false)
     {
         $urls = array_values(array_filter($urls));
         if (empty($urls)) {
             WP_CLI::warning('No URLs to warm.');
-            return;
+            return array();
         }
 
+        WP_CLI::log(sprintf('Preparing warm-up for %d URL(s).', count($urls)));
+
+        $summary = array(
+            'requested' => count($urls),
+            'processed' => 0,
+            'completed' => 0,
+            'skipped' => 0,
+            'failed' => 0,
+            'preempted' => false,
+            'css' => array(
+                'built' => 0,
+                'reused' => 0,
+                'skipped' => 0,
+                'failed' => 0,
+                'sourceStylesheets' => 0,
+                'bundleBytes' => 0,
+            ),
+            'cachedHtml' => array(
+                'urlsInspected' => 0,
+                'variantsInspected' => 0,
+                'urlsMainAll' => 0,
+                'urlsMainPartial' => 0,
+                'urlsMainNone' => 0,
+                'urlsLeftover' => 0,
+                'urlsFontMix' => 0,
+                'urlsFontCss' => 0,
+                'urlsOptimizedCss' => 0,
+                'urlsGoogleFonts' => 0,
+            ),
+            'homepage' => array('included' => false),
+        );
+
         $progress = \WP_CLI\Utils\make_progress_bar('Warming cache', count($urls));
-        $warmed = 0;
-        $failed = 0;
+        $homepage_url = untrailingslashit((string) home_url('/'));
 
         foreach ($urls as $url) {
             if ($purge_first && method_exists($engine, 'purge_url')) {
                 $engine->purge_url($url);
             }
 
-            $warm_args = array('build_css_bundle' => (bool) $build_css_bundle);
+            $warm_args = array_merge(
+                array('build_css_bundle' => (bool) $build_css_bundle),
+                $this->get_cli_warm_pipeline_args()
+            );
             if (is_array($buckets)) {
                 $warm_args['buckets'] = $buckets;
             }
-            $result = $engine->warm_url($url, $warm_args);
+            $result = $this->run_cli_warm_pipeline_with_lock_retry($engine, $url, $warm_args);
+            ++$summary['processed'];
+
             if (!empty($result['success'])) {
-                $warmed++;
+                ++$summary['completed'];
+            } elseif (!empty($result['skipped'])) {
+                ++$summary['skipped'];
+                WP_CLI::warning($url . ' -> ' . (!empty($result['message']) ? $result['message'] : 'Warm skipped.'));
             } else {
-                $failed++;
+                ++$summary['failed'];
                 WP_CLI::warning($url . ' -> ' . (!empty($result['message']) ? $result['message'] : 'Warm failed.'));
             }
+
+            if ($build_css_bundle) {
+                $css_result = isset($result['cssBundle']) && is_array($result['cssBundle']) ? $result['cssBundle'] : array();
+                $css_outcome = sanitize_key((string) ($css_result['outcome'] ?? ''));
+                if ('built' === $css_outcome || (!empty($css_result['success']) && empty($css_result['skipped']))) {
+                    ++$summary['css']['built'];
+                    $summary['css']['sourceStylesheets'] += max(0, (int) ($css_result['stats']['bundled'] ?? 0));
+                    $summary['css']['bundleBytes'] += max(0, (int) ($css_result['bundleBytes'] ?? 0));
+                } elseif ('reused' === $css_outcome) {
+                    ++$summary['css']['reused'];
+                } elseif (!empty($css_result['skipped'])) {
+                    ++$summary['css']['skipped'];
+                } elseif (empty($css_result) && empty($result['success'])) {
+                    ++$summary['css']['skipped'];
+                } else {
+                    ++$summary['css']['failed'];
+                }
+
+                $cache_scan = $this->inspect_cli_cached_css_files((array) ($result['files'] ?? array()));
+                if ($cache_scan['variantCount'] > 0) {
+                    ++$summary['cachedHtml']['urlsInspected'];
+                    $summary['cachedHtml']['variantsInspected'] += (int) $cache_scan['variantCount'];
+                    if ($cache_scan['mainBundleVariants'] === $cache_scan['variantCount']) {
+                        ++$summary['cachedHtml']['urlsMainAll'];
+                    } elseif ($cache_scan['mainBundleVariants'] > 0) {
+                        ++$summary['cachedHtml']['urlsMainPartial'];
+                    } else {
+                        ++$summary['cachedHtml']['urlsMainNone'];
+                    }
+                    if ($cache_scan['leftoverBundleVariants'] > 0) {
+                        ++$summary['cachedHtml']['urlsLeftover'];
+                    }
+                    if ($cache_scan['fontMixBundleVariants'] > 0) {
+                        ++$summary['cachedHtml']['urlsFontMix'];
+                    }
+                    if ($cache_scan['fontCssVariants'] > 0) {
+                        ++$summary['cachedHtml']['urlsFontCss'];
+                    }
+                    if ($cache_scan['optimizedCssVariants'] > 0) {
+                        ++$summary['cachedHtml']['urlsOptimizedCss'];
+                    }
+                    if ($cache_scan['googleFontsVariants'] > 0) {
+                        ++$summary['cachedHtml']['urlsGoogleFonts'];
+                    }
+                }
+
+                if ($homepage_url === untrailingslashit((string) $url)) {
+                    $summary['homepage'] = array_merge(
+                        array(
+                            'included' => true,
+                            'completed' => !empty($result['success']),
+                            'message' => (string) ($result['message'] ?? ''),
+                        ),
+                        $cache_scan
+                    );
+                }
+            }
+
             $progress->tick();
+            if (!empty($result['ownershipLost']) || $this->ultracache_cli_warm_preempted) {
+                $summary['preempted'] = true;
+                WP_CLI::warning('WP-CLI warm-up yielded to a newer dashboard or WP-CLI foreground owner.');
+                break;
+            }
         }
 
         $progress->finish();
-        WP_CLI::success(sprintf('Warm finished. Success: %d, failed: %d.', $warmed, $failed));
+        WP_CLI::success(sprintf(
+            'Warm finished. Completed: %d, skipped: %d, failed: %d, processed: %d of %d.',
+            (int) $summary['completed'],
+            (int) $summary['skipped'],
+            (int) $summary['failed'],
+            (int) $summary['processed'],
+            (int) $summary['requested']
+        ));
+
+        if ($build_css_bundle) {
+            $inventory_after = $this->get_cli_css_asset_inventory();
+            $this->print_cli_css_warm_summary($summary, $inventory_after);
+        }
+
+        return $summary;
     }
 
     /**
@@ -224,7 +692,19 @@ trait ULTRACACHE_CLI_Cache_Trait
             $warm_args['buckets'] = $buckets;
         }
 
-        $result = $engine->warm_frontpage_html($warm_args);
+        if (method_exists($engine, 'warm_page_pipeline')) {
+            $result = $this->run_cli_warm_pipeline_with_lock_retry(
+                $engine,
+                $frontpage_url,
+                array_merge(
+                    $warm_args,
+                    array('skip_css_bundle' => true),
+                    $this->get_cli_warm_pipeline_args()
+                )
+            );
+        } else {
+            $result = $engine->warm_frontpage_html($warm_args);
+        }
         if (!empty($result['success'])) {
             WP_CLI::success(!empty($result['message']) ? $result['message'] : 'Front page HTML cache warmed.');
             return;
@@ -260,7 +740,13 @@ trait ULTRACACHE_CLI_Cache_Trait
                 WP_CLI::error('Front page HTML warming is not available while CSS Bundling is disabled.');
             }
 
-            $result = $engine->warm_frontpage_html(array('force_refresh' => true));
+            $fallback_args = array_merge(
+                array('force_refresh' => true, 'skip_css_bundle' => true),
+                $this->get_cli_warm_pipeline_args()
+            );
+            $result = method_exists($engine, 'warm_page_pipeline')
+                ? $this->run_cli_warm_pipeline_with_lock_retry($engine, $frontpage_url, $fallback_args)
+                : $engine->warm_frontpage_html(array('force_refresh' => true));
             if (!empty($result['success']) || !empty($result['skipped'])) {
                 $message = !empty($result['message']) ? (string) $result['message'] : 'Front page HTML cache warmed.';
                 WP_CLI::success('CSS Bundling is disabled; warmed front page HTML cache only. ' . $message);
@@ -270,7 +756,16 @@ trait ULTRACACHE_CLI_Cache_Trait
             WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Front page HTML warm failed while CSS Bundling is disabled.');
         }
 
-        $result = $engine->warm_frontpage_html_with_css();
+        $result = method_exists($engine, 'warm_page_pipeline')
+            ? $this->run_cli_warm_pipeline_with_lock_retry(
+                $engine,
+                $frontpage_url,
+                array_merge(
+                    array('build_css_bundle' => true),
+                    $this->get_cli_warm_pipeline_args()
+                )
+            )
+            : $engine->warm_frontpage_html_with_css();
         if (!empty($result['success']) || !empty($result['skipped'])) {
             WP_CLI::success(!empty($result['message']) ? $result['message'] : 'Front page HTML + CSS warm completed.');
             return;
@@ -297,7 +792,7 @@ trait ULTRACACHE_CLI_Cache_Trait
     public function warm_html_all_css($args, $assoc_args)
     {
         $engine = $this->get_engine();
-        if (!$engine || !method_exists($engine, 'get_crawl_urls') || !method_exists($engine, 'warm_url') || !method_exists($engine, 'build_frontpage_css_bundle')) {
+        if (!$engine || !method_exists($engine, 'get_crawl_urls') || !method_exists($engine, 'warm_url')) {
             WP_CLI::error('Site-wide HTML + CSS warming is not available.');
         }
 
@@ -307,15 +802,13 @@ trait ULTRACACHE_CLI_Cache_Trait
             $urls = array_slice($urls, 0, $limit);
         }
 
-        $this->warm_url_list($engine, $urls, $this->get_warm_buckets_from_assoc_args($assoc_args), isset($assoc_args['purge-first']), true);
-
-        $result = $engine->build_frontpage_css_bundle();
-        if (!empty($result['success']) || !empty($result['skipped'])) {
-            WP_CLI::success(!empty($result['message']) ? $result['message'] : 'All URLs warmed and front page CSS bundle rebuilt.');
-            return;
-        }
-
-        WP_CLI::error(!empty($result['message']) ? $result['message'] : 'All URLs were warmed, but front page CSS rebuild failed.');
+        $this->warm_url_list(
+            $engine,
+            $urls,
+            $this->get_warm_buckets_from_assoc_args($assoc_args),
+            isset($assoc_args['purge-first']),
+            true
+        );
     }
 
     /**

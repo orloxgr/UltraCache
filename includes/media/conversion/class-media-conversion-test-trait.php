@@ -72,6 +72,7 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 				return array();
 			}
 
+			$avif_ids = array();
 			$png_ids = array();
 			$jpeg_ids = array();
 			foreach ($ids as $attachment_id) {
@@ -80,12 +81,19 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 				}
 
 				$mime = sanitize_mime_type((string) get_post_mime_type($attachment_id));
-				if (!in_array($mime, array('image/png', 'image/jpeg'), true)) {
+				if (!in_array($mime, array('image/avif', 'image/png', 'image/jpeg'), true)) {
 					continue;
 				}
 
 				$file = get_attached_file($attachment_id);
 				if (!is_string($file) || '' === $file || !$this->optimized_storage_readable_source_exists($file)) {
+					continue;
+				}
+
+				if ('image/avif' === $mime) {
+					if (count($avif_ids) < 1) {
+						$avif_ids[] = $attachment_id;
+					}
 					continue;
 				}
 
@@ -99,30 +107,19 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 				$jpeg_ids[] = $attachment_id;
 			}
 
-			if (!empty($png_ids)) {
-				return array_slice(array_merge($png_ids, $jpeg_ids), 0, 10);
-			}
-
-			return array_slice($jpeg_ids, 0, 10);
+			return array_slice(array_merge($avif_ids, $png_ids, $jpeg_ids), 0, 10);
 		}
 
 		private function get_media_library_conversion_test_stored_report() {
 			$report = get_option(self::MEDIA_LIBRARY_CONVERSION_TEST_OPTION, array());
-			if (is_array($report) && !empty($report)) {
-				return $report;
-			}
-
-			$legacy_report = get_transient(self::MEDIA_LIBRARY_CONVERSION_TEST_TRANSIENT);
-			return is_array($legacy_report) ? $legacy_report : array();
+			return is_array($report) ? $report : array();
 		}
 
 		private function delete_media_library_conversion_test_report() {
 			delete_option(self::MEDIA_LIBRARY_CONVERSION_TEST_OPTION);
-			delete_transient(self::MEDIA_LIBRARY_CONVERSION_TEST_TRANSIENT);
 		}
 
 		private function store_media_library_conversion_test_report(array $report) {
-			delete_transient(self::MEDIA_LIBRARY_CONVERSION_TEST_TRANSIENT);
 			return update_option(self::MEDIA_LIBRARY_CONVERSION_TEST_OPTION, $report, false);
 		}
 
@@ -145,10 +142,11 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 		}
 
 		private function build_media_library_conversion_test_attachment_ids() {
-			$png_ids = $this->get_media_library_conversion_test_attachment_ids_by_mime(array('image/png'), 3, array());
-			$ids = $png_ids;
+			$avif_ids = $this->get_media_library_conversion_test_attachment_ids_by_mime(array('image/avif'), 1, array());
+			$png_ids = $this->get_media_library_conversion_test_attachment_ids_by_mime(array('image/png'), 3, $avif_ids);
+			$ids = array_merge($avif_ids, $png_ids);
 
-			$jpeg_limit = empty($png_ids) ? 10 : max(0, 10 - count($ids));
+			$jpeg_limit = max(0, 10 - count($ids));
 			if ($jpeg_limit > 0) {
 				$ids = array_merge(
 					$ids,
@@ -250,7 +248,7 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 				$extension = 'jpg';
 			}
 
-			return in_array($extension, array('jpg', 'png'), true) ? $extension : '';
+			return in_array($extension, array('jpg', 'png', 'avif'), true) ? $extension : '';
 		}
 
 		private function copy_media_conversion_test_source($source_file, $attachment_id, $run_key) {
@@ -313,13 +311,16 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 			$attempts = array();
 
 			if ('webp' === $format) {
-				if ($this->supports_imagick_webp()) {
+				$source_is_avif = $this->source_file_matches_target_format($source_file, 'avif');
+				if ($source_is_avif ? $this->supports_imagick_avif_to_webp() : $this->supports_imagick_webp()) {
 					$attempts[] = array('encoder' => 'imagick', 'callback' => 'imagick');
 				}
-				if ($this->supports_gd_webp()) {
+				if ($source_is_avif ? $this->supports_gd_avif_to_webp() : $this->supports_gd_webp()) {
 					$attempts[] = array('encoder' => 'gd', 'callback' => 'gd');
 				}
-				$attempts[] = array('encoder' => 'wordpress-image-editor', 'callback' => 'wp-image-editor');
+				if (!$source_is_avif) {
+					$attempts[] = array('encoder' => 'wordpress-image-editor', 'callback' => 'wp-image-editor');
+				}
 			} elseif ('avif' === $format) {
 				if ($this->supports_imagick_avif()) {
 					$attempts[] = array('encoder' => 'imagick', 'callback' => 'imagick');
@@ -365,6 +366,35 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 		private function build_media_conversion_test_format_result($source_file, $attachment_id, $run_key, $format, $supported, $quality) {
 			$format = strtolower((string) $format);
 			$quality = max(1, min(100, absint($quality)));
+			if ($this->source_file_matches_target_format($source_file, $format)) {
+				$size = $this->get_media_conversion_test_file_size($source_file);
+				return array(
+					'supported' => true,
+					'status'    => 'source',
+					'label'     => __('Source format', 'ultracache'),
+					'quality'   => $quality,
+					'encoder'   => '',
+					'size'      => $size,
+					'sizeHuman' => $this->format_media_conversion_test_size($size),
+					'url'       => '',
+				);
+			}
+
+			$semantic_skip_reason = $this->get_media_source_conversion_skip_reason($source_file, $format);
+			if ('' !== $semantic_skip_reason) {
+				return array(
+					'supported' => false,
+					'status'    => 'not_supported',
+					'label'     => __('Preserved animated image', 'ultracache'),
+					'quality'   => $quality,
+					'encoder'   => '',
+					'size'      => 0,
+					'sizeHuman' => __('Preserved animated image', 'ultracache'),
+					'url'       => '',
+					'skipReason'=> $semantic_skip_reason,
+				);
+			}
+
 			if (!$supported) {
 				return array(
 					'supported' => false,
@@ -467,7 +497,7 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 			if (empty($attachment_ids)) {
 				return array(
 					'success' => false,
-					'message' => __('No readable JPG or PNG images were found in the Media Library.', 'ultracache'),
+					'message' => __('No readable AVIF, JPG, or PNG images were found in the Media Library.', 'ultracache'),
 					'items'   => array(),
 				);
 			}
@@ -490,8 +520,22 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 				}
 
 				$test_source = (string) $original['path'];
-				$webp = $this->build_media_conversion_test_format_result($test_source, $attachment_id, $run_key, 'webp', $webp_supported, $quality_values['webp']);
-				$avif = $this->build_media_conversion_test_format_result($test_source, $attachment_id, $run_key, 'avif', $avif_supported, $quality_values['avif']);
+				$webp = $this->build_media_conversion_test_format_result(
+					$test_source,
+					$attachment_id,
+					$run_key,
+					'webp',
+					$webp_supported && ($this->source_file_matches_target_format($test_source, 'webp') || $this->is_source_file_supported_for_format($test_source, 'webp')),
+					$quality_values['webp']
+				);
+				$avif = $this->build_media_conversion_test_format_result(
+					$test_source,
+					$attachment_id,
+					$run_key,
+					'avif',
+					$avif_supported && ($this->source_file_matches_target_format($test_source, 'avif') || $this->is_source_file_supported_for_format($test_source, 'avif')),
+					$quality_values['avif']
+				);
 
 				$items[] = array(
 					'id'                => $attachment_id,
@@ -519,7 +563,7 @@ trait Ultra_Cache_Media_Conversion_Test_Trait
 			if (empty($items)) {
 				return array(
 					'success' => false,
-					'message' => __('No readable JPG or PNG images were found in the Media Library.', 'ultracache'),
+					'message' => __('No readable AVIF, JPG, or PNG images were found in the Media Library.', 'ultracache'),
 					'items'   => array(),
 				);
 			}

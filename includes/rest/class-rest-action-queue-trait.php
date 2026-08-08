@@ -22,6 +22,7 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
             'external_caches_redetect',
             'google_fonts_rebuild_cache',
             'performance_profile',
+            'js_dependency_scan',
         );
     }
 
@@ -265,13 +266,15 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
             }
 
             $status = (string) ($job['status'] ?? 'queued');
+            $action = sanitize_key((string) ($job['action'] ?? ''));
             $created = isset($job['createdAt']) ? (int) $job['createdAt'] : $now;
             $started = isset($job['startedAt']) ? (int) $job['startedAt'] : 0;
             $updated = isset($job['updatedAt']) ? (int) $job['updatedAt'] : 0;
             $finished = isset($job['finishedAt']) ? (int) $job['finishedAt'] : 0;
             $age_base = max($started, $updated, $created);
 
-            if (in_array($status, array('queued', 'running'), true) && $age_base > 0 && ($now - $age_base) > $stale_after) {
+            $job_stale_after = 'js_dependency_scan' === $action ? 6 * HOUR_IN_SECONDS : $stale_after;
+            if (in_array($status, array('queued', 'running'), true) && $age_base > 0 && ($now - $age_base) > $job_stale_after) {
                 $job['status'] = 'failed';
                 $job['message'] = 'Dashboard processing action was marked stale and stopped from blocking new work.';
                 $job['finishedAt'] = $now;
@@ -649,6 +652,54 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
         return $scrubbed;
     }
 
+    private function action_queue_public_job(array $job)
+    {
+        if ('js_dependency_scan' === sanitize_key((string) ($job['action'] ?? ''))) {
+            $status = sanitize_key((string) ($job['status'] ?? 'queued'));
+            if (isset($job['scanState']) && is_array($job['scanState'])) {
+                $state = $job['scanState'];
+                $phase = sanitize_key((string) ($state['phase'] ?? 'prepare'));
+                $total_files = count((array) ($state['analysisIndexes'] ?? array()));
+                $cursor = max(0, (int) ($state['cursor'] ?? 0));
+                $processed = min($total_files, $cursor);
+                $progress_percent = 5;
+                if ('analyze' === $phase) {
+                    $progress_percent = $total_files > 0
+                        ? min(92, 10 + (int) round(80 * ($processed / $total_files)))
+                        : 90;
+                } elseif ('correlate' === $phase) {
+                    $progress_percent = 95;
+                }
+                $job['progress'] = array(
+                    'phase' => $phase,
+                    'progressPercent' => max(0, min(99, $progress_percent)),
+                    'cursor' => $cursor,
+                    'totalScripts' => max(0, (int) ($state['totalScripts'] ?? count((array) ($state['scripts'] ?? array())))),
+                    'totalFiles' => $total_files,
+                    'processedFiles' => $processed,
+                    'analyzedFiles' => max(0, (int) ($state['analyzedFiles'] ?? 0)),
+                    'freshlyAnalyzedFiles' => max(0, (int) ($state['contentScanned'] ?? 0)),
+                    'cacheHits' => max(0, (int) ($state['cacheHits'] ?? 0)),
+                    'cacheMisses' => max(0, (int) ($state['cacheMisses'] ?? 0)),
+                    'cacheWrites' => max(0, (int) ($state['cacheWrites'] ?? 0)),
+                    'settingsIntegrityTracked' => !empty($state['settingsFingerprint']),
+                );
+                unset($job['scanState']);
+            } elseif ('done' === $status) {
+                $job['progress'] = array(
+                    'phase' => 'complete',
+                    'progressPercent' => 100,
+                );
+            } elseif ('failed' === $status) {
+                $job['progress'] = array(
+                    'phase' => 'failed',
+                    'progressPercent' => 100,
+                );
+            }
+        }
+        return $this->scrub_action_queue_payload($job, 'job', 0);
+    }
+
     private function normalize_action_params($params)
     {
         if (!is_array($params)) {
@@ -669,6 +720,33 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
         return $normalized;
     }
 
+    /**
+     * Persist the completed Varnish dashboard job into the authoritative
+     * operation-state record after the durable job row has been saved.
+     *
+     * @param string $action Action name.
+     * @param string $job_id Job identifier.
+     * @param array  $job    Completed job.
+     * @return void
+     */
+    private function persist_varnish_action_job_completion($action, $job_id, array $job)
+    {
+        if ('varnish_flush_all' !== sanitize_key((string) $action)
+            || !class_exists('Ultra_Cache_WP')
+            || !method_exists('Ultra_Cache_WP', 'persist_varnish_action_job_result')) {
+            return;
+        }
+
+        $result = is_array($job['result'] ?? null) ? $job['result'] : array(
+            'success' => false,
+            'runtimeOutcome' => 'failed',
+            'operationType' => 'site-flush',
+            'message' => sanitize_textarea_field((string) ($job['message'] ?? 'Varnish dashboard action failed.')),
+            'time' => max(0, (int) ($job['finishedAt'] ?? time())),
+        );
+        Ultra_Cache_WP::persist_varnish_action_job_result($result, $job_id, $job);
+    }
+
     public function enqueue_action_job(WP_REST_Request $request)
     {
         $action = sanitize_key((string) $request->get_param('action'));
@@ -678,6 +756,51 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
 
         $params = $this->normalize_action_params($request->get_param('params'));
         $stored_params = $this->scrub_action_queue_payload($params, 'params', 0);
+
+        if ('js_dependency_scan' === $action) {
+            $requested_url = trim((string) ($params['url'] ?? home_url('/')));
+            if (method_exists($this, 'normalize_performance_profile_url')) {
+                $normalized_url = $this->normalize_performance_profile_url($requested_url);
+                if (is_wp_error($normalized_url)) {
+                    return new WP_REST_Response(array('success' => false, 'message' => $normalized_url->get_error_message()), 400);
+                }
+                $requested_url = (string) $normalized_url;
+                $params['url'] = $requested_url;
+                $stored_params = $this->scrub_action_queue_payload($params, 'params', 0);
+            }
+            $jobs = $this->load_action_jobs();
+            foreach ($jobs as $existing_job) {
+                if (!is_array($existing_job)
+                    || 'js_dependency_scan' !== sanitize_key((string) ($existing_job['action'] ?? ''))
+                    || !in_array((string) ($existing_job['status'] ?? ''), array('queued', 'running'), true)) {
+                    continue;
+                }
+                $existing_params = is_array($existing_job['params'] ?? null) ? $existing_job['params'] : array();
+                if (trim((string) ($existing_params['url'] ?? '')) !== $requested_url) {
+                    continue;
+                }
+                return new WP_REST_Response(array('success' => true, 'resumed' => true, 'job' => $this->action_queue_public_job($existing_job)), 200);
+            }
+
+            $id = 'ultracache_' . wp_generate_password(18, false, false);
+            $now = time();
+            $job = array(
+                'id'        => $id,
+                'action'    => $action,
+                'params'    => is_array($stored_params) ? $stored_params : array(),
+                'status'    => 'queued',
+                'message'   => __('HTML JS dependency analysis prepared for resumable processing.', 'ultracache'),
+                'createdAt' => $now,
+                'startedAt' => 0,
+                'updatedAt' => $now,
+                'direct'    => false,
+                'scanState' => array('phase' => 'prepare'),
+            );
+            $jobs[$id] = $job;
+            $this->save_action_jobs($jobs);
+            return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 200);
+        }
+
         $id = 'ultracache_' . wp_generate_password(18, false, false);
         $now = time();
         $job = array(
@@ -706,7 +829,10 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
          */
         try {
             $result = $this->run_action_queue_job($action, $params);
-            $ok = !empty($result['success']) || !empty($result['skipped']);
+            $runtime_outcome = sanitize_key((string) ($result['runtimeOutcome'] ?? ''));
+            $ok = '' !== $runtime_outcome
+                ? in_array($runtime_outcome, array('complete', 'degraded', 'partial'), true)
+                : (!empty($result['success']) || !empty($result['skipped']));
             $job['status'] = $ok ? 'done' : 'failed';
             $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
             $job['result'] = $this->scrub_action_queue_payload($result, 'result', 0);
@@ -724,8 +850,9 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
         $jobs = $this->load_action_jobs();
         $jobs[$id] = $job;
         $this->save_action_jobs($jobs);
+        $this->persist_varnish_action_job_completion($action, $id, $job);
 
-        return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
+        return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 200);
     }
 
     public function get_action_job(WP_REST_Request $request)
@@ -757,7 +884,7 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
             }
         }
 
-        return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
+        return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 200);
     }
 
     public function run_action_job_request(WP_REST_Request $request)
@@ -778,15 +905,56 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
             $job['updatedAt'] = time();
             $jobs[$id] = $job;
             $this->save_action_jobs($jobs);
-            return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
+            return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 200);
         }
 
         if (in_array($status, array('done', 'failed'), true)) {
-            return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
+            return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 200);
+        }
+
+        if ('js_dependency_scan' === $action) {
+            $running_age = max(0, time() - max((int) ($job['updatedAt'] ?? 0), (int) ($job['startedAt'] ?? 0)));
+            if ('running' === $status && $running_age < 10) {
+                return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 202);
+            }
+            $job['status'] = 'running';
+            $job['startedAt'] = !empty($job['startedAt']) ? (int) $job['startedAt'] : time();
+            $job['updatedAt'] = time();
+            $job['message'] = __('Processing the next HTML JS dependency analysis batch.', 'ultracache');
+            $jobs[$id] = $job;
+            $this->save_action_jobs($jobs);
+
+            try {
+                $batch = $this->run_resumable_js_dependency_scan_batch($job);
+                $job['scanState'] = isset($batch['state']) && is_array($batch['state']) ? $batch['state'] : array();
+                $job['message'] = (string) ($batch['message'] ?? __('HTML JS dependency analysis batch completed.', 'ultracache'));
+                if (!empty($batch['done'])) {
+                    $job['status'] = !empty($batch['success']) ? 'done' : 'failed';
+                    $job['result'] = $this->scrub_action_queue_payload(is_array($batch['result'] ?? null) ? $batch['result'] : array(), 'result', 0);
+                    $job['finishedAt'] = time();
+                    unset($job['scanState']);
+                } else {
+                    $job['status'] = 'queued';
+                }
+            } catch (Throwable $error) {
+                $job['status'] = 'failed';
+                $job['message'] = $error->getMessage();
+                $job['finishedAt'] = time();
+            } catch (Exception $error) {
+                $job['status'] = 'failed';
+                $job['message'] = $error->getMessage();
+                $job['finishedAt'] = time();
+            }
+
+            $job['updatedAt'] = time();
+            $jobs = $this->load_action_jobs();
+            $jobs[$id] = $job;
+            $this->save_action_jobs($jobs);
+            return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 'queued' === $job['status'] ? 202 : 200);
         }
 
         if ('running' === $status) {
-            return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
+            return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 202);
         }
 
         $lock_acquired = false;
@@ -800,7 +968,7 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
                 $job['updatedAt'] = time();
                 $jobs[$id] = $job;
                 $this->save_action_jobs($jobs);
-                return new WP_REST_Response(array('success' => true, 'alreadyRunning' => true, 'job' => $this->scrub_action_queue_payload($active, 'job', 0)), 202);
+                return new WP_REST_Response(array('success' => true, 'alreadyRunning' => true, 'job' => $this->action_queue_public_job($active)), 202);
             }
 
             if (!$this->acquire_action_queue_heavy_lock($action, $id)) {
@@ -808,7 +976,7 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
                 $job['updatedAt'] = time();
                 $jobs[$id] = $job;
                 $this->save_action_jobs($jobs);
-                return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 202);
+                return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 202);
             }
             $lock_acquired = true;
         }
@@ -822,7 +990,10 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
 
         try {
             $result = $this->run_action_queue_job($action, is_array($job['params'] ?? null) ? $job['params'] : array());
-            $ok = !empty($result['success']) || !empty($result['skipped']);
+            $runtime_outcome = sanitize_key((string) ($result['runtimeOutcome'] ?? ''));
+            $ok = '' !== $runtime_outcome
+                ? in_array($runtime_outcome, array('complete', 'degraded', 'partial'), true)
+                : (!empty($result['success']) || !empty($result['skipped']));
             $job['status'] = $ok ? 'done' : 'failed';
             $job['message'] = !empty($result['message']) ? (string) $result['message'] : ($ok ? 'Completed.' : 'Failed.');
             $job['result'] = $this->scrub_action_queue_payload($result, 'result', 0);
@@ -839,12 +1010,13 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
         $jobs = $this->load_action_jobs();
         $jobs[$id] = $job;
         $this->save_action_jobs($jobs);
+        $this->persist_varnish_action_job_completion($action, $id, $job);
 
         if ($lock_acquired) {
             $this->release_action_queue_heavy_lock($id);
         }
 
-        return new WP_REST_Response(array('success' => true, 'job' => $this->scrub_action_queue_payload($job, 'job', 0)), 200);
+        return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 200);
     }
 
     private function run_action_queue_job($action, array $params)

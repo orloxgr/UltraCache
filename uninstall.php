@@ -589,6 +589,42 @@ function ultracache_uninstall_drop_custom_tables(array $table_basenames)
     return $success;
 }
 
+
+/**
+ * Delete UltraCache state rows under one validated state-name prefix.
+ *
+ * @param string $state_prefix State-name prefix.
+ * @return bool
+ */
+function ultracache_uninstall_delete_state_prefix($state_prefix)
+{
+    if (!isset($GLOBALS['wpdb']) || !($GLOBALS['wpdb'] instanceof wpdb)) {
+        return false;
+    }
+
+    $state_prefix = trim((string) $state_prefix);
+    if ('' === $state_prefix || 1 !== preg_match('/^ultracache_state:[A-Za-z0-9_.:-]+$/', $state_prefix)) {
+        return false;
+    }
+
+    global $wpdb;
+    $table = (string) $wpdb->prefix . 'ultracache_locks';
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+        return false;
+    }
+
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Uninstall cleanup deletes only validated UltraCache-owned state rows.
+    $deleted = $wpdb->query(
+        $wpdb->prepare(
+            "DELETE FROM %i WHERE record_type = 'state' AND lock_name LIKE %s",
+            $table,
+            $wpdb->esc_like($state_prefix) . '%'
+        )
+    );
+
+    return false !== $deleted;
+}
+
 function ultracache_uninstall_sanitize_cleanup_policy($policy)
 {
     $policy = strtolower(trim((string) $policy));
@@ -621,6 +657,7 @@ function ultracache_run_uninstall_cleanup()
         'ultracache_scheduled_cache_cleanup',
         'ultracache_cron_warm_tick',
         'ultracache_cron_warm_tick_kickoff',
+        'ultracache_flush_affected_url_batch',
         'ultracache_process_media_conversion_queue',
     );
 
@@ -649,6 +686,7 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_media_queue_rebuild_generation_v1',
             'ultracache_media_replacement_active_job_v1',
             'ultracache_media_replacement_active_job_v2',
+            'ultracache_media_replacement_workflow_state_v1',
             'ultracache_media_replacement_ref_index_scan_v1',
             'ultracache_media_replacement_ref_index_specs_v1',
             'ultracache_media_replacement_intermediate_expand_v1',
@@ -664,10 +702,21 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_external_cache_detection',
             'ultracache_action_queue_heavy_lock_v1',
             'ultracache_warmup_generation',
+            'ultracache_warm_runtime_reset_version',
+            'ultracache_warm_runtime_reset_state',
+            'ultracache_locks_schema_install_lock',
+            'ultracache_affected_url_batch_v1',
             'ultracache_varnish_refresh_ahead_state_v1',
             'ultracache_varnish_refresh_candidates_v1',
             'ultracache_varnish_metrics_v1',
+            'ultracache_litespeed_metrics_v1',
+            'ultracache_litespeed_diagnostic_behavior_v1',
+            'ultracache_litespeed_refresh_candidates_v1',
+            'ultracache_litespeed_refresh_ahead_state_v1',
             'ultracache_varnish_diagnostic_basic_v1',
+            'ultracache_varnish_endpoint_capabilities_v1',
+            'ultracache_varnish_esi_capability_v1',
+            'ultracache_varnish_html_variant_capability_v1',
             'ultracache_varnish_diagnostic_flush_scope_v1',
             'ultracache_varnish_diagnostic_validators_v1',
             'ultracache_varnish_diagnostic_accept_vcl_v1',
@@ -684,6 +733,8 @@ function ultracache_run_uninstall_cleanup()
 
         if (!$ultracache_keep_tables) {
             $ultracache_options[] = 'ultracache_media_queue_db_version';
+            $ultracache_options[] = 'ultracache_media_queue_units_db_version';
+            $ultracache_options[] = 'ultracache_media_queue_units_migration_state_v1';
             $ultracache_options[] = 'ultracache_media_page_refs_db_version';
             $ultracache_options[] = 'ultracache_action_jobs_db_version';
             $ultracache_options[] = 'ultracache_js_diagnostic_queue_db_version';
@@ -707,14 +758,21 @@ function ultracache_run_uninstall_cleanup()
         $ultracache_transients = array(
             'ultracache_admin_notice',
             'ultracache_cron_warm_lock',
+            'ultracache_cron_warm_recovery_checked',
             'ultracache_dashboard_cache_activity_v1',
+            'ultracache_cache_storage_diagnostics_v2',
+            'ultracache_dashboard_stats_snapshot_v2',
+            'ultracache_settings_dashboard_stats_snapshot_v2',
             'ultracache_frontend_compression_probe_v1',
             'ultracache_last_cache_event',
             'ultracache_loopback_ssl_status_v1',
             'ultracache_media_conversion_queue_lock',
             'ultracache_media_queue_process_lock_v1',
             'ultracache_media_page_refs_cleanup_lock',
+            'ultracache_media_queue_init_maintenance_v1',
+            'ultracache_media_library_conversion_test_v1',
             'ultracache_media_work_summary_v1',
+            'ultracache_media_storage_stats_v1',
             'ultracache_object_cache_support_status_v1',
             'ultracache_reverse_proxy_status_v2',
             'ultracache_varnish_last_result',
@@ -722,7 +780,14 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_varnish_two_stage_refill_v1',
             'ultracache_varnish_soft_purge_capability_v1',
             'ultracache_varnish_refresh_ahead_capability_v1',
+            'ultracache_varnish_performance_snapshot_v1',
             'ultracache_runtime_font_css_url_map_v3',
+            'ultracache_media_support_status_v4',
+            'ultracache_media_support_status_v5',
+            'ultracache_media_support_status_v6',
+            'ultracache_imagick_avif_alpha_probe_v1',
+            'ultracache_gd_avif_alpha_probe_v3',
+            'ultracache_gd_webp_encode_probe_v2',
         );
 
         foreach ($ultracache_transients as $ultracache_transient) {
@@ -736,13 +801,18 @@ function ultracache_run_uninstall_cleanup()
             '_site_transient_ultracache_%',
             '_site_transient_timeout_ultracache_%',
             'ultracache_google_fonts_lock_%',
+            'ultracache_lcp_manual_selector_%',
         ));
+
+        ultracache_uninstall_delete_state_prefix('ultracache_state:admin.notice.');
     }
 
     $ultracache_custom_table_basenames = array(
         'ultracache_media_queue',
+        'ultracache_media_queue_units',
         'ultracache_media_page_refs',
         'ultracache_media_replacement_items',
+        'ultracache_media_replacement_attachment_plans',
         'ultracache_media_replacement_refs',
         'ultracache_media_replacement_ref_index',
         'ultracache_media_replacement_file_refs',
@@ -801,6 +871,7 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_locks_db_version',
             'ultracache_media_replacement_db_version',
             'ultracache_media_replacement_schema_lock_v1',
+            'ultracache_media_replacement_workflow_state_v1',
         ) as $ultracache_final_option) {
             delete_option($ultracache_final_option);
             delete_site_option($ultracache_final_option);

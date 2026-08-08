@@ -23,6 +23,18 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
         return function_exists('ultracache_validate_custom_table_name') ? ultracache_validate_custom_table_name($table, 'media_replacement_items') : $table;
     }
 
+    private function get_media_replacement_attachment_plans_table_name()
+    {
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            return '';
+        }
+
+        $table = (string) $wpdb->prefix . 'ultracache_media_replacement_attachment_plans';
+        return function_exists('ultracache_validate_custom_table_name') ? ultracache_validate_custom_table_name($table, 'media_replacement_attachment_plans') : $table;
+    }
+
     private function get_media_replacement_refs_table_name()
     {
         global $wpdb;
@@ -112,6 +124,11 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
         return $this->media_replacement_table_exists($this->get_media_replacement_items_table_name());
     }
 
+    private function media_replacement_attachment_plans_table_exists()
+    {
+        return $this->media_replacement_table_exists($this->get_media_replacement_attachment_plans_table_name());
+    }
+
     private function media_replacement_refs_table_exists()
     {
         return $this->media_replacement_table_exists($this->get_media_replacement_refs_table_name());
@@ -136,10 +153,14 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
     {
         return self::MEDIA_REPLACEMENT_DB_VERSION === (string) get_option(self::MEDIA_REPLACEMENT_DB_VERSION_OPTION, '')
             && $this->media_replacement_items_table_exists()
+            && $this->media_replacement_attachment_plans_table_exists()
             && $this->media_replacement_refs_table_exists()
             && $this->media_replacement_ref_index_table_exists()
             && $this->media_replacement_file_refs_table_exists()
             && $this->media_replacement_theme_css_files_table_exists()
+            && $this->media_replacement_table_has_columns($this->get_media_replacement_items_table_name(), array('old_file_hash', 'destination_existed', 'destination_overwritten', 'destination_previous_size', 'destination_previous_hash', 'destination_backup_path', 'destination_backup_size', 'destination_backup_hash', 'destination_published_size', 'destination_published_hash', 'blocker_code', 'blocker_detail', 'decision', 'decision_generation', 'decided_by', 'decided_at'))
+            && $this->media_replacement_table_has_columns($this->get_media_replacement_refs_table_name(), array('row_identity'))
+            && $this->media_replacement_table_has_columns($this->get_media_replacement_ref_index_table_name(), array('row_identity'))
             && $this->media_replacement_table_has_columns($this->get_media_replacement_file_refs_table_name(), array('apply_old_found', 'apply_new_found', 'verify_old_found', 'verify_new_found'))
             && $this->media_replacement_table_has_columns($this->get_media_replacement_theme_css_files_table_name(), array('checksum_after', 'checksum_scheme'));
     }
@@ -210,6 +231,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
 
         $tables = array(
             $this->get_media_replacement_theme_css_files_table_name(),
+            $this->get_media_replacement_attachment_plans_table_name(),
             $this->get_media_replacement_file_refs_table_name(),
             $this->get_media_replacement_ref_index_table_name(),
             $this->get_media_replacement_refs_table_name(),
@@ -241,6 +263,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
         }
 
         return !$this->media_replacement_items_table_exists()
+            && !$this->media_replacement_attachment_plans_table_exists()
             && !$this->media_replacement_refs_table_exists()
             && !$this->media_replacement_ref_index_table_exists()
             && !$this->media_replacement_file_refs_table_exists()
@@ -256,11 +279,12 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
         }
 
         $items_table     = $this->get_media_replacement_items_table_name();
+        $attachment_plans_table = $this->get_media_replacement_attachment_plans_table_name();
         $refs_table      = $this->get_media_replacement_refs_table_name();
         $ref_index_table = $this->get_media_replacement_ref_index_table_name();
         $file_refs_table = $this->get_media_replacement_file_refs_table_name();
         $theme_css_files_table = $this->get_media_replacement_theme_css_files_table_name();
-        if ('' === $items_table || '' === $refs_table || '' === $ref_index_table || '' === $file_refs_table || '' === $theme_css_files_table) {
+        if ('' === $items_table || '' === $attachment_plans_table || '' === $refs_table || '' === $ref_index_table || '' === $file_refs_table || '' === $theme_css_files_table) {
             return false;
         }
 
@@ -287,21 +311,13 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
             $version = (string) get_option(self::MEDIA_REPLACEMENT_DB_VERSION_OPTION, '');
             $legacy_storage_exists = '' !== $version
                 || $this->media_replacement_items_table_exists()
+                || $this->media_replacement_attachment_plans_table_exists()
                 || $this->media_replacement_refs_table_exists()
                 || $this->media_replacement_ref_index_table_exists()
                 || $this->media_replacement_file_refs_table_exists()
-                || $this->media_replacement_theme_css_files_table_exists()
-                || false !== get_option('ultracache_media_replacement_active_job_v1', false)
-                || false !== get_option('ultracache_media_replacement_active_job_v2', false)
-                || false !== get_option('ultracache_media_replacement_ref_index_scan_v1', false)
-                || false !== get_option('ultracache_media_replacement_ref_index_specs_v1', false)
-                || false !== get_option('ultracache_media_replacement_intermediate_expand_v1', false)
-                || false !== get_option('ultracache_media_replacement_theme_css_scan_state', false)
-                || false !== get_option('ultracache_media_replacement_theme_css_scan_manifest_v1', false)
-                || false !== get_option('ultracache_media_replacement_theme_css_stream_state_v1', false)
-                || false !== get_option('ultracache_media_replacement_readiness_v1', false);
+                || $this->media_replacement_theme_css_files_table_exists();
 
-            $additive_schema_upgrade = in_array($version, array('8', '9'), true)
+            $additive_schema_upgrade = in_array($version, array('8', '9', '10', '11', '12', '13', '14'), true)
                 && $this->media_replacement_items_table_exists()
                 && $this->media_replacement_refs_table_exists()
                 && $this->media_replacement_ref_index_table_exists()
@@ -339,9 +355,25 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 old_mime varchar(100) NOT NULL DEFAULT '',
                 new_mime varchar(100) NOT NULL DEFAULT '',
                 old_size bigint(20) unsigned NOT NULL DEFAULT 0,
+                old_file_hash char(64) NOT NULL DEFAULT '',
                 new_size bigint(20) unsigned NOT NULL DEFAULT 0,
+                destination_existed tinyint(1) unsigned NOT NULL DEFAULT 0,
+                destination_overwritten tinyint(1) unsigned NOT NULL DEFAULT 0,
+                destination_previous_size bigint(20) unsigned NOT NULL DEFAULT 0,
+                destination_previous_hash char(64) NOT NULL DEFAULT '',
+                destination_backup_path text NOT NULL,
+                destination_backup_size bigint(20) unsigned NOT NULL DEFAULT 0,
+                destination_backup_hash char(64) NOT NULL DEFAULT '',
+                destination_published_size bigint(20) unsigned NOT NULL DEFAULT 0,
+                destination_published_hash char(64) NOT NULL DEFAULT '',
                 old_metadata_json longtext NOT NULL,
                 new_metadata_json longtext NOT NULL,
+                blocker_code varchar(64) NOT NULL DEFAULT '',
+                blocker_detail text NULL,
+                decision varchar(32) NOT NULL DEFAULT '',
+                decision_generation varchar(64) NOT NULL DEFAULT '',
+                decided_by bigint(20) unsigned NOT NULL DEFAULT 0,
+                decided_at datetime NULL DEFAULT NULL,
                 status varchar(24) NOT NULL DEFAULT 'pending',
                 error_message text NULL,
                 created_at datetime NULL DEFAULT NULL,
@@ -351,8 +383,35 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY old_path_hash (old_path_hash),
                 KEY attachment_id (attachment_id),
                 KEY job_status (job_id, status),
+                KEY job_blocker (job_id, blocker_code, status),
+                KEY job_decision (job_id, decision),
                 KEY job_cursor (job_id, id),
                 KEY target_format (target_format),
+                KEY updated_at (updated_at)
+            ) {$charset_collate};";
+
+            $attachment_plans_sql = "CREATE TABLE {$attachment_plans_table} (
+                id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                job_id varchar(64) NOT NULL DEFAULT '',
+                attachment_id bigint(20) unsigned NOT NULL DEFAULT 0,
+                main_item_id bigint(20) unsigned NOT NULL DEFAULT 0,
+                old_attached_file text NOT NULL,
+                new_attached_file text NOT NULL,
+                old_mime varchar(100) NOT NULL DEFAULT '',
+                new_mime varchar(100) NOT NULL DEFAULT '',
+                old_metadata_json longtext NOT NULL,
+                final_metadata_json longtext NOT NULL,
+                plan_hash char(64) NOT NULL DEFAULT '',
+                status varchar(24) NOT NULL DEFAULT 'prepared',
+                error_message text NULL,
+                created_at datetime NULL DEFAULT NULL,
+                updated_at datetime NULL DEFAULT NULL,
+                applied_at datetime NULL DEFAULT NULL,
+                restored_at datetime NULL DEFAULT NULL,
+                PRIMARY KEY  (id),
+                UNIQUE KEY job_attachment (job_id, attachment_id),
+                KEY job_status (job_id, status),
+                KEY main_item_id (main_item_id),
                 KEY updated_at (updated_at)
             ) {$charset_collate};";
 
@@ -364,6 +423,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 table_name varchar(191) NOT NULL DEFAULT '',
                 primary_key_column varchar(64) NOT NULL DEFAULT '',
                 primary_key_value varchar(191) NOT NULL DEFAULT '',
+                row_identity varchar(191) NOT NULL DEFAULT '',
                 column_name varchar(64) NOT NULL DEFAULT '',
                 old_value_hash char(32) NOT NULL DEFAULT '',
                 new_value_hash char(32) NOT NULL DEFAULT '',
@@ -381,6 +441,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY job_status (job_id, status),
                 KEY job_cursor (job_id, id),
                 KEY job_table_column (job_id, table_name, column_name),
+                KEY job_row_identity (job_id, row_identity),
                 KEY table_name (table_name),
                 KEY column_name (column_name),
                 KEY updated_at (updated_at)
@@ -393,6 +454,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 table_name varchar(191) NOT NULL DEFAULT '',
                 primary_key_column varchar(64) NOT NULL DEFAULT '',
                 primary_key_value varchar(191) NOT NULL DEFAULT '',
+                row_identity varchar(191) NOT NULL DEFAULT '',
                 column_name varchar(64) NOT NULL DEFAULT '',
                 reference_type varchar(24) NOT NULL DEFAULT '',
                 raw_fragment longtext NOT NULL,
@@ -412,6 +474,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY job_status (job_id, status),
                 KEY job_cursor (job_id, id),
                 KEY job_table_column (job_id, table_name, column_name),
+                KEY job_row_identity (job_id, row_identity),
                 KEY table_name (table_name),
                 KEY column_name (column_name),
                 KEY updated_at (updated_at)
@@ -470,6 +533,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
             ) {$charset_collate};";
 
             dbDelta($items_sql);
+            dbDelta($attachment_plans_sql);
             dbDelta($refs_sql);
             dbDelta($ref_index_sql);
             dbDelta($file_refs_sql);
@@ -487,10 +551,14 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
             }
 
             if ($this->media_replacement_items_table_exists()
+                && $this->media_replacement_attachment_plans_table_exists()
                 && $this->media_replacement_refs_table_exists()
                 && $this->media_replacement_ref_index_table_exists()
                 && $this->media_replacement_file_refs_table_exists()
                 && $this->media_replacement_theme_css_files_table_exists()
+                && $this->media_replacement_table_has_columns($items_table, array('old_file_hash', 'destination_existed', 'destination_overwritten', 'destination_previous_size', 'destination_previous_hash', 'destination_backup_path', 'destination_backup_size', 'destination_backup_hash', 'destination_published_size', 'destination_published_hash', 'blocker_code', 'blocker_detail', 'decision', 'decision_generation', 'decided_by', 'decided_at'))
+                && $this->media_replacement_table_has_columns($refs_table, array('row_identity'))
+                && $this->media_replacement_table_has_columns($ref_index_table, array('row_identity'))
                 && $this->media_replacement_table_has_columns($file_refs_table, array('apply_old_found', 'apply_new_found', 'verify_old_found', 'verify_new_found'))
                 && $this->media_replacement_table_has_columns($theme_css_files_table, array('checksum_after', 'checksum_scheme'))
             ) {
@@ -507,6 +575,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
     private function get_media_replacement_table_status()
     {
         $items_table     = $this->get_media_replacement_items_table_name();
+        $attachment_plans_table = $this->get_media_replacement_attachment_plans_table_name();
         $refs_table      = $this->get_media_replacement_refs_table_name();
         $ref_index_table = $this->get_media_replacement_ref_index_table_name();
         $file_refs_table = $this->get_media_replacement_file_refs_table_name();
@@ -515,11 +584,13 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
         return array(
             'version'        => self::MEDIA_REPLACEMENT_DB_VERSION,
             'itemsTable'     => $items_table,
+            'attachmentPlansTable' => $attachment_plans_table,
             'refsTable'      => $refs_table,
             'refIndexTable'  => $ref_index_table,
             'fileRefsTable'  => $file_refs_table,
             'themeCssFilesTable' => $theme_css_files_table,
             'itemsReady'     => '' !== $items_table && $this->media_replacement_items_table_exists(),
+            'attachmentPlansReady' => '' !== $attachment_plans_table && $this->media_replacement_attachment_plans_table_exists(),
             'refsReady'      => '' !== $refs_table && $this->media_replacement_refs_table_exists(),
             'refIndexReady'  => '' !== $ref_index_table && $this->media_replacement_ref_index_table_exists(),
             'fileRefsReady'  => '' !== $file_refs_table && $this->media_replacement_file_refs_table_exists(),

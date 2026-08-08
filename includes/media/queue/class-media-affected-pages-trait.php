@@ -47,14 +47,20 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 		}
 
 
-		private function get_on_demand_queue_dedupe_transient_key($attachment_id, $queue_format, $source_file, $missing_format) {
+		private function get_on_demand_queue_dedupe_lock_name($attachment_id, $queue_format, $source_file, $missing_format, array $source_signature = array()) {
 			$attachment_id = absint($attachment_id);
 			$queue_format = $this->normalize_media_queue_format($queue_format);
 			$missing_format = strtolower((string) $missing_format);
 			$source_file = is_string($source_file) ? wp_normalize_path($source_file) : '';
-			$signature = $this->get_attachment_source_signature($attachment_id);
+			$signature = array(
+				'mtime' => max(0, (int) ($source_signature['mtime'] ?? 0)),
+				'size' => max(0, (int) ($source_signature['size'] ?? 0)),
+			);
+			if ($signature['mtime'] <= 0 && $signature['size'] <= 0) {
+				$signature = $this->get_attachment_source_signature($attachment_id);
+			}
 			$hash = md5($attachment_id . '|' . $queue_format . '|' . $missing_format . '|' . $source_file . '|' . (int) $signature['mtime'] . '|' . (int) $signature['size']);
-			return self::MEDIA_ON_DEMAND_QUEUE_TRANSIENT_PREFIX . $hash;
+			return self::MEDIA_ON_DEMAND_QUEUE_LOCK_PREFIX . $hash;
 		}
 
 
@@ -74,12 +80,144 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 		}
 
 
+		private function media_page_refs_index_rows($index_name) {
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+			$rows = $wpdb->get_results($wpdb->prepare('SHOW INDEX FROM %i', $table), ARRAY_A);
+			$index_name = (string) $index_name;
+			$matches = array_values(array_filter((array) $rows, static function ($row) use ($index_name) {
+				return $index_name === (string) ($row['Key_name'] ?? '');
+			}));
+			usort($matches, static function ($left, $right) {
+				return ((int) ($left['Seq_in_index'] ?? 0)) <=> ((int) ($right['Seq_in_index'] ?? 0));
+			});
+			return $matches;
+		}
+
+
+		private function media_page_refs_index_matches($index_name, array $columns, $unique) {
+			$rows = $this->media_page_refs_index_rows($index_name);
+			if (empty($rows)) {
+				return false;
+			}
+			$actual_columns = array_map(static function ($row) {
+				return (string) ($row['Column_name'] ?? '');
+			}, $rows);
+			$actual_unique = '0' === (string) ($rows[0]['Non_unique'] ?? '1');
+			return array_values($columns) === $actual_columns && (bool) $unique === $actual_unique;
+		}
+
+
+		private function media_page_refs_source_contract_exists() {
+			if (!$this->media_page_refs_table_exists()) {
+				return false;
+			}
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+			$columns = $wpdb->get_col($wpdb->prepare('SHOW COLUMNS FROM %i', $table));
+			$required = array('source_kind', 'source_identity', 'requested_format');
+			if (!empty(array_diff($required, array_map('strval', (array) $columns)))) {
+				return false;
+			}
+			return $this->media_page_refs_index_matches(
+				'page_source_format',
+				array('page_url_hash', 'source_kind', 'source_identity', 'format', 'requested_format'),
+				true
+			) && $this->media_page_refs_index_matches(
+				'page_attachment_format',
+				array('page_url_hash', 'attachment_id', 'format'),
+				false
+			);
+		}
+
+
+		private function deduplicate_media_page_source_references() {
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+			$duplicates = $wpdb->get_results(
+				$wpdb->prepare(
+					'SELECT page_url_hash, source_kind, source_identity, format, requested_format, COUNT(*) AS duplicate_count FROM %i GROUP BY page_url_hash, source_kind, source_identity, format, requested_format HAVING COUNT(*) > 1',
+					$table
+				),
+				ARRAY_A
+			);
+			foreach ((array) $duplicates as $duplicate) {
+				$rows = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT id, status, converted, discovered_at, updated_at FROM %i WHERE page_url_hash = %s AND source_kind = %s AND source_identity = %s AND format = %s AND requested_format = %s ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'complete' THEN 1 ELSE 2 END ASC, updated_at DESC, id DESC",
+						$table,
+						(string) ($duplicate['page_url_hash'] ?? ''),
+						(string) ($duplicate['source_kind'] ?? ''),
+						(string) ($duplicate['source_identity'] ?? ''),
+						(string) ($duplicate['format'] ?? ''),
+						(string) ($duplicate['requested_format'] ?? '')
+					),
+					ARRAY_A
+				);
+				if (count((array) $rows) < 2) {
+					continue;
+				}
+				array_shift($rows);
+				foreach ($rows as $row) {
+					$wpdb->delete($table, array('id' => (int) ($row['id'] ?? 0)), array('%d'));
+				}
+			}
+			$remaining = (int) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM (SELECT 1 FROM %i GROUP BY page_url_hash, source_kind, source_identity, format, requested_format HAVING COUNT(*) > 1) duplicate_groups',
+					$table
+				)
+			);
+			return 0 === $remaining;
+		}
+
+
+		private function ensure_media_page_refs_source_indexes() {
+			global $wpdb;
+			$table = $this->get_media_page_refs_table_name();
+
+			$wpdb->query(
+				$wpdb->prepare(
+					"UPDATE %i SET source_kind = 'attachment', source_identity = SHA2(CONCAT('attachment:', attachment_id), 256), requested_format = '' WHERE attachment_id > 0 AND (source_identity = '' OR source_kind = '')",
+					$table
+				)
+			);
+
+			if (!$this->media_page_refs_index_matches('page_attachment_format', array('page_url_hash', 'attachment_id', 'format'), false)) {
+				if (!empty($this->media_page_refs_index_rows('page_attachment_format'))) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Versioned repair of an UltraCache-owned custom-table index whose existing definition cannot be corrected reliably by dbDelta().
+					$wpdb->query($wpdb->prepare('ALTER TABLE %i DROP INDEX page_attachment_format', $table));
+				}
+				if (empty($this->media_page_refs_index_rows('page_attachment_format'))) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Recreates the verified UltraCache-owned index after the versioned legacy-definition repair above.
+					$wpdb->query($wpdb->prepare('ALTER TABLE %i ADD KEY page_attachment_format (page_url_hash, attachment_id, format)', $table));
+				}
+			}
+
+			if (!$this->media_page_refs_index_matches('page_source_format', array('page_url_hash', 'source_kind', 'source_identity', 'format', 'requested_format'), true)) {
+				if (!empty($this->media_page_refs_index_rows('page_source_format'))) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Versioned repair of an UltraCache-owned custom-table index whose existing definition cannot be corrected reliably by dbDelta().
+					$wpdb->query($wpdb->prepare('ALTER TABLE %i DROP INDEX page_source_format', $table));
+				}
+				if (!$this->deduplicate_media_page_source_references()) {
+					return false;
+				}
+				if (empty($this->media_page_refs_index_rows('page_source_format'))) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Recreates the deduplicated UltraCache-owned unique index after the versioned legacy-definition repair above.
+					$wpdb->query($wpdb->prepare('ALTER TABLE %i ADD UNIQUE KEY page_source_format (page_url_hash, source_kind, source_identity, format, requested_format)', $table));
+				}
+			}
+
+			return $this->media_page_refs_source_contract_exists();
+		}
+
+
 		public function ensure_media_page_refs_table() {
 			global $wpdb;
 
 			$table = $this->get_media_page_refs_table_name();
 			$version = (string) get_option(self::MEDIA_PAGE_REFS_DB_VERSION_OPTION, '');
-			if (self::MEDIA_PAGE_REFS_DB_VERSION === $version && $this->media_page_refs_table_exists()) {
+			if (self::MEDIA_PAGE_REFS_DB_VERSION === $version && $this->media_page_refs_source_contract_exists()) {
 				return true;
 			}
 
@@ -91,8 +229,11 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 				page_url_hash char(32) NOT NULL,
 				page_url text NOT NULL,
-				attachment_id bigint(20) unsigned NOT NULL,
+				attachment_id bigint(20) unsigned NOT NULL DEFAULT 0,
+				source_kind varchar(20) NOT NULL DEFAULT 'attachment',
+				source_identity char(64) NOT NULL DEFAULT '',
 				format varchar(12) NOT NULL DEFAULT 'best',
+				requested_format varchar(12) NOT NULL DEFAULT '',
 				missing_formats varchar(40) NOT NULL DEFAULT '',
 				status varchar(20) NOT NULL DEFAULT 'pending',
 				converted tinyint(1) unsigned NOT NULL DEFAULT 0,
@@ -102,8 +243,8 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				purge_ready_at datetime NULL DEFAULT NULL,
 				purged_at datetime NULL DEFAULT NULL,
 				PRIMARY KEY  (id),
-				UNIQUE KEY page_attachment_format (page_url_hash, attachment_id, format),
 				KEY attachment_format_status (attachment_id, format, status),
+				KEY source_format_status (source_kind, source_identity, format, requested_format, status),
 				KEY page_status (page_url_hash, status),
 				KEY purge_ready (purge_ready_at, purged_at),
 				KEY purged_at (purged_at),
@@ -111,7 +252,7 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			) {$charset_collate};";
 
 			dbDelta($sql);
-			if ($this->media_page_refs_table_exists()) {
+			if ($this->media_page_refs_table_exists() && $this->ensure_media_page_refs_source_indexes()) {
 				update_option(self::MEDIA_PAGE_REFS_DB_VERSION_OPTION, self::MEDIA_PAGE_REFS_DB_VERSION, false);
 				return true;
 			}
@@ -121,12 +262,17 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 
 
 		private function maybe_cleanup_on_demand_affected_page_refs() {
-			if (get_transient('ultracache_media_page_refs_cleanup_lock')) {
+			if (!$this->ensure_media_page_refs_table() || !function_exists('ultracache_acquire_lock')) {
 				return;
 			}
-			set_transient('ultracache_media_page_refs_cleanup_lock', 1, HOUR_IN_SECONDS);
 
-			if (!$this->ensure_media_page_refs_table()) {
+			$cleanup_token = 'media-page-refs-cleanup-' . wp_generate_uuid4();
+			if (!ultracache_acquire_lock(
+				'ultracache_media_page_refs_cleanup_lock',
+				$cleanup_token,
+				HOUR_IN_SECONDS,
+				array('type' => 'media_page_refs_cleanup', 'startedAt' => time())
+			)) {
 				return;
 			}
 
@@ -161,12 +307,21 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 		}
 
 
-		private function get_on_demand_affected_media_key($attachment_id, $format = 'best') {
-			return absint($attachment_id) . '|' . $this->normalize_media_queue_format($format);
+
+		private function get_on_demand_affected_source_key($source_kind, $source_identity, $format = 'best', $requested_format = '') {
+			$requested_format = in_array(strtolower((string) $requested_format), array('avif', 'webp'), true) ? strtolower((string) $requested_format) : '';
+			return sanitize_key((string) $source_kind) . '|' . strtolower((string) $source_identity) . '|' . $this->normalize_media_queue_format($format) . '|' . $requested_format;
 		}
 
 
 		private function get_current_on_demand_affected_page_url() {
+			$explicit_page_url = isset($this->media_rewrite_page_url_context)
+				? esc_url_raw((string) $this->media_rewrite_page_url_context)
+				: '';
+			if ('' !== $explicit_page_url) {
+				return $explicit_page_url;
+			}
+
 			if (is_admin() || wp_doing_ajax() || (defined('REST_REQUEST') && REST_REQUEST)) {
 				return '';
 			}
@@ -225,8 +380,27 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 
 		private function record_on_demand_affected_page($attachment_id, $format = 'best', $missing_format = '') {
 			$attachment_id = absint($attachment_id);
-			$format = $this->normalize_media_queue_format($format);
 			if ($attachment_id <= 0) {
+				return false;
+			}
+			return $this->record_on_demand_affected_source_page(
+				'attachment',
+				hash('sha256', 'attachment:' . $attachment_id),
+				$format,
+				$missing_format,
+				$attachment_id,
+				''
+			);
+		}
+
+
+		private function record_on_demand_affected_source_page($source_kind, $source_identity, $format = 'best', $missing_format = '', $attachment_id = 0, $requested_format = '') {
+			$source_kind = sanitize_key((string) $source_kind);
+			$source_identity = strtolower(trim((string) $source_identity));
+			$attachment_id = absint($attachment_id);
+			$format = $this->normalize_media_queue_format($format);
+			$requested_format = in_array(strtolower((string) $requested_format), array('avif', 'webp'), true) ? strtolower((string) $requested_format) : '';
+			if (!in_array($source_kind, array('attachment', 'local_asset'), true) || !preg_match('/^[a-f0-9]{64}$/', $source_identity)) {
 				return false;
 			}
 
@@ -234,47 +408,56 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			if ('' === $page_url) {
 				return false;
 			}
-
 			$page_key = md5($page_url);
-			$seen_key = $page_key . '|' . $this->get_on_demand_affected_media_key($attachment_id, $format);
+			$seen_key = $page_key . '|' . $this->get_on_demand_affected_source_key($source_kind, $source_identity, $format, $requested_format);
 			if (isset($this->on_demand_affected_page_seen[$seen_key])) {
 				return true;
 			}
 			$this->on_demand_affected_page_seen[$seen_key] = true;
-
 			if (!$this->ensure_media_page_refs_table()) {
 				return false;
 			}
-
 			$this->maybe_cleanup_on_demand_affected_page_refs();
 
 			global $wpdb;
 			$table = $this->get_media_page_refs_table_name();
 			$now = current_time('mysql');
 			$missing_formats = $this->merge_on_demand_missing_format('', $missing_format);
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Atomic upsert prevents concurrent frontend discovery from racing on the unique page/attachment/format key.
 			$upserted = $wpdb->query(
 				$wpdb->prepare(
-					"INSERT INTO %i (page_url_hash, page_url, attachment_id, format, missing_formats, status, converted, discovered_at, updated_at) VALUES (%s, %s, %d, %s, %s, 'pending', 0, %s, %s) ON DUPLICATE KEY UPDATE page_url = VALUES(page_url), missing_formats = CASE WHEN VALUES(missing_formats) = '' THEN missing_formats WHEN missing_formats = '' THEN VALUES(missing_formats) WHEN FIND_IN_SET(VALUES(missing_formats), missing_formats) > 0 THEN missing_formats ELSE CONCAT(missing_formats, ',', VALUES(missing_formats)) END, status = 'pending', updated_at = VALUES(updated_at), purged_at = NULL, purge_ready_at = NULL",
+					"INSERT INTO %i (page_url_hash, page_url, attachment_id, source_kind, source_identity, format, requested_format, missing_formats, status, converted, discovered_at, updated_at) VALUES (%s, %s, %d, %s, %s, %s, %s, %s, 'pending', 0, %s, %s) ON DUPLICATE KEY UPDATE page_url = VALUES(page_url), missing_formats = CASE WHEN VALUES(missing_formats) = '' THEN missing_formats WHEN missing_formats = '' THEN VALUES(missing_formats) WHEN FIND_IN_SET(VALUES(missing_formats), missing_formats) > 0 THEN missing_formats ELSE CONCAT(missing_formats, ',', VALUES(missing_formats)) END, status = 'pending', updated_at = VALUES(updated_at), purged_at = NULL, purge_ready_at = NULL",
 					$table,
 					$page_key,
 					$page_url,
 					$attachment_id,
+					$source_kind,
+					$source_identity,
 					$format,
+					$requested_format,
 					$missing_formats,
 					$now,
 					$now
 				)
 			);
-
 			return false !== $upserted;
 		}
 
 
 		private function mark_on_demand_affected_media_processed($attachment_id, $format, array $result) {
 			$attachment_id = absint($attachment_id);
+			if ($attachment_id <= 0) {
+				return array();
+			}
+			return $this->mark_on_demand_affected_source_processed('attachment', hash('sha256', 'attachment:' . $attachment_id), $format, $result, '');
+		}
+
+
+		private function mark_on_demand_affected_source_processed($source_kind, $source_identity, $format, array $result, $requested_format = '') {
+			$source_kind = sanitize_key((string) $source_kind);
+			$source_identity = strtolower(trim((string) $source_identity));
 			$format = $this->normalize_media_queue_format($format);
-			if ($attachment_id <= 0 || !$this->ensure_media_page_refs_table()) {
+			$requested_format = in_array(strtolower((string) $requested_format), array('avif', 'webp'), true) ? strtolower((string) $requested_format) : '';
+			if (!in_array($source_kind, array('attachment', 'local_asset'), true) || !preg_match('/^[a-f0-9]{64}$/', $source_identity) || !$this->ensure_media_page_refs_table()) {
 				return array();
 			}
 
@@ -282,26 +465,27 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			$table = $this->get_media_page_refs_table_name();
 			$now = current_time('mysql');
 			$converted = !empty($result['converted']) || !empty($result['alreadyOptimized']) || ((int) ($result['skippedExisting'] ?? 0) > 0) || (((int) ($result['avif'] ?? 0) + (int) ($result['webp'] ?? 0)) > 0);
-
 			$page_rows = $wpdb->get_results($wpdb->prepare(
-				"SELECT DISTINCT page_url_hash FROM %i WHERE attachment_id = %d AND format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00') LIMIT 250",
+				"SELECT DISTINCT page_url_hash FROM %i WHERE source_kind = %s AND source_identity = %s AND format = %s AND requested_format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00') LIMIT 250",
 				$table,
-				$attachment_id,
-				$format
+				$source_kind,
+				$source_identity,
+				$format,
+				$requested_format
 			), ARRAY_A);
-
 			if (empty($page_rows)) {
 				return array();
 			}
-
 			$wpdb->query($wpdb->prepare(
-				"UPDATE %i SET status = 'complete', converted = %d, completed_at = %s, updated_at = %s WHERE attachment_id = %d AND format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+				"UPDATE %i SET status = 'complete', converted = %d, completed_at = %s, updated_at = %s WHERE source_kind = %s AND source_identity = %s AND format = %s AND requested_format = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
 				$table,
 				$converted ? 1 : 0,
 				$now,
 				$now,
-				$attachment_id,
-				$format
+				$source_kind,
+				$source_identity,
+				$format,
+				$requested_format
 			));
 
 			$ready_urls = array();
@@ -310,17 +494,14 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				if (!preg_match('/^[a-f0-9]{32}$/', $page_key)) {
 					continue;
 				}
-
 				$summary = $wpdb->get_row($wpdb->prepare(
 					"SELECT MAX(page_url) AS page_url, SUM(CASE WHEN status <> 'complete' THEN 1 ELSE 0 END) AS pending_media, SUM(CASE WHEN converted = 1 THEN 1 ELSE 0 END) AS converted_media FROM %i WHERE page_url_hash = %s AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
 					$table,
 					$page_key
 				), ARRAY_A);
-
 				if (!is_array($summary)) {
 					continue;
 				}
-
 				$pending = (int) ($summary['pending_media'] ?? 0);
 				$converted_count = (int) ($summary['converted_media'] ?? 0);
 				$page_url = isset($summary['page_url']) ? esc_url_raw((string) $summary['page_url']) : '';
@@ -335,7 +516,6 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 					$ready_urls[$page_url] = $page_url;
 				}
 			}
-
 			return array_values($ready_urls);
 		}
 
@@ -404,8 +584,12 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 		}
 
 
-		private function maybe_queue_missing_optimized_media_from_public_url($public_url, $missing_format) {
+		private function maybe_queue_missing_optimized_media_from_public_url($public_url, $missing_format, $discovery_reason = 'missing', array $source_signature = array()) {
 			$missing_format = strtolower((string) $missing_format);
+			$discovery_reason = strtolower((string) $discovery_reason);
+			if (!in_array($discovery_reason, array('missing', 'stale', 'indeterminate'), true)) {
+				$discovery_reason = 'missing';
+			}
 			if (!in_array($missing_format, array('avif', 'webp'), true) || !$this->media_output_mode_allows($missing_format)) {
 				return false;
 			}
@@ -420,10 +604,7 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			}
 
 			$discovery_key = $missing_format . '|' . $relative_path;
-			if (isset($this->on_demand_queue_discovery_seen[$discovery_key])) {
-				return false;
-			}
-			$this->on_demand_queue_discovery_seen[$discovery_key] = true;
+			$already_discovered = isset($this->on_demand_queue_discovery_seen[$discovery_key]);
 
 			$uploads = ultracache_uploads_base_info();
 			$uploads_root = !empty($uploads['basedir']) ? realpath($uploads['basedir']) : false;
@@ -432,7 +613,7 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			}
 
 			$source_file = trailingslashit($uploads_root) . ltrim(str_replace('\\', '/', (string) $relative_path), '/');
-			if (!$this->optimized_storage_readable_source_exists($source_file) || !$this->is_allowed_source_file($source_file)) {
+			if (!$this->optimized_storage_readable_source_exists($source_file) || !$this->is_source_file_supported_for_format($source_file, $missing_format)) {
 				return false;
 			}
 
@@ -442,24 +623,87 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			}
 
 			$queue_format = 'best';
-			$dedupe_key = $this->get_on_demand_queue_dedupe_transient_key($attachment_id, $queue_format, $source_file, $missing_format);
-			if (get_transient($dedupe_key)) {
+			$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
+			if ($already_discovered) {
+				return false;
+			}
+			$this->on_demand_queue_discovery_seen[$discovery_key] = true;
+			$dedupe_lock_name = $this->get_on_demand_queue_dedupe_lock_name($attachment_id, $queue_format, $source_file, $missing_format, $source_signature);
+			$dedupe_lock_token = 'media-odq-' . wp_generate_uuid4();
+			if (!function_exists('ultracache_acquire_lock') || !ultracache_acquire_lock(
+				$dedupe_lock_name,
+				$dedupe_lock_token,
+				HOUR_IN_SECONDS,
+				array(
+					'type' => 'media_on_demand_queue_dedupe',
+					'attachmentId' => $attachment_id,
+					'format' => $queue_format,
+					'missingFormat' => $missing_format,
+				)
+			)) {
 				$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
 				return false;
 			}
 
-			$message = 'Queued by on-demand missing media discovery (' . $missing_format . '). Current request stayed lookup-only.';
+			$message = 'Queued by on-demand ' . $discovery_reason . ' media discovery (' . $missing_format . '). Current request stayed lookup-only.';
 			$queued = $this->upsert_media_queue_item($attachment_id, $queue_format, 'pending', $message, 0, true);
 			if (!$queued) {
+				if (function_exists('ultracache_release_lock')) {
+					ultracache_release_lock($dedupe_lock_name, $dedupe_lock_token);
+				}
 				return false;
 			}
 
 			$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
 			$this->on_demand_queue_discovery_count++;
-			set_transient($dedupe_key, 1, HOUR_IN_SECONDS);
 			$this->invalidate_media_work_summary_cache();
 			$this->queue_background_generation_dispatch('on_demand');
 
+			return true;
+		}
+
+
+		private function maybe_queue_missing_local_asset_media($public_url, array $source, $missing_format, $discovery_reason = 'missing', array $source_signature = array()) {
+			$missing_format = strtolower((string) $missing_format);
+			$discovery_reason = in_array((string) $discovery_reason, array('missing', 'stale', 'indeterminate'), true) ? (string) $discovery_reason : 'missing';
+			if (!in_array($missing_format, array('avif', 'webp'), true) || !$this->media_output_mode_allows($missing_format) || !$this->can_queue_missing_media_from_lookup()) {
+				return false;
+			}
+			$normalized = $this->normalize_local_asset_queue_source($source, $missing_format);
+			if (empty($normalized)) {
+				return false;
+			}
+			$discovery_key = 'local_asset|' . $normalized['source_identity'] . '|' . $missing_format;
+			$already_discovered = isset($this->on_demand_queue_discovery_seen[$discovery_key]);
+			$this->record_on_demand_affected_source_page('local_asset', $normalized['source_identity'], 'best', $missing_format, 0, $missing_format);
+			if ($already_discovered) {
+				return false;
+			}
+			$this->on_demand_queue_discovery_seen[$discovery_key] = true;
+			$mtime = max(0, (int) ($source_signature['mtime'] ?? $normalized['source_mtime']));
+			$size = max(0, (int) ($source_signature['size'] ?? $normalized['source_size']));
+			$lock_hash = hash('sha256', $normalized['source_identity'] . '|' . $missing_format . '|' . $mtime . '|' . $size);
+			$lock_name = self::MEDIA_ON_DEMAND_QUEUE_LOCK_PREFIX . $lock_hash;
+			$lock_token = 'media-local-odq-' . wp_generate_uuid4();
+			if (!function_exists('ultracache_acquire_lock') || !ultracache_acquire_lock(
+				$lock_name,
+				$lock_token,
+				HOUR_IN_SECONDS,
+				array('type' => 'media_local_asset_on_demand_queue_dedupe', 'sourceIdentity' => $normalized['source_identity'], 'requestedFormat' => $missing_format)
+			)) {
+				return false;
+			}
+			$message = 'Queued by on-demand ' . $discovery_reason . ' local-asset discovery (' . $missing_format . '). Current request stayed lookup-only.';
+			$queued = $this->upsert_local_asset_media_queue_item($source, $missing_format, 'pending', $message, 0, true);
+			if (!$queued) {
+				if (function_exists('ultracache_release_lock')) {
+					ultracache_release_lock($lock_name, $lock_token);
+				}
+				return false;
+			}
+			$this->on_demand_queue_discovery_count++;
+			$this->invalidate_media_work_summary_cache();
+			$this->queue_background_generation_dispatch('on_demand_local_asset');
 			return true;
 		}
 

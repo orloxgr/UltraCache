@@ -174,7 +174,7 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
 
         public static function get_advanced_cache_dropin_contents()
         {
-            $template = ultracache_plugin_dir('templates/advanced-cache.php.tpl');
+            $template = ultracache_plugin_dir('templates/advanced-cache-template.php');
             if (!file_exists($template) || !is_readable($template)) {
                 return '';
             }

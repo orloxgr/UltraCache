@@ -16,7 +16,6 @@
 	const mediaReplacementDestructiveTokenKeys = {
 		media_library_replacement_db_apply: 'databaseApply',
 		media_library_replacement_theme_css_apply: 'themeCssApply',
-		media_library_replacement_cleanup_apply: 'cleanupApply',
 		media_library_replacement_delete: 'cleanupApply',
 	};
 
@@ -150,12 +149,12 @@
 			storage_diagnostics_refresh: { path: 'diagnostics/storage/refresh', method: 'POST' },
 			lcp_observations_query: { path: 'lcp-observations', method: 'GET' },
 			lcp_observation_detail: { path: 'lcp-observations/detail', method: 'GET' },
+			lcp_observation_manual_selector: { path: 'lcp-observations/manual-selector', method: 'POST' },
 			lcp_observation_action: { path: 'lcp-observations/action', method: 'POST' },
 			compression_capabilities: { path: 'compression/capabilities', method: 'POST' },
 			get_crawl_urls: { path: 'crawl-urls', method: 'GET' },
 			inspect_url: { path: 'inspect-url', method: 'POST' },
 			crawl_page: { path: 'crawl-page', method: 'POST' },
-			manual_warm_page_stage: { path: 'manual-warm/page-stage', method: 'POST' },
 			build_frontpage_css: { path: 'build-frontpage-css', method: 'POST' },
 			warm_frontpage_html: { path: 'warm-frontpage-html', method: 'POST' },
 			warm_frontpage_html_css: { path: 'warm-frontpage-html-css', method: 'POST' },
@@ -167,9 +166,12 @@
 			media_library_replacement_status: { path: 'media/library-replacement/status', method: 'GET' },
 			media_library_replacement_session: { path: 'media/library-replacement/session', method: 'POST' },
 			media_library_replacement_restart: { path: 'media/library-replacement/restart', method: 'POST' },
+			media_library_replacement_recover: { path: 'media/library-replacement/recover', method: 'POST' },
 			media_library_replacement_readiness_status: { path: 'media/library-replacement/readiness', method: 'GET' },
 			media_library_replacement_readiness_scan: { path: 'media/library-replacement/readiness', method: 'POST' },
 			media_library_replacement_workflow_stage: { path: 'media/library-replacement/workflow-stage', method: 'POST' },
+			media_library_replacement_blockers: { path: 'media/library-replacement/blockers', method: 'GET' },
+			media_library_replacement_blocker_decisions: { path: 'media/library-replacement/blockers', method: 'POST' },
 			media_library_replacement_prepare: { path: 'media/library-replacement/prepare', method: 'POST' },
 			media_library_replacement_do: { path: 'media/library-replacement/do', method: 'POST' },
 			media_library_replacement_verify: { path: 'media/library-replacement/verify', method: 'POST' },
@@ -191,7 +193,6 @@
 			media_library_replacement_theme_css_apply: { path: 'media/library-replacement/theme-css/apply', method: 'POST' },
 			media_library_replacement_theme_css_verify: { path: 'media/library-replacement/theme-css/verify', method: 'POST' },
 			media_library_replacement_cleanup_preview: { path: 'media/library-replacement/cleanup/preview', method: 'GET' },
-			media_library_replacement_cleanup_apply: { path: 'media/library-replacement/cleanup/apply', method: 'POST' },
 			media_queue_status: { path: 'media-queue/status', method: 'GET' },
 			media_queue_rebuild: { path: 'media-queue/rebuild', method: 'POST' },
 			media_queue_process: { path: 'media-queue/process', method: 'POST' },
@@ -200,11 +201,14 @@
 			media_queue_retry_failed: { path: 'media-queue/retry-failed', method: 'POST' },
 			media_queue_requeue_completed_regeneration: { path: 'media-queue/requeue-completed-regeneration', method: 'POST' },
 			media_queue_clear_completed: { path: 'media-queue/clear-completed', method: 'POST' },
+			varnish_discover: { path: 'varnish/discover', method: 'POST' },
 			varnish_test: { path: 'varnish/test', method: 'POST' },
 			varnish_behavior_test: { path: 'varnish/test-behavior', method: 'POST' },
+			varnish_performance_snapshot: { path: 'varnish/performance-snapshot', method: 'POST' },
 			varnish_flush_all: { path: 'varnish/flush-all', method: 'POST' },
 			opcache_flush: { path: 'opcache/flush', method: 'POST' },
 			apcu_flush: { path: 'apcu/flush', method: 'POST' },
+			litespeed_behavior_test: { path: 'litespeed/test-behavior', method: 'POST' },
 			litespeed_flush: { path: 'litespeed/flush', method: 'POST' },
 			nginx_flush: { path: 'nginx/flush', method: 'POST' },
 			external_caches_redetect: { path: 'external-caches/redetect', method: 'POST' },
@@ -470,6 +474,11 @@
 			: Math.max(0, Number(source.nextOffset ? source.nextOffset : items.length));
 		const nextCursor = typeof source.nextCursor === 'string' ? source.nextCursor : '';
 		const queueBuilding = queue ? !queue.buildComplete : false;
+		const hasMore = typeof source.hasMore !== 'undefined' ? !!source.hasMore : !!nextCursor;
+		const waitingForQueueBuild = !!source.waitingForQueueBuild || (queueBuilding && !items.length && hasMore);
+		const retryAfterMs = waitingForQueueBuild
+			? Math.max(250, Math.min(5000, Number(source.retryAfterMs || 500)))
+			: 0;
 	
 		return {
 			items,
@@ -483,15 +492,39 @@
 			processed: processed,
 			queueCompleted: queueCompleted,
 			queueBuilding: queueBuilding,
+			waitingForQueueBuild: waitingForQueueBuild,
+			retryAfterMs: retryAfterMs,
+			queueWaitReason: source.queueWaitReason ? String(source.queueWaitReason) : '',
+			queueProgressToken: source.queueProgressToken ? String(source.queueProgressToken) : '',
+			buildGeneration: source.buildGeneration ? String(source.buildGeneration) : (queue && queue.rebuildGeneration ? String(queue.rebuildGeneration) : ''),
+			buildOffset: typeof source.buildOffset !== 'undefined' ? Math.max(0, Number(source.buildOffset || 0)) : (queue ? Math.max(0, Number(queue.buildOffset || 0)) : 0),
 			queuePending: queue ? Math.max(0, Number(queue.pending || 0)) : 0,
 			queueFailed: queue ? Math.max(0, Number(queue.failed || 0)) : 0,
 			queueSkipped: queue ? Math.max(0, Number(queue.skipped || 0)) : 0,
 			queueAlreadyOptimized: queue ? Math.max(0, Number(queue.alreadyOptimized || queue.skipped || 0)) : 0,
+			queueUnitParentTotal: queue ? Math.max(0, Number(queue.unitParentTotal || 0)) : 0,
+			queueUnitRequiredParentTotal: queue ? Math.max(0, Number(queue.unitRequiredParentTotal || 0)) : 0,
+			queueUnitMaterializedParents: queue ? Math.max(0, Number(queue.unitMaterializedParents || 0)) : 0,
+			queueUnitMaterializedRequiredParents: queue ? Math.max(0, Number(queue.unitMaterializedRequiredParents || 0)) : 0,
+			queueUnitUnmaterializedParents: queue ? Math.max(0, Number(queue.unitUnmaterializedParents || 0)) : 0,
+			queueUnitCoverageComplete: queue ? !!queue.unitCoverageComplete : false,
+			queueUnitTotal: queue ? Math.max(0, Number(queue.unitTotal || 0)) : 0,
+			queueUnitRequiredTotal: queue ? Math.max(0, Number(queue.unitRequiredTotal || 0)) : 0,
+			queueUnitRequiredCompleted: queue ? Math.max(0, Number(queue.unitRequiredCompleted || 0)) : 0,
+			queueUnitPending: queue ? Math.max(0, Number(queue.unitPending || 0)) : 0,
+			queueUnitProcessing: queue ? Math.max(0, Number(queue.unitProcessing || 0)) : 0,
+			queueUnitDone: queue ? Math.max(0, Number(queue.unitDone || 0)) : 0,
+			queueUnitFailed: queue ? Math.max(0, Number(queue.unitFailed || 0)) : 0,
+			queueUnitSkipped: queue ? Math.max(0, Number(queue.unitSkipped || 0)) : 0,
+			queueUnitRemaining: queue ? Math.max(0, Number(queue.unitRemaining || 0)) : 0,
+			queueUnitOutstanding: queue ? Math.max(0, Number(queue.unitOutstanding || 0)) : 0,
+			queueUnitInventoryComplete: queue ? !!queue.unitInventoryComplete : false,
+			queueUnitIsComplete: queue ? !!queue.unitIsComplete : false,
 			queueIsComplete: queue ? !!queue.isComplete : !!source.complete,
 			needsRepair: queue ? !!queue.needsRepair : false,
 			repair: source.repair && typeof source.repair === 'object' ? source.repair : null,
 			message: source.message ? String(source.message) : '',
-			hasMore: typeof source.hasMore !== 'undefined' ? !!source.hasMore : !!nextCursor,
+			hasMore: hasMore,
 		};
 	}
 

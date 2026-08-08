@@ -7,9 +7,32 @@
 		throw new Error('UltraCacheAdmin namespace is required before jobs.js.');
 	}
 
+	const core = typeof admin.get === 'function' ? admin.get('core') : null;
+	if (!core) {
+		throw new Error('UltraCache admin core module is required before jobs.js.');
+	}
+	const { reportNonFatalAdminError } = core;
+
 	let jobStorageKey = 'ultracache-dashboard-job-state-v3';
 	let defaultBatchSize = 100;
 	let getNextEtaCheckpoint = function () { return 10; };
+
+	const DEFAULT_NO_PROGRESS_MAX_COUNT = 15;
+	const DEFAULT_NO_PROGRESS_MAX_ELAPSED_MS = 60000;
+	const DEFAULT_MAX_BATCH_ITERATIONS = 10000;
+	const DEFAULT_RETRY_DELAY_MS = 250;
+	const MAX_RETRY_DELAY_MS = 4000;
+
+	async function waitForJobRetry(delayMs, isCancelled) {
+		let remaining = Math.max(0, Number(delayMs || 0));
+		while (remaining > 0 && !isCancelled()) {
+			const slice = Math.min(100, remaining);
+			await new Promise(function (resolve) {
+				window.setTimeout(resolve, slice);
+			});
+			remaining -= slice;
+		}
+	}
 
 	function configure(config) {
 		const source = config && typeof config === 'object' ? config : {};
@@ -29,6 +52,7 @@
 			const raw = window.localStorage.getItem(jobStorageKey);
 			return raw ? JSON.parse(raw) : null;
 		} catch (error) {
+			reportNonFatalAdminError('jobs.storage.load', error, { severity: 'warning', dedupeKey: 'jobs.storage.load' });
 			return null;
 		}
 	}
@@ -36,13 +60,17 @@
 	function saveJob(job) {
 		try {
 			window.localStorage.setItem(jobStorageKey, JSON.stringify(job));
-		} catch (error) {}
+		} catch (error) {
+			reportNonFatalAdminError('jobs.storage.save', error, { severity: 'warning', dedupeKey: 'jobs.storage.save' });
+		}
 	}
 
 	function clearSavedJob() {
 		try {
 			window.localStorage.removeItem(jobStorageKey);
-		} catch (error) {}
+		} catch (error) {
+			reportNonFatalAdminError('jobs.storage.clear', error, { severity: 'warning', dedupeKey: 'jobs.storage.clear' });
+		}
 	}
 
 	function getJobControls(savedJob, type, options) {
@@ -99,6 +127,7 @@
 			skippedCount: forceRestart ? 0 : Math.max(0, Number(source.skippedCount || 0)),
 			failedCount: forceRestart ? 0 : Math.max(0, Number(source.failedCount || 0)),
 			varnishWarmedCount: forceRestart ? 0 : Math.max(0, Number(source.varnishWarmedCount || 0)),
+			liteSpeedWarmedCount: forceRestart ? 0 : Math.max(0, Number(source.liteSpeedWarmedCount || 0)),
 			etaMeasuredMs: forceRestart ? 0 : Math.max(0, Number(source.etaMeasuredMs || 0)),
 			etaSampleCount: sampleCount,
 			etaPerItemMs: forceRestart ? 0 : Math.max(0, Number(source.etaPerItemMs || 0)),
@@ -128,6 +157,7 @@
 			avifCount: Math.max(0, Number(source.avifCount || 0)),
 			webpCount: Math.max(0, Number(source.webpCount || 0)),
 			varnishWarmedCount: Math.max(0, Number(source.varnishWarmedCount || 0)),
+			liteSpeedWarmedCount: Math.max(0, Number(source.liteSpeedWarmedCount || 0)),
 			logs: Array.isArray(source.logs) ? source.logs : [],
 			startTime: Number(source.startTime || 0),
 			etaPerItemMs: Math.max(0, Number(source.etaPerItemMs || 0)),
@@ -154,6 +184,7 @@
 			avifIncrement: isObject ? Math.max(0, Number(itemResult.avifIncrement || 0)) : 0,
 			webpIncrement: isObject ? Math.max(0, Number(itemResult.webpIncrement || 0)) : 0,
 			varnishWarmedIncrement: isObject ? Math.max(0, Number(itemResult.varnishWarmedIncrement || 0)) : 0,
+			liteSpeedWarmedIncrement: isObject ? Math.max(0, Number(itemResult.liteSpeedWarmedIncrement || 0)) : 0,
 			varnishVerifiedIncrement: isObject ? Math.max(0, Number(itemResult.varnishVerifiedIncrement || 0)) : 0,
 			varnishBypassedIncrement: isObject ? Math.max(0, Number(itemResult.varnishBypassedIncrement || 0)) : 0,
 			varnishInconclusiveIncrement: isObject ? Math.max(0, Number(itemResult.varnishInconclusiveIncrement || 0)) : 0,
@@ -190,6 +221,7 @@
 			skippedCount: Number(source.skippedCount || 0) + result.skippedIncrement,
 			failedCount: Number(source.failedCount || 0) + result.failedIncrement,
 			varnishWarmedCount: Number(source.varnishWarmedCount || 0) + result.varnishWarmedIncrement,
+			liteSpeedWarmedCount: Number(source.liteSpeedWarmedCount || 0) + result.liteSpeedWarmedIncrement,
 			etaMeasuredMs,
 			etaSampleCount,
 			etaPerItemMs,
@@ -234,8 +266,24 @@
 		const onCompleted = typeof cb.onCompleted === 'function' ? cb.onCompleted : async function () {};
 		const markProcessComplete = typeof cb.markProcessComplete === 'function' ? cb.markProcessComplete : function () {};
 		const getFailureText = typeof cb.getFailureText === 'function' ? cb.getFailureText : function () { return 'Job failed.'; };
-		const onReleaseFailure = typeof cb.onReleaseFailure === 'function' ? cb.onReleaseFailure : function () {};
+		const hasReleaseFailureHandler = typeof cb.onReleaseFailure === 'function';
+		const onReleaseFailure = hasReleaseFailureHandler ? cb.onReleaseFailure : function () {};
 		const onPaused = typeof cb.onPaused === 'function' ? cb.onPaused : function () {};
+		const waitForRetry = typeof cb.waitForRetry === 'function' ? cb.waitForRetry : waitForJobRetry;
+		const getNow = typeof cb.getNow === 'function' ? cb.getNow : function () { return Date.now(); };
+		const noProgressMaxCount = Math.max(1, Number(cb.noProgressMaxCount || DEFAULT_NO_PROGRESS_MAX_COUNT));
+		const noProgressMaxElapsedMs = Math.max(1000, Number(cb.noProgressMaxElapsedMs || DEFAULT_NO_PROGRESS_MAX_ELAPSED_MS));
+		const maxBatchIterations = Math.max(1, Number(cb.maxBatchIterations || DEFAULT_MAX_BATCH_ITERATIONS));
+
+		function reportExclusiveSessionFailure(context, error, message) {
+			reportNonFatalAdminError(context, error, {
+				severity: 'warning',
+				dedupeKey: context,
+				pushToast,
+				userVisible: true,
+				toastText: message,
+			});
+		}
 
 		return async function runJob(job, forceRestart, existingExclusiveToken) {
 			let state = normalizeJobState(job, forceRestart, {
@@ -245,6 +293,10 @@
 			});
 			let exclusiveToken = '';
 			let completed = false;
+			let batchIterationCount = 0;
+			let noProgressCount = 0;
+			let noProgressStartedAt = null;
+			let lastQueueProgressToken = '';
 			resetCancel();
 			setBusy(true);
 			updateProcessState(state);
@@ -259,6 +311,10 @@
 				}
 
 				while (true) {
+					batchIterationCount += 1;
+					if (batchIterationCount > maxBatchIterations) {
+						throw new Error('Job batch iteration limit reached without completion. The job was paused and can be resumed.');
+					}
 					if (isCancelled()) {
 						state = Object.assign({}, state, {
 							active: false,
@@ -270,7 +326,9 @@
 						if (exclusiveToken) {
 							try {
 								await pauseExclusiveSession(state, exclusiveToken);
-							} catch (sessionError) {}
+							} catch (sessionError) {
+								reportExclusiveSessionFailure('jobs.session.pause', sessionError, 'The job paused locally, but its server lease could not be paused. Check the current job status before resuming.');
+							}
 						}
 						onPaused(state, exclusiveToken);
 						break;
@@ -279,16 +337,26 @@
 					let batchItems = Array.isArray(state.pendingItems) ? state.pendingItems.slice() : [];
 					let batchNextCursor = state.nextCursor || state.cursor || '';
 					let batchHasMore = typeof state.hasMore === 'boolean' ? state.hasMore : true;
+					let batchWaitingForQueueBuild = false;
+					let batchRetryAfterMs = 0;
+					let batchProgressToken = '';
+					const previousCursor = String(state.cursor || '');
 
 					if (!batchItems.length) {
 						const batch = await fetchBatch(state.type, state.cursor || '', state.batchSize, state.scope || getWarmScopeForType(state.type), state);
 						batchItems = Array.isArray(batch.items) ? batch.items.slice() : [];
 						batchNextCursor = batch.nextCursor || '';
 						batchHasMore = !!batch.hasMore;
+						batchWaitingForQueueBuild = !!batch.waitingForQueueBuild;
+						batchRetryAfterMs = Math.max(0, Number(batch.retryAfterMs || 0));
+						batchProgressToken = String(batch.queueProgressToken || '');
 						state = Object.assign({}, state, getBatchStatePatch(state, batch), {
 							hasMore: batchHasMore,
 							nextCursor: batchNextCursor,
 							pendingItems: batchItems.slice(),
+							waitingForQueueBuild: batchWaitingForQueueBuild,
+							queueRetryAfterMs: batchRetryAfterMs,
+							queueProgressToken: batchProgressToken,
 						});
 						updateProcessState(state);
 						persistJobState(state);
@@ -297,17 +365,50 @@
 					if (!batchItems.length) {
 						completed = !batchHasMore;
 						if (!completed) {
+							const cursorAdvanced = String(batchNextCursor || '') !== previousCursor;
+							const progressTokenAdvanced = !!batchProgressToken && batchProgressToken !== lastQueueProgressToken;
+							if (cursorAdvanced || progressTokenAdvanced) {
+								noProgressCount = 0;
+								noProgressStartedAt = null;
+							} else {
+								noProgressCount += 1;
+								if (null === noProgressStartedAt) {
+									noProgressStartedAt = getNow();
+								}
+							}
+							if (batchProgressToken) {
+								lastQueueProgressToken = batchProgressToken;
+							}
 							state = Object.assign({}, state, {
 								cursor: batchNextCursor,
 								nextCursor: '',
 								hasMore: batchHasMore,
 							});
 							persistJobState(state);
+							const noProgressElapsedMs = null !== noProgressStartedAt ? Math.max(0, getNow() - noProgressStartedAt) : 0;
+							if (noProgressCount >= noProgressMaxCount || noProgressElapsedMs >= noProgressMaxElapsedMs) {
+								const message = state.type === 'media'
+									? 'Media queue build is not making progress. The job was paused and can be resumed after the active queue builder advances.'
+									: 'Job batching is not making progress. The job was paused and can be resumed.';
+								throw new Error(message);
+							}
+							const shouldWait = batchWaitingForQueueBuild || noProgressCount > 0;
+							if (shouldWait) {
+								const baseDelay = Math.max(DEFAULT_RETRY_DELAY_MS, batchRetryAfterMs || DEFAULT_RETRY_DELAY_MS);
+								const retryDelay = Math.min(MAX_RETRY_DELAY_MS, baseDelay * Math.pow(2, Math.max(0, noProgressCount - 1)));
+								await waitForRetry(retryDelay, isCancelled);
+							}
 						}
 						if (completed) {
 							break;
 						}
 						continue;
+					}
+
+					noProgressCount = 0;
+					noProgressStartedAt = null;
+					if (batchProgressToken) {
+						lastQueueProgressToken = batchProgressToken;
 					}
 
 					for (let index = 0; index < batchItems.length; index += 1) {
@@ -337,7 +438,9 @@
 							if (exclusiveToken) {
 								try {
 									await pauseExclusiveSession(state, exclusiveToken);
-								} catch (sessionError) {}
+								} catch (sessionError) {
+									reportExclusiveSessionFailure('jobs.session.pause', sessionError, 'The job paused locally, but its server lease could not be paused. Check the current job status before resuming.');
+								}
 							}
 							onPaused(state, exclusiveToken);
 							return;
@@ -399,14 +502,34 @@
 				if (exclusiveToken) {
 					try {
 						await failExclusiveSession(state, exclusiveToken);
-					} catch (sessionError) {}
+					} catch (sessionError) {
+						reportExclusiveSessionFailure('jobs.session.fail', sessionError, 'The job failed, and its server lease could not be marked failed. Refresh status before retrying.');
+					}
 				}
 				pushToast({ type: 'error', text: failureText });
 			} finally {
 				resetCancel();
 				if (shouldAcquireExclusiveSession(state.type) && exclusiveToken && shouldReleaseExclusiveSessionOnExit(state, completed)) {
-					const released = await endExclusiveSession(state, exclusiveToken);
-					if (!released) {
+					try {
+						const released = await endExclusiveSession(state, exclusiveToken);
+						if (!released) {
+							reportNonFatalAdminError('jobs.session.release', new Error('Exclusive server lease release returned false.'), {
+								severity: 'warning',
+								dedupeKey: 'jobs.session.release',
+								pushToast,
+								userVisible: !hasReleaseFailureHandler,
+								toastText: 'The job finished locally, but its server lease could not be released. Refresh status before starting another exclusive job.',
+							});
+							onReleaseFailure(state);
+						}
+					} catch (releaseError) {
+						reportNonFatalAdminError('jobs.session.release', releaseError, {
+							severity: 'warning',
+							dedupeKey: 'jobs.session.release',
+							pushToast,
+							userVisible: !hasReleaseFailureHandler,
+							toastText: 'The job finished locally, but its server lease could not be released. Refresh status before starting another exclusive job.',
+						});
 						onReleaseFailure(state);
 					}
 				}

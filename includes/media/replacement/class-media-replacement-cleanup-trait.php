@@ -26,13 +26,12 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
         return array('cleanup_failed');
     }
 
-    private function get_media_replacement_cleanup_preview_summary($job_id)
+    private function get_media_replacement_cleanup_preview_summary()
     {
         global $wpdb;
 
         $items_table = $this->get_media_replacement_items_table_name();
-        $job_id      = sanitize_key((string) $job_id);
-        if ('' === $items_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
@@ -78,9 +77,8 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT status, COUNT(*) AS item_count, SUM(old_size) AS old_total, SUM(new_size) AS new_total FROM %i WHERE job_id = %s GROUP BY status',
-                $items_table,
-                $job_id
+                'SELECT status, COUNT(*) AS item_count, SUM(old_size) AS old_total, SUM(new_size) AS new_total FROM %i GROUP BY status',
+                $items_table
             ),
             ARRAY_A
         );
@@ -117,9 +115,8 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
 
         $candidate_rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT old_file_path, old_size FROM %i WHERE job_id = %s AND status IN (%s, %s)',
+                'SELECT old_file_path, old_size FROM %i WHERE status IN (%s, %s)',
                 $items_table,
-                $job_id,
                 'metadata_updated',
                 'refs_scanned'
             ),
@@ -137,7 +134,7 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
             $summary['potentialFreeBytes'] += isset($candidate_row['old_size']) ? max(0, (int) $candidate_row['old_size']) : 0;
         }
 
-        $db_summary = $this->get_media_replacement_database_preview_summary($job_id);
+        $db_summary = $this->get_media_replacement_database_preview_summary();
         if (!empty($db_summary)) {
             $summary['databaseRefs']                 = isset($db_summary['totalRefs']) ? max(0, (int) $db_summary['totalRefs']) : 0;
             $summary['databaseVerifiedRefs']         = isset($db_summary['verifiedRefs']) ? max(0, (int) $db_summary['verifiedRefs']) : 0;
@@ -148,8 +145,8 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
         }
 
         $ref_index_state = $this->get_media_replacement_ref_index_state();
-        $summary['databaseIndexCompleted'] = isset($ref_index_state['job_id'], $ref_index_state['status']) && $job_id === (string) $ref_index_state['job_id'] && 'completed' === (string) $ref_index_state['status'];
-        $ref_index_summary = $this->get_media_replacement_ref_index_summary($job_id);
+        $summary['databaseIndexCompleted'] = isset($ref_index_state['status']) && 'completed' === (string) $ref_index_state['status'];
+        $ref_index_summary = $this->get_media_replacement_ref_index_summary();
         if (!empty($ref_index_summary)) {
             $summary['databaseIndexedRefs']    = isset($ref_index_summary['indexedTotal']) ? max(0, (int) $ref_index_summary['indexedTotal']) : 0;
             $summary['databaseIndexedIgnored'] = isset($ref_index_summary['unmatchedIgnored']) ? max(0, (int) $ref_index_summary['unmatchedIgnored']) : 0;
@@ -167,7 +164,7 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
                 ? ($summary['databaseVerifiedRefs'] === $summary['databaseRefs'] && 0 === $summary['databasePendingRefs'] && 0 === $summary['databaseFailedRefs'] && 0 === $summary['databaseRestoredRefs'] && 0 === $summary['databaseRollbackFailedRefs'])
                 : true);
 
-        $theme_css_summary = $this->get_media_replacement_theme_css_summary($job_id);
+        $theme_css_summary = $this->get_media_replacement_theme_css_summary();
         if (!empty($theme_css_summary)) {
             $summary['themeCssRefs']         = isset($theme_css_summary['total']) ? max(0, (int) $theme_css_summary['total']) : 0;
             $summary['themeCssVerifiedRefs'] = isset($theme_css_summary['verified']) ? max(0, (int) $theme_css_summary['verified']) : 0;
@@ -179,7 +176,7 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
         $summary['cleanupReady'] = $summary['metadataReadyByStatus'] && $summary['databaseReady'] && $summary['themeCssReady'] && 0 === (int) $summary['cleanupFailedItems'];
         $summary['cleanupComplete'] = $summary['cleanupReady'] && $summary['totalItems'] > 0 && 0 === (int) $summary['candidateItems'];
 
-        $orphan_summary = $this->get_media_replacement_orphan_duplicate_upload_preview_summary($job_id);
+        $orphan_summary = $this->get_media_replacement_orphan_duplicate_upload_preview_summary();
         if (!empty($orphan_summary)) {
             $summary['orphanDuplicateFiles']   = isset($orphan_summary['count']) ? max(0, (int) $orphan_summary['count']) : 0;
             $summary['orphanDuplicateBytes']   = isset($orphan_summary['bytes']) ? max(0, (int) $orphan_summary['bytes']) : 0;
@@ -189,24 +186,22 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
         return $summary;
     }
 
-    private function get_media_replacement_cleanup_preview_rows($job_id, $limit = 200, $offset = 0, $global_cleanup_ready = false)
+    private function get_media_replacement_cleanup_preview_rows($limit = 200, $offset = 0, $global_cleanup_ready = false)
     {
         global $wpdb;
 
         $items_table = $this->get_media_replacement_items_table_name();
-        $job_id      = sanitize_key((string) $job_id);
         $limit       = max(1, min(500, absint($limit)));
         $offset      = max(0, absint($offset));
 
-        if ('' === $items_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, attachment_id, item_scope, size_name, source_format, target_format, old_relative_path, old_file_path, new_relative_path, new_file_path, old_mime, new_mime, old_size, new_size, status, error_message FROM %i WHERE job_id = %s ORDER BY id ASC LIMIT %d OFFSET %d',
+                'SELECT id, attachment_id, item_scope, size_name, source_format, target_format, old_relative_path, old_file_path, generated_file_path, new_relative_path, new_file_path, old_mime, new_mime, old_size, old_file_hash, new_size, status, error_message FROM %i ORDER BY id ASC LIMIT %d OFFSET %d',
                 $items_table,
-                $job_id,
                 $limit,
                 $offset
             ),
@@ -228,29 +223,25 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
             $item_scope = isset($row['item_scope']) ? sanitize_key((string) $row['item_scope']) : 'main';
             $size_name = isset($row['size_name']) ? substr(sanitize_key((string) $row['size_name']), 0, 64) : '';
 
-            $old_exists = '' !== $old_file && $this->optimized_storage_path_exists($old_file, true);
-            $new_exists = '' !== $new_file && $this->optimized_storage_path_exists($new_file, true);
-            $metadata_switched = $this->is_media_replacement_cleanup_row_metadata_switched($row);
+            $evaluation = $this->evaluate_media_replacement_cleanup_row($row);
+            $old_exists = !$evaluation['alreadyMissing'] && '' !== $old_file && $this->optimized_storage_path_exists($old_file, true);
+            $new_exists = !empty($evaluation['replacementReady']);
+            $metadata_switched = !empty($evaluation['metadataSwitched']);
 
             $is_candidate_status = in_array($status, $candidate_statuses, true);
             $is_completed_status = in_array($status, $completed_statuses, true);
-            $local_ready = $is_candidate_status && $metadata_switched && $old_exists && $new_exists && '' !== $old_relative && '' !== $new_relative && $old_relative !== $new_relative;
-            $cleanup_candidate = $global_cleanup_ready && $local_ready;
+            $cleanup_candidate = $global_cleanup_ready && $is_candidate_status && !empty($evaluation['processable']);
             $reason = '';
-            if (!$global_cleanup_ready) {
-                $reason = __('Job-level checks are not complete yet.', 'ultracache');
-            } elseif ($is_completed_status) {
+            if ($is_completed_status) {
                 $reason = __('Original file cleanup is already complete for this row.', 'ultracache');
             } elseif (!$is_candidate_status) {
                 $reason = __('Registry row is not in a cleanup-ready status.', 'ultracache');
-            } elseif (!$metadata_switched) {
-                $reason = __('Attachment metadata does not currently point to the copied replacement file.', 'ultracache');
-            } elseif (!$new_exists) {
-                $reason = __('Copied replacement file is missing.', 'ultracache');
-            } elseif (!$old_exists) {
-                $reason = __('Original file is already missing, so there is nothing to delete for this row.', 'ultracache');
-            } elseif ($old_relative === $new_relative) {
-                $reason = __('Original and replacement paths are identical.', 'ultracache');
+            } elseif (!$global_cleanup_ready) {
+                $reason = __('Workflow-level checks are not complete yet.', 'ultracache');
+            } elseif (empty($evaluation['processable'])) {
+                $reason = (string) $evaluation['message'];
+            } elseif (!empty($evaluation['alreadyMissing'])) {
+                $reason = __('Original file is already missing; Delete Originals will mark this row complete.', 'ultracache');
             }
 
             $title = $attachment_id > 0 ? get_the_title($attachment_id) : '';
@@ -278,6 +269,8 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
                 'oldFileExists'        => $old_exists,
                 'newFileExists'        => $new_exists,
                 'metadataSwitched'     => $metadata_switched,
+                'replacementMatchesOutput' => !empty($evaluation['replacementMatchesOutput']),
+                'originalFingerprintCurrent' => !empty($evaluation['originalFingerprintCurrent']),
                 'cleanupCandidate'     => $cleanup_candidate,
                 'reason'               => $reason,
                 'errorMessage'         => isset($row['error_message']) ? wp_strip_all_tags((string) $row['error_message']) : '',
@@ -311,50 +304,124 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
         return $current_attached === $new_relative && $metadata_file === $new_relative && ('' === $new_mime || $current_mime === $new_mime);
     }
 
-    private function is_media_replacement_cleanup_original_unchanged(array $row)
+    private function is_media_replacement_cleanup_original_fingerprint_current(array $row)
     {
         $old_file = isset($row['old_file_path']) ? wp_normalize_path((string) $row['old_file_path']) : '';
         $expected_size = isset($row['old_size']) ? max(0, (int) $row['old_size']) : 0;
-        if ('' === $old_file || !$this->optimized_storage_path_exists($old_file, true)) {
+        $expected_hash = isset($row['old_file_hash']) ? strtolower((string) $row['old_file_hash']) : '';
+        if ('' === $old_file || $expected_size <= 0 || !preg_match('/^[a-f0-9]{64}$/', $expected_hash) || !$this->optimized_storage_path_exists($old_file, true)) {
             return false;
         }
 
         $current_size = function_exists('ultracache_safe_filesize')
             ? (int) ultracache_safe_filesize($old_file, 'media_replacement_cleanup_original_size')
             : (int) filesize($old_file);
+        if ($current_size !== $expected_size || !function_exists('hash_file')) {
+            return false;
+        }
 
-        return $current_size > 0 && (0 === $expected_size || $current_size === $expected_size);
+        $current_hash = hash_file('sha256', $old_file);
+        return is_string($current_hash) && hash_equals($expected_hash, strtolower($current_hash));
     }
 
-    private function get_media_replacement_cleanup_hard_blocked_status_count($job_id)
+
+    private function evaluate_media_replacement_cleanup_row(array $row)
+    {
+        $old_file       = isset($row['old_file_path']) ? wp_normalize_path((string) $row['old_file_path']) : '';
+        $generated_file = isset($row['generated_file_path']) ? wp_normalize_path((string) $row['generated_file_path']) : '';
+        $new_file       = isset($row['new_file_path']) ? wp_normalize_path((string) $row['new_file_path']) : '';
+        $result = array(
+            'processable'               => false,
+            'deletable'                 => false,
+            'alreadyMissing'            => false,
+            'pathAllowed'               => false,
+            'replacementReady'          => false,
+            'replacementMatchesOutput'  => false,
+            'metadataSwitched'           => false,
+            'originalFingerprintCurrent'=> false,
+            'oldFile'                   => $old_file,
+            'generatedFile'             => $generated_file,
+            'newFile'                   => $new_file,
+            'code'                      => 'invalid_original_path',
+            'message'                   => __('Original path is not an eligible JPG/PNG uploads file or matches the replacement path.', 'ultracache'),
+        );
+
+        if (!$this->is_media_replacement_upload_file_cleanup_allowed($old_file) || '' === $new_file || $old_file === $new_file) {
+            return $result;
+        }
+        $result['pathAllowed'] = true;
+
+        if ('' === $generated_file || !$this->optimized_storage_path_exists($generated_file, true) || !$this->optimized_storage_path_exists($new_file, true)) {
+            $result['code'] = 'replacement_missing';
+            $result['message'] = __('Rewrite source or replacement file is missing or invalid; original was not deleted.', 'ultracache');
+            return $result;
+        }
+        $result['replacementReady'] = true;
+
+        if (!$this->media_replacement_files_are_identical($generated_file, $new_file)) {
+            $result['code'] = 'replacement_changed';
+            $result['message'] = __('Replacement file no longer matches the verified UltraCache rewrite output; original was not deleted.', 'ultracache');
+            return $result;
+        }
+        $result['replacementMatchesOutput'] = true;
+
+        if (!$this->is_media_replacement_cleanup_row_metadata_switched($row)) {
+            $result['code'] = 'metadata_not_switched';
+            $result['message'] = __('Attachment metadata no longer points to the replacement file; original was not deleted.', 'ultracache');
+            return $result;
+        }
+        $result['metadataSwitched'] = true;
+
+        if (!$this->optimized_storage_path_exists($old_file, true)) {
+            $result['processable'] = true;
+            $result['alreadyMissing'] = true;
+            $result['code'] = 'original_already_missing';
+            $result['message'] = __('Original file was already missing; row can be marked complete.', 'ultracache');
+            return $result;
+        }
+
+        if (!$this->is_media_replacement_cleanup_original_fingerprint_current($row)) {
+            $result['code'] = 'original_changed';
+            $result['message'] = __('Original file content changed after the replacement plan was prepared; original was not deleted.', 'ultracache');
+            return $result;
+        }
+
+        $result['processable'] = true;
+        $result['deletable'] = true;
+        $result['originalFingerprintCurrent'] = true;
+        $result['code'] = 'deletable';
+        $result['message'] = '';
+        return $result;
+    }
+
+
+    private function get_media_replacement_cleanup_hard_blocked_status_count()
     {
         global $wpdb;
 
         $items_table = $this->get_media_replacement_items_table_name();
-        $job_id      = sanitize_key((string) $job_id);
-        if ('' === $items_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || !($wpdb instanceof wpdb)) {
             return 0;
         }
 
         return max(0, (int) $wpdb->get_var(
             $wpdb->prepare(
-                'SELECT COUNT(*) FROM %i WHERE job_id = %s AND status NOT IN (%s, %s, %s, %s)',
+                'SELECT COUNT(*) FROM %i WHERE status NOT IN (%s, %s, %s, %s, %s)',
                 $items_table,
-                $job_id,
                 'metadata_updated',
                 'refs_scanned',
                 'cleanup_deleted',
-                'cleanup_failed'
+                'cleanup_failed',
+                'excluded'
             )
         ));
     }
 
-    private function recover_media_replacement_cleanup_failed_rows($job_id, $limit = 200)
+    private function recover_media_replacement_cleanup_failed_rows($limit = 200)
     {
         global $wpdb;
 
         $items_table = $this->get_media_replacement_items_table_name();
-        $job_id      = sanitize_key((string) $job_id);
         $limit       = max(1, min(500, absint($limit)));
         $result      = array(
             'checked'        => 0,
@@ -362,15 +429,14 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
             'markedComplete' => 0,
         );
 
-        if ('' === $items_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || !($wpdb instanceof wpdb)) {
             return $result;
         }
 
         $rows = (array) $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, attachment_id, item_scope, size_name, old_relative_path, old_file_path, generated_file_path, new_relative_path, new_file_path, old_mime, new_mime, old_size, new_size, status FROM %i WHERE job_id = %s AND status = %s ORDER BY id ASC LIMIT %d',
+                'SELECT id, attachment_id, item_scope, size_name, old_relative_path, old_file_path, generated_file_path, new_relative_path, new_file_path, old_mime, new_mime, old_size, old_file_hash, new_size, destination_overwritten, destination_backup_path, destination_backup_size, destination_backup_hash, status FROM %i WHERE status = %s ORDER BY id ASC LIMIT %d',
                 $items_table,
-                $job_id,
                 'cleanup_failed',
                 $limit
             ),
@@ -384,30 +450,20 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
             }
 
             $result['checked']++;
-            $old_file = isset($row['old_file_path']) ? wp_normalize_path((string) $row['old_file_path']) : '';
-            $generated_file = isset($row['generated_file_path']) ? wp_normalize_path((string) $row['generated_file_path']) : '';
-            $new_file = isset($row['new_file_path']) ? wp_normalize_path((string) $row['new_file_path']) : '';
-
-            if (!$this->is_media_replacement_upload_file_cleanup_allowed($old_file)) {
-                continue;
-            }
-            if ('' === $generated_file || '' === $new_file || !$this->optimized_storage_path_exists($generated_file, true) || !$this->optimized_storage_path_exists($new_file, true)) {
-                continue;
-            }
-            if (!$this->media_replacement_files_are_identical($generated_file, $new_file)) {
-                continue;
-            }
-            if (!$this->is_media_replacement_cleanup_row_metadata_switched($row)) {
+            $evaluation = $this->evaluate_media_replacement_cleanup_row($row);
+            if (empty($evaluation['processable'])) {
                 continue;
             }
 
-            if (!$this->optimized_storage_path_exists($old_file, true)) {
+            if (!empty($evaluation['alreadyMissing'])) {
+                $backup_cleanup = $this->finalize_media_replacement_destination_backup_cleanup($row);
+                if (empty($backup_cleanup['cleaned'])) {
+                    $this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_failed', (string) ($backup_cleanup['message'] ?? __('Overwrite backup cleanup failed.', 'ultracache')));
+                    continue;
+                }
                 if ($this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_deleted', __('Original file was already missing; recovered cleanup row marked complete.', 'ultracache'))) {
                     $result['markedComplete']++;
                 }
-                continue;
-            }
-            if (!$this->is_media_replacement_cleanup_original_unchanged($row)) {
                 continue;
             }
 
@@ -422,17 +478,13 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
     private function is_media_replacement_upload_file_cleanup_allowed($path)
     {
         $path = wp_normalize_path((string) $path);
-        if ('' === $path || !preg_match('/\.(?:jpe?g|png)$/i', $path)) {
+        if ('' === $path || !preg_match('/\.(?:jpe?g|png)$/i', $path) || !function_exists('ultracache_path_has_dir_prefix')) {
             return false;
         }
 
         $uploads = wp_get_upload_dir();
         $basedir = isset($uploads['basedir']) ? wp_normalize_path((string) $uploads['basedir']) : '';
-        if ('' === $basedir) {
-            return false;
-        }
-
-        return 0 === strpos($path, trailingslashit($basedir));
+        return '' !== $basedir && ultracache_path_has_dir_prefix($path, $basedir);
     }
 
     private function update_media_replacement_cleanup_item_status($item_id, $status, $message = '')
@@ -461,22 +513,20 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
         );
     }
 
-    private function get_media_replacement_cleanup_candidate_rows($job_id, $limit = 50)
+    private function get_media_replacement_cleanup_candidate_rows($limit = 50)
     {
         global $wpdb;
 
         $items_table = $this->get_media_replacement_items_table_name();
-        $job_id      = sanitize_key((string) $job_id);
         $limit       = max(1, min(100, absint($limit)));
-        if ('' === $items_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         return (array) $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, attachment_id, item_scope, size_name, old_relative_path, old_file_path, generated_file_path, new_relative_path, new_file_path, old_mime, new_mime, old_size, new_size, status FROM %i WHERE job_id = %s AND status IN (%s, %s) ORDER BY old_file_path ASC, id ASC LIMIT %d',
+                'SELECT id, attachment_id, item_scope, size_name, old_relative_path, old_file_path, generated_file_path, new_relative_path, new_file_path, old_mime, new_mime, old_size, old_file_hash, new_size, destination_overwritten, destination_backup_path, destination_backup_size, destination_backup_hash, status FROM %i WHERE status IN (%s, %s) ORDER BY old_file_path ASC, id ASC LIMIT %d',
                 $items_table,
-                $job_id,
                 'metadata_updated',
                 'refs_scanned',
                 $limit
@@ -485,22 +535,20 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
         );
     }
 
-    private function get_media_replacement_orphan_duplicate_upload_preview_summary($job_id, $sample_limit = 25)
+    private function get_media_replacement_orphan_duplicate_upload_preview_summary($sample_limit = 25)
     {
         global $wpdb;
 
         $items_table  = $this->get_media_replacement_items_table_name();
-        $job_id       = sanitize_key((string) $job_id);
         $sample_limit = max(1, min(100, absint($sample_limit)));
-        if ('' === $items_table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $items_table || !($wpdb instanceof wpdb)) {
             return array('count' => 0, 'bytes' => 0, 'samples' => array());
         }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT old_file_path, new_file_path, generated_file_path FROM %i WHERE job_id = %s AND new_file_path <> %s',
+                'SELECT old_file_path, new_file_path, generated_file_path FROM %i WHERE new_file_path <> %s',
                 $items_table,
-                $job_id,
                 ''
             ),
             ARRAY_A
@@ -594,46 +642,37 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
             );
         }
 
-        $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array(
-                'success' => false,
-                'message' => __('Run Media Library replacement before previewing cleanup candidates.', 'ultracache'),
-                'hasCleanupPreview' => false,
-            );
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            $empty = $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for cleanup preview. Restore the database backup or roll back attachment metadata, then run Restart Replacement Plan again.', 'ultracache'));
+        if (!$this->media_replacement_has_registry_rows()) {
+            $empty = $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for cleanup preview. Restore the database backup or roll back attachment metadata, then run Restart Replacement Plan again.', 'ultracache'));
             $empty['hasCleanupPreview'] = false;
             return $empty;
         }
 
+        $args = is_array($args) ? $args : array();
         $limit  = isset($args['limit']) ? absint($args['limit']) : 200;
         $offset = isset($args['offset']) ? absint($args['offset']) : 0;
         $limit  = max(1, min(500, $limit));
         $offset = max(0, $offset);
 
-        $summary = $this->get_media_replacement_cleanup_preview_summary($job_id);
+        $summary = $this->get_media_replacement_cleanup_preview_summary();
         if (empty($summary)) {
             return array(
                 'success' => false,
-                'message' => __('Cleanup preview is not available for the active Media Library replacement job.', 'ultracache'),
-                'jobId' => $job_id,
+                'message' => __('Cleanup preview is not available for the Media Library replacement workflow.', 'ultracache'),
                 'hasCleanupPreview' => false,
             );
         }
 
         $total = isset($summary['totalItems']) ? max(0, (int) $summary['totalItems']) : 0;
         $cleanup_ready = !empty($summary['cleanupReady']);
-        $items = $total > 0 ? $this->get_media_replacement_cleanup_preview_rows($job_id, $limit, $offset, $cleanup_ready) : array();
+        $items = $total > 0 ? $this->get_media_replacement_cleanup_preview_rows($limit, $offset, $cleanup_ready) : array();
         $has_more = ($offset + count($items)) < $total;
 
         if (!$cleanup_ready) {
             $message = __('Media Library replacement cleanup preview found blockers. Do not delete originals yet.', 'ultracache');
-            $next_step = __('Resolve database verification or attachment metadata blockers before running Cleanup Apply.', 'ultracache');
+            $next_step = __('Resolve database verification or attachment metadata blockers before using Delete Originals.', 'ultracache');
         } elseif (!empty($summary['cleanupComplete'])) {
-            $message = __('Media Library replacement cleanup is complete. No original JPG/PNG cleanup candidates remain for this job.', 'ultracache');
+            $message = __('Media Library replacement cleanup is complete. No original JPG/PNG cleanup candidates remain.', 'ultracache');
             $next_step = __('Cleanup is complete. Review the site and keep backups until you are done testing.', 'ultracache');
         } else {
             $message = sprintf(
@@ -643,13 +682,12 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
                 isset($summary['uniqueOriginalFiles']) ? (int) $summary['uniqueOriginalFiles'] : 0,
                 size_format(isset($summary['potentialFreeBytes']) ? (int) $summary['potentialFreeBytes'] : 0, 1)
             );
-            $next_step = __('Next step: Cleanup Apply with confirmation deletes only verified original JPG/PNG files for this job.', 'ultracache');
+            $next_step = __('Next step: Delete Originals with confirmation removes only verified original JPG/PNG files for this workflow.', 'ultracache');
         }
 
         $response = array(
             'success'             => true,
             'message'             => $message,
-            'jobId'               => $job_id,
             'hasCleanupPreview'   => true,
             'summary'             => $summary,
             'items'               => $items,
@@ -675,219 +713,9 @@ trait Ultra_Cache_Media_Replacement_Cleanup_Trait
             'nextStep'            => $next_step,
         );
 
-        return $this->add_media_replacement_confirmation_token_to_response($response, $job_id, 'cleanup_apply', $cleanup_ready && empty($summary['cleanupComplete']) && !empty($summary['candidateItems']));
+        return $this->add_media_replacement_confirmation_token_to_response($response, 'cleanup_apply', $cleanup_ready && empty($summary['cleanupComplete']) && !empty($summary['candidateItems']));
     }
 
 
-    public function apply_media_library_replacement_cleanup($args = array())
-    {
-        if (!$this->ensure_media_replacement_tables()) {
-            return array(
-                'success' => false,
-                'message' => __('Media Library replacement registry tables are not available.', 'ultracache'),
-            );
-        }
-
-        $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        $limit  = isset($args['limit']) ? absint($args['limit']) : 50;
-        $limit  = max(1, min(100, $limit));
-
-        if ('' === $job_id) {
-            return array(
-                'success' => false,
-                'message' => __('Run and verify Media Library replacement before applying cleanup.', 'ultracache'),
-                'blocked' => true,
-            );
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            $empty = $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for cleanup apply.', 'ultracache'));
-            $empty['blocked'] = true;
-            return $empty;
-        }
-
-        $confirmation = $this->validate_media_replacement_confirmation_token($job_id, 'cleanup_apply', $args);
-        if (empty($confirmation['success'])) {
-            return $confirmation;
-        }
-
-        $recovered_cleanup_rows = $this->recover_media_replacement_cleanup_failed_rows($job_id);
-        $summary = $this->get_media_replacement_cleanup_preview_summary($job_id);
-        $hard_blocked_statuses = $this->get_media_replacement_cleanup_hard_blocked_status_count($job_id);
-        $cleanup_ready = !empty($summary['cleanupReady']);
-        if (!$cleanup_ready && !empty($summary)) {
-            $total_items = isset($summary['totalItems']) ? max(0, (int) $summary['totalItems']) : 0;
-            $ready_or_retryable_items = (int) ($summary['candidateItems'] ?? 0) + (int) ($summary['cleanupDeletedItems'] ?? 0) + (int) ($summary['cleanupFailedItems'] ?? 0);
-            $cleanup_ready = $total_items > 0
-                && $ready_or_retryable_items === $total_items
-                && !empty($summary['databaseReady'])
-                && 0 === (int) $hard_blocked_statuses;
-        }
-
-        if (empty($summary) || !$cleanup_ready) {
-            return array(
-                'success' => false,
-                'message' => __('Cleanup apply is blocked until database verification and attachment metadata checks are complete. Run Cleanup Preview again and resolve any blocked rows before deleting originals.', 'ultracache'),
-                'jobId'   => $job_id,
-                'summary' => $summary,
-                'blocked' => true,
-                'status'  => 'cleanup_blocked',
-                'cleanupCandidates' => isset($summary['candidateItems']) ? (int) $summary['candidateItems'] : 0,
-                'cleanupBlockedItems' => isset($summary['blockedItems']) ? (int) $summary['blockedItems'] : 0,
-                'cleanupDeleted' => isset($summary['cleanupDeletedItems']) ? (int) $summary['cleanupDeletedItems'] : 0,
-                'cleanupFailed' => isset($summary['cleanupFailedItems']) ? (int) $summary['cleanupFailedItems'] : 0,
-                'cleanupHardBlockedStatuses' => isset($hard_blocked_statuses) ? (int) $hard_blocked_statuses : 0,
-                'recoveredCleanupRows' => isset($recovered_cleanup_rows) ? $recovered_cleanup_rows : array(),
-                'databaseVerified' => isset($summary['databaseVerifiedRefs']) ? (int) $summary['databaseVerifiedRefs'] : 0,
-                'databaseRefs' => isset($summary['databaseRefs']) ? (int) $summary['databaseRefs'] : 0,
-                'nextStep' => __('Run Cleanup Preview again. Cleanup Apply will stay blocked until DB verification, attachment metadata, and row-status checks are complete.', 'ultracache'),
-            );
-        }
-
-        $rows = $this->get_media_replacement_cleanup_candidate_rows($job_id, $limit);
-        if (empty($rows)) {
-            $summary = $this->get_media_replacement_cleanup_preview_summary($job_id);
-            $failed_items = isset($summary['cleanupFailedItems']) ? (int) $summary['cleanupFailedItems'] : 0;
-            if ($failed_items > 0) {
-                return array(
-                    'success' => false,
-                    'message' => __('Media Library replacement cleanup has failed rows that could not be recovered automatically. Run Cleanup Preview and inspect the row messages before deleting more originals.', 'ultracache'),
-                    'jobId' => $job_id,
-                    'status' => 'cleanup_failed_rows_remaining',
-                    'blocked' => true,
-                    'hasMore' => false,
-                    'deleted' => 0,
-                    'failed' => $failed_items,
-                    'remainingCleanup' => 0,
-                    'summary' => $summary,
-                    'progressPercent' => 100,
-                    'nextStep' => __('Run Cleanup Preview and inspect the cleanup failed rows.', 'ultracache'),
-                );
-            }
-            return array(
-                'success' => true,
-                'message' => __('Media Library replacement cleanup is complete. Original JPG/PNG files for verified registry rows have already been deleted or marked complete.', 'ultracache'),
-                'jobId' => $job_id,
-                'status' => 'cleanup_complete',
-                'hasMore' => false,
-                'deleted' => 0,
-                'failed' => 0,
-                'remainingCleanup' => 0,
-                'summary' => $summary,
-                'progressPercent' => 100,
-                'nextStep' => __('Cleanup is complete. Review the site and keep backups until you are done testing.', 'ultracache'),
-            );
-        }
-
-        $deleted = 0;
-        $already_missing = 0;
-        $failed = 0;
-        $processed = 0;
-        $deleted_paths = array();
-
-        foreach ($rows as $row) {
-            $item_id = isset($row['id']) ? absint($row['id']) : 0;
-            $attachment_id = isset($row['attachment_id']) ? absint($row['attachment_id']) : 0;
-            $item_scope = isset($row['item_scope']) ? sanitize_key((string) $row['item_scope']) : 'main';
-            $size_name = isset($row['size_name']) ? substr(sanitize_key((string) $row['size_name']), 0, 64) : '';
-            $old_file = isset($row['old_file_path']) ? wp_normalize_path((string) $row['old_file_path']) : '';
-            $new_file = isset($row['new_file_path']) ? wp_normalize_path((string) $row['new_file_path']) : '';
-            $new_relative = isset($row['new_relative_path']) ? ltrim(str_replace('\\', '/', (string) $row['new_relative_path']), '/') : '';
-            $new_mime = isset($row['new_mime']) ? sanitize_mime_type((string) $row['new_mime']) : '';
-
-            if ($item_id <= 0) {
-                continue;
-            }
-            $processed++;
-
-            if (!$this->is_media_replacement_upload_file_cleanup_allowed($old_file)) {
-                $failed++;
-                $this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_failed', __('Original file path is outside the WordPress uploads directory or is not a JPG/PNG file.', 'ultracache'));
-                continue;
-            }
-
-            if ('' === $new_file || !$this->optimized_storage_path_exists($new_file, true)) {
-                $failed++;
-                $this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_failed', __('Replacement file is missing; original was not deleted.', 'ultracache'));
-                continue;
-            }
-
-            $metadata_switched = $this->is_media_replacement_cleanup_row_metadata_switched($row);
-
-            if (!$metadata_switched) {
-                $failed++;
-                $this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_failed', __('Attachment metadata no longer points to the replacement file; original was not deleted.', 'ultracache'));
-                continue;
-            }
-
-            if (!$this->optimized_storage_path_exists($old_file, true)) {
-                $already_missing++;
-                $this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_deleted', __('Original file was already missing; row marked complete.', 'ultracache'));
-                continue;
-            }
-
-            if (!isset($deleted_paths[$old_file])) {
-                if (!function_exists('ultracache_safe_unlink') || !ultracache_safe_unlink($old_file, 'media_library_replacement_cleanup_original')) {
-                    $failed++;
-                    $this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_failed', __('Original file could not be deleted.', 'ultracache'));
-                    continue;
-                }
-                $deleted_paths[$old_file] = true;
-                $deleted++;
-            }
-
-            if ($this->optimized_storage_path_exists($old_file, true)) {
-                $failed++;
-                $this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_failed', __('Original file still exists after delete attempt.', 'ultracache'));
-                continue;
-            }
-
-            $this->update_media_replacement_cleanup_item_status($item_id, 'cleanup_deleted', '');
-        }
-
-        $summary = $this->get_media_replacement_cleanup_preview_summary($job_id);
-        $remaining = isset($summary['candidateItems']) ? max(0, (int) $summary['candidateItems']) : 0;
-        $has_more = $remaining > 0;
-
-        $completed_items = isset($summary['cleanupDeletedItems']) ? (int) $summary['cleanupDeletedItems'] : 0;
-        $failed_items = isset($summary['cleanupFailedItems']) ? (int) $summary['cleanupFailedItems'] : 0;
-        $total_items = isset($summary['totalItems']) ? max(0, (int) $summary['totalItems']) : 0;
-
-        return array(
-            'success' => true,
-            'message' => $has_more
-                ? sprintf(
-                    /* translators: 1: processed rows, 2: deleted unique files, 3: already missing rows, 4: remaining rows. */
-                    __('Media Library replacement cleanup processed %1$d rows in this batch. Deleted %2$d unique original files; %3$d rows were already missing or shared a file deleted earlier. Remaining cleanup rows: %4$d.', 'ultracache'),
-                    (int) $processed,
-                    (int) $deleted,
-                    (int) $already_missing,
-                    (int) $remaining
-                )
-                : sprintf(
-                    /* translators: 1: processed rows, 2: deleted unique files, 3: already missing rows, 4: failed rows. */
-                    __('Media Library replacement cleanup complete. Final batch processed %1$d rows. Deleted %2$d unique original files; %3$d rows were already missing or shared a file deleted earlier. Failed rows: %4$d.', 'ultracache'),
-                    (int) $processed,
-                    (int) $deleted,
-                    (int) $already_missing,
-                    $failed_items
-                ),
-            'jobId' => $job_id,
-            'status' => $has_more ? 'cleanup_applying' : 'cleanup_complete',
-            'hasMore' => $has_more,
-            'processed' => $processed,
-            'deleted' => $deleted,
-            'alreadyMissing' => $already_missing,
-            'failed' => $failed,
-            'recoveredCleanupRows' => isset($recovered_cleanup_rows) ? $recovered_cleanup_rows : array(),
-            'remainingCleanup' => $remaining,
-            'summary' => $summary,
-            'cleanupDeleted' => $completed_items,
-            'cleanupFailed' => $failed_items,
-            'cleanupCandidates' => isset($summary['candidateItems']) ? (int) $summary['candidateItems'] : 0,
-            'progressPercent' => $total_items > 0 ? round((($completed_items + $failed_items) / max(1, $total_items)) * 100, 1) : 100,
-            'nextStep' => $has_more ? __('Continue Cleanup Apply until all cleanup rows are processed.', 'ultracache') : __('Cleanup is complete. Review the site and keep backups until you are done testing.', 'ultracache'),
-        );
-    }
 
 }

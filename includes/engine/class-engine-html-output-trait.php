@@ -481,6 +481,12 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
+            if (!empty($settings['media_optimization_enabled'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'linked-css-media-url-rewrite', function ($html) {
+                    return $this->rewrite_linked_local_stylesheet_media_urls_in_html($html);
+                });
+            }
+
             if (!empty($settings['font_mix_css_bundle'])) {
                 $html = $this->profile_store_stage('consolidate-font-mix-css-bundle', $html, function ($html) use ($settings) {
                     return $this->maybe_consolidate_font_mix_stylesheet_links($html, $settings);
@@ -502,6 +508,12 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             if (!empty($settings['lazy_load_images'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'lazy-load-async-images', function ($html) use ($settings) {
                     return $this->apply_lazy_load_images_to_html($html, $settings);
+                });
+            }
+
+            if (!empty($settings['lazy_load_third_party_iframes'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'lazy-load-third-party-iframes', function ($html) {
+                    return $this->apply_lazy_load_third_party_iframes_to_html($html);
                 });
             }
 
@@ -678,10 +690,16 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                         continue;
                     }
 
-                    $fallbacks[] = $this->build_async_css_noscript_fallback_link($href, $processor->get_attribute('media'));
+                    $original_media = trim((string) $processor->get_attribute('media'));
+                    $fallbacks[] = $this->build_async_css_noscript_fallback_link($href, $original_media);
+
+                    $target_media = '' !== $original_media ? preg_replace('/[^a-z0-9,\-\s\(\):\.]+/i', '', $original_media) : 'all';
+                    if (!is_string($target_media) || '' === trim($target_media)) {
+                        $target_media = 'all';
+                    }
 
                     $processor->set_attribute('media', 'print');
-                    $processor->set_attribute('onload', "this.media='all'");
+                    $processor->set_attribute('data-ultracache-target-media', $target_media);
                     $processor->set_attribute('data-ultracache-async-css', '1');
                     $changed = true;
                 }
@@ -1276,17 +1294,17 @@ private function html_tag_processor_available()
             );
 
             $html = (string) preg_replace_callback(
-                "/(\bsrcset=)([\"'])([^\"']+)\2/i",
+                "/(\bsrcset=)([\"'])([^\"']+)\\2/i",
                 function ($matches) use ($scheme) {
-                    $parts = array_map('trim', explode(',', $matches[3]));
-                    foreach ($parts as $index => $part) {
-                        $segments = preg_split('/\s+/', $part, 2);
-                        if (!empty($segments[0]) && 0 === strpos($segments[0], '//')) {
-                            $segments[0] = $scheme . ':' . $segments[0];
-                            $parts[$index] = trim(implode(' ', array_filter($segments, 'strlen')));
+                    $rewritten = ultracache_rewrite_srcset_urls(
+                        (string) $matches[3],
+                        static function ($url) use ($scheme) {
+                            return 0 === strpos((string) $url, '//')
+                                ? (string) $scheme . ':' . (string) $url
+                                : false;
                         }
-                    }
-                    return $matches[1] . $matches[2] . implode(', ', $parts) . $matches[2];
+                    );
+                    return $matches[1] . $matches[2] . $rewritten . $matches[2];
                 },
                 $html
             );
@@ -1326,19 +1344,16 @@ private function html_tag_processor_available()
 
                     $srcset = $processor->get_attribute('srcset');
                     if (is_string($srcset) && false !== strpos($srcset, '//')) {
-                        $parts = array_map('trim', explode(',', $srcset));
-                        $srcset_changed = false;
-                        foreach ($parts as $index => $part) {
-                            $segments = preg_split('/\s+/', $part, 2);
-                            if (!empty($segments[0]) && 0 === strpos($segments[0], '//')) {
-                                $segments[0] = (string) $scheme . ':' . $segments[0];
-                                $parts[$index] = trim(implode(' ', array_filter($segments, 'strlen')));
-                                $srcset_changed = true;
+                        $rewritten_srcset = ultracache_rewrite_srcset_urls(
+                            $srcset,
+                            static function ($url) use ($scheme) {
+                                return 0 === strpos((string) $url, '//')
+                                    ? (string) $scheme . ':' . (string) $url
+                                    : false;
                             }
-                        }
-
-                        if ($srcset_changed) {
-                            $processor->set_attribute('srcset', implode(', ', $parts));
+                        );
+                        if ($rewritten_srcset !== $srcset) {
+                            $processor->set_attribute('srcset', $rewritten_srcset);
                             $changed = true;
                         }
                     }

@@ -375,11 +375,12 @@ private function build_linked_woff2_font_face_registry_from_html($html)
                 continue;
             }
 
-            if (!preg_match_all('/@font-face\s*\{.*?\}/is', $css, $blocks)) {
+            $font_face_scan = ultracache_css_scan_font_face_blocks($css);
+            if (!empty($font_face_scan['malformed']) || empty($font_face_scan['blocks'])) {
                 continue;
             }
 
-            foreach ((array) $blocks[0] as $block) {
+            foreach ((array) $font_face_scan['blocks'] as $block) {
                 $block = (string) $block;
                 if (false === stripos($block, '.woff2')) {
                     continue;
@@ -467,12 +468,13 @@ private function build_linked_woff2_font_face_registry_from_html($html)
             return 0;
         }
 
-        if (!preg_match_all('/@font-face\s*\{.*?\}/is', $css, $blocks)) {
+        $font_face_scan = ultracache_css_scan_font_face_blocks($css);
+        if (!empty($font_face_scan['malformed']) || empty($font_face_scan['blocks'])) {
             return 0;
         }
 
         $added = 0;
-        foreach ((array) $blocks[0] as $block) {
+        foreach ((array) $font_face_scan['blocks'] as $block) {
             $block = (string) $block;
             if (false === stripos($block, '.woff2')) {
                 continue;
@@ -973,23 +975,12 @@ private function get_local_font_css_scan_roots()
             return false;
         }
 
-        if (function_exists('ultracache_extract_font_face_blocks_from_css')) {
-            $extracted = ultracache_extract_font_face_blocks_from_css($css);
-            $blocks = isset($extracted['blocks']) && is_array($extracted['blocks']) ? $extracted['blocks'] : array();
-            foreach ($blocks as $block) {
-                if ($this->font_face_block_requires_display_normalization((string) $block)) {
-                    return true;
-                }
-            }
-
+        $extracted = ultracache_extract_font_face_blocks_from_css($css);
+        if (!empty($extracted['malformed'])) {
             return false;
         }
-
-        if (!preg_match_all('/@font-face\s*{.*?}/is', $css, $matches)) {
-            return false;
-        }
-
-        foreach ((array) ($matches[0] ?? array()) as $block) {
+        $blocks = isset($extracted['blocks']) && is_array($extracted['blocks']) ? $extracted['blocks'] : array();
+        foreach ($blocks as $block) {
             if ($this->font_face_block_requires_display_normalization((string) $block)) {
                 return true;
             }
@@ -1006,11 +997,17 @@ private function get_local_font_css_scan_roots()
             return false;
         }
 
-        if (!preg_match('/font-display\s*:\s*([^;}]+)/i', $block, $match)) {
+        $declaration_scan = ultracache_font_css_scan_declarations($block);
+        if (!empty($declaration_scan['malformed'])) {
+            return false;
+        }
+
+        $display = ultracache_font_css_find_declaration($block, 'font-display');
+        if (empty($display)) {
             return true;
         }
 
-        $value = strtolower(trim((string) ($match[1] ?? '')));
+        $value = strtolower(trim(ultracache_font_css_extract_declaration($block, 'font-display')));
         return in_array($value, array('auto', 'block'), true);
     }
 }

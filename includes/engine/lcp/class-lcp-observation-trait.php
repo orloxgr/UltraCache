@@ -50,6 +50,35 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
         return $expires_at > time();
     }
 
+    private function normalize_lcp_request_credentials_mode($mode, $fallback = 'unknown')
+    {
+        $mode = sanitize_key((string) $mode);
+        $allowed = array('unknown', 'none', 'anonymous', 'use-credentials', 'conflict', 'unavailable');
+        if (in_array($mode, $allowed, true)) {
+            return $mode;
+        }
+
+        $fallback = sanitize_key((string) $fallback);
+        return in_array($fallback, $allowed, true) ? $fallback : 'unknown';
+    }
+
+    private function is_lcp_request_credentials_preload_contract_enabled(array $settings)
+    {
+        return !empty($settings['slider_safe_mode'])
+            && !empty($settings['lcp_image_priority']);
+    }
+
+    private function is_lcp_request_credentials_learning_enabled(array $settings)
+    {
+        return $this->is_lcp_request_credentials_preload_contract_enabled($settings)
+            && $this->is_lcp_frontend_discovery_active($settings);
+    }
+
+    private function is_lcp_request_credentials_mode_preload_usable($mode)
+    {
+        return in_array($this->normalize_lcp_request_credentials_mode($mode), array('none', 'anonymous', 'use-credentials'), true);
+    }
+
     private function is_lcp_frontend_discovery_audience_allowed(array $settings)
     {
         $is_admin_user = is_user_logged_in() && current_user_can('manage_options');
@@ -87,13 +116,14 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
     private function normalize_lcp_learning_candidate(array $candidate)
     {
         $resource_type = sanitize_key((string) ($candidate['resource_type'] ?? 'unknown'));
-        if (!in_array($resource_type, array('text', 'image', 'background', 'poster', 'unknown'), true)) {
+        if (!in_array($resource_type, array('text', 'image', 'background', 'poster', 'video', 'unknown'), true)) {
             $resource_type = 'unknown';
         }
-        $resource_url = in_array($resource_type, array('image', 'background', 'poster'), true)
+        $resource_url = in_array($resource_type, array('image', 'background', 'poster', 'video'), true)
             ? $this->normalize_public_resource_url((string) ($candidate['resource_url'] ?? ''))
             : '';
         $element_tag = substr(sanitize_key((string) ($candidate['element_tag'] ?? '')), 0, 80);
+        $request_credentials_mode = $this->normalize_lcp_request_credentials_mode($candidate['request_credentials_mode'] ?? 'unknown');
         $selector = substr(sanitize_text_field((string) ($candidate['selector'] ?? '')), 0, 512);
         if ('' === $selector) {
             $selector = '' !== $element_tag ? $element_tag : 'unknown';
@@ -101,18 +131,20 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
 
         $fingerprint = hash('sha256', wp_json_encode(array(
             'resource_type' => $resource_type,
-            'resource_url'  => $resource_url,
-            'element_tag'   => $element_tag,
-            'selector'      => $selector,
+            'resource_url'             => $resource_url,
+            'request_credentials_mode' => $request_credentials_mode,
+            'element_tag'              => $element_tag,
+            'selector'                 => $selector,
         )));
 
         return array(
             'fingerprint'   => $fingerprint,
             'resource_type' => $resource_type,
-            'resource_url'  => $resource_url,
-            'element_tag'   => $element_tag,
-            'selector'      => $selector,
-            'observed_at'   => max(1, absint($candidate['observed_at'] ?? time())),
+            'resource_url'             => $resource_url,
+            'request_credentials_mode' => $request_credentials_mode,
+            'element_tag'              => $element_tag,
+            'selector'                 => $selector,
+            'observed_at'              => max(1, absint($candidate['observed_at'] ?? time())),
         );
     }
 
@@ -123,8 +155,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
         }
         return $this->normalize_lcp_learning_candidate(array(
             'resource_type' => (string) ($row['resource_type'] ?? 'unknown'),
-            'resource_url'  => (string) ($row['resource_url'] ?? ''),
-            'element_tag'   => (string) ($row['element_tag'] ?? ''),
+            'resource_url'             => (string) ($row['resource_url'] ?? ''),
+            'request_credentials_mode' => (string) ($row['request_credentials_mode'] ?? 'unknown'),
+            'element_tag'              => (string) ($row['element_tag'] ?? ''),
             'selector'      => (string) ($row['selector'] ?? ''),
             'observed_at'   => absint($row['last_seen'] ?? time()),
         ));
@@ -443,11 +476,14 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
     {
         static $records_by_key = array();
 
-        $settings = $this->get_settings();
-        $selectors = isset($settings['manual_lcp_hero_selector_list']) && is_array($settings['manual_lcp_hero_selector_list'])
-            ? $settings['manual_lcp_hero_selector_list']
-            : array();
         $page_url = $this->normalize_lcp_observation_page_url($this->get_current_request_url());
+        $manual_configuration = $this->get_effective_manual_lcp_configuration($page_url);
+        if (!empty($manual_configuration['images'])) {
+            return array();
+        }
+        $selectors = isset($manual_configuration['selectors']) && is_array($manual_configuration['selectors'])
+            ? $manual_configuration['selectors']
+            : array();
 
         $cache_key = md5($page_url . '|' . wp_json_encode(array_values($selectors)));
         if (isset($records_by_key[$cache_key])) {
@@ -470,9 +506,8 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             return false;
         }
 
-        foreach (preg_split('/\s*,\s*/', $value) as $candidate) {
-            $parts = preg_split('/\s+/', trim((string) $candidate));
-            $url = isset($parts[0]) ? $this->absolutize_public_resource_url($parts[0], $page_url) : '';
+        foreach (ultracache_extract_srcset_urls($value) as $candidate_url) {
+            $url = $this->absolutize_public_resource_url((string) $candidate_url, $page_url);
             $url = $this->normalize_public_resource_url($url);
             if ('' !== $url && isset($resource_urls[$url])) {
                 return true;
@@ -480,6 +515,217 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
         }
 
         return false;
+    }
+
+    private function get_observed_lcp_processor_selector($processor, $tag)
+    {
+        $tag = strtolower((string) $tag);
+        $id = trim((string) $processor->get_attribute('id'));
+        if ('' !== $id) {
+            return '#' . $id;
+        }
+
+        $classes = preg_split('/\s+/', trim((string) $processor->get_attribute('class')));
+        $classes = array_values(array_filter(array_slice(is_array($classes) ? $classes : array(), 0, 3)));
+        return $tag . (empty($classes) ? '' : '.' . implode('.', $classes));
+    }
+
+    private function observed_lcp_selector_matches_processor($selector, $processor, $tag)
+    {
+        $selector = trim((string) $selector);
+        $tag = strtolower(trim((string) $tag));
+        if ('' === $selector || '' === $tag) {
+            return false;
+        }
+
+        if ($selector === $this->get_observed_lcp_processor_selector($processor, $tag)) {
+            return true;
+        }
+
+        if (preg_match('/[\s>+~:\[]/', $selector)) {
+            return false;
+        }
+
+        $selector = preg_replace('/\\\\(.)/s', '$1', $selector);
+        if (!is_string($selector) || '' === $selector) {
+            return false;
+        }
+
+        if (preg_match('/^#([A-Za-z0-9_-]+)$/', $selector, $id_only_match)) {
+            return (string) $id_only_match[1] === trim((string) $processor->get_attribute('id'));
+        }
+
+        $selector_tag = '';
+        if (preg_match('/^([A-Za-z][A-Za-z0-9_-]*)/', $selector, $tag_match)) {
+            $selector_tag = strtolower((string) $tag_match[1]);
+            $selector = substr($selector, strlen((string) $tag_match[0]));
+        } elseif (0 !== strpos($selector, '.')) {
+            return false;
+        }
+        if ('' !== $selector_tag && $selector_tag !== $tag) {
+            return false;
+        }
+
+        $id = '';
+        if (preg_match('/#([A-Za-z0-9_-]+)/', $selector, $id_match)) {
+            $id = (string) $id_match[1];
+            if ($id !== trim((string) $processor->get_attribute('id'))) {
+                return false;
+            }
+        }
+
+        preg_match_all('/\.([A-Za-z0-9_-]+)/', $selector, $class_matches);
+        $required_classes = isset($class_matches[1]) && is_array($class_matches[1]) ? $class_matches[1] : array();
+        $recognized = ('' !== $id ? '#' . $id : '') . (empty($required_classes) ? '' : '.' . implode('.', $required_classes));
+        if ('' === $recognized || $recognized !== $selector) {
+            return false;
+        }
+
+        $classes = preg_split('/\s+/', trim((string) $processor->get_attribute('class')));
+        $classes = is_array($classes) ? array_fill_keys(array_filter($classes), true) : array();
+        foreach ($required_classes as $class_name) {
+            if (!isset($classes[$class_name])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function observed_lcp_video_selector_matches_processor($selector, $processor)
+    {
+        return $this->observed_lcp_selector_matches_processor($selector, $processor, 'video');
+    }
+
+    private function is_observed_lcp_selector_specific($selector, $tag)
+    {
+        $selector = trim((string) $selector);
+        $tag = strtolower(trim((string) $tag));
+        if ('' === $selector || '' === $tag || 'unknown' === strtolower($selector) || $selector === $tag) {
+            return false;
+        }
+        if (preg_match('/[\s>+~:\[]/', $selector)) {
+            return false;
+        }
+
+        return false !== strpos($selector, '#') || false !== strpos($selector, '.');
+    }
+
+    private function normalize_lcp_observation_policy_record(array $record, $viewport)
+    {
+        $viewport = sanitize_key((string) $viewport);
+        if (!in_array($viewport, array('mobile', 'tablet', 'desktop'), true)) {
+            return array();
+        }
+
+        $resource_type = sanitize_key((string) ($record['resource_type'] ?? ''));
+        if (!in_array($resource_type, array('image', 'background', 'poster', 'video'), true)) {
+            return array();
+        }
+
+        $resource_url = $this->normalize_public_resource_url((string) ($record['resource_url'] ?? ''));
+        if ('' === $resource_url) {
+            return array();
+        }
+
+        $tag = sanitize_key((string) ($record['element_tag'] ?? ($record['tag'] ?? '')));
+        $selector = trim((string) ($record['selector'] ?? ''));
+
+        $record['viewport'] = $viewport;
+        $record['resource_type'] = $resource_type;
+        $record['resource_url'] = $resource_url;
+        $record['request_credentials_mode'] = $this->normalize_lcp_request_credentials_mode($record['request_credentials_mode'] ?? 'unknown');
+        $record['element_tag'] = $tag;
+        $record['tag'] = $tag;
+        $record['selector'] = $selector;
+
+        return $record;
+    }
+
+    private function get_lcp_observation_resource_policy(array $records, $include_request_credentials_mode = false)
+    {
+        $required_viewports = array('mobile', 'tablet', 'desktop');
+        $records_by_viewport = array();
+        $duplicate_viewport = false;
+
+        foreach ($records as $selector_records) {
+            if (!is_array($selector_records)) {
+                continue;
+            }
+            foreach ($selector_records as $viewport => $record) {
+                if (!is_array($record)) {
+                    continue;
+                }
+                $normalized = $this->normalize_lcp_observation_policy_record($record, $viewport);
+                if (empty($normalized)) {
+                    continue;
+                }
+                $viewport = (string) $normalized['viewport'];
+                if (isset($records_by_viewport[$viewport])) {
+                    $duplicate_viewport = true;
+                    continue;
+                }
+                $records_by_viewport[$viewport] = $normalized;
+            }
+        }
+
+        $ordered_records = array();
+        foreach ($required_viewports as $viewport) {
+            if (isset($records_by_viewport[$viewport])) {
+                $ordered_records[$viewport] = $records_by_viewport[$viewport];
+            }
+        }
+
+        $policy = array(
+            'classification'    => 'ambiguous',
+            'records_by_viewport' => $ordered_records,
+            'universal'         => array(),
+            'viewport_specific'  => array(),
+            'ambiguous'         => $ordered_records,
+        );
+
+        if ($duplicate_viewport || count($ordered_records) !== count($required_viewports)) {
+            return $policy;
+        }
+
+        $resource_keys = array();
+        foreach ($ordered_records as $record) {
+            $resource_key = (string) $record['resource_type'] . '|' . (string) $record['resource_url'];
+            if ($include_request_credentials_mode) {
+                $resource_key .= '|' . (string) ($record['request_credentials_mode'] ?? 'unknown');
+            }
+            $resource_keys[] = $resource_key;
+        }
+        $resource_keys = array_values(array_unique($resource_keys));
+        if (1 !== count($resource_keys)) {
+            $policy['classification'] = 'viewport_specific';
+            $policy['viewport_specific'] = $ordered_records;
+            $policy['ambiguous'] = array();
+            return $policy;
+        }
+
+        $first = reset($ordered_records);
+        $element_keys = array();
+        foreach ($ordered_records as $record) {
+            $element_keys[] = (string) $record['element_tag'] . '|' . (string) $record['selector'];
+        }
+        $same_element = 1 === count(array_unique($element_keys));
+        $markup_eligible = $same_element
+            && in_array((string) ($first['resource_type'] ?? ''), array('image', 'poster', 'video'), true)
+            && $this->is_observed_lcp_selector_specific(
+                (string) ($first['selector'] ?? ''),
+                (string) ($first['element_tag'] ?? '')
+            );
+
+        $policy['classification'] = 'universal';
+        $policy['universal'] = array(
+            'record'         => $first,
+            'records'        => $ordered_records,
+            'markup_eligible' => $markup_eligible,
+        );
+        $policy['ambiguous'] = array();
+
+        return $policy;
     }
 
     private function apply_observed_lcp_priority_markup($html)
@@ -493,42 +739,75 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             return $html;
         }
 
-        $image_urls = array();
-        foreach ($records as $selector_records) {
-            foreach ($selector_records as $record) {
-                if ('image' !== (string) ($record['resource_type'] ?? '')) {
-                    continue;
-                }
-                $resource_url = $this->normalize_public_resource_url((string) ($record['resource_url'] ?? ''));
-                if ('' !== $resource_url) {
-                    $image_urls[$resource_url] = true;
-                }
-            }
+        $policy = $this->get_lcp_observation_resource_policy($records);
+        if ('universal' !== (string) ($policy['classification'] ?? '') || empty($policy['universal']['markup_eligible'])) {
+            return $html;
         }
-        if (empty($image_urls)) {
+
+        $record = isset($policy['universal']['record']) && is_array($policy['universal']['record'])
+            ? $policy['universal']['record']
+            : array();
+        $resource_type = (string) ($record['resource_type'] ?? '');
+        $resource_url = (string) ($record['resource_url'] ?? '');
+        $selector = (string) ($record['selector'] ?? '');
+        $tag = (string) ($record['element_tag'] ?? '');
+        if ('' === $resource_url || '' === $selector || '' === $tag) {
             return $html;
         }
 
         $page_url = $this->normalize_lcp_observation_page_url($this->get_current_request_url());
 
         try {
-            $processor = new WP_HTML_Tag_Processor($html);
-            $changed = false;
-            while ($processor->next_tag('IMG')) {
-                $src = $this->absolutize_public_resource_url((string) $processor->get_attribute('src'), $page_url);
-                $src = $this->normalize_public_resource_url($src);
-                $srcset = (string) $processor->get_attribute('srcset');
-                if (!isset($image_urls[$src]) && !$this->observed_lcp_attribute_contains_url($srcset, $image_urls, $page_url)) {
-                    continue;
-                }
+            if ('image' === $resource_type && 'img' === $tag) {
+                $processor = new WP_HTML_Tag_Processor($html);
+                while ($processor->next_tag('IMG')) {
+                    if (!$this->observed_lcp_selector_matches_processor($selector, $processor, 'img')) {
+                        continue;
+                    }
 
-                $processor->set_attribute('fetchpriority', 'high');
-                $processor->set_attribute('loading', 'eager');
-                $processor->set_attribute('data-ultracache-lcp', '1');
-                $changed = true;
+                    $src = $this->absolutize_public_resource_url((string) $processor->get_attribute('src'), $page_url);
+                    $src = $this->normalize_public_resource_url($src);
+                    $srcset = (string) $processor->get_attribute('srcset');
+                    $resource_urls = array($resource_url => true);
+                    if ($resource_url !== $src && !$this->observed_lcp_attribute_contains_url($srcset, $resource_urls, $page_url)) {
+                        continue;
+                    }
+
+                    $processor->set_attribute('fetchpriority', 'high');
+                    $processor->set_attribute('loading', 'eager');
+                    $processor->set_attribute('data-ultracache-lcp', '1');
+                    return $processor->get_updated_html();
+                }
+                return $html;
             }
 
-            return $changed ? $processor->get_updated_html() : $html;
+            if (in_array($resource_type, array('video', 'poster'), true) && 'video' === $tag) {
+                $processor = new WP_HTML_Tag_Processor($html);
+                while ($processor->next_tag('VIDEO')) {
+                    if (!$this->observed_lcp_video_selector_matches_processor($selector, $processor)) {
+                        continue;
+                    }
+
+                    $src = $this->normalize_public_resource_url($this->absolutize_public_resource_url((string) $processor->get_attribute('src'), $page_url));
+                    $poster = $this->normalize_public_resource_url($this->absolutize_public_resource_url((string) $processor->get_attribute('poster'), $page_url));
+                    if ('poster' === $resource_type && $poster !== $resource_url) {
+                        continue;
+                    }
+                    if ('video' === $resource_type && '' !== $src && $src !== $resource_url) {
+                        continue;
+                    }
+
+                    $processor->set_attribute('fetchpriority', 'high');
+                    if ('video' === $resource_type) {
+                        $processor->set_attribute('preload', 'auto');
+                    }
+                    $processor->remove_attribute('loading');
+                    $processor->set_attribute('data-ultracache-lcp', '1');
+                    return $processor->get_updated_html();
+                }
+            }
+
+            return $html;
         } catch (Throwable $error) {
             return $html;
         }
@@ -549,23 +828,55 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
         return '';
     }
 
-    private function html_has_observed_lcp_preload($html, $url, $media)
+    private function get_lcp_preload_tag_request_credentials_mode($tag)
+    {
+        $tag = (string) $tag;
+        if (!preg_match('/\bcrossorigin(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+)))?/i', $tag, $matches)) {
+            return 'none';
+        }
+
+        $value = '';
+        foreach (array(1, 2, 3) as $index) {
+            if (isset($matches[$index]) && '' !== (string) $matches[$index]) {
+                $value = strtolower(trim((string) $matches[$index]));
+                break;
+            }
+        }
+
+        return 'use-credentials' === $value ? 'use-credentials' : 'anonymous';
+    }
+
+    private function html_has_observed_lcp_preload($html, $url, $media, $request_credentials_mode)
     {
         $url = $this->normalize_public_resource_url($url);
         if ('' === $url || false === stripos((string) $html, '<link')) {
             return false;
         }
 
-        if (!preg_match_all('/<link\b[^>]*>/i', (string) $html, $matches)) {
+        $tags = ultracache_scan_raw_html_tags((string) $html, array('link'));
+        if (empty($tags)) {
             return false;
         }
 
-        foreach ($matches[0] as $tag) {
+        foreach ($tags as $record) {
+            if (!empty($record['closing'])) {
+                continue;
+            }
+            $tag = isset($record['raw']) ? (string) $record['raw'] : '';
+            if ('' === $tag) {
+                continue;
+            }
             $rel = strtolower($this->extract_attribute_from_html_tag($tag, 'rel'));
             $as = strtolower($this->extract_attribute_from_html_tag($tag, 'as'));
             $href = $this->normalize_public_resource_url($this->extract_attribute_from_html_tag($tag, 'href'));
             $existing_media = trim($this->extract_attribute_from_html_tag($tag, 'media'));
-            if (false !== strpos($rel, 'preload') && 'image' === $as && $href === $url && ('' === $existing_media || $existing_media === (string) $media)) {
+            if (
+                false !== strpos($rel, 'preload')
+                && 'image' === $as
+                && $href === $url
+                && ('' === $existing_media || $existing_media === (string) $media)
+                && $this->get_lcp_preload_tag_request_credentials_mode($tag) === $this->normalize_lcp_request_credentials_mode($request_credentials_mode, 'none')
+            ) {
                 return true;
             }
         }
@@ -573,71 +884,90 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
         return false;
     }
 
-    private function inject_observed_lcp_priority_preloads($html)
+    private function inject_observed_lcp_priority_preloads($html, $require_observed_credentials = false)
     {
         if (!is_string($html) || '' === $html || false === stripos($html, '</head>')) {
             return $html;
         }
 
-        $settings = $this->get_settings();
-        $selectors = isset($settings['manual_lcp_hero_selector_list']) && is_array($settings['manual_lcp_hero_selector_list']) ? $settings['manual_lcp_hero_selector_list'] : array();
-
         $page_url = $this->normalize_lcp_observation_page_url($this->get_current_request_url());
+        $manual_configuration = $this->get_effective_manual_lcp_configuration($page_url);
+        if (!empty($manual_configuration['images'])) {
+            return $html;
+        }
+        $selectors = isset($manual_configuration['selectors']) && is_array($manual_configuration['selectors']) ? $manual_configuration['selectors'] : array();
+
         $records = $this->get_lcp_observation_records_for_page($page_url, $selectors);
         if (empty($records)) {
             return $html;
         }
 
-        $resource_records = array();
-        foreach ($records as $selector_records) {
-            foreach ($selector_records as $viewport => $record) {
-                $resource_type = (string) ($record['resource_type'] ?? '');
-                $resource_url = $this->normalize_public_resource_url((string) ($record['resource_url'] ?? ''));
-                if (!in_array($resource_type, array('image', 'background', 'poster'), true) || '' === $resource_url || !$this->is_lcp_candidate_image_url($resource_url)) {
+        $policy = $this->get_lcp_observation_resource_policy($records, $require_observed_credentials);
+        $preload_records = array();
+        if ('universal' === (string) ($policy['classification'] ?? '')) {
+            $record = isset($policy['universal']['record']) && is_array($policy['universal']['record'])
+                ? $policy['universal']['record']
+                : array();
+            if (!empty($record)) {
+                $preload_records[] = array('record' => $record, 'media' => '');
+            }
+        } else {
+            foreach ((array) ($policy['records_by_viewport'] ?? array()) as $viewport => $record) {
+                if (!is_array($record)) {
                     continue;
                 }
-                $resource_records[$resource_url][$viewport] = true;
+                $media = $this->get_lcp_observation_viewport_media($viewport);
+                if ('' !== $media) {
+                    $preload_records[] = array('record' => $record, 'media' => $media);
+                }
             }
-        }
-        if (empty($resource_records)) {
-            return $html;
         }
 
         $tags = array();
-        foreach ($resource_records as $resource_url => $viewports) {
-            $viewports = array_keys($viewports);
-            $media_values = array();
-            if (count($viewports) >= 3) {
-                $media_values[] = '';
-            } else {
-                foreach ($viewports as $viewport) {
-                    $media_values[] = $this->get_lcp_observation_viewport_media($viewport);
-                }
+        $seen = array();
+        foreach ($preload_records as $candidate) {
+            $record = isset($candidate['record']) && is_array($candidate['record']) ? $candidate['record'] : array();
+            $resource_type = (string) ($record['resource_type'] ?? '');
+            $resource_url = $this->normalize_public_resource_url((string) ($record['resource_url'] ?? ''));
+            $media = (string) ($candidate['media'] ?? '');
+            $request_credentials_mode = $require_observed_credentials
+                ? $this->normalize_lcp_request_credentials_mode($record['request_credentials_mode'] ?? 'unknown')
+                : ($this->is_same_origin_public_resource_url($resource_url) ? 'none' : 'anonymous');
+            if (
+                !in_array($resource_type, array('image', 'background', 'poster'), true)
+                || '' === $resource_url
+                || !$this->is_lcp_candidate_image_url($resource_url)
+                || !$this->is_lcp_request_credentials_mode_preload_usable($request_credentials_mode)
+            ) {
+                continue;
             }
 
-            foreach (array_unique($media_values) as $media) {
-                if ($this->html_has_observed_lcp_preload($html, $resource_url, $media)) {
-                    continue;
-                }
-                $href = esc_url($resource_url);
-                if ('' === $href) {
-                    continue;
-                }
-                $tag = '<link rel="preload" as="image" href="' . $href . '"';
-                $mime = $this->get_lcp_preload_image_type($resource_url);
-                if ('' !== $mime) {
-                    $tag .= ' type="' . esc_attr($mime) . '"';
-                }
-                $tag .= ' fetchpriority="high" data-ultracache-lcp-preload="1" data-ultracache-lcp-preload-reason="browser-observed"';
-                if ('' !== $media) {
-                    $tag .= ' media="' . esc_attr($media) . '"';
-                }
-                if (!$this->is_same_origin_public_resource_url($resource_url)) {
-                    $tag .= ' crossorigin="anonymous"';
-                }
-                $tag .= '>';
-                $tags[] = $tag;
+            $dedupe_key = $resource_url . '|' . $media . '|' . $request_credentials_mode;
+            if (isset($seen[$dedupe_key]) || $this->html_has_observed_lcp_preload($html, $resource_url, $media, $request_credentials_mode)) {
+                continue;
             }
+            $seen[$dedupe_key] = true;
+
+            $href = esc_url($resource_url);
+            if ('' === $href) {
+                continue;
+            }
+            $tag = '<link rel="preload" as="image" href="' . $href . '"';
+            $mime = $this->get_lcp_preload_image_type($resource_url);
+            if ('' !== $mime) {
+                $tag .= ' type="' . esc_attr($mime) . '"';
+            }
+            $tag .= ' fetchpriority="high" data-ultracache-lcp-preload="1" data-ultracache-lcp-preload-reason="browser-observed"';
+            if ('' !== $media) {
+                $tag .= ' media="' . esc_attr($media) . '"';
+            }
+            if ('anonymous' === $request_credentials_mode) {
+                $tag .= ' crossorigin="anonymous"';
+            } elseif ('use-credentials' === $request_credentials_mode) {
+                $tag .= ' crossorigin="use-credentials"';
+            }
+            $tag .= '>';
+            $tags[] = $tag;
         }
 
         return empty($tags) ? $html : $this->insert_html_before_closing_head($html, implode("\n", $tags));
@@ -654,6 +984,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             return;
         }
 
+        $credentials_learning_enabled = $this->is_lcp_request_credentials_learning_enabled($settings);
         $request_url = $this->get_current_request_url();
         if ($this->lcp_observation_url_has_query_string($request_url)) {
             return;
@@ -663,8 +994,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             return;
         }
 
-        $selectors = isset($settings['manual_lcp_hero_selector_list']) && is_array($settings['manual_lcp_hero_selector_list'])
-            ? $settings['manual_lcp_hero_selector_list']
+        $manual_configuration = $this->get_effective_manual_lcp_configuration($page_url);
+        $selectors = isset($manual_configuration['selectors']) && is_array($manual_configuration['selectors'])
+            ? $manual_configuration['selectors']
             : array();
         $known = $this->get_lcp_observation_records_for_page($page_url, $selectors);
         $selector_data = array();
@@ -677,7 +1009,11 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
                     continue;
                 }
                 foreach ($viewport_records as $viewport => $record) {
-                    if (isset($manual_viewport_locked[$viewport]) && is_array($record) && 'locked' === sanitize_key((string) ($record['learning_state'] ?? ''))) {
+                    if (
+                        isset($manual_viewport_locked[$viewport])
+                        && is_array($record)
+                        && 'locked' === sanitize_key((string) ($record['learning_state'] ?? ''))
+                    ) {
                         $manual_viewport_locked[$viewport] = true;
                     }
                 }
@@ -715,6 +1051,8 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             $all_locked = true;
             foreach (array('mobile', 'tablet', 'desktop') as $viewport) {
                 $record = isset($known[$automatic_hash][$viewport]) && is_array($known[$automatic_hash][$viewport]) ? $known[$automatic_hash][$viewport] : array();
+                // A locked viewport is immutable until the administrator
+                // explicitly starts a new cycle with Forget mapping or Relearn.
                 $locked[$viewport] = 'locked' === sanitize_key((string) ($record['learning_state'] ?? ''));
                 if (!$locked[$viewport]) {
                     $all_locked = false;
@@ -741,8 +1079,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             'action'          => 'ultracache_lcp_observation',
             'pageUrl'         => $page_url,
             'mode'            => empty($selector_data) ? 'automatic' : 'manual',
-            'expiresAt'       => absint($settings['lcp_frontend_discovery_expires_at'] ?? 0),
-            'manualSelectors' => $selector_data,
+            'expiresAt'                 => absint($settings['lcp_frontend_discovery_expires_at'] ?? 0),
+            'observeRequestCredentials' => $credentials_learning_enabled,
+            'manualSelectors'           => $selector_data,
             'automatic'       => $automatic_data,
         ));
     }
@@ -760,6 +1099,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
         if (!$this->is_lcp_frontend_discovery_audience_allowed($settings)) {
             wp_send_json_error(array('message' => __('LCP frontend discovery is limited to administrators.', 'ultracache')), 403);
         }
+        $credentials_learning_enabled = $this->is_lcp_request_credentials_learning_enabled($settings);
 
         $raw_page_url = isset($request['pageUrl']) ? (string) $request['pageUrl'] : '';
         if ($this->lcp_observation_url_has_query_string($raw_page_url)) {
@@ -772,6 +1112,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
         $viewport = isset($request['viewport']) ? sanitize_key($request['viewport']) : '';
         $resource_type = isset($request['resourceType']) ? sanitize_key($request['resourceType']) : '';
         $resource_url = isset($request['resourceUrl']) ? esc_url_raw($request['resourceUrl']) : '';
+        $request_credentials_mode = isset($request['requestCredentialsMode'])
+            ? $this->normalize_lcp_request_credentials_mode($request['requestCredentialsMode'])
+            : 'unknown';
         $tag = isset($request['tag']) ? sanitize_key($request['tag']) : '';
         $element_selector = isset($request['elementSelector']) ? substr(sanitize_text_field($request['elementSelector']), 0, 512) : '';
 
@@ -791,12 +1134,13 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
         if (!$this->is_lcp_observation_page_cacheable_url($page_url)) {
             wp_send_json_error(array('message' => __('LCP frontend discovery requires a cacheable URL without query parameters.', 'ultracache')), 400);
         }
-        if (!in_array($viewport, array('mobile', 'tablet', 'desktop'), true) || !in_array($resource_type, array('text', 'image', 'background', 'poster', 'unknown'), true)) {
+        if (!in_array($viewport, array('mobile', 'tablet', 'desktop'), true) || !in_array($resource_type, array('text', 'image', 'background', 'poster', 'video', 'unknown'), true)) {
             wp_send_json_error(array('message' => __('Invalid LCP observation payload.', 'ultracache')), 400);
         }
 
-        $selectors = isset($settings['manual_lcp_hero_selector_list']) && is_array($settings['manual_lcp_hero_selector_list'])
-            ? $settings['manual_lcp_hero_selector_list']
+        $manual_configuration = $this->get_effective_manual_lcp_configuration($page_url);
+        $selectors = isset($manual_configuration['selectors']) && is_array($manual_configuration['selectors'])
+            ? $manual_configuration['selectors']
             : array();
         $matched_selector = '';
         $observation_source = 'automatic';
@@ -820,18 +1164,30 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             wp_send_json_error(array('message' => __('Invalid automatic LCP discovery scope.', 'ultracache')), 400);
         }
 
-        if (in_array($resource_type, array('image', 'background', 'poster'), true)) {
+        if (in_array($resource_type, array('image', 'background', 'poster', 'video'), true)) {
             $resource_url = $this->absolutize_public_resource_url($resource_url, $page_url);
             $resource_host = wp_parse_url($resource_url, PHP_URL_HOST);
             $resource_host = function_exists('ultracache_normalize_host')
                 ? ultracache_normalize_host($resource_host)
                 : strtolower(rtrim(trim((string) $resource_host), '.'));
             $allowed_hosts = $this->get_lcp_observation_allowed_resource_hosts($page_url);
-            if ('' === $resource_url || !$this->is_lcp_candidate_image_url($resource_url) || '' === $resource_host || !in_array($resource_host, $allowed_hosts, true)) {
+            $valid_resource = 'video' === $resource_type
+                ? $this->is_lcp_candidate_video_url($resource_url)
+                : $this->is_lcp_candidate_image_url($resource_url);
+            if ('' === $resource_url || !$valid_resource || '' === $resource_host || !in_array($resource_host, $allowed_hosts, true)) {
                 wp_send_json_error(array('message' => __('Invalid LCP resource URL.', 'ultracache')), 400);
             }
         } else {
             $resource_url = '';
+        }
+
+        if (
+            !$credentials_learning_enabled
+            || !in_array($resource_type, array('image', 'background', 'poster'), true)
+        ) {
+            $request_credentials_mode = 'unknown';
+        } elseif ('unknown' === $request_credentials_mode) {
+            $request_credentials_mode = 'unavailable';
         }
 
         if ('automatic' === $observation_source) {
@@ -841,28 +1197,40 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             $matched_selector = $element_selector;
         }
 
-        $viewport_winner = $this->get_confirmed_lcp_observation_winner_for_page_viewport($page_url, $viewport);
-        if ('confirmed' === sanitize_key((string) ($viewport_winner['status'] ?? '')) && 'locked' === sanitize_key((string) ($viewport_winner['learning_state'] ?? ''))) {
+        $existing = $this->get_lcp_observation_row($page_url, $row_selector_hash, $viewport);
+        $existing_is_locked = 'confirmed' === sanitize_key((string) ($existing['status'] ?? ''))
+            && 'locked' === sanitize_key((string) ($existing['learning_state'] ?? ''));
+        if ($existing_is_locked) {
+            // Never enrich or otherwise mutate a locked mapping from public
+            // telemetry. Forget mapping or Relearn is the only unlock path.
+            $page_url_hash = $this->get_lcp_observation_page_hash($page_url);
+            if (64 === strlen($page_url_hash) && self::ensure_lcp_observations_table()) {
+                $this->ultracache_reset_lcp_page_probe_evidence(
+                    self::get_lcp_observations_table_name(),
+                    $page_url_hash,
+                    $page_url,
+                    time()
+                );
+            }
             wp_send_json_success(array(
                 'stored'            => false,
                 'changed'           => false,
                 'status'            => 'locked',
-                'observationCount'  => absint($viewport_winner['observation_count'] ?? 0),
-                'confirmationCount' => absint($viewport_winner['confirmation_count'] ?? 2),
+                'observationCount'  => absint($existing['observation_count'] ?? 0),
+                'confirmationCount' => absint($existing['confirmation_count'] ?? 2),
                 'purged'            => false,
                 'refreshQueued'     => false,
             ));
         }
-
-        $existing = $this->get_lcp_observation_row($page_url, $row_selector_hash, $viewport);
         if ('confirmed' !== sanitize_key((string) ($existing['status'] ?? ''))) {
             $existing = array();
         }
 
         $candidate = $this->normalize_lcp_learning_candidate(array(
             'resource_type' => $resource_type,
-            'resource_url'  => $resource_url,
-            'element_tag'   => $tag,
+            'resource_url'             => $resource_url,
+            'request_credentials_mode' => $request_credentials_mode,
+            'element_tag'              => $tag,
             'selector'      => $matched_selector,
             'observed_at'   => time(),
         ));
@@ -886,8 +1254,9 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             'selector'           => (string) ($active['selector'] ?? $matched_selector),
             'viewport'           => $viewport,
             'resource_type'      => (string) ($active['resource_type'] ?? $resource_type),
-            'resource_url'       => (string) ($active['resource_url'] ?? $resource_url),
-            'element_tag'        => (string) ($active['element_tag'] ?? $tag),
+            'resource_url'             => (string) ($active['resource_url'] ?? $resource_url),
+            'request_credentials_mode' => (string) ($active['request_credentials_mode'] ?? $request_credentials_mode),
+            'element_tag'              => (string) ($active['element_tag'] ?? $tag),
             'observation_source' => $observation_source,
             'observation_count'  => max(1, absint($existing['observation_count'] ?? 0) + 1),
             'status'             => 'confirmed',

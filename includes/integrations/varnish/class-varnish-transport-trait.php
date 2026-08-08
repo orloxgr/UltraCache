@@ -177,6 +177,54 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
     }
         private static function send_varnish_http_request(array $endpoint, $target_url, $host_header, $timeout_s, $expr, $method, array $extra_headers = array())
         {
+            $settings = self::get_varnish_cli_settings();
+            $endpoint_label = self::normalize_varnish_metrics_endpoint_label($endpoint);
+            $contract_profile = self::get_varnish_http_contract_runtime_profile($endpoint_label, $settings);
+            $soft_requested = !empty($extra_headers['X-UltraCache-Soft-Purge'])
+                || 'soft' === strtolower((string) ($extra_headers['X-Purge'] ?? ''));
+            if (
+                !empty($contract_profile)
+                && !$soft_requested
+                && 'PURGE' === strtoupper((string) $method)
+                && self::is_varnish_endpoint_capability_current($contract_profile, 'exactPurge')
+            ) {
+                $parts = wp_parse_url((string) $target_url);
+                $path = is_array($parts) && !empty($parts['path']) ? (string) $parts['path'] : '/';
+                if (is_array($parts) && !empty($parts['query'])) {
+                    $path .= '?' . (string) $parts['query'];
+                }
+                $home = wp_parse_url(home_url('/'));
+                $scheme = is_array($home) && !empty($home['scheme']) ? strtolower((string) $home['scheme']) : 'https';
+                $public_host = (string) $host_header;
+                $home_host = is_array($home) && !empty($home['host']) ? strtolower(rtrim((string) $home['host'], '.')) : '';
+                if (
+                    '' !== $home_host
+                    && strtolower(rtrim($public_host, '.')) === $home_host
+                    && false === strpos($public_host, ':')
+                ) {
+                    $home_port = absint($home['port'] ?? 0);
+                    $default_port = 'https' === $scheme ? 443 : 80;
+                    if ($home_port > 0 && $home_port !== $default_port) {
+                        $public_host .= ':' . $home_port;
+                    }
+                }
+                $public_url = $scheme . '://' . $public_host . $path;
+                $contract_result = self::send_varnish_http_contract_exact_purge(
+                    $endpoint_label,
+                    $public_url,
+                    $timeout_s,
+                    $settings
+                );
+                if (!empty($contract_result['ok'])) {
+                    return $contract_result;
+                }
+
+                self::maybe_downgrade_varnish_http_contract_profile($endpoint_label, $contract_result, $settings);
+                // The standalone CWP template and generic hosts may still expose
+                // exact PURGE even when the optional advanced contract is stale.
+                // Continue into the portable request path for this operation.
+            }
+
             $started_at = microtime(true);
             $endpoint_label = self::normalize_varnish_metrics_endpoint_label($endpoint);
             $finalize = static function (array $result) use ($started_at, $endpoint_label) {
@@ -203,7 +251,6 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
                 }
             }
 
-            $settings = self::get_varnish_cli_settings();
             if (!empty($settings['key'])) {
                 $headers['X-UltraCache-Token'] = (string) $settings['key'];
             }
@@ -226,6 +273,18 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
             $content_type = strtolower(trim((string) wp_remote_retrieve_header($response, 'content-type')));
             $summary = self::summarize_varnish_http_body($body);
             $looks_like_html = (false !== strpos($content_type, 'text/html')) || ('' !== $body && preg_match('/<(?:!doctype|html|head|body)\b/i', $body));
+            $x_varnish = self::get_varnish_response_header($response, 'x-varnish');
+            $via = self::get_varnish_response_header($response, 'via');
+            $server = self::get_varnish_response_header($response, 'server');
+            $varnish_evidence = '' !== $x_varnish
+                || false !== stripos($via, 'varnish')
+                || false !== stripos($server, 'varnish');
+            $invalidation_text = strtolower($message . ' ' . $summary);
+            $invalidation_confirmed = 1 === preg_match('/\b(purged?|ban(?:ned)?|ban added|invalidated?|cache cleared|cache flushed|flush(?:ed)? successfully)\b/i', $invalidation_text);
+            $verified_html_invalidation = $looks_like_html
+                && $varnish_evidence
+                && $invalidation_confirmed
+                && strlen($body) <= 16384;
 
             if ($code < 200 || $code >= 300) {
                 $detail = 'HTTP ' . $code . ($message !== '' ? ' ' . $message : '');
@@ -235,10 +294,10 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
                 return $finalize(array('ok' => false, 'detail' => self::sanitize_varnish_string($detail), 'code' => $code));
             }
 
-            if ($looks_like_html) {
+            if ($looks_like_html && !$verified_html_invalidation) {
                 return $finalize(array(
                     'ok' => false,
-                    'detail' => self::sanitize_varnish_string('HTTP ' . $code . ' returned an HTML page instead of a Varnish purge response. Check that this endpoint points to a Varnish frontend/listener that accepts ' . strtoupper((string) $method) . '.'),
+                    'detail' => self::sanitize_varnish_string('HTTP ' . $code . ' returned an unverified HTML page instead of a confirmed Varnish invalidation response. Check that this endpoint points to a Varnish frontend/listener that accepts ' . strtoupper((string) $method) . '.'),
                     'code' => $code,
                 ));
             }
@@ -451,26 +510,26 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
 
         private static function send_varnish_admin_ban($host, $port, $secret, $timeout_s, $expr)
         {
-            $expr = trim((string) $expr);
-            if ('' === $expr || strlen($expr) > 4096 || preg_match('/[\x00-\x1F\x7F]/', $expr)) {
-                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Invalid or oversized Varnish BAN expression.'));
+            $expr = self::build_varnish_object_metadata_expression($expr);
+            if ('' === $expr) {
+                return array('ok' => false, 'connectionAccepted' => false, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string('Invalid or unsupported Varnish BAN expression.'));
             }
 
             $connection = self::open_authenticated_varnish_admin_connection($host, $port, $secret, $timeout_s);
             if (empty($connection['ok']) || !is_resource($connection['fp'] ?? null)) {
-                return array('ok' => false, 'detail' => self::sanitize_varnish_string((string) ($connection['detail'] ?? 'Admin connection failed.')));
+                return array('ok' => false, 'connectionAccepted' => false, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string((string) ($connection['detail'] ?? 'Admin connection failed.')));
             }
 
             $fp = $connection['fp'];
             if (!self::write_varnish_admin_command($fp, 'ban ' . $expr . "\n")) {
                 fclose($fp);
-                return array('ok' => false, 'detail' => self::sanitize_varnish_string('Could not write Varnish BAN command.'));
+                return array('ok' => false, 'connectionAccepted' => true, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string('Could not write Varnish BAN command.'));
             }
             $resp = self::read_varnish_admin_response($fp);
             fclose($fp);
 
             if (empty($resp['ok'])) {
-                return array('ok' => false, 'detail' => self::sanitize_varnish_string((string) ($resp['body'] ?? 'No admin response.')));
+                return array('ok' => false, 'connectionAccepted' => true, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string((string) ($resp['body'] ?? 'No admin response.')));
             }
 
             $detail = 'Admin ' . (int) $resp['code'];
@@ -478,7 +537,13 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
                 $detail .= ' · ' . self::summarize_varnish_http_body($resp['body']);
             }
 
-            return array('ok' => (200 === (int) $resp['code']), 'detail' => self::sanitize_varnish_string($detail), 'code' => (int) $resp['code']);
+            return array(
+                'ok' => (200 === (int) $resp['code']),
+                'connectionAccepted' => true,
+                'commandAccepted' => (200 === (int) $resp['code']),
+                'detail' => self::sanitize_varnish_string($detail),
+                'code' => (int) $resp['code'],
+            );
         }
 
         private static function send_varnish_admin_ban_list($host, $port, $secret, $timeout_s)
@@ -511,9 +576,56 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
 
         // phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.WP.AlternativeFunctions.file_system_operations_fsockopen,WordPress.WP.AlternativeFunctions.file_system_operations_fclose,WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
 
-        private static function varnish_command_for_expr($terminal, $secret, $timeout_s, $expr, $method)
+        private static function varnish_command_for_expr($terminal, $secret, $timeout_s, $expr, $method, $diagnostic_probe = false)
         {
             $settings = self::get_varnish_cli_settings();
+            if ($diagnostic_probe) {
+                $object_expression = method_exists(static::class, 'build_varnish_object_metadata_expression')
+                    ? self::build_varnish_object_metadata_expression($expr)
+                    : '';
+                $classified = '' !== $object_expression && method_exists(static::class, 'classify_varnish_contract_ban_operation')
+                    ? self::classify_varnish_contract_ban_operation($object_expression)
+                    : '';
+                $probe_map = array(
+                    'exact-ban' => array(
+                        'operation' => 'targeted',
+                        'strategy' => 'PURGE' === strtoupper((string) $method) ? 'exact-purge' : 'exact-ban',
+                        'scope' => 'exact-url',
+                    ),
+                    'batch-ban' => array(
+                        'operation' => 'targeted',
+                        'strategy' => 'batch-ban',
+                        'scope' => 'batch',
+                    ),
+                    'html-ban' => array(
+                        'operation' => 'site-flush',
+                        'strategy' => 'html-flush',
+                        'scope' => 'html',
+                    ),
+                    'host-ban' => array(
+                        'operation' => 'site-flush',
+                        'strategy' => 'host-flush',
+                        'scope' => 'host',
+                    ),
+                );
+                $probe = is_array($probe_map[$classified] ?? null) ? $probe_map[$classified] : array();
+                $authorized = !empty($probe)
+                    && method_exists(static::class, 'is_varnish_capability_probe_transport_authorized')
+                    && self::is_varnish_capability_probe_transport_authorized(
+                        (string) $probe['operation'],
+                        (string) $probe['strategy'],
+                        (string) $probe['scope'],
+                        array($terminal)
+                    );
+                if (!$authorized) {
+                    return array(
+                        'ok' => false,
+                        'status' => 'diagnostic-probe-not-authorized',
+                        'detail' => self::sanitize_varnish_string('The diagnostic Varnish command is outside the active scoped capability probe.'),
+                        'code' => 0,
+                    );
+                }
+            }
             if ('admin' === ($settings['mode'] ?? 'http')) {
                 list($host, $port) = self::parse_varnish_terminal($terminal);
                 $started_at = microtime(true);
@@ -540,6 +652,20 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
                 $response = array('ok' => false, 'detail' => self::sanitize_varnish_string('Invalid or blocked Varnish HTTP endpoint.'));
                 self::record_varnish_endpoint_result($terminal, 'http', false, 0, (string) $response['detail']);
                 return $response;
+            }
+
+            $contract_profile = self::get_varnish_http_contract_runtime_profile($terminal, $settings);
+            if (!empty($contract_profile) || $diagnostic_probe) {
+                $response = self::send_varnish_http_contract_ban($terminal, $timeout_s, $expr, $settings, (bool) $diagnostic_probe);
+                if (!empty($response['ok'])) {
+                    return $response;
+                }
+                if (!empty($contract_profile) || !empty($response['contractAvailable'])) {
+                    if (!$diagnostic_probe) {
+                        self::maybe_downgrade_varnish_http_contract_profile($terminal, $response, $settings);
+                    }
+                    return $response;
+                }
             }
 
             $home = wp_parse_url(home_url('/'));

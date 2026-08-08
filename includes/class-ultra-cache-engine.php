@@ -4,7 +4,11 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/core/html-variant-functions.php';
+require_once __DIR__ . '/core/srcset-functions.php';
+require_once __DIR__ . '/core/html-tag-scanner-functions.php';
 require_once __DIR__ . '/engine/class-engine-response-headers-trait.php';
+require_once __DIR__ . '/esi/class-esi-rendering-trait.php';
+require_once __DIR__ . '/engine/class-engine-litespeed-response-trait.php';
 require_once __DIR__ . '/engine/class-engine-conditional-response-trait.php';
 require_once __DIR__ . '/engine/class-engine-storage-trait.php';
 require_once __DIR__ . '/engine/class-engine-css-bundle-trait.php';
@@ -12,6 +16,7 @@ require_once __DIR__ . '/engine/class-engine-font-optimization-trait.php';
 require_once __DIR__ . '/engine/class-engine-lcp-slider-trait.php';
 require_once __DIR__ . '/engine/class-engine-js-optimization-trait.php';
 require_once __DIR__ . '/engine/class-engine-media-image-trait.php';
+require_once __DIR__ . '/engine/class-engine-iframe-lazy-load-trait.php';
 require_once __DIR__ . '/engine/class-engine-html-output-trait.php';
 require_once __DIR__ . '/engine/class-engine-cache-decision-trait.php';
 require_once __DIR__ . '/engine/class-engine-warm-crawl-trait.php';
@@ -21,11 +26,15 @@ require_once __DIR__ . '/engine/class-engine-hot-page-analytics-trait.php';
 require_once __DIR__ . '/engine/class-engine-analytics-trait.php';
 require_once __DIR__ . '/engine/class-engine-async-css-trait.php';
 require_once __DIR__ . '/engine/class-engine-frontend-assets-trait.php';
+require_once __DIR__ . '/integrations/woocommerce/class-woocommerce-esi-trait.php';
+require_once __DIR__ . '/integrations/elementor/class-elementor-page-css-dependency-trait.php';
 require_once __DIR__ . '/maintenance/class-update-cache-purge-trait.php';
 
 class Ultra_Cache_Engine
 {
     use Ultra_Cache_Engine_Response_Headers_Trait;
+    use Ultra_Cache_Engine_ESI_Rendering_Trait;
+    use Ultra_Cache_Engine_LiteSpeed_Response_Trait;
     use Ultra_Cache_Engine_Conditional_Response_Trait;
     use Ultra_Cache_Engine_Storage_Trait;
     use Ultra_Cache_Engine_CSS_Bundle_Trait;
@@ -33,6 +42,7 @@ class Ultra_Cache_Engine
     use Ultra_Cache_Engine_LCP_Slider_Trait;
     use Ultra_Cache_Engine_JS_Optimization_Trait;
     use Ultra_Cache_Engine_Media_Image_Trait;
+    use Ultra_Cache_Engine_Iframe_Lazy_Load_Trait;
     use Ultra_Cache_Engine_HTML_Output_Trait;
     use Ultra_Cache_Engine_Cache_Decision_Trait;
     use Ultra_Cache_Engine_Warm_Crawl_Trait;
@@ -42,6 +52,8 @@ class Ultra_Cache_Engine
     use Ultra_Cache_Engine_Analytics_Trait;
     use Ultra_Cache_Engine_Async_CSS_Trait;
     use Ultra_Cache_Engine_Frontend_Assets_Trait;
+    use Ultra_Cache_Engine_WooCommerce_ESI_Trait;
+    use Ultra_Cache_Engine_Elementor_Page_CSS_Dependency_Trait;
     use Ultra_Cache_Engine_Update_Cache_Purge_Trait;
 
     /** @var Ultra_Cache_Engine|null */
@@ -55,6 +67,21 @@ class Ultra_Cache_Engine
 
     /** @var bool */
     private $template_enhancement_buffer_started = false;
+
+    /** @var array<string,mixed> */
+    private $template_enhancement_buffer_decision = array();
+
+    /** @var bool */
+    private $template_enhancement_callbacks_registered = false;
+
+    /** @var bool */
+    private $template_enhancement_esi_callback_registered = false;
+
+    /** @var bool */
+    private $template_enhancement_google_fonts_callback_registered = false;
+
+    /** @var bool */
+    private $template_enhancement_esi_late_registration_compatibility = false;
 
     /** @var bool */
     private $diagnostic_fallback_output_buffer_active = false;
@@ -129,18 +156,63 @@ class Ultra_Cache_Engine
         $this->register_hooks();
     }
 
+    /**
+     * Determine whether the current request is the WordPress login screen.
+     *
+     * wp-login.php is not an admin request, so is_admin() alone cannot keep
+     * frontend script, style, and output transforms away from its dependency
+     * graph. Prefer WordPress' request predicate and retain bounded fallbacks
+     * for bootstrap contexts where that predicate is unavailable.
+     *
+     * @return bool
+     */
+    private function is_wordpress_login_request()
+    {
+        if (function_exists('is_login') && is_login()) {
+            return true;
+        }
+
+        $pagenow = isset($GLOBALS['pagenow']) && is_scalar($GLOBALS['pagenow'])
+            ? strtolower((string) $GLOBALS['pagenow'])
+            : '';
+        if ('wp-login.php' === $pagenow) {
+            return true;
+        }
+
+        foreach (array('SCRIPT_NAME', 'PHP_SELF') as $server_key) {
+            $script_path = function_exists('ultracache_server_value')
+                ? ultracache_server_value($server_key)
+                : '';
+            if ('' === $script_path) {
+                continue;
+            }
+
+            $parsed_path = function_exists('wp_parse_url')
+                ? wp_parse_url($script_path, PHP_URL_PATH)
+                : $script_path;
+            if ('wp-login.php' === strtolower(basename((string) $parsed_path))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function register_hooks()
     {
         $is_admin_request = function_exists('is_admin') && is_admin();
         $is_ajax_request = function_exists('wp_doing_ajax') && wp_doing_ajax();
         $is_cron_request = function_exists('wp_doing_cron') && wp_doing_cron();
         $is_rest_request = defined('REST_REQUEST') && REST_REQUEST;
-        $is_frontend_request = !$is_admin_request && !$is_ajax_request && !$is_cron_request && !$is_rest_request;
+        $is_login_request = $this->is_wordpress_login_request();
+        $is_frontend_request = !$is_admin_request && !$is_ajax_request && !$is_cron_request && !$is_rest_request && !$is_login_request;
 
         // Cache invalidation hooks are required in both frontend and admin
         // contexts. They do not mutate rendered admin assets or output.
         add_action('save_post', array($this, 'handle_post_update'), 20);
-        add_action('delete_post', array($this, 'handle_post_deletion'), 20);
+        add_action('before_delete_post', array($this, 'ultracache_delete_lcp_observations_for_post'), 10);
+        add_action('before_delete_post', array($this, 'handle_post_deletion'), 20);
+        add_action('wp_trash_post', array($this, 'ultracache_delete_lcp_observations_for_post'), 10);
         add_action('trashed_post', array($this, 'handle_post_deletion'), 20);
         add_action('untrashed_post', array($this, 'handle_post_update'), 20);
         add_action('woocommerce_update_product', array($this, 'handle_woocommerce_object_update'), 20);
@@ -162,6 +234,12 @@ class Ultra_Cache_Engine
         add_action('update_option_permalink_structure', array($this, 'handle_global_frontend_change'), 20, 2);
         add_action('wp_ajax_ultracache_lcp_observation', array($this, 'handle_lcp_observation_ajax'));
         add_action('wp_ajax_nopriv_ultracache_lcp_observation', array($this, 'handle_lcp_observation_ajax'));
+        add_action('pmxi_before_xml_import', array($this, 'handle_wp_all_import_start'), 10, 1);
+        add_action('pmxi_saved_post', array($this, 'handle_wp_all_import_record_saved'), 20, 3);
+        add_action('pmxi_after_xml_import', array($this, 'handle_wp_all_import_complete'), 10, 2);
+        add_action('ultracache_flush_affected_url_batch', array($this, 'process_persisted_affected_url_batch'));
+        add_action('shutdown', array($this, 'flush_request_affected_url_batch'), PHP_INT_MAX - 20);
+        $this->register_woocommerce_esi_hooks();
 
         if (!$is_frontend_request) {
             return;
@@ -170,7 +248,7 @@ class Ultra_Cache_Engine
         add_filter('woocommerce_set_cookie_enabled', array($this, 'filter_internal_warm_woocommerce_cookie'), PHP_INT_MAX, 6);
 
         // Frontend rendering/optimization hooks must never participate in
-        // wp-admin, REST, AJAX, or cron responses. This prevents the frontend
+        // wp-admin, wp-login.php, REST, AJAX, or cron responses. This prevents the frontend
         // engine from affecting third-party admin script dependency graphs or
         // partially generated admin output.
         add_action('init', array($this, 'maybe_start_translatepress_final_output_buffer'), -1000);
@@ -180,9 +258,9 @@ class Ultra_Cache_Engine
         add_action('template_redirect', array($this, 'profile_template_redirect_checkpoint'), -1000);
         add_filter('redirect_canonical', array($this, 'filter_authenticated_internal_canonical_redirect'), 10, 2);
         add_action('template_redirect', array($this, 'maybe_start_buffering'), 0);
+        add_action('wp_before_include_template', array($this, 'register_template_enhancement_output_callbacks'), 900);
         add_filter('wp_should_output_buffer_template_for_enhancement', array($this, 'should_force_template_enhancement_output_buffer'), PHP_INT_MAX);
         add_action('wp_template_enhancement_output_buffer_started', array($this, 'template_enhancement_output_buffer_started_checkpoint'), 0);
-        add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_live_google_fonts_output_cleanup'), 90);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_delayed_script_loader'), -998);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_runtime_font_helpers'), -997);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_lcp_observer_runtime_helper'), -996);
@@ -190,6 +268,8 @@ class Ultra_Cache_Engine
         add_action('wp_enqueue_scripts', array($this, 'enqueue_runtime_js_scan_collector'), -999);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_woocommerce_cart_fragments_delay_helper'), -995);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_mailerlite_lazy_nonce_helper'), 0);
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_async_css_runtime_helper'), -994);
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_lazy_third_party_iframe_runtime_helper'), -993);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_page_css_bundle_stylesheet'), 9999);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_delayed_icon_font_stylesheets'), 10000);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_local_font_display_patch_stylesheet'), 10001);
@@ -204,6 +284,7 @@ class Ultra_Cache_Engine
         add_action('shutdown', array($this, 'release_page_generation_lock_on_shutdown'), PHP_INT_MAX - 1);
         add_action('shutdown', array($this, 'update_store_profile_after_shutdown'), PHP_INT_MAX);
         add_filter('script_loader_tag', array($this, 'defer_scripts'), 10, 3);
+        add_filter('script_loader_tag', array($this, 'annotate_runtime_js_inventory_script_tag'), PHP_INT_MAX, 3);
         add_filter('style_loader_src', array($this, 'add_display_swap_to_google_fonts'), 20, 2);
         add_filter('style_loader_tag', array($this, 'add_local_font_display_patch_style_attributes'), 20, 4);
         add_filter('style_loader_tag', array($this, 'add_page_css_bundle_style_attributes'), 20, 4);
@@ -441,7 +522,7 @@ class Ultra_Cache_Engine
         if ($should_bypass) {
             $this->profile_request_checkpoint('bypass_selected', array('reason' => (string) $this->last_bypass_reason));
             $this->record_analytics_bypass($this->last_bypass_reason);
-            $this->send_varnish_shared_html_headers(false);
+            $this->send_shared_html_cache_headers(false);
             $this->send_debug_headers('BYPASS', $this->last_bypass_reason);
             return;
         }
@@ -463,7 +544,7 @@ class Ultra_Cache_Engine
         if ('' !== (string) $this->page_cache_generation_lock_denied_reason) {
             $skip_reason = (string) $this->page_cache_generation_lock_denied_reason;
             $this->record_analytics_store_skip($skip_reason);
-            $this->send_varnish_shared_html_headers(false);
+            $this->send_shared_html_cache_headers(false);
             $this->send_debug_headers('SKIP', $skip_reason);
             return;
         }
@@ -599,30 +680,220 @@ class Ultra_Cache_Engine
         }
     }
 
+    /**
+     * Register full-template transformation callbacks only when the current
+     * request can actually require them.
+     *
+     * @return void
+     */
+    public function register_template_enhancement_output_callbacks()
+    {
+        if ($this->template_enhancement_callbacks_registered) {
+            return;
+        }
+        $this->template_enhancement_callbacks_registered = true;
+
+        $google_fonts_required = $this->should_force_template_buffer_for_google_fonts_cleanup();
+        if ($google_fonts_required) {
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_live_google_fonts_output_cleanup'), 90);
+            $this->template_enhancement_google_fonts_callback_registered = true;
+        }
+
+        $esi_enabled = function_exists('ultracache_esi_is_enabled') && ultracache_esi_is_enabled();
+        $esi_diagnostics = array();
+        $esi_has_fragments = false;
+        if ($esi_enabled && class_exists('Ultra_Cache_ESI_Registry')) {
+            $registry = Ultra_Cache_ESI_Registry::instance();
+            if (method_exists($registry, 'get_template_buffer_diagnostics')) {
+                $candidate_diagnostics = $registry->get_template_buffer_diagnostics();
+                if (is_array($candidate_diagnostics)) {
+                    $esi_diagnostics = $candidate_diagnostics;
+                }
+            }
+            $esi_has_fragments = method_exists($registry, 'has_fragments') && $registry->has_fragments();
+        }
+
+        /**
+         * Allow integrations which intentionally register ESI fragments while
+         * rendering the template to reserve the legacy full-buffer path.
+         *
+         * @param bool  $force_buffering Whether to reserve the ESI buffer.
+         * @param array $diagnostics     Current ESI registry diagnostics.
+         */
+        $this->template_enhancement_esi_late_registration_compatibility = $esi_enabled
+            && (bool) apply_filters(
+                'ultracache_esi_force_template_buffer_for_late_registration',
+                false,
+                $esi_diagnostics
+            );
+
+        $output_filter_registered = function_exists('has_filter')
+            && false !== has_filter('wp_template_enhancement_output_buffer');
+        $finalized_action_registered = function_exists('has_action')
+            && false !== has_action('wp_finalized_template_enhancement_output_buffer');
+        $other_buffer_required = $this->template_enhancement_buffer_required
+            || (method_exists($this, 'is_runtime_js_scan_request') && $this->is_runtime_js_scan_request())
+            || $google_fonts_required
+            || $output_filter_registered
+            || $finalized_action_registered;
+
+        if (
+            $esi_enabled
+            && (
+                $esi_has_fragments
+                || $this->template_enhancement_esi_late_registration_compatibility
+                || $other_buffer_required
+            )
+        ) {
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_esi_template_output_buffer'), PHP_INT_MAX - 1);
+            $this->template_enhancement_esi_callback_registered = true;
+        }
+
+        $this->profile_request_checkpoint('template_enhancement_callbacks_registered', array(
+            'google_fonts_callback' => $this->template_enhancement_google_fonts_callback_registered ? 'yes' : 'no',
+            'esi_enabled' => $esi_enabled ? 'yes' : 'no',
+            'esi_has_fragments' => $esi_has_fragments ? 'yes' : 'no',
+            'esi_callback' => $this->template_enhancement_esi_callback_registered ? 'yes' : 'no',
+            'esi_late_registration_compatibility' => $this->template_enhancement_esi_late_registration_compatibility ? 'yes' : 'no',
+            'other_buffer_required' => $other_buffer_required ? 'yes' : 'no',
+        ));
+    }
+
     public function should_force_template_enhancement_output_buffer($should_buffer)
     {
+        $this->register_template_enhancement_output_callbacks();
+
+        $esi_diagnostics = array(
+            'has_fragments' => false,
+            'fragment_count' => 0,
+            'fragment_count_at_decision' => 0,
+            'late_fragment_count' => 0,
+            'decision_observed' => false,
+            'registered_after_init_started_count' => 0,
+        );
+        if (class_exists('Ultra_Cache_ESI_Registry')) {
+            $registry = Ultra_Cache_ESI_Registry::instance();
+            if (method_exists($registry, 'note_template_buffer_decision')) {
+                $candidate_diagnostics = $registry->note_template_buffer_decision();
+                if (is_array($candidate_diagnostics)) {
+                    $esi_diagnostics = array_merge($esi_diagnostics, $candidate_diagnostics);
+                }
+            }
+        }
+
         if (method_exists($this, 'is_runtime_js_scan_request') && $this->is_runtime_js_scan_request()) {
+            $this->record_template_enhancement_buffer_decision('runtime-js-scan', true, $esi_diagnostics);
             $this->profile_request_checkpoint('runtime_js_scan_template_buffer_forced');
             return true;
         }
 
         if ($this->template_enhancement_buffer_required) {
+            $this->record_template_enhancement_buffer_decision('page-cache-store', true, $esi_diagnostics);
             $this->profile_request_checkpoint('template_enhancement_buffer_forced');
             return true;
         }
 
         if ($this->should_force_template_buffer_for_google_fonts_cleanup()) {
+            $this->record_template_enhancement_buffer_decision('google-fonts-cleanup', true, $esi_diagnostics);
             $this->profile_request_checkpoint('template_enhancement_buffer_for_google_fonts_cleanup_forced');
             return true;
         }
 
+        if (
+            function_exists('ultracache_esi_is_enabled')
+            && ultracache_esi_is_enabled()
+            && (
+                !empty($esi_diagnostics['has_fragments'])
+                || $this->template_enhancement_esi_late_registration_compatibility
+            )
+        ) {
+            $reason = !empty($esi_diagnostics['has_fragments'])
+                ? 'esi-fragments'
+                : 'esi-late-registration-compatibility';
+            $this->record_template_enhancement_buffer_decision($reason, true, $esi_diagnostics);
+            $this->profile_request_checkpoint('template_enhancement_buffer_for_esi_forced', array(
+                'esi_has_fragments' => !empty($esi_diagnostics['has_fragments']) ? 'yes' : 'no',
+                'esi_fragment_count' => (int) ($esi_diagnostics['fragment_count'] ?? 0),
+                'esi_late_registration_compatibility' => $this->template_enhancement_esi_late_registration_compatibility ? 'yes' : 'no',
+            ));
+            return true;
+        }
+
+        if (
+            $should_buffer
+            && function_exists('ultracache_esi_is_enabled')
+            && ultracache_esi_is_enabled()
+            && !$this->template_enhancement_esi_callback_registered
+        ) {
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_esi_template_output_buffer'), PHP_INT_MAX - 1);
+            $this->template_enhancement_esi_callback_registered = true;
+        }
+
+        $this->record_template_enhancement_buffer_decision(
+            $should_buffer ? 'upstream-filter' : 'not-required',
+            (bool) $should_buffer,
+            $esi_diagnostics
+        );
+
         return (bool) $should_buffer;
+    }
+
+    /**
+     * Record the effective template-enhancement buffer decision.
+     *
+     * @param string $reason          Effective forcing reason.
+     * @param bool   $required        Whether buffering is required.
+     * @param array  $esi_diagnostics ESI registry state at decision time.
+     * @return void
+     */
+    private function record_template_enhancement_buffer_decision($reason, $required, array $esi_diagnostics)
+    {
+        $this->template_enhancement_buffer_decision = array(
+            'reason' => sanitize_key((string) $reason),
+            'required' => (bool) $required,
+            'esi_has_fragments' => !empty($esi_diagnostics['has_fragments']),
+            'esi_fragment_count' => (int) ($esi_diagnostics['fragment_count'] ?? 0),
+            'esi_fragment_count_at_decision' => (int) ($esi_diagnostics['fragment_count_at_decision'] ?? 0),
+            'esi_late_fragment_count' => (int) ($esi_diagnostics['late_fragment_count'] ?? 0),
+            'esi_registered_after_init_started_count' => (int) ($esi_diagnostics['registered_after_init_started_count'] ?? 0),
+            'esi_registration_hooks' => implode(',', array_slice((array) ($esi_diagnostics['registration_hooks'] ?? array()), 0, 16)),
+            'esi_callback_registered' => $this->template_enhancement_esi_callback_registered,
+            'google_fonts_callback_registered' => $this->template_enhancement_google_fonts_callback_registered,
+            'esi_late_registration_compatibility' => $this->template_enhancement_esi_late_registration_compatibility,
+        );
+
+        $this->profile_request_checkpoint('template_enhancement_buffer_decision', array(
+            'required' => $required ? 'yes' : 'no',
+            'reason' => (string) $this->template_enhancement_buffer_decision['reason'],
+            'esi_has_fragments' => $this->template_enhancement_buffer_decision['esi_has_fragments'] ? 'yes' : 'no',
+            'esi_fragment_count' => (int) $this->template_enhancement_buffer_decision['esi_fragment_count'],
+            'esi_fragment_count_at_decision' => (int) $this->template_enhancement_buffer_decision['esi_fragment_count_at_decision'],
+            'esi_late_fragment_count' => (int) $this->template_enhancement_buffer_decision['esi_late_fragment_count'],
+            'esi_registered_after_init_started_count' => (int) $this->template_enhancement_buffer_decision['esi_registered_after_init_started_count'],
+            'esi_registration_hooks' => (string) $this->template_enhancement_buffer_decision['esi_registration_hooks'],
+            'esi_callback_registered' => $this->template_enhancement_buffer_decision['esi_callback_registered'] ? 'yes' : 'no',
+            'google_fonts_callback_registered' => $this->template_enhancement_buffer_decision['google_fonts_callback_registered'] ? 'yes' : 'no',
+            'esi_late_registration_compatibility' => $this->template_enhancement_buffer_decision['esi_late_registration_compatibility'] ? 'yes' : 'no',
+        ));
     }
 
     public function template_enhancement_output_buffer_started_checkpoint()
     {
         $this->template_enhancement_buffer_started = true;
-        $this->profile_request_checkpoint('template_enhancement_buffer_started');
+        if (
+            class_exists('Ultra_Cache_ESI_Registry')
+            && method_exists(Ultra_Cache_ESI_Registry::instance(), 'note_template_buffer_started')
+        ) {
+            Ultra_Cache_ESI_Registry::instance()->note_template_buffer_started();
+        }
+        $decision = is_array($this->template_enhancement_buffer_decision)
+            ? $this->template_enhancement_buffer_decision
+            : array();
+        $this->profile_request_checkpoint('template_enhancement_buffer_started', array(
+            'reason' => (string) ($decision['reason'] ?? 'unknown'),
+            'esi_has_fragments' => !empty($decision['esi_has_fragments']) ? 'yes' : 'no',
+            'esi_fragment_count_at_decision' => (int) ($decision['esi_fragment_count_at_decision'] ?? 0),
+        ));
     }
 
     private function maybe_acquire_page_generation_lock()
@@ -855,7 +1126,7 @@ class Ultra_Cache_Engine
         $this->template_enhancement_buffer_required = false;
 
         if (!is_string($html) || '' === $html) {
-            $this->send_varnish_shared_html_headers(false);
+            $this->send_shared_html_cache_headers(false);
             if ($this->is_store_profiler_enabled()) {
                 $this->start_store_profile_diagnostic_skip('empty-output');
                 $this->finalize_store_profile('SKIP', 'empty-output', '');
@@ -873,6 +1144,9 @@ class Ultra_Cache_Engine
             'url'         => $current_request_url,
             'request_url' => $current_request_url,
         ));
+        $esi_metadata = method_exists($this, 'get_esi_parent_metadata_from_html')
+            ? $this->get_esi_parent_metadata_from_html($html)
+            : array();
         $skip_reason = $this->get_skip_store_reason($html);
         if ('' !== $skip_reason) {
             $this->record_analytics_store_skip($skip_reason);
@@ -880,7 +1154,7 @@ class Ultra_Cache_Engine
                 $this->clear_revalidate_lock($current_request_url);
             }
             $this->send_set_cookie_skip_diagnostic_header($skip_reason);
-            $this->send_varnish_shared_html_headers(false);
+            $this->send_shared_html_cache_headers(false, null, '', $esi_metadata);
             $this->send_debug_headers('SKIP', $skip_reason);
             $this->finalize_store_profile('SKIP', $skip_reason, '');
             $this->release_page_generation_lock();
@@ -890,7 +1164,7 @@ class Ultra_Cache_Engine
         $url = $current_request_url;
         $file_path = $this->get_cache_path($url);
         if (empty($file_path)) {
-            $this->send_varnish_shared_html_headers(false);
+            $this->send_shared_html_cache_headers(false, null, '', $esi_metadata);
             $this->send_debug_headers('SKIP', 'empty-cache-path');
             $this->finalize_store_profile('SKIP', 'empty-cache-path', '');
             $this->release_page_generation_lock();
@@ -914,7 +1188,7 @@ class Ultra_Cache_Engine
             if ($this->is_internal_revalidate_request()) {
                 $this->clear_revalidate_lock($url);
             }
-            $this->send_varnish_shared_html_headers(false);
+            $this->send_shared_html_cache_headers(false, null, '', $esi_metadata);
             $this->send_debug_headers('SKIP', 'write-failed');
             $this->finalize_store_profile('SKIP', 'write-failed', $file_path);
             $this->release_page_generation_lock();
@@ -927,13 +1201,20 @@ class Ultra_Cache_Engine
                 header('X-Ultra-Cache-Revalidate: refreshed');
             }
         }
-        $validator_metadata = $this->get_cached_html_validator_metadata($file_path, 'identity');
-        $not_modified = !headers_sent()
+        $is_esi_parent = !empty($esi_metadata);
+        $validator_metadata = $is_esi_parent
+            ? array()
+            : $this->get_cached_html_validator_metadata($file_path, 'identity');
+        $not_modified = !$is_esi_parent
+            && !headers_sent()
             && !empty($validator_metadata)
             && $this->cached_html_request_is_not_modified($validator_metadata);
 
-        $this->send_varnish_shared_html_headers(true);
+        $this->send_shared_html_cache_headers(true, null, $url, $esi_metadata);
         $this->send_cached_html_validator_headers($validator_metadata);
+        if ($is_esi_parent && $this->should_send_source_debug_header()) {
+            header('X-UltraCache-ESI-Validators: disabled');
+        }
         $this->send_debug_headers('STORE');
         if (!headers_sent()) {
             header('X-Ultra-Cache-Store-Post-Response: deferred');
@@ -979,6 +1260,9 @@ class Ultra_Cache_Engine
         }
 
         if ($profile) {
+            $html = $this->profile_store_stage('elementor-page-css-dependency-reconciliation', $html, function ($html) use ($context) {
+                return $this->reconcile_elementor_page_css_dependencies($html, $context);
+            });
             $html = $this->profile_store_stage('frontend_performance_optimizations_total', $html, function ($html) use ($context) {
                 return $this->apply_frontend_performance_optimizations($html, $context);
             });
@@ -1000,10 +1284,14 @@ class Ultra_Cache_Engine
             $html = $this->profile_store_stage('remove-hrefless-link-placeholders', $html, function ($html) {
                 return $this->remove_hrefless_ultracache_link_placeholders($html);
             });
+            $html = $this->profile_store_stage('final-esi-placeholder-conversion', $html, function ($html) {
+                return $this->apply_esi_placeholders_before_cache_store($html);
+            });
 
             return is_string($html) ? $html : '';
         }
 
+        $html = $this->reconcile_elementor_page_css_dependencies($html, $context);
         $html = $this->apply_frontend_performance_optimizations($html, $context);
         $html = $this->apply_final_google_fonts_rewrite_before_cache_store($html);
         $html = $this->apply_final_font_display_rewrite_before_cache_store($html);
@@ -1011,6 +1299,7 @@ class Ultra_Cache_Engine
         $html = $this->normalize_generated_asset_urls_to_root_relative($html, $context);
         $html = $this->strip_internal_control_query_args_from_cached_html($html);
         $html = $this->remove_hrefless_ultracache_link_placeholders($html);
+        $html = $this->apply_esi_placeholders_before_cache_store($html);
 
         return is_string($html) ? $html : '';
     }
@@ -1281,11 +1570,15 @@ class Ultra_Cache_Engine
             return $html;
         }
 
-        $accept_header = isset($context['accept']) ? (string) $context['accept'] : '';
-        if ('' !== $accept_header && method_exists($converter, 'rewrite_html_image_urls_with_accept')) {
-            $rewritten = $converter->rewrite_html_image_urls_with_accept($html, $accept_header);
+        if (method_exists($converter, 'rewrite_html_image_urls_with_context')) {
+            $rewritten = $converter->rewrite_html_image_urls_with_context($html, $context);
         } else {
-            $rewritten = $converter->rewrite_html_image_urls($html);
+            $accept_header = isset($context['accept']) ? (string) $context['accept'] : '';
+            if ('' !== $accept_header && method_exists($converter, 'rewrite_html_image_urls_with_accept')) {
+                $rewritten = $converter->rewrite_html_image_urls_with_accept($html, $accept_header);
+            } else {
+                $rewritten = $converter->rewrite_html_image_urls($html);
+            }
         }
 
         return is_string($rewritten) && '' !== $rewritten ? $rewritten : $html;
@@ -1294,6 +1587,10 @@ class Ultra_Cache_Engine
 
     private function get_skip_store_reason($html)
     {
+        if ('' !== $this->get_elementor_page_css_dependency_error()) {
+            return 'elementor-css-dependency-unresolved';
+        }
+
         if (is_admin()) {
             return 'admin';
         }

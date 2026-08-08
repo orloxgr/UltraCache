@@ -323,9 +323,7 @@ trait Ultra_Cache_Rest_Media_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement status is not available.', 'ultracache')), 500);
         }
 
-        $result = $media->get_media_library_replacement_workflow_status(array(
-            'job_id' => (string) $request->get_param('jobId'),
-        ));
+        $result = $media->get_media_library_replacement_workflow_status();
 
         return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
     }
@@ -357,6 +355,19 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->restart_media_library_replacement_workflow();
+        $status = !empty($result['success']) ? 200 : (!empty($result['blocked']) ? 409 : 500);
+        return new WP_REST_Response($result, $status);
+    }
+
+
+    public function media_library_replacement_recover(WP_REST_Request $request)
+    {
+        $media = $this->get_media();
+        if (!$media || !method_exists($media, 'recover_media_library_replacement_do')) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement recovery is not available.', 'ultracache')), 500);
+        }
+
+        $result = $media->recover_media_library_replacement_do((string) $request->get_param('mode'));
         $status = !empty($result['success']) ? 200 : (!empty($result['blocked']) ? 409 : 500);
         return new WP_REST_Response($result, $status);
     }
@@ -406,12 +417,41 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->set_media_library_replacement_workflow_stage(array(
-            'job_id'  => (string) $request->get_param('jobId'),
             'stage'   => (string) $request->get_param('stage'),
             'message' => (string) $request->get_param('message'),
         ));
 
         return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+    }
+
+    public function media_library_replacement_blockers(WP_REST_Request $request)
+    {
+        $media = $this->get_media();
+        if (!$media || !method_exists($media, 'get_media_library_replacement_blockers')) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement blocker decisions are not available.', 'ultracache')), 500);
+        }
+        $result = $media->get_media_library_replacement_blockers(array(
+            'blocker_code' => (string) $request->get_param('blockerCode'),
+            'limit' => absint($request->get_param('limit')),
+            'offset' => absint($request->get_param('offset')),
+        ));
+        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 404);
+    }
+
+    public function media_library_replacement_blocker_decisions(WP_REST_Request $request)
+    {
+        $media = $this->get_media();
+        if (!$media || !method_exists($media, 'save_media_library_replacement_blocker_decisions')) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement blocker decisions are not available.', 'ultracache')), 500);
+        }
+        $payload = $request->get_json_params();
+        $payload = is_array($payload) ? $payload : array();
+        $result = $media->save_media_library_replacement_blocker_decisions(array(
+            'decisions' => isset($payload['decisions']) && is_array($payload['decisions']) ? $payload['decisions'] : array(),
+            'item_decisions' => isset($payload['itemDecisions']) && is_array($payload['itemDecisions']) ? $payload['itemDecisions'] : array(),
+        ));
+        $status = !empty($result['success']) ? 200 : (!empty($result['blocked']) ? 409 : 500);
+        return new WP_REST_Response($result, $status);
     }
 
     public function media_library_replacement_prepare(WP_REST_Request $request)
@@ -423,8 +463,8 @@ trait Ultra_Cache_Rest_Media_Trait
 
         $result = $media->run_media_library_replacement_prepare_chunk(array(
             'reset'                => rest_sanitize_boolean($request->get_param('reset')),
-            'readiness_generation' => (string) $request->get_param('readinessGeneration'),
             'session_token'        => (string) $request->get_param('sessionToken'),
+            'collision_policy'     => (string) $request->get_param('collisionPolicy'),
             'limit'                => absint($request->get_param('limit')),
             'time_budget'          => (float) $request->get_param('time_budget'),
         ));
@@ -480,9 +520,7 @@ trait Ultra_Cache_Rest_Media_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement Delete Originals confirmation is not available.', 'ultracache')), 500);
         }
 
-        $result = $media->confirm_media_library_replacement_delete(array(
-            'generation' => (string) $request->get_param('generation'),
-        ));
+        $result = $media->confirm_media_library_replacement_delete();
         $status = !empty($result['success']) ? 200 : (!empty($result['blocked']) ? 409 : 500);
         return new WP_REST_Response($result, $status);
     }
@@ -497,7 +535,6 @@ trait Ultra_Cache_Rest_Media_Trait
 
         $result = $media->run_media_library_replacement_delete_chunk(array(
             'session_token'     => (string) $request->get_param('sessionToken'),
-            'generation'        => (string) $request->get_param('generation'),
             'limit'             => absint($request->get_param('limit')),
             'time_budget'       => (float) $request->get_param('time_budget'),
             'confirmationToken' => (string) $request->get_param('confirmationToken'),
@@ -516,7 +553,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->get_media_library_replacement_mapping_preview(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
             'offset' => absint($request->get_param('offset')),
         ));
@@ -536,7 +572,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->copy_media_library_replacement_files(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -554,7 +589,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->prepare_media_library_replacement_metadata_updates(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -573,7 +607,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->apply_media_library_replacement_metadata_updates(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -591,7 +624,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->rollback_media_library_replacement_metadata_updates(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -609,7 +641,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->scan_media_library_replacement_database_references(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -629,7 +660,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->match_media_library_replacement_database_references(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -647,7 +677,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->scan_media_library_replacement_theme_css_references(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
             'start'  => (bool) $request->get_param('start'),
         ));
@@ -663,7 +692,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->get_media_library_replacement_theme_css_replacement_preview(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
             'offset' => absint($request->get_param('offset')),
         ));
@@ -681,7 +709,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->apply_media_library_replacement_theme_css_replacements(array(
-            'job_id'            => (string) $request->get_param('jobId'),
             'limit'             => absint($request->get_param('limit')),
             'confirmationToken' => (string) $request->get_param('confirmationToken'),
         ));
@@ -699,7 +726,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->verify_media_library_replacement_theme_css_replacements(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -715,7 +741,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->get_media_library_replacement_database_replacement_preview(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
             'offset' => absint($request->get_param('offset')),
         ));
@@ -734,7 +759,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->apply_media_library_replacement_database_replacements(array(
-            'job_id'            => (string) $request->get_param('jobId'),
             'limit'             => absint($request->get_param('limit')),
             'confirmationToken' => (string) $request->get_param('confirmationToken'),
         ));
@@ -754,7 +778,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->verify_media_library_replacement_database_replacements(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -772,7 +795,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->rollback_media_library_replacement_database_replacements(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
         ));
 
@@ -789,7 +811,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->get_media_library_replacement_cleanup_preview(array(
-            'job_id' => (string) $request->get_param('jobId'),
             'limit'  => absint($request->get_param('limit')),
             'offset' => absint($request->get_param('offset')),
         ));
@@ -798,23 +819,6 @@ trait Ultra_Cache_Rest_Media_Trait
     }
 
 
-    public function media_library_replacement_cleanup_apply(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'apply_media_library_replacement_cleanup')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement cleanup apply is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->apply_media_library_replacement_cleanup(array(
-            'job_id'            => (string) $request->get_param('jobId'),
-            'limit'             => absint($request->get_param('limit')),
-            'confirmationToken' => (string) $request->get_param('confirmationToken'),
-        ));
-
-        return new WP_REST_Response($result, (!empty($result['success']) || !empty($result['blocked'])) ? 200 : 500);
-    }
 
     public function media_queue_retry_failed(WP_REST_Request $request)
     {

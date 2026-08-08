@@ -218,7 +218,8 @@ trait Ultra_Cache_WP_Varnish_Refresh_Candidates_Trait
         if (empty($settings)) {
             $settings = self::get_dashboard_settings();
         }
-        $lines = preg_split('/[\r\n,]+/', (string) ($settings['varnishRefreshAheadPinnedUrls'] ?? ''));
+        $automation = self::get_varnish_automation_policy($settings);
+        $lines = preg_split('/[\r\n,]+/', (string) ($automation['refreshAheadPinnedUrls'] ?? ''));
         $filtered = apply_filters('ultracache_varnish_refresh_ahead_pinned_urls', (array) $lines, $settings);
         $urls = array();
         foreach ((array) $filtered as $line) {

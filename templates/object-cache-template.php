@@ -68,6 +68,20 @@ function ultracache_object_cache_safe_file_get_contents($file) {
 	return ultracache_object_cache_is_allowed_file_path($file, true) && is_readable($file) ? file_get_contents($file) : false;
 }
 
+function ultracache_object_cache_safe_fopen($file, $mode) {
+	$file = is_string($file) ? trim($file) : '';
+	$mode = is_string($mode) ? trim($mode) : '';
+	if ('' === $file || '' === $mode || !ultracache_object_cache_is_allowed_file_path($file, false)) {
+		return false;
+	}
+	$dir = dirname($file);
+	if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0700, true) && !is_dir($dir)) {
+		return false;
+	}
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- A native handle is required for flock(); the file path is restricted by ultracache_object_cache_is_allowed_file_path().
+	return @fopen($file, $mode);
+}
+
 function ultracache_object_cache_safe_file_put_contents($file, $data, $flags = 0, $context = '') {
     $file = is_string($file) ? trim($file) : '';
     if ('' === $file || !ultracache_object_cache_is_allowed_file_path($file, false)) {
@@ -77,10 +91,13 @@ function ultracache_object_cache_safe_file_put_contents($file, $data, $flags = 0
     if ('' !== $dir && '.' !== $dir && !is_dir($dir)) {
         ultracache_object_cache_safe_mkdir($dir, 0700, true);
     }
+    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable -- The path is restricted by ultracache_object_cache_is_allowed_file_path(); the drop-in runs before WP_Filesystem initialization.
     if ('' !== $dir && '.' !== $dir && (!is_dir($dir) || !is_writable($dir))) {
         if (is_dir($dir)) {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- Repairs permissions only on an UltraCache-allowed object-cache directory before WP_Filesystem initialization.
             @chmod($dir, 0700);
         }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable -- Rechecks the same UltraCache-allowed object-cache directory after the bounded permission repair.
         if (!is_dir($dir) || !is_writable($dir)) {
             return false;
         }
@@ -91,6 +108,7 @@ function ultracache_object_cache_safe_unlink($file) {
 	if (!ultracache_object_cache_is_allowed_file_path($file, false)) {
 		return false;
 	}
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- Deletes only a path accepted by ultracache_object_cache_is_allowed_file_path() before WP_Filesystem initialization.
 	return !file_exists($file) ? true : @unlink($file);
 }
 
@@ -98,6 +116,7 @@ function ultracache_object_cache_safe_rename($from, $to) {
 	if (!ultracache_object_cache_is_allowed_file_path($from, true) || !ultracache_object_cache_is_allowed_file_path($to, false)) {
 		return false;
 	}
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- Atomic rename is restricted to two UltraCache-allowed object-cache paths before WP_Filesystem initialization.
 	return @rename($from, $to);
 }
 
@@ -109,6 +128,7 @@ function ultracache_object_cache_safe_mkdir($dir, $mode = 0700, $recursive = tru
     if (is_dir($dir)) {
         return true;
     }
+    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- Creates only an UltraCache-allowed object-cache directory before WP_Filesystem initialization.
     return @mkdir($dir, $mode, $recursive) || is_dir($dir);
 }
 
@@ -141,10 +161,11 @@ function ultracache_object_cache_safe_rmdir($dir) {
 		}
 	}
 	clearstatcache(true, $dir);
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Removes only an empty UltraCache-allowed object-cache directory before WP_Filesystem initialization.
 	return @rmdir($dir) || !file_exists($dir);
 }
 
-__ULTRACACHE_OBJECT_CACHE_BACKEND_CLASSES__
+/*__ULTRACACHE_OBJECT_CACHE_BACKEND_CLASSES__*/
 
 if (!class_exists('WP_Object_Cache')) {
 	class WP_Object_Cache {
@@ -152,6 +173,7 @@ if (!class_exists('WP_Object_Cache')) {
 		private $global_groups = array();
 		private $non_persistent_groups = array();
 		private $cache_dir = __ULTRACACHE_OBJECT_CACHE_DIR__;
+		private $multisite = false;
 		private $blog_id = 1;
 		private $metrics_file = '';
 		private $stats = array(
@@ -167,6 +189,9 @@ if (!class_exists('WP_Object_Cache')) {
 		private $redis_enabled = false;
 		private $apcu_enabled = false;
 		private $apcu_prefix = '';
+		private $apcu_lock_ttl = 5;
+		private $apcu_lock_max_attempts = 50;
+		private $apcu_lock_sleep_us = 2000;
 		private $sqlite = null;
 		private $sqlite_enabled = false;
 		private $sqlite_path = __ULTRACACHE_SQLITE_PATH__;
@@ -193,11 +218,17 @@ if (!class_exists('WP_Object_Cache')) {
 		private $redis_value_max_depth = 2;
 		private $redis_value_max_string_bytes = 16384;
 		private $redis_payload_max_bytes = 1048576;
+		private $redis_transaction_max_retries = 5;
 		private $disk_payload_max_bytes = 8388608;
 		private $signed_envelope_max_bytes = 12582912;
+		private $disk_lock_max_attempts = 250;
+		private $disk_lock_sleep_us = 2000;
 
 		public function __construct() {
-			$this->blog_id = $this->detect_blog_id();
+			$this->multisite = function_exists('is_multisite')
+				? (bool) is_multisite()
+				: (defined('MULTISITE') && MULTISITE);
+			$this->blog_id = $this->multisite ? $this->detect_blog_id() : 1;
 			$this->metrics_file = rtrim($this->cache_dir, '/\\') . '/object-cache-metrics.json';
 			$this->ensure_base_dir();
 			$this->load_redis_credentials_from_constants();
@@ -289,6 +320,9 @@ if (!class_exists('WP_Object_Cache')) {
 				'normalize_key' => function ($key) {
 					return $this->normalize_key($key);
 				},
+				'get_runtime_scope' => function ($group) {
+					return $this->get_runtime_scope($group);
+				},
 				'should_suspend_cache_addition' => function () {
 					return $this->should_suspend_cache_addition();
 				},
@@ -317,6 +351,10 @@ if (!class_exists('WP_Object_Cache')) {
 					$this->cache = array();
 					return true;
 				},
+				'runtime_reset' => function () {
+					$this->reset_runtime_values();
+					return true;
+				},
 				'runtime_clear_group' => function ($group) {
 					$scope = $this->get_runtime_scope($group);
 					unset($this->cache[$scope][$group]);
@@ -332,19 +370,20 @@ if (!class_exists('WP_Object_Cache')) {
 					$this->stats['misses']++;
 				},
 				'delete_persistent_payload' => function ($key, $group) {
+					$deleted = true;
 					if ($this->is_redis_backend()) {
-						$this->delete_redis_payload($key, $group);
+						$deleted = $this->delete_redis_payload($key, $group) && $deleted;
 					}
 					if ($this->apcu_enabled) {
-						$this->delete_apcu_payload($key, $group);
+						$deleted = $this->delete_apcu_payload($key, $group) && $deleted;
 					}
 					if ($this->sqlite_enabled) {
-						$this->delete_sqlite_payload($key, $group);
+						$deleted = $this->delete_sqlite_payload($key, $group) && $deleted;
 					}
 					if ('disk' === $this->active_backend) {
-						$this->delete_disk_payload($key, $group);
+						$deleted = $this->delete_disk_payload($key, $group) && $deleted;
 					}
-					return true;
+					return $deleted;
 				},
 				'flush_persistent_cache' => function () {
 					$this->flush_redis_cache();
@@ -366,10 +405,7 @@ if (!class_exists('WP_Object_Cache')) {
 						$this->flush_sqlite_group($group);
 					}
 					if ('disk' === $this->active_backend) {
-						$path = $this->get_group_dir($group);
-						if ($path && is_dir($path)) {
-							$this->recursive_delete($path);
-						}
+						$this->flush_disk_group($group);
 					}
 					return true;
 				},
@@ -387,6 +423,23 @@ if (!class_exists('WP_Object_Cache')) {
 				'write_redis_payload' => function ($key, $group, $payload, $expire) {
 					return $this->write_redis_payload($key, $group, $payload, (int) $expire);
 				},
+				'add_redis_payload' => function ($key, $group, $payload, $expire) {
+					return $this->add_redis_payload($key, $group, $payload, (int) $expire);
+				},
+				'replace_redis_payload' => function ($key, $group, $payload, $expire) {
+					return $this->replace_redis_payload($key, $group, $payload, (int) $expire);
+				},
+				'mutate_redis_numeric_payload' => function ($key, $group, $offset, $decrement, $runtime_present, $runtime_value, $runtime_authoritative) {
+					return $this->mutate_redis_numeric_payload(
+						$key,
+						$group,
+						(int) $offset,
+						(bool) $decrement,
+						(bool) $runtime_present,
+						$runtime_value,
+						(bool) $runtime_authoritative
+					);
+				},
 				'delete_redis_payload' => function ($key, $group) {
 					return $this->delete_redis_payload($key, $group);
 				},
@@ -395,6 +448,23 @@ if (!class_exists('WP_Object_Cache')) {
 				},
 				'write_apcu_payload' => function ($key, $group, $payload, $expire) {
 					return $this->write_apcu_payload($key, $group, $payload, (int) $expire);
+				},
+				'add_apcu_payload' => function ($key, $group, $payload, $expire) {
+					return $this->add_apcu_payload($key, $group, $payload, (int) $expire);
+				},
+				'replace_apcu_payload' => function ($key, $group, $payload, $expire) {
+					return $this->replace_apcu_payload($key, $group, $payload, (int) $expire);
+				},
+				'mutate_apcu_numeric_payload' => function ($key, $group, $offset, $decrement, $runtime_present, $runtime_value, $runtime_authoritative) {
+					return $this->mutate_apcu_numeric_payload(
+						$key,
+						$group,
+						(int) $offset,
+						(bool) $decrement,
+						(bool) $runtime_present,
+						$runtime_value,
+						(bool) $runtime_authoritative
+					);
 				},
 				'read_sqlite_payload' => function ($key, $group) {
 					return $this->read_sqlite_payload($key, $group);
@@ -408,14 +478,44 @@ if (!class_exists('WP_Object_Cache')) {
 				'replace_sqlite_payload' => function ($key, $group, $payload) {
 					return $this->replace_sqlite_payload($key, $group, $payload);
 				},
-				'mutate_sqlite_numeric_payload' => function ($key, $group, $offset, $decrement) {
-					return $this->mutate_sqlite_numeric_payload($key, $group, (int) $offset, (bool) $decrement);
+				'mutate_sqlite_numeric_payload' => function ($key, $group, $offset, $decrement, $runtime_present, $runtime_value) {
+					return $this->mutate_sqlite_numeric_payload(
+						$key,
+						$group,
+						(int) $offset,
+						(bool) $decrement,
+						(bool) $runtime_present,
+						$runtime_value
+					);
 				},
 				'read_disk_payload' => function ($key, $group) {
 					return $this->read_disk_payload($key, $group);
 				},
 				'write_disk_payload' => function ($key, $group, $payload) {
-					return $this->write_disk_payload_for_key($key, $group, $payload);
+					return 'stored' === $this->set_disk_payload($key, $group, $payload);
+				},
+				'set_disk_payload' => function ($key, $group, $payload) {
+					return $this->set_disk_payload($key, $group, $payload);
+				},
+				'add_disk_payload' => function ($key, $group, $payload) {
+					return $this->add_disk_payload($key, $group, $payload);
+				},
+				'replace_disk_payload' => function ($key, $group, $payload) {
+					return $this->replace_disk_payload($key, $group, $payload);
+				},
+				'mutate_disk_numeric_payload' => function ($key, $group, $offset, $decrement, $runtime_present, $runtime_value, $runtime_authoritative) {
+					return $this->mutate_disk_numeric_payload(
+						$key,
+						$group,
+						(int) $offset,
+						(bool) $decrement,
+						(bool) $runtime_present,
+						$runtime_value,
+						(bool) $runtime_authoritative
+					);
+				},
+				'delete_disk_payload_status' => function ($key, $group) {
+					return $this->delete_disk_payload_status($key, $group);
 				},
 			));
 
@@ -629,7 +729,7 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function apcu_available() {
-			if (!function_exists('apcu_fetch') || !function_exists('apcu_store') || !function_exists('apcu_delete') || !function_exists('apcu_add')) {
+			if (!function_exists('apcu_fetch') || !function_exists('apcu_store') || !function_exists('apcu_delete') || !function_exists('apcu_add') || !function_exists('apcu_cas')) {
 				return false;
 			}
 			if (function_exists('apcu_enabled') && !apcu_enabled()) {
@@ -658,6 +758,7 @@ if (!class_exists('WP_Object_Cache')) {
 		private function harden_sqlite_file_permissions() {
 			foreach (array($this->sqlite_path, $this->sqlite_path . '-wal', $this->sqlite_path . '-shm') as $path) {
 				if (is_string($path) && '' !== $path && file_exists($path) && $this->is_cache_path($path)) {
+					// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- Hardens only validated SQLite files inside the UltraCache object-cache directory.
 					@chmod($path, 0600);
 				}
 			}
@@ -678,13 +779,14 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 
-			$handle = @fopen($lock_path, 'c+');
+			$handle = ultracache_object_cache_safe_fopen($lock_path, 'c+');
 			if (!is_resource($handle)) {
 				return false;
 			}
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- Hardens a validated UltraCache SQLite maintenance lock before WP_Filesystem initialization.
 			@chmod($lock_path, 0600);
 			if (!@flock($handle, LOCK_EX | LOCK_NB)) {
-				@fclose($handle);
+				$this->release_sqlite_maintenance_lock($handle);
 				return false;
 			}
 
@@ -696,6 +798,7 @@ if (!class_exists('WP_Object_Cache')) {
 				return;
 			}
 			@flock($handle, LOCK_UN);
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Releases the validated native SQLite maintenance lock handle.
 			@fclose($handle);
 		}
 
@@ -813,7 +916,7 @@ if (!class_exists('WP_Object_Cache')) {
 
 			try {
 				$now = time();
-				$this->sqlite->exec('DELETE FROM ultracache_object_cache WHERE expires_at > 0 AND expires_at < ' . $now);
+				$this->sqlite->exec('DELETE FROM ultracache_object_cache WHERE expires_at > 0 AND expires_at <= ' . $now);
 				$usage = $this->get_sqlite_page_usage($this->sqlite);
 				$ratio_low_watermark = max(1.0, floor((float) $usage['max_pages'] * (float) $this->sqlite_cleanup_low_watermark));
 				$write_safe_watermark = max(1.0, floor((float) $usage['max_pages'] - $incoming_pages - 8.0));
@@ -877,6 +980,7 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 
 			$this->ensure_base_dir();
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable -- The cache directory is fixed by the generated drop-in configuration and validated by is_cache_path().
 			if (!is_dir($this->cache_dir) || !is_writable($this->cache_dir)) {
 				$this->sqlite_error = 'UltraCache object-cache directory is not writable.';
 				return false;
@@ -954,7 +1058,9 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function with_redis_error_handler($callback, $default = false) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- Scoped handler converts Redis connection warnings into exceptions and is restored immediately.
 			$previous = set_error_handler(function ($severity, $message, $file = null, $line = null) {
+				// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception context is not rendered as HTML output.
 				throw new ErrorException($message, 0, $severity, (string) $file, (int) $line);
 			});
 			try {
@@ -1023,22 +1129,37 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		public function add($key, $data, $group = 'default', $expire = 0) {
+			if (!$this->validate_key($key, 'add')) {
+				return false;
+			}
 			return $this->backend_adapter->add($key, $data, $group, $expire);
 		}
 
 		public function replace($key, $data, $group = 'default', $expire = 0) {
+			if (!$this->validate_key($key, 'replace')) {
+				return false;
+			}
 			return $this->backend_adapter->replace($key, $data, $group, $expire);
 		}
 
 		public function set($key, $data, $group = 'default', $expire = 0) {
+			if (!$this->validate_key($key, 'set')) {
+				return false;
+			}
 			return $this->backend_adapter->set($key, $data, $group, $expire);
 		}
 
 		public function get($key, $group = 'default', $force = false, &$found = null) {
+			if (!$this->validate_key($key, 'get')) {
+				return false;
+			}
 			return $this->backend_adapter->get($key, $group, $force, $found);
 		}
 
 		public function delete($key, $group = 'default', $deprecated = false) {
+			if (!$this->validate_key($key, 'delete')) {
+				return false;
+			}
 			return $this->backend_adapter->delete($key, $group);
 		}
 
@@ -1051,10 +1172,16 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		public function incr($key, $offset = 1, $group = 'default') {
+			if (!$this->validate_key($key, 'incr')) {
+				return false;
+			}
 			return $this->backend_adapter->incr($key, $offset, $group);
 		}
 
 		public function decr($key, $offset = 1, $group = 'default') {
+			if (!$this->validate_key($key, 'decr')) {
+				return false;
+			}
 			return $this->backend_adapter->decr($key, $offset, $group);
 		}
 
@@ -1069,19 +1196,37 @@ if (!class_exists('WP_Object_Cache')) {
 
 
 		public function flush_runtime() {
-			$this->cache = array();
-			return true;
+			return $this->backend_adapter->flush_runtime();
 		}
 
 
 
 
 		public function reset() {
-			return $this->flush_runtime();
+			return $this->backend_adapter->reset_runtime();
+		}
+
+		private function reset_runtime_values() {
+			foreach ($this->cache as $scope => $groups) {
+				if (!is_array($groups)) {
+					unset($this->cache[$scope]);
+					continue;
+				}
+				foreach (array_keys($groups) as $group) {
+					if (!$this->is_global_group($group)) {
+						unset($this->cache[$scope][$group]);
+					}
+				}
+				if (empty($this->cache[$scope])) {
+					unset($this->cache[$scope]);
+				}
+			}
 		}
 
 		public function switch_to_blog($blog_id) {
-			$this->blog_id = max(1, (int) $blog_id);
+			if ($this->multisite) {
+				$this->blog_id = max(1, (int) $blog_id);
+			}
 			return true;
 		}
 
@@ -1152,14 +1297,25 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		public function is_valid_key($key) {
-			return !(null === $key || '' === (string) $key);
+			return is_int($key) || (is_string($key) && '' !== trim($key));
 		}
 
-		private function _exists($key, $group) {
-			$found = false;
-			$this->get($key, $group, true, $found);
-			return $found;
+		private function validate_key($key, $method) {
+			if ($this->is_valid_key($key)) {
+				return true;
+			}
+
+			if (function_exists('_doing_it_wrong')) {
+				$message = is_string($key)
+					? 'Cache key must not be an empty string.'
+					: 'Cache key must be an integer or a non-empty string, ' . gettype($key) . ' given.';
+				// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped, WordPress.Security.EscapeOutput.OutputNotEscaped -- Core _doing_it_wrong() owns diagnostic rendering; values are fixed method/type descriptions, not direct HTML output.
+				_doing_it_wrong('WP_Object_Cache::' . (string) $method, $message, '6.1.0');
+			}
+
+			return false;
 		}
+
 
 		private function detect_blog_id() {
 			if (function_exists('get_current_blog_id')) {
@@ -1200,12 +1356,15 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function get_group_dir($group) {
+			$group = (string) $group;
 			$group_slug = preg_replace('/[^A-Za-z0-9_.-]/', '-', $group);
 			$group_slug = trim((string) $group_slug, '-');
 			if ('' === $group_slug) {
 				$group_slug = 'default';
 			}
-			return $this->get_scope_dir($group) . '/' . $group_slug;
+			$group_slug = substr($group_slug, 0, 80);
+			$group_hash = function_exists('hash') ? hash('sha256', $group) : md5($group);
+			return $this->get_scope_dir($group) . '/' . $group_slug . '-' . substr((string) $group_hash, 0, 12);
 		}
 
 		private function get_file_path($key, $group) {
@@ -1367,14 +1526,16 @@ if (!class_exists('WP_Object_Cache')) {
 			return $this->apcu_prefix . $this->get_apcu_namespace() . ':' . $this->get_apcu_group_version($group) . ':' . $this->get_redis_scope($group) . ':' . $this->get_redis_group_slug($group) . ':' . sha1($key);
 		}
 
-		private function write_apcu_payload($key, $group, $payload, $expire) {
+		private function prepare_apcu_payload_data($payload) {
 			if (!$this->is_apcu_backend() || !is_array($payload)) {
 				return false;
 			}
+
 			$value = $payload['value'] ?? null;
 			if ($this->payload_contains_complex_types($value)) {
 				return false;
 			}
+
 			try {
 				$serialized = serialize($payload);
 			} catch (Throwable $e) {
@@ -1383,25 +1544,25 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!is_string($serialized) || '' === $serialized || strlen($serialized) > $this->redis_payload_max_bytes) {
 				return false;
 			}
+
 			$envelope = $this->build_signed_envelope($serialized);
 			if (!is_array($envelope)) {
 				return false;
 			}
-			$data = serialize($envelope);
-			$ttl = max(0, (int) $expire);
-			return (bool) @apcu_store($this->get_apcu_key($key, $group), $data, $ttl);
+			try {
+				$data = serialize($envelope);
+			} catch (Throwable $e) {
+				return false;
+			}
+			return (is_string($data) && '' !== $data && strlen($data) <= $this->signed_envelope_max_bytes) ? $data : false;
 		}
 
-		private function read_apcu_payload($key, $group) {
-			if (!$this->is_apcu_backend()) {
+		private function decode_apcu_payload_data($data, $key, $group) {
+			if (!is_string($data) || '' === $data || strlen($data) > $this->signed_envelope_max_bytes) {
 				return false;
 			}
-			$success = false;
-			$data = apcu_fetch($this->get_apcu_key($key, $group), $success);
-			if (!$success || !is_string($data) || '' === $data) {
-				return false;
-			}
-			$envelope = $this->deserialize_signed_envelope($data, $this->redis_payload_max_bytes * 2);
+
+			$envelope = $this->deserialize_signed_envelope($data, $this->signed_envelope_max_bytes);
 			if (!is_array($envelope)) {
 				return false;
 			}
@@ -1413,12 +1574,248 @@ if (!class_exists('WP_Object_Cache')) {
 			return (is_array($payload) && $this->is_valid_cache_payload($payload, $key, $group)) ? $payload : false;
 		}
 
+		private function get_apcu_lock_key($apcu_key) {
+			return $this->apcu_prefix . 'lock:' . sha1((string) $apcu_key);
+		}
+
+		private function create_apcu_lock_token() {
+			try {
+				return random_int(1, 2147483647);
+			} catch (Throwable $e) {
+				$material = uniqid('ultracache-apcu-lock-', true) . '|' . microtime(true) . '|' . (function_exists('getmypid') ? (int) getmypid() : 0);
+				return max(1, (int) hexdec(substr(hash('sha256', $material), 0, 7)));
+			}
+		}
+
+		private function acquire_apcu_key_lock($key, $group, $apcu_key = '') {
+			if (!$this->is_apcu_backend() || !function_exists('apcu_cas')) {
+				return false;
+			}
+
+			$apcu_key = is_string($apcu_key) && '' !== $apcu_key ? $apcu_key : $this->get_apcu_key($key, $group);
+			$lock_key = $this->get_apcu_lock_key($apcu_key);
+			$token = $this->create_apcu_lock_token();
+			$attempts = max(1, (int) $this->apcu_lock_max_attempts);
+			for ($attempt = 0; $attempt < $attempts; $attempt++) {
+				if (@apcu_add($lock_key, $token, max(1, (int) $this->apcu_lock_ttl))) {
+					return array('key' => $lock_key, 'token' => $token, 'data_key' => $apcu_key);
+				}
+				if (($attempt + 1) < $attempts && function_exists('usleep')) {
+					usleep(max(250, (int) $this->apcu_lock_sleep_us));
+				}
+			}
+			return false;
+		}
+
+		private function release_apcu_key_lock($lock) {
+			if (!is_array($lock) || !isset($lock['key'], $lock['token'])) {
+				return;
+			}
+			$lock_key = (string) $lock['key'];
+			$token = (int) $lock['token'];
+			if ('' === $lock_key || $token <= 0 || !function_exists('apcu_cas')) {
+				return;
+			}
+			if (@apcu_cas($lock_key, $token, 0)) {
+				@apcu_delete($lock_key);
+			}
+		}
+
+		private function write_apcu_payload($key, $group, $payload, $expire) {
+			$data = $this->prepare_apcu_payload_data($payload);
+			$lock = $this->acquire_apcu_key_lock($key, $group);
+			if (!is_array($lock)) {
+				return false;
+			}
+			try {
+				$apcu_key = (string) $lock['data_key'];
+				if (!is_string($data) || '' === $data) {
+					@apcu_delete($apcu_key);
+					return false;
+				}
+				$stored = (bool) @apcu_store($apcu_key, $data, max(0, (int) $expire));
+				if (!$stored) {
+					@apcu_delete($apcu_key);
+				}
+				return $stored;
+			} finally {
+				$this->release_apcu_key_lock($lock);
+			}
+		}
+
+		private function add_apcu_payload($key, $group, $payload, $expire) {
+			if (!$this->is_apcu_backend()) {
+				return 'unavailable';
+			}
+			$data = $this->prepare_apcu_payload_data($payload);
+			if (!is_string($data) || '' === $data) {
+				return 'unsupported';
+			}
+
+			$apcu_key = $this->get_apcu_key($key, $group);
+			if (@apcu_add($apcu_key, $data, max(0, (int) $expire))) {
+				return 'stored';
+			}
+
+			$success = false;
+			$existing = apcu_fetch($apcu_key, $success);
+			if ($success && false !== $this->decode_apcu_payload_data($existing, $key, $group)) {
+				return 'exists';
+			}
+			if (!$success) {
+				return 'unavailable';
+			}
+
+			$lock = $this->acquire_apcu_key_lock($key, $group, $apcu_key);
+			if (!is_array($lock)) {
+				return 'unavailable';
+			}
+			try {
+				$apcu_key = (string) $lock['data_key'];
+				$success = false;
+				$existing = apcu_fetch($apcu_key, $success);
+				if ($success && false !== $this->decode_apcu_payload_data($existing, $key, $group)) {
+					return 'exists';
+				}
+				if ($success) {
+					@apcu_delete($apcu_key);
+				}
+				return @apcu_add($apcu_key, $data, max(0, (int) $expire)) ? 'stored' : 'unavailable';
+			} finally {
+				$this->release_apcu_key_lock($lock);
+			}
+		}
+
+		private function replace_apcu_payload($key, $group, $payload, $expire) {
+			if (!$this->is_apcu_backend()) {
+				return 'unavailable';
+			}
+			$data = $this->prepare_apcu_payload_data($payload);
+
+			$lock = $this->acquire_apcu_key_lock($key, $group);
+			if (!is_array($lock)) {
+				return 'contended';
+			}
+			try {
+				$apcu_key = (string) $lock['data_key'];
+				$success = false;
+				$existing = apcu_fetch($apcu_key, $success);
+				if (!$success) {
+					return 'missing';
+				}
+				if (false === $this->decode_apcu_payload_data($existing, $key, $group)) {
+					@apcu_delete($apcu_key);
+					return 'missing';
+				}
+				if (!is_string($data) || '' === $data) {
+					@apcu_delete($apcu_key);
+					return 'unsupported_existing';
+				}
+				$stored = (bool) @apcu_store($apcu_key, $data, max(0, (int) $expire));
+				if (!$stored) {
+					@apcu_delete($apcu_key);
+					return 'unavailable';
+				}
+				return 'stored';
+			} finally {
+				$this->release_apcu_key_lock($lock);
+			}
+		}
+
+		private function mutate_apcu_numeric_payload($key, $group, $offset, $decrement, $runtime_present = false, $runtime_value = null, $runtime_authoritative = false) {
+			if (!$this->is_apcu_backend()) {
+				return array('status' => 'unavailable');
+			}
+
+			$lock = $this->acquire_apcu_key_lock($key, $group);
+			if (!is_array($lock)) {
+				return array('status' => 'contended');
+			}
+			try {
+				$apcu_key = (string) $lock['data_key'];
+				$success = false;
+				$data = apcu_fetch($apcu_key, $success);
+				$payload = $success ? $this->decode_apcu_payload_data($data, $key, $group) : false;
+				$persistent_exists = is_array($payload) && array_key_exists('value', $payload);
+				if ($success && !$persistent_exists) {
+					@apcu_delete($apcu_key);
+				}
+				if (!$runtime_present && !$persistent_exists) {
+					return array('status' => 'missing');
+				}
+
+				$expires_at = $persistent_exists ? (int) ($payload['expires_at'] ?? 0) : 0;
+				if ($expires_at > 0 && $expires_at <= time()) {
+					@apcu_delete($apcu_key);
+					$persistent_exists = false;
+					$payload = false;
+					$expires_at = 0;
+					if (!$runtime_present) {
+						return array('status' => 'missing');
+					}
+				}
+
+				$base_value = ($runtime_present && ($runtime_authoritative || !$persistent_exists))
+					? $runtime_value
+					: $payload['value'];
+				if (!is_numeric($base_value)) {
+					$base_value = 0;
+				}
+				$value = $decrement ? ($base_value - (int) $offset) : ($base_value + (int) $offset);
+				if ($value < 0) {
+					$value = 0;
+				}
+
+				if (!$persistent_exists) {
+					$payload = $this->build_payload($key, $group, $runtime_value, 0);
+				}
+				$payload['value'] = $value;
+				$payload['expires_at'] = $expires_at;
+				$prepared = $this->prepare_apcu_payload_data($payload);
+				if (!is_string($prepared) || '' === $prepared) {
+					return array('status' => 'unsupported');
+				}
+
+				$ttl = 0;
+				if ($expires_at > 0) {
+					$ttl = $expires_at - time();
+					if ($ttl <= 0) {
+						return array('status' => 'missing');
+					}
+				}
+				if (!@apcu_store($apcu_key, $prepared, $ttl)) {
+					@apcu_delete($apcu_key);
+					return array('status' => 'unavailable');
+				}
+				return array('status' => 'stored', 'value' => $value);
+			} finally {
+				$this->release_apcu_key_lock($lock);
+			}
+		}
+
+		private function read_apcu_payload($key, $group) {
+			if (!$this->is_apcu_backend()) {
+				return false;
+			}
+			$success = false;
+			$data = apcu_fetch($this->get_apcu_key($key, $group), $success);
+			return $success ? $this->decode_apcu_payload_data($data, $key, $group) : false;
+		}
+
 		private function delete_apcu_payload($key, $group) {
 			if (!$this->apcu_enabled || !$this->apcu_available()) {
 				return true;
 			}
-			@apcu_delete($this->get_apcu_key($key, $group));
-			return true;
+			$lock = $this->acquire_apcu_key_lock($key, $group);
+			if (!is_array($lock)) {
+				return false;
+			}
+			try {
+				@apcu_delete((string) $lock['data_key']);
+				return true;
+			} finally {
+				$this->release_apcu_key_lock($lock);
+			}
 		}
 
 		private function flush_apcu_group($group) {
@@ -1600,7 +1997,7 @@ if (!class_exists('WP_Object_Cache')) {
 				}
 
 				$cache_id = $this->get_sqlite_cache_id($key, $group);
-				$delete_statement = $this->sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_id = :cache_id AND expires_at > 0 AND expires_at < :now');
+				$delete_statement = $this->sqlite->prepare('DELETE FROM ultracache_object_cache WHERE cache_id = :cache_id AND expires_at > 0 AND expires_at <= :now');
 				$delete_statement->bindValue(':cache_id', $cache_id, SQLITE3_TEXT);
 				$delete_statement->bindValue(':now', time(), SQLITE3_INTEGER);
 				$delete_result = $delete_statement->execute();
@@ -1671,7 +2068,7 @@ if (!class_exists('WP_Object_Cache')) {
 			$statement = null;
 			$result = null;
 			try {
-				$statement = $this->sqlite->prepare('UPDATE ultracache_object_cache SET cache_scope = :cache_scope, cache_group = :cache_group, payload = :payload, expires_at = :expires_at, updated_at = :updated_at WHERE cache_id = :cache_id AND (expires_at = 0 OR expires_at >= :now)');
+				$statement = $this->sqlite->prepare('UPDATE ultracache_object_cache SET cache_scope = :cache_scope, cache_group = :cache_group, payload = :payload, expires_at = :expires_at, updated_at = :updated_at WHERE cache_id = :cache_id AND (expires_at = 0 OR expires_at > :now)');
 				$statement->bindValue(':cache_scope', $this->get_redis_scope($group), SQLITE3_TEXT);
 				$statement->bindValue(':cache_group', $group, SQLITE3_TEXT);
 				$statement->bindValue(':payload', $prepared['data'], SQLITE3_BLOB);
@@ -1697,7 +2094,7 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 		}
 
-		private function mutate_sqlite_numeric_payload($key, $group, $offset, $decrement) {
+		private function mutate_sqlite_numeric_payload($key, $group, $offset, $decrement, $runtime_present = false, $runtime_value = null) {
 			if (!$this->maintain_sqlite_capacity_before_write()) {
 				return false;
 			}
@@ -1710,14 +2107,26 @@ if (!class_exists('WP_Object_Cache')) {
 				}
 
 				$payload = $this->read_sqlite_payload($key, $group);
-				if (!is_array($payload) || !array_key_exists('value', $payload) || !is_numeric($payload['value'])) {
+				$persistent_exists = is_array($payload) && array_key_exists('value', $payload);
+				if (!$runtime_present && !$persistent_exists) {
 					$this->sqlite->exec('ROLLBACK');
 					return false;
 				}
 
+				$base_value = $runtime_present ? $runtime_value : $payload['value'];
+				if (!is_numeric($base_value)) {
+					$base_value = 0;
+				}
 				$value = $decrement
-					? max(0, $payload['value'] - (int) $offset)
-					: $payload['value'] + (int) $offset;
+					? $base_value - (int) $offset
+					: $base_value + (int) $offset;
+				if ($value < 0) {
+					$value = 0;
+				}
+
+				if (!$persistent_exists) {
+					$payload = $this->build_payload($key, $group, $base_value, 0);
+				}
 				$payload['value'] = $value;
 				$prepared = $this->prepare_sqlite_payload_data($payload);
 				if (!is_array($prepared)) {
@@ -1725,11 +2134,13 @@ if (!class_exists('WP_Object_Cache')) {
 					return false;
 				}
 
-				$statement = $this->sqlite->prepare('UPDATE ultracache_object_cache SET payload = :payload, expires_at = :expires_at, updated_at = :updated_at WHERE cache_id = :cache_id');
+				$statement = $this->sqlite->prepare('INSERT OR REPLACE INTO ultracache_object_cache (cache_id, cache_scope, cache_group, payload, expires_at, updated_at) VALUES (:cache_id, :cache_scope, :cache_group, :payload, :expires_at, :updated_at)');
+				$statement->bindValue(':cache_id', $this->get_sqlite_cache_id($key, $group), SQLITE3_TEXT);
+				$statement->bindValue(':cache_scope', $this->get_redis_scope($group), SQLITE3_TEXT);
+				$statement->bindValue(':cache_group', $group, SQLITE3_TEXT);
 				$statement->bindValue(':payload', $prepared['data'], SQLITE3_BLOB);
 				$statement->bindValue(':expires_at', (int) $prepared['expires_at'], SQLITE3_INTEGER);
 				$statement->bindValue(':updated_at', time(), SQLITE3_INTEGER);
-				$statement->bindValue(':cache_id', $this->get_sqlite_cache_id($key, $group), SQLITE3_TEXT);
 				$result = $statement->execute();
 				if (false === $result || $this->sqlite->changes() < 1) {
 					throw new RuntimeException('SQLite numeric mutation did not update the cache entry.');
@@ -1791,7 +2202,7 @@ if (!class_exists('WP_Object_Cache')) {
 			if (!is_array($row)) {
 				return false;
 			}
-			if (!empty($row['expires_at']) && (int) $row['expires_at'] < time()) {
+			if (!empty($row['expires_at']) && (int) $row['expires_at'] <= time()) {
 				$this->delete_sqlite_payload($key, $group);
 				return false;
 			}
@@ -1875,38 +2286,335 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 		}
 
-		private function write_disk_payload_for_key($key, $group, $payload) {
-			$path = $this->get_file_path($key, $group);
-			if (!$path) {
+		private function get_disk_lock_dir() {
+			return rtrim($this->cache_dir, '/\\') . '/.locks';
+		}
+
+		private function get_disk_global_lock_path() {
+			return $this->get_disk_lock_dir() . '/global.lock';
+		}
+
+		private function get_disk_group_lock_path($group) {
+			$material = $this->get_redis_scope($group) . "\0" . (string) $group;
+			$hash = function_exists('hash') ? hash('sha256', $material) : md5($material);
+			return $this->get_disk_lock_dir() . '/group-' . (string) $hash . '.lock';
+		}
+
+		private function get_disk_key_lock_path($key, $group) {
+			$material = $this->get_redis_scope($group) . "\0" . (string) $group . "\0" . (string) $key;
+			$hash = function_exists('hash') ? hash('sha256', $material) : md5($material);
+			return $this->get_disk_lock_dir() . '/key-' . substr((string) $hash, 0, 3) . '.lock';
+		}
+
+		private function acquire_disk_lock_handle($path, $operation, $bounded = true) {
+			$handle = ultracache_object_cache_safe_fopen($path, 'c+b');
+			if (!is_resource($handle)) {
 				return false;
 			}
-			return $this->write_file_payload($path, $payload);
+
+			$operation = (int) $operation;
+			if (!$bounded) {
+				if (@flock($handle, $operation)) {
+					return $handle;
+				}
+				$this->release_disk_lock_handle($handle);
+				return false;
+			}
+			for ($attempt = 0; $attempt < (int) $this->disk_lock_max_attempts; $attempt++) {
+				if (@flock($handle, $operation | LOCK_NB)) {
+					return $handle;
+				}
+				if (function_exists('usleep')) {
+					usleep((int) $this->disk_lock_sleep_us);
+				}
+			}
+			$this->release_disk_lock_handle($handle);
+			return false;
+		}
+
+		private function release_disk_lock_handle($handle) {
+			if (!is_resource($handle)) {
+				return;
+			}
+			@flock($handle, LOCK_UN);
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Releases a validated native disk-cache flock() handle.
+			@fclose($handle);
+		}
+
+		private function acquire_disk_key_locks($key, $group, $key_operation = LOCK_EX) {
+			$locks = array();
+			$global = $this->acquire_disk_lock_handle($this->get_disk_global_lock_path(), LOCK_SH);
+			if (!is_resource($global)) {
+				return false;
+			}
+			$locks[] = $global;
+
+			$group_lock = $this->acquire_disk_lock_handle($this->get_disk_group_lock_path($group), LOCK_SH);
+			if (!is_resource($group_lock)) {
+				$this->release_disk_locks($locks);
+				return false;
+			}
+			$locks[] = $group_lock;
+
+			$key_lock = $this->acquire_disk_lock_handle($this->get_disk_key_lock_path($key, $group), (int) $key_operation);
+			if (!is_resource($key_lock)) {
+				$this->release_disk_locks($locks);
+				return false;
+			}
+			$locks[] = $key_lock;
+			return $locks;
+		}
+
+		private function release_disk_locks($locks) {
+			$locks = is_array($locks) ? array_reverse($locks) : array();
+			foreach ($locks as $handle) {
+				$this->release_disk_lock_handle($handle);
+			}
+		}
+
+		private function prepare_disk_payload_data($payload) {
+			if (!is_array($payload) || $this->payload_contains_complex_types($payload['value'] ?? null)) {
+				return false;
+			}
+			try {
+				$serialized = serialize($payload);
+			} catch (Throwable $e) {
+				return false;
+			}
+			if (!is_string($serialized) || '' === $serialized || strlen($serialized) > $this->disk_payload_max_bytes) {
+				return false;
+			}
+			$envelope = $this->build_signed_envelope($serialized);
+			if (!is_array($envelope)) {
+				return false;
+			}
+			try {
+				$data = serialize($envelope);
+			} catch (Throwable $e) {
+				return false;
+			}
+			return (is_string($data) && '' !== $data && strlen($data) <= $this->signed_envelope_max_bytes) ? $data : false;
+		}
+
+		private function write_disk_payload_data_unlocked($path, $data) {
+			if (!is_string($path) || '' === trim($path) || !$this->is_cache_path($path) || !is_string($data) || '' === $data) {
+				return false;
+			}
+			$dir = dirname($path);
+			if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0700, true) && !is_dir($dir)) {
+				return false;
+			}
+			try {
+				$suffix = bin2hex(random_bytes(8));
+			} catch (Throwable $e) {
+				$suffix = str_replace('.', '-', uniqid('', true));
+			}
+			$tmp = $path . '.tmp-' . $suffix;
+			$result = ultracache_object_cache_safe_file_put_contents($tmp, $data, LOCK_EX);
+			if (false === $result) {
+				ultracache_object_cache_safe_unlink($tmp);
+				return false;
+			}
+			if (!ultracache_object_cache_safe_rename($tmp, $path)) {
+				ultracache_object_cache_safe_unlink($tmp);
+				return false;
+			}
+			return true;
+		}
+
+		private function delete_disk_path_unlocked($path) {
+			if (!$path || !$this->is_cache_path($path)) {
+				return false;
+			}
+			return !file_exists($path) || ultracache_object_cache_safe_unlink($path);
+		}
+
+		private function read_live_disk_payload_unlocked($key, $group, &$exists = false, $cleanup_invalid = true) {
+			$exists = false;
+			$path = $this->get_file_path($key, $group);
+			if (!$path || !file_exists($path)) {
+				return false;
+			}
+			$payload = $this->read_payload($path, $key, $group);
+			if (!is_array($payload) || !array_key_exists('value', $payload)) {
+				if ($cleanup_invalid) {
+					$this->delete_disk_path_unlocked($path);
+				}
+				return false;
+			}
+			if (!empty($payload['expires_at']) && (int) $payload['expires_at'] <= time()) {
+				if ($cleanup_invalid) {
+					$this->delete_disk_path_unlocked($path);
+				}
+				return false;
+			}
+			$exists = true;
+			return $payload;
+		}
+
+		private function cleanup_invalid_disk_payload($key, $group) {
+			$locks = $this->acquire_disk_key_locks($key, $group, LOCK_EX);
+			if (!is_array($locks)) {
+				return false;
+			}
+			try {
+				$exists = false;
+				$this->read_live_disk_payload_unlocked($key, $group, $exists, true);
+				return !$exists;
+			} finally {
+				$this->release_disk_locks($locks);
+			}
+		}
+
+		private function set_disk_payload($key, $group, $payload) {
+			$data = $this->prepare_disk_payload_data($payload);
+			$locks = $this->acquire_disk_key_locks($key, $group);
+			if (!is_array($locks)) {
+				return 'unavailable';
+			}
+			try {
+				$path = $this->get_file_path($key, $group);
+				if (!$path) {
+					return 'unavailable';
+				}
+				if (!is_string($data) || '' === $data) {
+					return $this->delete_disk_path_unlocked($path) ? 'unsupported' : 'unavailable';
+				}
+				return $this->write_disk_payload_data_unlocked($path, $data) ? 'stored' : 'unavailable';
+			} finally {
+				$this->release_disk_locks($locks);
+			}
+		}
+
+		private function add_disk_payload($key, $group, $payload) {
+			$data = $this->prepare_disk_payload_data($payload);
+			$locks = $this->acquire_disk_key_locks($key, $group);
+			if (!is_array($locks)) {
+				return 'unavailable';
+			}
+			try {
+				$exists = false;
+				$this->read_live_disk_payload_unlocked($key, $group, $exists);
+				if ($exists) {
+					return 'exists';
+				}
+				if (!is_string($data) || '' === $data) {
+					return 'unsupported';
+				}
+				$path = $this->get_file_path($key, $group);
+				return $path && $this->write_disk_payload_data_unlocked($path, $data) ? 'stored' : 'unavailable';
+			} finally {
+				$this->release_disk_locks($locks);
+			}
+		}
+
+		private function replace_disk_payload($key, $group, $payload) {
+			$data = $this->prepare_disk_payload_data($payload);
+			$locks = $this->acquire_disk_key_locks($key, $group);
+			if (!is_array($locks)) {
+				return 'unavailable';
+			}
+			try {
+				$exists = false;
+				$this->read_live_disk_payload_unlocked($key, $group, $exists);
+				if (!$exists) {
+					return 'missing';
+				}
+				$path = $this->get_file_path($key, $group);
+				if (!$path) {
+					return 'unavailable';
+				}
+				if (!is_string($data) || '' === $data) {
+					return $this->delete_disk_path_unlocked($path) ? 'unsupported_existing' : 'unavailable';
+				}
+				return $this->write_disk_payload_data_unlocked($path, $data) ? 'stored' : 'unavailable';
+			} finally {
+				$this->release_disk_locks($locks);
+			}
+		}
+
+		private function mutate_disk_numeric_payload($key, $group, $offset, $decrement, $runtime_present = false, $runtime_value = null, $runtime_authoritative = false) {
+			$locks = $this->acquire_disk_key_locks($key, $group);
+			if (!is_array($locks)) {
+				return array('status' => 'unavailable');
+			}
+			try {
+				$exists = false;
+				$payload = $this->read_live_disk_payload_unlocked($key, $group, $exists);
+				if (!$runtime_present && !$exists) {
+					return array('status' => 'missing');
+				}
+
+				$base_value = ($runtime_present && ($runtime_authoritative || !$exists))
+					? $runtime_value
+					: $payload['value'];
+				if (!is_numeric($base_value)) {
+					$base_value = 0;
+				}
+				$value = $decrement ? ($base_value - (int) $offset) : ($base_value + (int) $offset);
+				if ($value < 0) {
+					$value = 0;
+				}
+
+				if (!$exists) {
+					$payload = $this->build_payload($key, $group, $runtime_value, 0);
+				}
+				$payload['value'] = $value;
+				$data = $this->prepare_disk_payload_data($payload);
+				if (!is_string($data) || '' === $data) {
+					return array('status' => 'unavailable');
+				}
+				$path = $this->get_file_path($key, $group);
+				if (!$path || !$this->write_disk_payload_data_unlocked($path, $data)) {
+					return array('status' => 'unavailable');
+				}
+				return array('status' => 'stored', 'value' => $value);
+			} finally {
+				$this->release_disk_locks($locks);
+			}
+		}
+
+		private function delete_disk_payload_status($key, $group) {
+			$locks = $this->acquire_disk_key_locks($key, $group);
+			if (!is_array($locks)) {
+				return 'unavailable';
+			}
+			try {
+				$exists = false;
+				$this->read_live_disk_payload_unlocked($key, $group, $exists);
+				if (!$exists) {
+					return 'missing';
+				}
+				$path = $this->get_file_path($key, $group);
+				return $path && $this->delete_disk_path_unlocked($path) ? 'deleted' : 'unavailable';
+			} finally {
+				$this->release_disk_locks($locks);
+			}
+		}
+
+		private function write_disk_payload_for_key($key, $group, $payload) {
+			return 'stored' === $this->set_disk_payload($key, $group, $payload);
 		}
 
 		private function delete_disk_payload($key, $group) {
-			$path = $this->get_file_path($key, $group);
-			if (!$path || !$this->is_cache_path($path) || !file_exists($path)) {
-				return true;
-			}
-			return ultracache_object_cache_safe_unlink($path);
+			return 'unavailable' !== $this->delete_disk_payload_status($key, $group);
 		}
 
-		private function write_redis_payload($key, $group, $payload, $expire) {
-			if (!$this->is_redis_backend() || !is_array($payload)) {
+		private function prepare_redis_payload_data($payload) {
+			if (!is_array($payload)) {
 				return false;
 			}
-
-			$value = $payload['value'] ?? null;
-			if ($this->payload_contains_complex_types($value)) {
-				$this->redis_payload_skip_reason = 'Redis payload skipped: unsupported resource/closure or excessive nesting.';
-				return false;
-			}
-
-			$redis_key = $this->get_redis_key($key, $group);
 
 			try {
+				$value = $payload['value'] ?? null;
+				if ($this->payload_contains_complex_types($value)) {
+					$this->redis_payload_skip_reason = 'Redis payload skipped: unsupported resource/closure or excessive nesting.';
+					return false;
+				}
+
 				$serialized = serialize($payload);
 				if (!is_string($serialized) || '' === $serialized) {
+					$this->redis_payload_skip_reason = 'Redis payload skipped: serialization failed.';
 					return false;
 				}
 
@@ -1917,6 +2625,7 @@ if (!class_exists('WP_Object_Cache')) {
 				}
 				$data = serialize($envelope);
 				if (!is_string($data) || '' === $data) {
+					$this->redis_payload_skip_reason = 'Redis payload skipped: envelope serialization failed.';
 					return false;
 				}
 
@@ -1925,19 +2634,35 @@ if (!class_exists('WP_Object_Cache')) {
 					return false;
 				}
 
+				return $data;
+			} catch (Throwable $e) {
+				$this->redis_payload_skip_reason = 'Redis payload skipped: serialization failed.';
+				return false;
+			}
+		}
+
+		private function write_redis_payload($key, $group, $payload, $expire) {
+			if (!$this->is_redis_backend()) {
+				return false;
+			}
+
+			$data = $this->prepare_redis_payload_data($payload);
+			if (!is_string($data) || '' === $data) {
+				return false;
+			}
+
+			$redis_key = $this->get_redis_key($key, $group);
+
+			try {
 				if ((int) $expire > 0) {
 					$stored = (bool) $this->with_redis_error_handler(function () use ($redis_key, $expire, $data) {
 						return $this->redis->setEx($redis_key, (int) $expire, $data);
 					}, false);
-					if ($stored) {
-						$this->redis_error = '';
-						$this->redis_payload_skip_reason = '';
-					}
-					return $stored;
+				} else {
+					$stored = (bool) $this->with_redis_error_handler(function () use ($redis_key, $data) {
+						return $this->redis->set($redis_key, $data);
+					}, false);
 				}
-				$stored = (bool) $this->with_redis_error_handler(function () use ($redis_key, $data) {
-					return $this->redis->set($redis_key, $data);
-				}, false);
 				if ($stored) {
 					$this->redis_error = '';
 					$this->redis_payload_skip_reason = '';
@@ -1949,15 +2674,49 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 		}
 
-		private function read_redis_payload($key, $group) {
+		private function add_redis_payload($key, $group, $payload, $expire) {
+			return $this->write_redis_payload_conditionally($key, $group, $payload, (int) $expire, 'nx');
+		}
+
+		private function replace_redis_payload($key, $group, $payload, $expire) {
+			return $this->write_redis_payload_conditionally($key, $group, $payload, (int) $expire, 'xx');
+		}
+
+		private function write_redis_payload_conditionally($key, $group, $payload, $expire, $condition) {
 			if (!$this->is_redis_backend()) {
-				return false;
+				return 'unavailable';
 			}
 
-			$serialized = $this->with_redis_error_handler(function () use ($key, $group) {
-				return $this->redis->get($this->get_redis_key($key, $group));
+			$data = $this->prepare_redis_payload_data($payload);
+			if (!is_string($data) || '' === $data) {
+				return 'unsupported';
+			}
+
+			$condition = 'xx' === strtolower((string) $condition) ? 'xx' : 'nx';
+			$options = array($condition);
+			if ((int) $expire > 0) {
+				$options['ex'] = (int) $expire;
+			}
+
+			$redis_key = $this->get_redis_key($key, $group);
+			$this->redis_error = '';
+			$stored = $this->with_redis_error_handler(function () use ($redis_key, $data, $options) {
+				return $this->redis->set($redis_key, $data, $options);
 			}, false);
 
+			if (true === $stored) {
+				$this->redis_error = '';
+				$this->redis_payload_skip_reason = '';
+				return 'stored';
+			}
+			if ('' !== (string) $this->redis_error) {
+				return 'unavailable';
+			}
+			$this->redis_payload_skip_reason = '';
+			return 'nx' === $condition ? 'exists' : 'missing';
+		}
+
+		private function decode_redis_payload_data($serialized, $key, $group) {
 			if (!is_string($serialized) || '' === $serialized) {
 				return false;
 			}
@@ -1978,11 +2737,156 @@ if (!class_exists('WP_Object_Cache')) {
 			}
 
 			$payload = $this->deserialize_cache_payload($payload_serialized, true);
-			if (!is_array($payload) || !$this->is_valid_cache_payload($payload, $key, $group)) {
+			return (is_array($payload) && $this->is_valid_cache_payload($payload, $key, $group)) ? $payload : false;
+		}
+
+		private function reset_redis_transaction_state() {
+			if (!$this->redis instanceof Redis) {
+				return;
+			}
+			$preserved_error = (string) $this->redis_error;
+			if (method_exists($this->redis, 'discard')) {
+				$this->with_redis_error_handler(function () {
+					return $this->redis->discard();
+				}, false);
+			}
+			if (method_exists($this->redis, 'unwatch')) {
+				$this->with_redis_error_handler(function () {
+					return $this->redis->unwatch();
+				}, false);
+			}
+			$this->redis_error = $preserved_error;
+		}
+
+		private function mutate_redis_numeric_payload($key, $group, $offset, $decrement, $runtime_present = false, $runtime_value = null, $runtime_authoritative = false) {
+			if (
+				!$this->is_redis_backend()
+				|| !method_exists($this->redis, 'watch')
+				|| !method_exists($this->redis, 'multi')
+				|| !method_exists($this->redis, 'exec')
+			) {
+				return array('status' => 'unavailable');
+			}
+
+			$redis_key = $this->get_redis_key($key, $group);
+			$max_attempts = max(1, (int) $this->redis_transaction_max_retries);
+			for ($attempt = 0; $attempt < $max_attempts; $attempt++) {
+				$this->redis_error = '';
+				$watched = $this->with_redis_error_handler(function () use ($redis_key) {
+					return $this->redis->watch($redis_key);
+				}, false);
+				if (!$watched || '' !== (string) $this->redis_error) {
+					$this->reset_redis_transaction_state();
+					return array('status' => 'unavailable');
+				}
+
+				$serialized = $this->with_redis_error_handler(function () use ($redis_key) {
+					return $this->redis->get($redis_key);
+				}, false);
+				if ('' !== (string) $this->redis_error) {
+					$this->reset_redis_transaction_state();
+					return array('status' => 'unavailable');
+				}
+
+				$payload = false;
+				$condition = 'nx';
+				$expires_at = 0;
+				if (is_string($serialized) && '' !== $serialized) {
+					$payload = $this->decode_redis_payload_data($serialized, $key, $group);
+					if (!is_array($payload) || !array_key_exists('value', $payload)) {
+						$this->reset_redis_transaction_state();
+						return array('status' => 'invalid');
+					}
+					$expires_at = isset($payload['expires_at']) ? (int) $payload['expires_at'] : 0;
+					if ($expires_at > 0 && $expires_at <= time()) {
+						$this->reset_redis_transaction_state();
+						$this->delete_redis_payload($key, $group);
+						if (!$runtime_present) {
+							return array('status' => 'missing');
+						}
+						continue;
+					}
+					$base_value = $runtime_authoritative ? $runtime_value : $payload['value'];
+					$condition = 'xx';
+				} elseif ($runtime_present) {
+					$base_value = $runtime_value;
+					$payload = $this->build_payload($key, $group, $runtime_value, 0);
+				} else {
+					$this->reset_redis_transaction_state();
+					return array('status' => 'missing');
+				}
+
+				if (!is_numeric($base_value)) {
+					$base_value = 0;
+				}
+				$value = $decrement ? ($base_value - (int) $offset) : ($base_value + (int) $offset);
+				if ($value < 0) {
+					$value = 0;
+				}
+				$payload['value'] = $value;
+				$payload['expires_at'] = $expires_at;
+				$data = $this->prepare_redis_payload_data($payload);
+				if (!is_string($data) || '' === $data) {
+					$this->reset_redis_transaction_state();
+					return array('status' => 'unsupported');
+				}
+
+				$options = array($condition);
+				if ($expires_at > 0) {
+					$remaining_ttl = $expires_at - time();
+					if ($remaining_ttl <= 0) {
+						$this->reset_redis_transaction_state();
+						continue;
+					}
+					$options['ex'] = $remaining_ttl;
+				}
+
+				$transaction = $this->with_redis_error_handler(function () {
+					return $this->redis->multi();
+				}, false);
+				if (!$transaction || '' !== (string) $this->redis_error) {
+					$this->reset_redis_transaction_state();
+					return array('status' => 'unavailable');
+				}
+
+				$queued = $this->with_redis_error_handler(function () use ($redis_key, $data, $options) {
+					return $this->redis->set($redis_key, $data, $options);
+				}, false);
+				if (!$queued || '' !== (string) $this->redis_error) {
+					$this->reset_redis_transaction_state();
+					return array('status' => 'unavailable');
+				}
+
+				$committed = $this->with_redis_error_handler(function () {
+					return $this->redis->exec();
+				}, false);
+				if (false === $committed) {
+					if ('' !== (string) $this->redis_error) {
+						$this->reset_redis_transaction_state();
+						return array('status' => 'unavailable');
+					}
+					continue;
+				}
+				if (is_array($committed) && !empty($committed) && true === reset($committed)) {
+					$this->redis_error = '';
+					$this->redis_payload_skip_reason = '';
+					return array('status' => 'stored', 'value' => $value);
+				}
+			}
+
+			$this->reset_redis_transaction_state();
+			return array('status' => 'conflict');
+		}
+
+		private function read_redis_payload($key, $group) {
+			if (!$this->is_redis_backend()) {
 				return false;
 			}
 
-			return $payload;
+			$serialized = $this->with_redis_error_handler(function () use ($key, $group) {
+				return $this->redis->get($this->get_redis_key($key, $group));
+			}, false);
+			return $this->decode_redis_payload_data($serialized, $key, $group);
 		}
 
 		private function delete_redis_payload($key, $group) {
@@ -2033,38 +2937,33 @@ if (!class_exists('WP_Object_Cache')) {
 		}
 
 		private function write_file_payload($path, $payload) {
-			if (!is_string($path) || '' === trim($path) || !$this->is_cache_path($path)) {
-				return false;
-			}
-			$dir = dirname($path);
-			if (!is_dir($dir) && !ultracache_object_cache_safe_mkdir($dir, 0700, true) && !is_dir($dir)) {
-				return false;
-			}
-			$tmp = $path . '.tmp-' . uniqid('', true);
-			$serialized = serialize($payload);
-			$envelope = $this->build_signed_envelope($serialized);
-			if (!is_array($envelope)) {
-				return false;
-			}
-			$data = serialize($envelope);
-			$result = ultracache_object_cache_safe_file_put_contents($tmp, $data, LOCK_EX);
-			if (false === $result) {
-				ultracache_object_cache_safe_unlink($tmp);
-				return false;
-			}
-			if (!ultracache_object_cache_safe_rename($tmp, $path)) {
-				ultracache_object_cache_safe_unlink($tmp);
-				return false;
-			}
-			return true;
+			$data = $this->prepare_disk_payload_data($payload);
+			return is_string($data) && '' !== $data && $this->write_disk_payload_data_unlocked($path, $data);
 		}
 
 		private function read_disk_payload($key, $group) {
-			$path = $this->get_file_path($key, $group);
-			if (!$path || !file_exists($path)) {
+			$locks = $this->acquire_disk_key_locks($key, $group, LOCK_SH);
+			if (!is_array($locks)) {
 				return false;
 			}
-			return $this->read_payload($path, $key, $group);
+			$payload = false;
+			$file_exists = false;
+			try {
+				$path = $this->get_file_path($key, $group);
+				$file_exists = $path && file_exists($path);
+				if ($file_exists) {
+					$payload = $this->read_payload($path, $key, $group);
+					if (!is_array($payload) || !array_key_exists('value', $payload) || (!empty($payload['expires_at']) && (int) $payload['expires_at'] <= time())) {
+						$payload = false;
+					}
+				}
+			} finally {
+				$this->release_disk_locks($locks);
+			}
+			if (false === $payload && $file_exists) {
+				$this->cleanup_invalid_disk_payload($key, $group);
+			}
+			return $payload;
 		}
 
 		private function read_payload($path, $key, $group) {
@@ -2292,27 +3191,58 @@ if (!class_exists('WP_Object_Cache')) {
 			return (string) $key;
 		}
 
+		private function flush_disk_group($group) {
+			$global = $this->acquire_disk_lock_handle($this->get_disk_global_lock_path(), LOCK_SH, false);
+			if (!is_resource($global)) {
+				return false;
+			}
+			$group_lock = $this->acquire_disk_lock_handle($this->get_disk_group_lock_path($group), LOCK_EX, false);
+			if (!is_resource($group_lock)) {
+				$this->release_disk_lock_handle($global);
+				return false;
+			}
+			try {
+				$path = $this->get_group_dir($group);
+				if ($path && is_dir($path)) {
+					$this->recursive_delete($path);
+				}
+				return true;
+			} finally {
+				$this->release_disk_lock_handle($group_lock);
+				$this->release_disk_lock_handle($global);
+			}
+		}
+
 		private function flush_disk_cache() {
-			if (!is_dir($this->cache_dir) || !$this->is_cache_path($this->cache_dir)) {
-				return;
+			$global = $this->acquire_disk_lock_handle($this->get_disk_global_lock_path(), LOCK_EX, false);
+			if (!is_resource($global)) {
+				return false;
 			}
-			$items = ultracache_object_cache_safe_scandir($this->cache_dir);
-			if (!is_array($items)) {
-				return;
-			}
-			foreach ($items as $item) {
-				if ('.' === $item || '..' === $item || $this->should_preserve_cache_root_entry($item)) {
-					continue;
+			try {
+				if (!is_dir($this->cache_dir) || !$this->is_cache_path($this->cache_dir)) {
+					return false;
 				}
-				$path = $this->cache_dir . DIRECTORY_SEPARATOR . $item;
-				if (is_link($path) || !$this->is_cache_path($path)) {
-					continue;
+				$items = ultracache_object_cache_safe_scandir($this->cache_dir);
+				if (!is_array($items)) {
+					return false;
 				}
-				if (is_dir($path)) {
-					$this->recursive_delete($path, true);
-				} else {
-					ultracache_object_cache_safe_unlink($path);
+				foreach ($items as $item) {
+					if ('.' === $item || '..' === $item || $this->should_preserve_cache_root_entry($item)) {
+						continue;
+					}
+					$path = $this->cache_dir . DIRECTORY_SEPARATOR . $item;
+					if (is_link($path) || !$this->is_cache_path($path)) {
+						continue;
+					}
+					if (is_dir($path)) {
+						$this->recursive_delete($path, true);
+					} else {
+						ultracache_object_cache_safe_unlink($path);
+					}
 				}
+				return true;
+			} finally {
+				$this->release_disk_lock_handle($global);
 			}
 		}
 
@@ -2322,7 +3252,7 @@ if (!class_exists('WP_Object_Cache')) {
 				return false;
 			}
 			$sqlite_name = basename($this->sqlite_path);
-			return in_array($item, array('index.php', '.htaccess', 'web.config', 'object-cache-metrics.json', $sqlite_name, $sqlite_name . '-wal', $sqlite_name . '-shm', $sqlite_name . '.maintenance.lock'), true);
+			return in_array($item, array('index.php', '.htaccess', 'web.config', '.locks', 'object-cache-metrics.json', $sqlite_name, $sqlite_name . '-wal', $sqlite_name . '-shm', $sqlite_name . '.maintenance.lock'), true);
 		}
 
 		private function recursive_delete($dir, $remove_root = true) {

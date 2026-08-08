@@ -181,6 +181,245 @@ trait Ultra_Cache_WP_Server_Rules_Trait
         return self::write_browser_cache_rules_with_verification($path, $updated, $contents, $original_exists);
     }
 
+    /**
+     * Build an Apache-compatible unsafe-cookie bypass pattern.
+     *
+     * @param array $settings Normalized runtime settings.
+     * @return string
+     */
+    private static function get_litespeed_cache_cookie_bypass_pattern(array $settings)
+    {
+        $patterns = !empty($settings['unsafe_cache_cookie_patterns']) && is_array($settings['unsafe_cache_cookie_patterns'])
+            ? $settings['unsafe_cache_cookie_patterns']
+            : array();
+        $patterns = array_merge($patterns, self::get_default_unsafe_cache_cookie_patterns());
+
+        $parts = array();
+        foreach (array_slice(array_values(array_unique(array_filter(array_map('strval', $patterns)))), 0, 64) as $pattern) {
+            $pattern = strtolower(trim((string) $pattern));
+            $pattern = preg_replace('/[^a-z0-9_.*\-]/', '', $pattern);
+            if ('' === $pattern || '*' === $pattern) {
+                continue;
+            }
+
+            $quoted = preg_quote($pattern, '#');
+            if (false !== strpos($pattern, '*')) {
+                $name_pattern = str_replace('\\*', '[^;=]*', $quoted);
+            } else {
+                $name_pattern = '[^;=]*' . $quoted . '[^;=]*';
+            }
+            $parts[$name_pattern] = $name_pattern;
+        }
+
+        if (empty($parts)) {
+            return '';
+        }
+
+        return '(?:^|;[[:space:]]*)(?:' . implode('|', array_values($parts)) . ')=';
+    }
+
+    /**
+     * Build an Apache-compatible dynamic-path bypass pattern.
+     *
+     * @param array $settings Normalized runtime settings.
+     * @return string
+     */
+    private static function get_litespeed_cache_path_bypass_pattern(array $settings)
+    {
+        $paths = !empty($settings['excluded_paths']) && is_array($settings['excluded_paths'])
+            ? $settings['excluded_paths']
+            : array();
+        $paths = array_merge($paths, array(
+            function_exists('ultracache_wordpress_admin_public_path') ? ultracache_wordpress_admin_public_path() : '/wp-admin/',
+            '/wp-login.php',
+            '/wp-json/',
+            '/xmlrpc.php',
+            '/wp-cron.php',
+            '/wp-comments-post.php',
+            '/admin-ajax.php',
+            '/wc-api/',
+            '/cart/',
+            '/checkout/',
+            '/my-account/',
+            '/order-pay/',
+            '/order-received/',
+            '/add-payment-method/',
+            '/lost-password/',
+        ));
+
+        $parts = array();
+        foreach (array_slice(array_values(array_unique(array_filter(array_map('strval', $paths)))), 0, 96) as $path) {
+            $path = (string) wp_parse_url(trim((string) $path), PHP_URL_PATH);
+            $path = '/' . ltrim(str_replace('\\', '/', $path), '/');
+            if ('/' === $path || '' === $path) {
+                continue;
+            }
+            $path = rtrim($path, '/');
+            $parts[preg_quote($path, '#')] = preg_quote($path, '#');
+        }
+
+        if (empty($parts)) {
+            return '';
+        }
+
+        return '^(?:' . implode('|', array_values($parts)) . ')(?:/|$)';
+    }
+
+    /**
+     * Return the shared Apache/LiteSpeed Accept conditions for one image bucket.
+     *
+     * These rules mirror ultracache_get_html_variant_bucket_for_accept(), including
+     * the explicit q=0 refusal rule and AVIF-before-WebP server preference.
+     *
+     * @param string $bucket HTML image bucket.
+     * @return array<int,string>
+     */
+    private static function get_html_variant_accept_rewrite_conditions($bucket)
+    {
+        $bucket = in_array((string) $bucket, array('avif', 'webp'), true) ? (string) $bucket : '';
+        if ('' === $bucket) {
+            return array();
+        }
+
+        return array(
+            'RewriteCond %{HTTP:Accept} "(^|,)[[:space:]]*image/' . $bucket . '([[:space:]]*;[^,]*)?([[:space:]]*,|$)" [NC]',
+            'RewriteCond %{HTTP:Accept} "!(^|,)[[:space:]]*image/' . $bucket . '[[:space:]]*;[^,]*q[[:space:]]*=[[:space:]]*0(\.0+)?([[:space:]]*(;|,|$))" [NC]',
+        );
+    }
+
+    /**
+     * Build the managed native LiteSpeed lookup, bypass, and vary block.
+     *
+     * @return string
+     */
+    private static function get_litespeed_cache_htaccess_block()
+    {
+        $settings = self::get_settings();
+        $variant_policy = ultracache_get_html_variant_policy($settings);
+        $active_html_buckets = (array) ($variant_policy['buckets'] ?? array('orig'));
+        $cookie_pattern = self::get_litespeed_cache_cookie_bypass_pattern($settings);
+        $path_pattern = self::get_litespeed_cache_path_bypass_pattern($settings);
+        $query_policy = method_exists(static::class, 'get_litespeed_query_cache_policy')
+            ? self::get_litespeed_query_cache_policy()
+            : array();
+        $query_policy_fingerprint = (string) ($query_policy['fingerprint'] ?? '');
+        $query_key_proof = function_exists('ultracache_build_litespeed_query_cache_key_proof')
+            ? ultracache_build_litespeed_query_cache_key_proof($query_policy)
+            : array();
+        $query_key_proof_fingerprint = (string) ($query_key_proof['fingerprint'] ?? '');
+        $query_key_proof_status = sanitize_key((string) ($query_key_proof['status'] ?? 'blocked'));
+
+        $lines = array(
+            '<IfModule LiteSpeed>',
+            'CacheLookup public on',
+            'RewriteEngine On',
+            '# UltraCache native LSCache retrieval contract. Response headers decide storage and TTL.',
+            '# UltraCache query policy fingerprint: ' . ('' !== $query_policy_fingerprint ? $query_policy_fingerprint : 'unavailable'),
+            '# UltraCache query key proof fingerprint: ' . ('' !== $query_key_proof_fingerprint ? $query_key_proof_fingerprint : 'unavailable'),
+            '# UltraCache query key proof status: ' . ('' !== $query_key_proof_status ? $query_key_proof_status : 'blocked'),
+            '# Native LSCache query-key modifiers cannot represent UltraCache canonical key/value ordering.',
+            '# Safe-query LSCache retrieval remains disabled.',
+            '# Query URLs are bypassed and are never mapped to the base URL for native purge or refill.',
+            'RewriteCond %{REQUEST_METHOD} !^(?:GET|HEAD)$ [NC]',
+            'RewriteRule .* - [E=Cache-Control:no-cache,E=ULTRACACHE_LSCACHE_BYPASS:1]',
+            'RewriteCond %{QUERY_STRING} !^$',
+            'RewriteRule .* - [E=Cache-Control:no-cache,E=ULTRACACHE_LSCACHE_BYPASS:1]',
+            'RewriteCond %{HTTP:Authorization} !^$',
+            'RewriteRule .* - [E=Cache-Control:no-cache,E=ULTRACACHE_LSCACHE_BYPASS:1]',
+        );
+
+        if ('' !== $cookie_pattern) {
+            $lines[] = 'RewriteCond %{HTTP:Cookie} "' . $cookie_pattern . '" [NC]';
+            $lines[] = 'RewriteRule .* - [E=Cache-Control:no-cache,E=ULTRACACHE_LSCACHE_BYPASS:1]';
+        }
+        if ('' !== $path_pattern) {
+            $lines[] = 'RewriteCond %{REQUEST_URI} "' . $path_pattern . '" [NC]';
+            $lines[] = 'RewriteRule .* - [E=Cache-Control:no-cache,E=ULTRACACHE_LSCACHE_BYPASS:1]';
+        }
+
+        $lines = array_merge($lines, array(
+            'RewriteCond %{REQUEST_URI} \.[A-Za-z0-9]{2,8}$ [NC]',
+            'RewriteRule .* - [E=Cache-Control:no-cache,E=ULTRACACHE_LSCACHE_BYPASS:1]',
+        ));
+
+        if (!empty($variant_policy['vary_accept'])) {
+            $avif_accept_conditions = self::get_html_variant_accept_rewrite_conditions('avif');
+            $webp_accept_conditions = self::get_html_variant_accept_rewrite_conditions('webp');
+
+            $lines[] = 'RewriteCond %{ENV:ULTRACACHE_LSCACHE_BYPASS} !^1$';
+            $lines[] = 'RewriteRule .* - [E=Cache-Control:vary=uc_orig]';
+            if (in_array('webp', $active_html_buckets, true)) {
+                $lines[] = 'RewriteCond %{ENV:ULTRACACHE_LSCACHE_BYPASS} !^1$';
+                foreach ($webp_accept_conditions as $condition) {
+                    $lines[] = $condition;
+                }
+                $lines[] = 'RewriteRule .* - [E=Cache-Control:vary=uc_webp]';
+            }
+            if (in_array('avif', $active_html_buckets, true)) {
+                $lines[] = 'RewriteCond %{ENV:ULTRACACHE_LSCACHE_BYPASS} !^1$';
+                foreach ($avif_accept_conditions as $condition) {
+                    $lines[] = $condition;
+                }
+                $lines[] = 'RewriteRule .* - [E=Cache-Control:vary=uc_avif]';
+            }
+        }
+
+        $lines[] = '</IfModule>';
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * Synchronize the managed LiteSpeed cache block in the root .htaccess.
+     *
+     * @param bool|null $enabled Optional explicit desired state.
+     * @return bool
+     */
+    public static function sync_litespeed_cache_rules($enabled = null)
+    {
+        $begin = '# BEGIN UltraCache LiteSpeed Cache';
+        $end = '# END UltraCache LiteSpeed Cache';
+
+        if (null === $enabled) {
+            $settings = self::get_settings();
+            $enabled = !empty($settings['litespeed_cache_enabled']) && !empty($settings['enabled']);
+        }
+
+        $path = self::get_browser_cache_htaccess_path();
+        $original_exists = file_exists($path);
+        $contents = $original_exists ? (string) ultracache_safe_file_get_contents($path, 'sync_litespeed_cache_rules') : '';
+        $has_block = false !== strpos($contents, $begin) && false !== strpos($contents, $end);
+
+        if ($original_exists && !ultracache_path_is_writable($path)) {
+            return !$enabled && !$has_block;
+        }
+
+        $pattern = '/' . preg_quote($begin, '/') . '.*?' . preg_quote($end, '/') . '\\R*/s';
+        $updated = (string) preg_replace($pattern, '', $contents);
+        $updated = ltrim($updated);
+
+        if ($enabled) {
+            $block_body = self::get_litespeed_cache_htaccess_block();
+            if ('' === $block_body) {
+                return false;
+            }
+            $block = $begin . "\n" . $block_body . $end;
+            $updated = '' === trim($updated) ? $block : ($block . "\n\n" . rtrim($updated));
+        }
+
+        $updated = '' === trim($updated) ? '' : (rtrim($updated) . "\n");
+        if ($updated === $contents) {
+            return true;
+        }
+
+        $dir = dirname($path);
+        if (!file_exists($dir) && !ultracache_safe_mkdir($dir, 0755, true, 'sync_litespeed_cache_rules') && !file_exists($dir)) {
+            return false;
+        }
+
+        return self::write_htaccess_rules_with_verification($path, $updated, $contents, $original_exists, 'sync_litespeed_cache_rules');
+    }
+
     private static function get_apache_static_html_delivery_cache_public_path()
     {
         $url = function_exists('ultracache_content_cache_storage_url') ? ultracache_content_cache_storage_url('') : '';
@@ -221,17 +460,29 @@ trait Ultra_Cache_WP_Server_Rules_Trait
         $variant_policy = ultracache_get_html_variant_policy($settings);
         $active_html_buckets = (array) $variant_policy['buckets'];
         $vary_accept = !empty($variant_policy['vary_accept']);
-        $send_variant_header = !empty($settings['debug_headers_enabled']) || !empty($settings['varnish_cli_enabled']);
-        $varnish_html_ttl_minutes = !empty($settings['varnish_cli_enabled'])
-            ? max(0, min(525600, absint($settings['varnish_html_ttl_minutes'] ?? 0)))
+        $send_variant_header = !empty($settings['debug_headers_enabled']) || !empty($settings['shared_cache_delivery_enabled']) || !empty($settings['varnish_cli_enabled']);
+        $litespeed_cache_enabled = !empty($settings['litespeed_cache_enabled']) && !empty($settings['enabled']);
+        $litespeed_html_ttl_seconds = $litespeed_cache_enabled
+            ? max(1, min(525600, absint($settings['cache_fresh_ttl_minutes'] ?? 1440))) * MINUTE_IN_SECONDS
             : 0;
-        $varnish_html_ttl_seconds = $varnish_html_ttl_minutes * MINUTE_IN_SECONDS;
-        $varnish_stale_while_revalidate_seconds = $varnish_html_ttl_seconds > 0
+        $litespeed_site_tag = $litespeed_cache_enabled && function_exists('ultracache_get_litespeed_site_tag')
+            ? ultracache_get_litespeed_site_tag()
+            : '';
+        $shared_cache_proof_expires_at = absint($settings['shared_cache_control_proof_expires_at'] ?? 0);
+        $static_managed_delivery = !empty($settings['shared_cache_control_verified'])
+            && 0 === $shared_cache_proof_expires_at;
+        $shared_html_ttl_minutes = !empty($settings['shared_cache_delivery_enabled'])
+            ? ($static_managed_delivery
+                ? max(1, min(525600, absint($settings['shared_cache_managed_ttl_minutes'] ?? 1440)))
+                : max(1, min(1440, absint($settings['shared_cache_ttl_only_minutes'] ?? 10))))
+            : 0;
+        $shared_html_ttl_seconds = $shared_html_ttl_minutes * MINUTE_IN_SECONDS;
+        $varnish_stale_while_revalidate_seconds = $shared_html_ttl_seconds > 0 && $static_managed_delivery
             ? max(0, min(86400, absint($settings['varnish_stale_while_revalidate_seconds'] ?? 0)))
             : 0;
-        $html_cache_control = $varnish_html_ttl_seconds > 0
-            ? 'public, max-age=0, s-maxage=' . (string) $varnish_html_ttl_seconds
-                . ($varnish_stale_while_revalidate_seconds > 0 ? ', stale-while-revalidate=' . (string) $varnish_stale_while_revalidate_seconds : '')
+        $html_cache_control = $shared_html_ttl_seconds > 0
+            ? 'public, max-age=0, s-maxage=' . (string) $shared_html_ttl_seconds
+                . ', stale-while-revalidate=' . (string) $varnish_stale_while_revalidate_seconds
             : 'public, max-age=0, must-revalidate';
 
         $common_conditions = array(
@@ -253,9 +504,12 @@ trait Ultra_Cache_WP_Server_Rules_Trait
             'Header set Cache-Control "' . $html_cache_control . '"',
             'Header set X-Ultra-Cache-Source "apache-static"',
             'Header set X-UltraCache-Encoding "identity"',
-            $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Cacheable "1"' : '',
-            $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Surrogate-TTL "' . (string) $varnish_html_ttl_seconds . '"' : '',
-            $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Stale-While-Revalidate "' . (string) $varnish_stale_while_revalidate_seconds . '"' : '',
+            $litespeed_html_ttl_seconds > 0 ? 'Header set X-LiteSpeed-Cache-Control "public,max-age=' . (string) $litespeed_html_ttl_seconds . '"' : '',
+            '' !== $litespeed_site_tag ? 'Header set X-LiteSpeed-Tag "' . $litespeed_site_tag . '"' : '',
+            $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Cacheable "1"' : '',
+            $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Surrogate-TTL "' . (string) $shared_html_ttl_seconds . '"' : '',
+            $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Stale-While-Revalidate "' . (string) $varnish_stale_while_revalidate_seconds . '"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Shared-Cache-Mode "' . ($static_managed_delivery ? 'managed' : 'ttl-only') . '"' : '',
         );
         if ($vary_accept) {
             $lines[] = 'Header merge Vary Accept';
@@ -271,9 +525,12 @@ trait Ultra_Cache_WP_Server_Rules_Trait
                 'Header set Cache-Control "' . $html_cache_control . '"',
                 'Header set X-Ultra-Cache-Source "apache-static"',
                 'Header set X-UltraCache-Encoding "gzip"',
-                $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Cacheable "1"' : '',
-                $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Surrogate-TTL "' . (string) $varnish_html_ttl_seconds . '"' : '',
-            $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Stale-While-Revalidate "' . (string) $varnish_stale_while_revalidate_seconds . '"' : '',
+                $litespeed_html_ttl_seconds > 0 ? 'Header set X-LiteSpeed-Cache-Control "public,max-age=' . (string) $litespeed_html_ttl_seconds . '"' : '',
+                '' !== $litespeed_site_tag ? 'Header set X-LiteSpeed-Tag "' . $litespeed_site_tag . '"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Cacheable "1"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Surrogate-TTL "' . (string) $shared_html_ttl_seconds . '"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Stale-While-Revalidate "' . (string) $varnish_stale_while_revalidate_seconds . '"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Shared-Cache-Mode "' . ($static_managed_delivery ? 'managed' : 'ttl-only') . '"' : '',
             );
             if ($vary_accept) {
                 $gzip_lines[] = 'Header merge Vary Accept';
@@ -291,9 +548,12 @@ trait Ultra_Cache_WP_Server_Rules_Trait
                 'Header set Cache-Control "' . $html_cache_control . '"',
                 'Header set X-Ultra-Cache-Source "apache-static"',
                 'Header set X-UltraCache-Encoding "brotli"',
-                $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Cacheable "1"' : '',
-                $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Surrogate-TTL "' . (string) $varnish_html_ttl_seconds . '"' : '',
-            $varnish_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Stale-While-Revalidate "' . (string) $varnish_stale_while_revalidate_seconds . '"' : '',
+                $litespeed_html_ttl_seconds > 0 ? 'Header set X-LiteSpeed-Cache-Control "public,max-age=' . (string) $litespeed_html_ttl_seconds . '"' : '',
+                '' !== $litespeed_site_tag ? 'Header set X-LiteSpeed-Tag "' . $litespeed_site_tag . '"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Cacheable "1"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Surrogate-TTL "' . (string) $shared_html_ttl_seconds . '"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Stale-While-Revalidate "' . (string) $varnish_stale_while_revalidate_seconds . '"' : '',
+                $shared_html_ttl_seconds > 0 ? 'Header set X-UltraCache-Shared-Cache-Mode "' . ($static_managed_delivery ? 'managed' : 'ttl-only') . '"' : '',
             );
             if ($vary_accept) {
                 $brotli_lines[] = 'Header merge Vary Accept';
@@ -314,6 +574,20 @@ trait Ultra_Cache_WP_Server_Rules_Trait
         $lines = array_values(array_filter($lines, static function ($line) {
             return '' !== (string) $line;
         }));
+
+        if ($litespeed_html_ttl_seconds > 0 && $vary_accept) {
+            foreach ($active_html_buckets as $active_html_bucket) {
+                if (!in_array($active_html_bucket, array('orig', 'webp', 'avif'), true)) {
+                    continue;
+                }
+                $vary_value = function_exists('ultracache_get_litespeed_vary_value_for_bucket')
+                    ? ultracache_get_litespeed_vary_value_for_bucket($active_html_bucket)
+                    : 'uc_orig';
+                $lines[] = '<FilesMatch "^index-' . $active_html_bucket . '\.html(?:\.(?:gz|br))?$">';
+                $lines[] = 'Header set X-LiteSpeed-Vary "value=' . $vary_value . '"';
+                $lines[] = '</FilesMatch>';
+            }
+        }
 
         if ($send_variant_header) {
             foreach ($active_html_buckets as $active_html_bucket) {
@@ -343,14 +617,8 @@ trait Ultra_Cache_WP_Server_Rules_Trait
         };
 
         $bucket_rules = array();
-        $avif_accept_conditions = array(
-            'RewriteCond %{HTTP:Accept} "(^|,)[[:space:]]*image/avif([[:space:]]*;[^,]*)?([[:space:]]*,|$)" [NC]',
-            'RewriteCond %{HTTP:Accept} "!(^|,)[[:space:]]*image/avif[[:space:]]*;[^,]*q[[:space:]]*=[[:space:]]*0(\.0+)?([[:space:]]*(;|,|$))" [NC]',
-        );
-        $webp_accept_conditions = array(
-            'RewriteCond %{HTTP:Accept} "(^|,)[[:space:]]*image/webp([[:space:]]*;[^,]*)?([[:space:]]*,|$)" [NC]',
-            'RewriteCond %{HTTP:Accept} "!(^|,)[[:space:]]*image/webp[[:space:]]*;[^,]*q[[:space:]]*=[[:space:]]*0(\.0+)?([[:space:]]*(;|,|$))" [NC]',
-        );
+        $avif_accept_conditions = self::get_html_variant_accept_rewrite_conditions('avif');
+        $webp_accept_conditions = self::get_html_variant_accept_rewrite_conditions('webp');
         if (in_array('avif', $active_html_buckets, true)) {
             $bucket_rules[] = array($avif_accept_conditions, 'index/index-avif.html', '^$');
         }

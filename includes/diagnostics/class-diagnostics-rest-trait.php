@@ -11,12 +11,166 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_WP_Diagnostics_REST_Trait
 {
+private static function get_dashboard_stats_state_name()
+    {
+        return 'ultracache_state:dashboard.stats_snapshot';
+    }
+
+private static function get_last_cache_event_state_name()
+    {
+        return 'ultracache_state:dashboard.last_cache_event';
+    }
+
+private static function get_persistent_last_cache_event()
+    {
+        if (!function_exists('ultracache_get_state_record_read_only')) {
+            return array();
+        }
+
+        $record = ultracache_get_state_record_read_only(self::get_last_cache_event_state_name());
+        return isset($record['payload']['event']) && is_array($record['payload']['event'])
+            ? $record['payload']['event']
+            : array();
+    }
+
+public static function persist_dashboard_stats_snapshot(array $stats, $timestamp)
+    {
+        $payload = array(
+            'time' => max(0, (int) $timestamp),
+            'stats' => $stats,
+            'contractVersion' => 1,
+        );
+
+        if (!function_exists('ultracache_mutate_state_record')) {
+            return array('success' => false, 'reason' => 'state_storage_unavailable');
+        }
+
+        return ultracache_mutate_state_record(
+            self::get_dashboard_stats_state_name(),
+            static function () use ($payload) {
+                return $payload;
+            },
+            3,
+            $payload
+        );
+    }
+
+private static function build_dashboard_stats_from_persistent_sources(array $previous_stats = array())
+    {
+        $stats = $previous_stats;
+
+        if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'get_analytics_stats')) {
+            $analytics = Ultra_Cache_Engine::get_analytics_stats();
+            if (is_array($analytics)) {
+                $stats = array_merge($stats, $analytics);
+            }
+        }
+
+        $activity_record = function_exists('ultracache_get_state_record_read_only')
+            ? ultracache_get_state_record_read_only(self::get_page_cache_activity_state_name())
+            : array();
+        $activity = isset($activity_record['payload']) && is_array($activity_record['payload']) ? $activity_record['payload'] : array();
+        $storage_record = function_exists('ultracache_get_state_record_read_only')
+            ? ultracache_get_state_record_read_only(self::get_cache_storage_diagnostics_state_name())
+            : array();
+        $storage = isset($storage_record['payload']) && is_array($storage_record['payload']) ? $storage_record['payload'] : array();
+
+        $activity_time = max(0, (int) ($activity['computedAt'] ?? 0), (int) ($activity['dirtyAt'] ?? 0), (int) ($activity_record['updatedAt'] ?? 0));
+        $storage_time = max(0, (int) ($storage['scannedAt'] ?? ($storage_record['updatedAt'] ?? 0)));
+        if (isset($activity['pageFiles']) && $activity_time >= $storage_time) {
+            $stats['pageCacheFiles'] = max(0, (int) $activity['pageFiles']);
+            $stats['pageCacheStatsState'] = !empty($activity['dirty']) ? 'dirty' : (!empty($activity['partial']) ? 'partial' : 'current');
+            $stats['pageCacheStatsComputedAt'] = $activity_time;
+            $stats['pageCacheStatsPartial'] = !empty($activity['partial']);
+            $stats['pageCacheStatsPartialReason'] = (string) ($activity['partialReason'] ?? '');
+        } elseif (isset($storage['pageCache']['files'])) {
+            $stats['pageCacheFiles'] = max(0, (int) $storage['pageCache']['files']);
+            $stats['pageCacheStatsState'] = !empty($storage['fingerprint']) && !hash_equals((string) $storage['fingerprint'], self::get_cache_storage_diagnostics_fingerprint())
+                ? 'configuration-changed'
+                : (($storage_time > 0 && (time() - $storage_time) > DAY_IN_SECONDS) ? 'stale' : (!empty($storage['pageCache']['truncated']) ? 'partial' : 'current'));
+            $stats['pageCacheStatsComputedAt'] = $storage_time;
+            $stats['pageCacheStatsPartial'] = !empty($storage['pageCache']['truncated']);
+            $stats['pageCacheStatsPartialReason'] = !empty($storage['pageCache']['truncated']) ? 'limit' : '';
+        } elseif (!isset($stats['pageCacheFiles'])) {
+            $stats['pageCacheFiles'] = 0;
+            $stats['pageCacheStatsState'] = 'not-measured';
+            $stats['pageCacheStatsComputedAt'] = 0;
+            $stats['pageCacheStatsPartial'] = false;
+            $stats['pageCacheStatsPartialReason'] = '';
+        }
+
+        $previous_backend = strtolower((string) ($stats['objectCacheActiveBackend'] ?? $stats['objectCacheBackend'] ?? ''));
+        $light_object_stats = array();
+        if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'get_lightweight_stats')) {
+            $light_object_stats = Ultra_Cache_Object_Cache_Manager::get_lightweight_stats();
+        }
+        if (is_array($light_object_stats) && !empty($light_object_stats)) {
+            $current_backend = strtolower((string) ($light_object_stats['objectCacheActiveBackend'] ?? $light_object_stats['objectCacheBackend'] ?? ''));
+            $backend_changed = '' !== $previous_backend && '' !== $current_backend && $previous_backend !== $current_backend;
+            $stats = array_merge($stats, $light_object_stats);
+            if ($backend_changed) {
+                foreach (array(
+                    'objectCacheEntries', 'objectCacheSizeBytes',
+                    'objectCacheRedisEntries', 'objectCacheRedisSizeBytes',
+                    'objectCacheApcuEntries', 'objectCacheApcuSizeBytes',
+                    'objectCacheSqliteEntries', 'objectCacheSqliteSizeBytes',
+                    'objectCacheDiskEntries', 'objectCacheDiskSizeBytes'
+                ) as $key) {
+                    $stats[$key] = 0;
+                }
+                $stats['objectCacheStatsState'] = 'configuration-changed';
+                $stats['objectCacheStatsMeasured'] = false;
+            }
+        }
+
+        if (!isset($stats['objectCacheEntries'])) {
+            $stats['objectCacheEntries'] = 0;
+        }
+        if (!isset($stats['objectCacheSizeBytes'])) {
+            $stats['objectCacheSizeBytes'] = 0;
+        }
+        if (!isset($stats['objectCacheStatsMeasured'])) {
+            $stats['objectCacheStatsMeasured'] = isset($previous_stats['objectCacheEntries']);
+        }
+        if (!isset($stats['objectCacheStatsState'])) {
+            $stats['objectCacheStatsState'] = !empty($stats['objectCacheStatsMeasured']) ? 'persisted-measurement' : 'not-measured';
+        }
+        $stats['objectCacheSizeHuman'] = function_exists('size_format')
+            ? size_format((int) $stats['objectCacheSizeBytes'], 2)
+            : (string) (int) $stats['objectCacheSizeBytes'];
+
+        $cache_root_bytes = null;
+        if (isset($storage['cacheRoot']['bytes'])) {
+            $cache_root_bytes = max(0, (int) $storage['cacheRoot']['bytes']);
+        } elseif (isset($storage['pageCache']['bytes'])) {
+            $cache_root_bytes = max(0, (int) $storage['pageCache']['bytes']) + max(0, (int) ($storage['cssBundles']['bytes'] ?? 0));
+        }
+        if (null !== $cache_root_bytes) {
+            $stats['cacheSizeBytes'] = $cache_root_bytes + max(0, (int) $stats['objectCacheSizeBytes']);
+        } elseif (!isset($stats['cacheSizeBytes'])) {
+            $stats['cacheSizeBytes'] = max(0, (int) $stats['objectCacheSizeBytes']);
+        }
+        $stats['cacheSizeHuman'] = function_exists('size_format')
+            ? size_format((int) $stats['cacheSizeBytes'], 2)
+            : (string) (int) $stats['cacheSizeBytes'];
+
+        $stats['cronWarm'] = self::get_cron_warm_status();
+        $stats['opcache'] = self::get_opcache_status_summary();
+        $stats['apcu'] = self::get_apcu_status_summary();
+        $stats['externalCaches'] = self::get_external_cache_detection(false);
+        $stats['dashboardStatsLightweight'] = true;
+        $stats['dashboardStatsSource'] = 'persistent-state-and-authoritative-counters';
+        $stats['dashboardDiagnosticsIncluded'] = false;
+
+        return $stats;
+    }
+
 public static function get_dashboard_diagnostics($force_storage_refresh = false)
         {
             $settings             = self::get_dashboard_settings();
             $support              = self::get_media_support_status();
             $compression          = self::get_compression_support_status();
-            $last                 = get_transient('ultracache_last_cache_event');
+            $last                 = self::get_persistent_last_cache_event();
             $advanced_cache_path  = function_exists('ultracache_dropin_path') ? ultracache_dropin_path('advanced-cache.php') : '';
             $object_cache_path    = function_exists('ultracache_dropin_path') ? ultracache_dropin_path('object-cache.php') : '';
             $browser_cache_path   = self::get_browser_cache_htaccess_path();
@@ -166,10 +320,15 @@ public static function get_dashboard_diagnostics($force_storage_refresh = false)
                     'path'    => $browser_cache_path,
                     'active'  => file_exists($browser_cache_path) && false !== strpos((string) ultracache_safe_file_get_contents($browser_cache_path, 'dashboard diagnostics'), '# BEGIN UltraCache Browser Cache'),
                 ),
+                'liteSpeed' => method_exists(__CLASS__, 'get_litespeed_diagnostics_status')
+                    ? self::get_litespeed_diagnostics_status()
+                    : array(),
                 'varnish' => array_merge(
                     self::get_varnish_support_status(),
                     array(
-                        'enabled' => !empty($settings['varnishCliEnabled']),
+                        'enabled' => self::is_varnish_enabled($settings),
+                        'connectionConfigured' => self::is_varnish_connection_configured($settings),
+                        'sharedCacheDelivery' => self::get_shared_cache_delivery_status($settings),
                         'mode'    => $varnish_mode,
                         'configuredMode' => $varnish_mode,
                         'servers' => $varnish_servers,
@@ -183,15 +342,20 @@ public static function get_dashboard_diagnostics($force_storage_refresh = false)
                         'timeout' => max(1, min(15, absint($settings['varnishCliTimeoutSeconds']))),
                         'last'    => self::get_varnish_last_result(),
                         'basicTest' => self::get_varnish_basic_test_result(),
+                        'endpointCapabilities' => self::get_varnish_endpoint_capability_registry_status(),
+                        'runtimePlanner' => self::get_varnish_runtime_planner_status(),
+                        'esiCapability' => self::get_varnish_esi_capability_status(),
                         'flushScope' => self::get_varnish_flush_scope_status(),
                         'staleWhileRevalidate' => self::get_varnish_stale_while_revalidate_status($settings),
-                        'refillAfterTargetedInvalidation' => !empty($settings['varnishRefillAfterTargetedInvalidation']),
-                        'warmDuringManualWarmup' => !empty($settings['varnishWarmDuringManualWarmup']),
-                        'warmWithSiteWarmup' => !empty($settings['varnishWarmDuringManualWarmup']),
+                        'refillAfterTargetedInvalidation' => !empty($varnish_cli_settings['refillAfterTargetedInvalidation']),
+                        'warmDuringManualWarmup' => !empty($varnish_cli_settings['warmWithSiteWarmup']),
+                        'warmWithSiteWarmup' => !empty($varnish_cli_settings['warmWithSiteWarmup']),
+                        'automationPolicy' => is_array($varnish_cli_settings['automationPolicy'] ?? null) ? $varnish_cli_settings['automationPolicy'] : array(),
                         'refreshAhead' => self::get_varnish_refresh_ahead_status($settings),
                         'endpointDiagnostics' => $varnish_endpoint_diagnostics,
                         'queue' => self::get_varnish_queue_stats(),
                         'metrics' => self::get_varnish_metrics_status(),
+                        'performanceSnapshot' => self::get_varnish_performance_snapshot_status(),
                         'hasUnsafeEndpoints' => !empty($varnish_endpoint_diagnostics['unsafe']),
                         'unsafeEndpointMessage' => !empty($varnish_endpoint_diagnostics['messages'][0]) ? (string) $varnish_endpoint_diagnostics['messages'][0] : '',
                     )
@@ -215,7 +379,7 @@ public static function get_dashboard_diagnostics($force_storage_refresh = false)
                     'analytics'         => self::get_analytics_diagnostic(),
                     'browserCacheRules' => self::get_path_diagnostic($browser_cache_path, 'file', '# BEGIN UltraCache Browser Cache'),
                 ),
-                'lastCacheWrite' => self::get_page_cache_activity_snapshot(),
+                'lastCacheWrite' => self::get_page_cache_activity_snapshot((bool) $force_storage_refresh),
                 'lastEvent' => self::normalize_last_cache_event($last),
             );
 
@@ -283,22 +447,26 @@ public static function get_dashboard_stats_snapshot($max_age = 60, $allow_refres
         $max_age = max(3, (int) $max_age);
 
         // Count cache stats OFF is a hard stop for dashboard/stat snapshots.
-        // Do not read cached snapshots, refresh engine stats, scan storage,
+        // Do not read persisted snapshots, refresh engine stats, scan storage,
         // count Redis/APCu keys, scan manifests, or touch analytics here.
         if (!self::are_cache_stats_enabled()) {
             return self::get_cache_stats_disabled_payload('snapshot_disabled');
         }
 
-        $cache_key = defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY . '_dashboard_stats_snapshot_v2' : 'ultracache_dashboard_stats_snapshot_v2';
-        $cached = get_transient($cache_key);
+        $record = function_exists('ultracache_get_state_record_read_only')
+            ? ultracache_get_state_record_read_only(self::get_dashboard_stats_state_name())
+            : array();
+        $stored = isset($record['payload']) && is_array($record['payload']) ? $record['payload'] : array();
 
-        if (is_array($cached) && isset($cached['time'], $cached['stats']) && is_array($cached['stats'])) {
-            $age = max(0, $now - (int) $cached['time']);
+        if (isset($stored['time'], $stored['stats']) && is_array($stored['stats'])) {
+            $age = max(0, $now - (int) $stored['time']);
             if ($age <= $max_age || !$allow_refresh) {
-                $stats = $cached['stats'];
+                $stats = $stored['stats'];
                 $stats['dashboardStatsSnapshotCached'] = true;
+                $stats['dashboardStatsSnapshotPersistent'] = true;
                 $stats['dashboardStatsSnapshotAge'] = $age;
                 $stats['dashboardStatsRefreshInterval'] = $max_age;
+                $stats['dashboardStatsSnapshotState'] = $age <= $max_age ? 'current' : 'stale';
                 return $stats;
             }
         }
@@ -307,7 +475,9 @@ public static function get_dashboard_stats_snapshot($max_age = 60, $allow_refres
             $passive = array(
                 'success' => true,
                 'dashboardStatsSnapshotCached' => false,
+                'dashboardStatsSnapshotPersistent' => true,
                 'dashboardStatsRefreshInterval' => $max_age,
+                'dashboardStatsSnapshotState' => empty($stored) ? 'not-measured' : 'stale',
                 'message' => __('Dashboard stats are passive; no refresh was requested.', 'ultracache'),
             );
 
@@ -331,12 +501,18 @@ public static function get_dashboard_stats_snapshot($max_age = 60, $allow_refres
             return $passive;
         }
 
-        $stats = self::get_engine_stats(false, true, false);
-        $stats = is_array($stats) ? $stats : array();
+        $previous_stats = isset($stored['stats']) && is_array($stored['stats']) ? $stored['stats'] : array();
+        $stats = self::build_dashboard_stats_from_persistent_sources($previous_stats);
         $stats['dashboardStatsSnapshotCached'] = false;
+        $stats['dashboardStatsSnapshotPersistent'] = true;
         $stats['dashboardStatsSnapshotAge'] = 0;
         $stats['dashboardStatsRefreshInterval'] = $max_age;
-        set_transient($cache_key, array('time' => $now, 'stats' => $stats), max(30, $max_age * 2));
+        $stats['dashboardStatsSnapshotState'] = 'current';
+        $mutation = self::persist_dashboard_stats_snapshot($stats, $now);
+        if (empty($mutation['success'])) {
+            $stats['dashboardStatsSnapshotPersistent'] = false;
+            $stats['dashboardStatsSnapshotPersistenceError'] = (string) ($mutation['reason'] ?? 'write_failed');
+        }
         return $stats;
     }
 

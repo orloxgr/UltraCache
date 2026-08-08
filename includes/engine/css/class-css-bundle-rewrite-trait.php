@@ -139,7 +139,7 @@ public function add_delayed_icon_font_style_attributes($html, $handle, $href, $m
                 $processor = new WP_HTML_Tag_Processor((string) $html);
                 if ($processor->next_tag('LINK')) {
                     $processor->set_attribute('media', 'print');
-                    $processor->set_attribute('onload', "this.media='all'");
+                    $processor->set_attribute('data-ultracache-target-media', 'all');
                     $processor->set_attribute('data-ultracache-delayed-icon-fonts', '1');
                     $processor->set_attribute('data-ultracache-css-role', 'delayed-fonts-css');
                     $processor->set_attribute('data-ultracache-css-async-reason', 'delayed-fonts');
@@ -228,7 +228,7 @@ private function maybe_build_page_css_bundle_on_entry($html, array $settings = a
 
         $key = $this->get_css_bundle_manifest_key($url);
         if ('' !== $key) {
-            $manifest['version'] = 3;
+            $manifest['version'] = 4;
             $manifest['updatedAt'] = current_time('timestamp');
             $manifest['updatedAtMysql'] = current_time('mysql');
             $manifest['entries'][$key] = $entry;
@@ -792,6 +792,199 @@ private function maybe_replace_page_stylesheet_links_with_bundle($html, $entry_u
         return $updated_html;
     }
 
+private function build_contiguous_css_bundle_runs_from_records(array $records)
+    {
+        $runs = array();
+        $current_run = array();
+
+        $flush_run = static function () use (&$runs, &$current_run) {
+            if (!empty($current_run)) {
+                $runs[] = $current_run;
+                $current_run = array();
+            }
+        };
+
+        foreach ($records as $record) {
+            $record = is_array($record) ? $record : array();
+            if (!empty($record['eligible'])) {
+                $current_run[] = $record;
+                continue;
+            }
+
+            if (!empty($record['boundary'])) {
+                $flush_run();
+            }
+        }
+
+        $flush_run();
+        return $runs;
+    }
+
+private function collect_contiguous_css_bundle_runs_with_processor($html, callable $candidate_resolver)
+    {
+        $collector = new WP_HTML_Tag_Processor($html);
+        $records = array();
+        $skipped = array();
+        $source_urls = array();
+        $link_position = 0;
+        $candidate_count = 0;
+
+        while ($collector->next_tag('LINK')) {
+            $link_position++;
+            $candidate = call_user_func($candidate_resolver, $collector);
+            $candidate = is_array($candidate) ? $candidate : array();
+            $asset = isset($candidate['asset']) && is_array($candidate['asset']) ? $candidate['asset'] : array();
+            $skip = isset($candidate['skip']) ? (string) $candidate['skip'] : '';
+            $url = isset($asset['url']) ? (string) $asset['url'] : '';
+
+            if (!empty($asset) && '' !== $url) {
+                $candidate_count++;
+                $source_urls[] = $url;
+                $records[] = array(
+                    'eligible' => true,
+                    'boundary' => false,
+                    'position' => $link_position,
+                    'url' => $url,
+                    'asset' => $asset,
+                );
+                continue;
+            }
+
+            $skipped[] = $candidate;
+            $records[] = array(
+                'eligible' => false,
+                // Non-stylesheet link tags do not participate in CSS cascade order.
+                'boundary' => ('not-stylesheet' !== $skip),
+                'position' => $link_position,
+                'url' => '',
+                'asset' => array(),
+                'skip' => $skip,
+            );
+        }
+
+        return array(
+            'runs' => $this->build_contiguous_css_bundle_runs_from_records($records),
+            'skipped' => $skipped,
+            'candidateCount' => $candidate_count,
+            'sourceUrls' => array_values(array_unique(array_map('strval', $source_urls))),
+        );
+    }
+
+private function apply_contiguous_css_bundle_runs_with_processor($html, array $plans, $mode)
+    {
+        if (!$this->html_tag_processor_available() || empty($plans) || !is_string($html) || '' === $html) {
+            return null;
+        }
+
+        $position_actions = array();
+        $required_bundle_positions = array();
+        foreach (array_values($plans) as $plan_index => $plan) {
+            $records = isset($plan['records']) && is_array($plan['records']) ? array_values($plan['records']) : array();
+            $bundle_url = isset($plan['bundleUrl']) ? (string) $plan['bundleUrl'] : '';
+            $delayed_font_url = isset($plan['delayedFontUrl']) ? (string) $plan['delayedFontUrl'] : '';
+            if (count($records) < 2 || '' === $bundle_url) {
+                continue;
+            }
+
+            $run_number = $plan_index + 1;
+            foreach ($records as $record_index => $record) {
+                $position = isset($record['position']) ? (int) $record['position'] : 0;
+                if ($position < 1) {
+                    continue;
+                }
+
+                if (0 === $record_index) {
+                    $position_actions[$position] = array(
+                        'action' => 'bundle',
+                        'bundleUrl' => $bundle_url,
+                        'runNumber' => $run_number,
+                    );
+                    $required_bundle_positions[$position] = false;
+                    continue;
+                }
+
+                if ('font-mix' === (string) $mode && 1 === $record_index && '' !== $delayed_font_url) {
+                    $position_actions[$position] = array(
+                        'action' => 'delayed-font',
+                        'delayedFontUrl' => $delayed_font_url,
+                        'runNumber' => $run_number,
+                    );
+                    continue;
+                }
+
+                $position_actions[$position] = array(
+                    'action' => 'neutralize',
+                    'sourceUrl' => isset($record['url']) ? (string) $record['url'] : '',
+                );
+            }
+        }
+
+        if (empty($position_actions) || empty($required_bundle_positions)) {
+            return null;
+        }
+
+        try {
+            $processor = new WP_HTML_Tag_Processor($html);
+            $link_position = 0;
+            $changed = false;
+
+            while ($processor->next_tag('LINK')) {
+                $link_position++;
+                if (!isset($position_actions[$link_position])) {
+                    continue;
+                }
+
+                $action = $position_actions[$link_position];
+                switch ((string) ($action['action'] ?? '')) {
+                    case 'bundle':
+                        if ('font-mix' === (string) $mode) {
+                            $this->rewrite_link_processor_to_font_mix_css_bundle(
+                                $processor,
+                                (string) ($action['bundleUrl'] ?? ''),
+                                (int) ($action['runNumber'] ?? 1)
+                            );
+                        } else {
+                            $this->rewrite_link_processor_to_leftover_css_bundle(
+                                $processor,
+                                (string) ($action['bundleUrl'] ?? ''),
+                                (int) ($action['runNumber'] ?? 1)
+                            );
+                        }
+                        $required_bundle_positions[$link_position] = true;
+                        $changed = true;
+                        break;
+
+                    case 'delayed-font':
+                        $this->rewrite_link_processor_to_delayed_font_mix_icon_fonts(
+                            $processor,
+                            (string) ($action['delayedFontUrl'] ?? ''),
+                            (int) ($action['runNumber'] ?? 1)
+                        );
+                        $changed = true;
+                        break;
+
+                    case 'neutralize':
+                        if ('font-mix' === (string) $mode) {
+                            $this->neutralize_link_processor_for_font_mix_css_source($processor, (string) ($action['sourceUrl'] ?? ''));
+                        } else {
+                            $this->neutralize_link_processor_for_leftover_css_source($processor, (string) ($action['sourceUrl'] ?? ''));
+                        }
+                        $changed = true;
+                        break;
+                }
+            }
+
+            if (!$changed || in_array(false, $required_bundle_positions, true)) {
+                return null;
+            }
+
+            $updated_html = $processor->get_updated_html();
+            return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
 private function maybe_consolidate_leftover_stylesheet_links($html, array $settings = array())
     {
         $stats = $this->get_leftover_css_bundle_default_stats();
@@ -832,89 +1025,90 @@ private function maybe_consolidate_leftover_stylesheet_links_with_processor($htm
 
         try {
             $page_url = $this->get_current_request_url();
-            $assets = array();
-            $matched_urls = array();
-            $seen = array();
-            $collector = new WP_HTML_Tag_Processor($html);
+            $collected = $this->collect_contiguous_css_bundle_runs_with_processor(
+                $html,
+                function ($processor) use ($page_url, $settings) {
+                    return $this->get_leftover_css_bundle_candidate_from_link_processor($processor, $page_url, $settings);
+                }
+            );
 
-            while ($collector->next_tag('LINK')) {
-                $candidate = $this->get_leftover_css_bundle_candidate_from_link_processor($collector, $page_url, $settings);
-                $asset = isset($candidate['asset']) && is_array($candidate['asset']) ? $candidate['asset'] : array();
+            foreach ((array) ($collected['skipped'] ?? array()) as $candidate) {
                 $skip = isset($candidate['skip']) ? (string) $candidate['skip'] : '';
+                switch ($skip) {
+                    case 'protected':
+                        $stats['skipped_protected_count']++;
+                        if (!empty($candidate['url']) && count($stats['protected_urls']) < 20) {
+                            $stats['protected_urls'][] = array(
+                                'url' => (string) $candidate['url'],
+                                'reason' => isset($candidate['reason']) ? (string) $candidate['reason'] : 'protected',
+                            );
+                        }
+                        break;
+                    case 'nonlocal':
+                        $stats['skipped_nonlocal_count']++;
+                        break;
+                    case 'unreadable':
+                        $stats['skipped_unreadable_count']++;
+                        break;
+                    case 'async':
+                    case 'external-css-async-wins-bundle':
+                        $stats['skipped_async_count']++;
+                        break;
+                    case 'media':
+                        $stats['skipped_media_count']++;
+                        break;
+                    case 'existing-bundle':
+                        $stats['skipped_existing_bundle_count']++;
+                        break;
+                }
+            }
 
-                if (empty($asset)) {
-                    switch ($skip) {
-                        case 'protected':
-                            $stats['skipped_protected_count']++;
-                            if (!empty($candidate['url']) && count($stats['protected_urls']) < 20) {
-                                $stats['protected_urls'][] = array(
-                                    'url' => (string) $candidate['url'],
-                                    'reason' => isset($candidate['reason']) ? (string) $candidate['reason'] : 'protected',
-                                );
-                            }
-                            break;
-                        case 'nonlocal':
-                            $stats['skipped_nonlocal_count']++;
-                            break;
-                        case 'unreadable':
-                            $stats['skipped_unreadable_count']++;
-                            break;
-                        case 'async':
-                        case 'external-css-async-wins-bundle':
-                            $stats['skipped_async_count']++;
-                            break;
-                        case 'media':
-                            $stats['skipped_media_count']++;
-                            break;
-                        case 'existing-bundle':
-                            $stats['skipped_existing_bundle_count']++;
-                            break;
-                    }
+            $stats['candidate_count'] = max(0, (int) ($collected['candidateCount'] ?? 0));
+            $stats['source_urls'] = isset($collected['sourceUrls']) && is_array($collected['sourceUrls']) ? $collected['sourceUrls'] : array();
+            $runs = array_values(array_filter((array) ($collected['runs'] ?? array()), static function ($run) {
+                return is_array($run) && count($run) >= 2;
+            }));
+
+            if (empty($runs)) {
+                $stats['skipped_reason'] = 'not-enough-contiguous-eligible-leftover-css';
+                $this->record_leftover_css_bundle_profile($stats);
+                return $html;
+            }
+
+            $plans = array();
+            foreach ($runs as $run) {
+                $assets = array_values(array_map(static function ($record) {
+                    return isset($record['asset']) && is_array($record['asset']) ? $record['asset'] : array();
+                }, $run));
+                $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, 'leftover');
+                if (empty($bundle['success'])) {
                     continue;
                 }
 
-                $url = (string) ($asset['url'] ?? '');
-                if ('' === $url || isset($seen[$url])) {
+                $bundle_url = isset($bundle['url']) ? (string) $bundle['url'] : '';
+                $bundle_file = isset($bundle['file']) ? (string) $bundle['file'] : '';
+                if ('' === $bundle_url || '' === $bundle_file || !is_readable($bundle_file) || !empty($bundle['delayedFontUrl'])) {
                     continue;
                 }
 
-                $seen[$url] = true;
-                $assets[] = $asset;
-                $matched_urls[] = $url;
+                $plans[] = array(
+                    'records' => $run,
+                    'bundleUrl' => $bundle_url,
+                    'bundleFile' => $bundle_file,
+                    'bundleBytes' => (int) filesize($bundle_file),
+                    'sourceBytesTotal' => isset($bundle['sourceBytesTotal']) ? (int) $bundle['sourceBytesTotal'] : 0,
+                    'sourceDetails' => isset($bundle['sourceDetails']) && is_array($bundle['sourceDetails']) ? $bundle['sourceDetails'] : array(),
+                    'delayedFontUrl' => '',
+                );
             }
 
-            $stats['candidate_count'] = count($assets);
-            $stats['source_urls'] = array_values(array_map('strval', array_keys($seen)));
-
-            if (count($assets) < 2 || count($matched_urls) < 2) {
-                $stats['skipped_reason'] = 'not-enough-eligible-leftover-css';
+            if (empty($plans)) {
+                $stats['skipped_reason'] = 'contiguous-leftover-css-bundle-build-failed';
                 $this->record_leftover_css_bundle_profile($stats);
                 return $html;
             }
 
-            $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, 'leftover');
-            if (empty($bundle['success'])) {
-                $stats['skipped_reason'] = !empty($bundle['message']) ? (string) $bundle['message'] : 'bundle-build-failed';
-                $this->record_leftover_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $bundle_url = isset($bundle['url']) ? (string) $bundle['url'] : '';
-            $bundle_file = isset($bundle['file']) ? (string) $bundle['file'] : '';
-            if ('' === $bundle_url || '' === $bundle_file || !is_readable($bundle_file)) {
-                $stats['skipped_reason'] = 'bundle-file-unreadable';
-                $this->record_leftover_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $delayed_font_url = !empty($bundle['delayedFontUrl']) ? (string) $bundle['delayedFontUrl'] : '';
-            if ('' !== $delayed_font_url) {
-                $stats['skipped_reason'] = 'delayed-font-css-requires-enqueue-phase';
-                $this->record_leftover_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $updated = $this->apply_leftover_css_bundle_links_with_processor($html, $matched_urls, $bundle_url, '');
+            $updated = $this->apply_contiguous_css_bundle_runs_with_processor($html, $plans, 'leftover');
             if (!is_string($updated) || '' === $updated || $updated === $html) {
                 $stats['skipped_reason'] = 'html-api-replacement-failed';
                 $this->record_leftover_css_bundle_profile($stats);
@@ -922,12 +1116,19 @@ private function maybe_consolidate_leftover_stylesheet_links_with_processor($htm
             }
 
             $stats['success'] = true;
-            $stats['replaced_link_count'] = count($matched_urls);
-            $stats['bundle_url'] = $bundle_url;
-            $stats['bundle_file'] = $bundle_file;
-            $stats['bundle_bytes'] = is_readable($bundle_file) ? (int) filesize($bundle_file) : 0;
-            $stats['source_bytes_total'] = isset($bundle['sourceBytesTotal']) ? (int) $bundle['sourceBytesTotal'] : 0;
-            $stats['source_details'] = isset($bundle['sourceDetails']) && is_array($bundle['sourceDetails']) ? $bundle['sourceDetails'] : array();
+            $stats['run_count'] = count($plans);
+            $stats['replaced_link_count'] = array_sum(array_map(static function ($plan) {
+                return count((array) ($plan['records'] ?? array()));
+            }, $plans));
+            $stats['bundle_urls'] = array_values(array_map(static function ($plan) { return (string) ($plan['bundleUrl'] ?? ''); }, $plans));
+            $stats['bundle_files'] = array_values(array_map(static function ($plan) { return (string) ($plan['bundleFile'] ?? ''); }, $plans));
+            $stats['bundle_url'] = (string) ($stats['bundle_urls'][0] ?? '');
+            $stats['bundle_file'] = (string) ($stats['bundle_files'][0] ?? '');
+            $stats['bundle_bytes'] = array_sum(array_map(static function ($plan) { return (int) ($plan['bundleBytes'] ?? 0); }, $plans));
+            $stats['source_bytes_total'] = array_sum(array_map(static function ($plan) { return (int) ($plan['sourceBytesTotal'] ?? 0); }, $plans));
+            $stats['source_details'] = array_values(array_merge(...array_map(static function ($plan) {
+                return (array) ($plan['sourceDetails'] ?? array());
+            }, $plans)));
             $this->record_leftover_css_bundle_profile($stats);
 
             return $updated;
@@ -936,70 +1137,12 @@ private function maybe_consolidate_leftover_stylesheet_links_with_processor($htm
         }
     }
 
-private function apply_leftover_css_bundle_links_with_processor($html, array $source_urls, $bundle_url, $delayed_font_url = '')
-    {
-        if (!$this->html_tag_processor_available() || empty($source_urls) || !is_string($html) || '' === $html) {
-            return null;
-        }
-
-        $source_map = array();
-        foreach ($source_urls as $url) {
-            $url = (string) $url;
-            if ('' !== $url) {
-                $source_map[strtolower($url)] = $url;
-            }
-        }
-
-        if (empty($source_map)) {
-            return null;
-        }
-
-        try {
-            $processor = new WP_HTML_Tag_Processor($html);
-            $changed = false;
-            $applied_bundle = false;
-
-            while ($processor->next_tag('LINK')) {
-                $href = $processor->get_attribute('href');
-                $href = is_string($href) ? html_entity_decode($href, ENT_QUOTES | ENT_HTML5) : '';
-                if ('' === $href) {
-                    continue;
-                }
-
-                $absolute = $this->absolutize_public_resource_url($href, home_url('/'));
-                $key = strtolower((string) $absolute);
-                if ('' === $key || !isset($source_map[$key])) {
-                    continue;
-                }
-
-                if (!$applied_bundle) {
-                    $this->rewrite_link_processor_to_leftover_css_bundle($processor, $bundle_url);
-                    $applied_bundle = true;
-                    $changed = true;
-                    continue;
-                }
-
-
-                $this->neutralize_link_processor_for_leftover_css_source($processor, $source_map[$key]);
-                $changed = true;
-            }
-
-            if (!$changed || !$applied_bundle) {
-                return null;
-            }
-
-            $updated_html = $processor->get_updated_html();
-            return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
-        } catch (\Throwable $e) {
-            return null;
-        }
-    }
-
-private function rewrite_link_processor_to_leftover_css_bundle($processor, $bundle_url)
+private function rewrite_link_processor_to_leftover_css_bundle($processor, $bundle_url, $run_number = 1)
     {
         $this->clear_leftover_css_link_processor_attributes($processor);
         $processor->set_attribute('rel', 'stylesheet');
-        $processor->set_attribute('id', 'ultracache-leftover-css-bundle');
+        $run_number = max(1, (int) $run_number);
+        $processor->set_attribute('id', 1 === $run_number ? 'ultracache-leftover-css-bundle' : 'ultracache-leftover-css-bundle-' . $run_number);
         $processor->set_attribute('href', (string) $bundle_url);
         $processor->set_attribute('data-ultracache-leftover-css-bundle', '1');
         $processor->set_attribute('data-ultracache-css-role', 'leftover-bundle');
@@ -1059,73 +1202,83 @@ private function maybe_consolidate_font_mix_stylesheet_links_with_processor($htm
 
         try {
             $page_url = $this->get_current_request_url();
-            $assets = array();
-            $matched_urls = array();
-            $seen = array();
-            $collector = new WP_HTML_Tag_Processor($html);
+            $collected = $this->collect_contiguous_css_bundle_runs_with_processor(
+                $html,
+                function ($processor) use ($page_url) {
+                    return $this->get_font_mix_css_bundle_candidate_from_link_processor($processor, $page_url);
+                }
+            );
 
-            while ($collector->next_tag('LINK')) {
-                $candidate = $this->get_font_mix_css_bundle_candidate_from_link_processor($collector, $page_url);
-                $asset = isset($candidate['asset']) && is_array($candidate['asset']) ? $candidate['asset'] : array();
+            foreach ((array) ($collected['skipped'] ?? array()) as $candidate) {
                 $skip = isset($candidate['skip']) ? (string) $candidate['skip'] : '';
+                switch ($skip) {
+                    case 'nonlocal':
+                        $stats['skipped_nonlocal_count']++;
+                        break;
+                    case 'unreadable':
+                        $stats['skipped_unreadable_count']++;
+                        break;
+                    case 'async':
+                        $stats['skipped_async_count']++;
+                        break;
+                    case 'media':
+                        $stats['skipped_media_count']++;
+                        break;
+                    case 'existing-bundle':
+                        $stats['skipped_existing_bundle_count']++;
+                        break;
+                }
+            }
 
-                if (empty($asset)) {
-                    switch ($skip) {
-                        case 'nonlocal':
-                            $stats['skipped_nonlocal_count']++;
-                            break;
-                        case 'unreadable':
-                            $stats['skipped_unreadable_count']++;
-                            break;
-                        case 'async':
-                            $stats['skipped_async_count']++;
-                            break;
-                        case 'media':
-                            $stats['skipped_media_count']++;
-                            break;
-                        case 'existing-bundle':
-                            $stats['skipped_existing_bundle_count']++;
-                            break;
-                    }
+            $stats['candidate_count'] = max(0, (int) ($collected['candidateCount'] ?? 0));
+            $stats['source_urls'] = isset($collected['sourceUrls']) && is_array($collected['sourceUrls']) ? $collected['sourceUrls'] : array();
+            $runs = array_values(array_filter((array) ($collected['runs'] ?? array()), static function ($run) {
+                return is_array($run) && count($run) >= 2;
+            }));
+
+            if (empty($runs)) {
+                $stats['skipped_reason'] = 'not-enough-contiguous-font-mix-css';
+                $this->record_font_mix_css_bundle_profile($stats);
+                return $html;
+            }
+
+            $plans = array();
+            foreach ($runs as $run) {
+                $assets = array_values(array_map(static function ($record) {
+                    return isset($record['asset']) && is_array($record['asset']) ? $record['asset'] : array();
+                }, $run));
+                $bundle = $this->build_font_mix_css_bundle_file($assets);
+                if (empty($bundle['success'])) {
                     continue;
                 }
 
-                $url = (string) ($asset['url'] ?? '');
-                if ('' === $url || isset($seen[$url])) {
+                $bundle_url = isset($bundle['url']) ? (string) $bundle['url'] : '';
+                $bundle_file = isset($bundle['file']) ? (string) $bundle['file'] : '';
+                if ('' === $bundle_url || '' === $bundle_file || !is_readable($bundle_file)) {
                     continue;
                 }
 
-                $seen[$url] = true;
-                $assets[] = $asset;
-                $matched_urls[] = $url;
+                $plans[] = array(
+                    'records' => $run,
+                    'bundleUrl' => $bundle_url,
+                    'bundleFile' => $bundle_file,
+                    'bundleBytes' => (int) filesize($bundle_file),
+                    'sourceBytesTotal' => isset($bundle['sourceBytesTotal']) ? (int) $bundle['sourceBytesTotal'] : 0,
+                    'sourceDetails' => isset($bundle['sourceDetails']) && is_array($bundle['sourceDetails']) ? $bundle['sourceDetails'] : array(),
+                    'delayedFontUrl' => isset($bundle['delayedFontUrl']) ? (string) $bundle['delayedFontUrl'] : '',
+                    'delayedFontFile' => isset($bundle['delayedFontFile']) ? (string) $bundle['delayedFontFile'] : '',
+                    'delayedFontBytes' => isset($bundle['delayedFontBytes']) ? (int) $bundle['delayedFontBytes'] : 0,
+                    'delayedFontFaceBlocks' => isset($bundle['delayedFontFaceBlocks']) ? (int) $bundle['delayedFontFaceBlocks'] : 0,
+                );
             }
 
-            $stats['candidate_count'] = count($assets);
-            $stats['source_urls'] = array_values(array_map('strval', array_keys($seen)));
-
-            if (count($assets) < 2 || count($matched_urls) < 2) {
-                $stats['skipped_reason'] = 'not-enough-font-mix-css';
+            if (empty($plans)) {
+                $stats['skipped_reason'] = 'contiguous-font-mix-css-bundle-build-failed';
                 $this->record_font_mix_css_bundle_profile($stats);
                 return $html;
             }
 
-            $bundle = $this->build_font_mix_css_bundle_file($assets);
-            if (empty($bundle['success'])) {
-                $stats['skipped_reason'] = !empty($bundle['message']) ? (string) $bundle['message'] : 'bundle-build-failed';
-                $this->record_font_mix_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $bundle_url = isset($bundle['url']) ? (string) $bundle['url'] : '';
-            $bundle_file = isset($bundle['file']) ? (string) $bundle['file'] : '';
-            if ('' === $bundle_url || '' === $bundle_file || !is_readable($bundle_file)) {
-                $stats['skipped_reason'] = 'bundle-file-unreadable';
-                $this->record_font_mix_css_bundle_profile($stats);
-                return $html;
-            }
-
-            $delayed_font_url = !empty($bundle['delayedFontUrl']) ? (string) $bundle['delayedFontUrl'] : '';
-            $updated = $this->apply_font_mix_css_bundle_links_with_processor($html, $matched_urls, $bundle_url, $delayed_font_url);
+            $updated = $this->apply_contiguous_css_bundle_runs_with_processor($html, $plans, 'font-mix');
             if (!is_string($updated) || '' === $updated || $updated === $html) {
                 $stats['skipped_reason'] = 'html-api-replacement-failed';
                 $this->record_font_mix_css_bundle_profile($stats);
@@ -1133,16 +1286,21 @@ private function maybe_consolidate_font_mix_stylesheet_links_with_processor($htm
             }
 
             $stats['success'] = true;
-            $stats['replaced_link_count'] = count($matched_urls);
-            $stats['bundle_url'] = $bundle_url;
-            $stats['bundle_file'] = $bundle_file;
-            $stats['bundle_bytes'] = is_readable($bundle_file) ? (int) filesize($bundle_file) : 0;
-            $stats['delayed_font_url'] = (string) ($bundle['delayedFontUrl'] ?? '');
-            $stats['delayed_font_file'] = (string) ($bundle['delayedFontFile'] ?? '');
-            $stats['delayed_font_bytes'] = isset($bundle['delayedFontBytes']) ? (int) $bundle['delayedFontBytes'] : 0;
-            $stats['delayed_font_face_blocks'] = isset($bundle['delayedFontFaceBlocks']) ? (int) $bundle['delayedFontFaceBlocks'] : 0;
-            $stats['source_bytes_total'] = isset($bundle['sourceBytesTotal']) ? (int) $bundle['sourceBytesTotal'] : 0;
-            $stats['source_details'] = isset($bundle['sourceDetails']) && is_array($bundle['sourceDetails']) ? $bundle['sourceDetails'] : array();
+            $stats['run_count'] = count($plans);
+            $stats['replaced_link_count'] = array_sum(array_map(static function ($plan) { return count((array) ($plan['records'] ?? array())); }, $plans));
+            $stats['bundle_urls'] = array_values(array_map(static function ($plan) { return (string) ($plan['bundleUrl'] ?? ''); }, $plans));
+            $stats['bundle_files'] = array_values(array_map(static function ($plan) { return (string) ($plan['bundleFile'] ?? ''); }, $plans));
+            $stats['bundle_url'] = (string) ($stats['bundle_urls'][0] ?? '');
+            $stats['bundle_file'] = (string) ($stats['bundle_files'][0] ?? '');
+            $stats['bundle_bytes'] = array_sum(array_map(static function ($plan) { return (int) ($plan['bundleBytes'] ?? 0); }, $plans));
+            $stats['delayed_font_urls'] = array_values(array_filter(array_map(static function ($plan) { return (string) ($plan['delayedFontUrl'] ?? ''); }, $plans)));
+            $stats['delayed_font_files'] = array_values(array_filter(array_map(static function ($plan) { return (string) ($plan['delayedFontFile'] ?? ''); }, $plans)));
+            $stats['delayed_font_url'] = (string) ($stats['delayed_font_urls'][0] ?? '');
+            $stats['delayed_font_file'] = (string) ($stats['delayed_font_files'][0] ?? '');
+            $stats['delayed_font_bytes'] = array_sum(array_map(static function ($plan) { return (int) ($plan['delayedFontBytes'] ?? 0); }, $plans));
+            $stats['delayed_font_face_blocks'] = array_sum(array_map(static function ($plan) { return (int) ($plan['delayedFontFaceBlocks'] ?? 0); }, $plans));
+            $stats['source_bytes_total'] = array_sum(array_map(static function ($plan) { return (int) ($plan['sourceBytesTotal'] ?? 0); }, $plans));
+            $stats['source_details'] = array_values(array_merge(...array_map(static function ($plan) { return (array) ($plan['sourceDetails'] ?? array()); }, $plans)));
             $this->record_font_mix_css_bundle_profile($stats);
 
             return $updated;
@@ -1151,76 +1309,12 @@ private function maybe_consolidate_font_mix_stylesheet_links_with_processor($htm
         }
     }
 
-private function apply_font_mix_css_bundle_links_with_processor($html, array $source_urls, $bundle_url, $delayed_font_url = '')
-    {
-        if (!$this->html_tag_processor_available() || empty($source_urls) || !is_string($html) || '' === $html) {
-            return null;
-        }
-
-        $source_map = array();
-        foreach ($source_urls as $url) {
-            $url = (string) $url;
-            if ('' !== $url) {
-                $source_map[strtolower($url)] = $url;
-            }
-        }
-
-        if (empty($source_map)) {
-            return null;
-        }
-
-        try {
-            $processor = new WP_HTML_Tag_Processor($html);
-            $changed = false;
-            $applied_bundle = false;
-
-            while ($processor->next_tag('LINK')) {
-                $href = $processor->get_attribute('href');
-                $href = is_string($href) ? html_entity_decode($href, ENT_QUOTES | ENT_HTML5) : '';
-                if ('' === $href) {
-                    continue;
-                }
-
-                $absolute = $this->normalize_public_resource_url($this->absolutize_public_resource_url($href, home_url('/')));
-                $key = strtolower((string) $absolute);
-                if ('' === $key || !isset($source_map[$key])) {
-                    continue;
-                }
-
-                if (!$applied_bundle) {
-                    $this->rewrite_link_processor_to_font_mix_css_bundle($processor, $bundle_url);
-                    $applied_bundle = true;
-                    $changed = true;
-                    continue;
-                }
-
-                if ('' !== (string) $delayed_font_url) {
-                    $this->rewrite_link_processor_to_delayed_font_mix_icon_fonts($processor, $delayed_font_url);
-                    $delayed_font_url = '';
-                    $changed = true;
-                    continue;
-                }
-
-                $this->neutralize_link_processor_for_font_mix_css_source($processor, $source_map[$key]);
-                $changed = true;
-            }
-
-            if (!$changed || !$applied_bundle) {
-                return null;
-            }
-
-            $updated_html = $processor->get_updated_html();
-            return is_string($updated_html) && '' !== $updated_html ? $updated_html : null;
-        } catch (\Throwable $e) {
-            return null;
-        }
-    }
-
-private function rewrite_link_processor_to_font_mix_css_bundle($processor, $bundle_url)
+private function rewrite_link_processor_to_font_mix_css_bundle($processor, $bundle_url, $run_number = 1)
     {
         $this->clear_leftover_css_link_processor_attributes($processor);
         $processor->set_attribute('rel', 'stylesheet');
-        $processor->set_attribute('id', 'ultracache-font-mix-css-bundle');
+        $run_number = max(1, (int) $run_number);
+        $processor->set_attribute('id', 1 === $run_number ? 'ultracache-font-mix-css-bundle' : 'ultracache-font-mix-css-bundle-' . $run_number);
         $processor->set_attribute('href', (string) $bundle_url);
         $processor->set_attribute('media', 'all');
         $processor->set_attribute('data-ultracache-font-mix-css-bundle', '1');
@@ -1228,14 +1322,15 @@ private function rewrite_link_processor_to_font_mix_css_bundle($processor, $bund
         $processor->set_attribute('data-ultracache-css-blocking-reason', 'font-mix-bundle-layout-risk');
     }
 
-private function rewrite_link_processor_to_delayed_font_mix_icon_fonts($processor, $delayed_font_url)
+private function rewrite_link_processor_to_delayed_font_mix_icon_fonts($processor, $delayed_font_url, $run_number = 1)
     {
         $this->clear_leftover_css_link_processor_attributes($processor);
         $processor->set_attribute('rel', 'stylesheet');
-        $processor->set_attribute('id', 'ultracache-font-mix-delayed-icon-fonts');
+        $run_number = max(1, (int) $run_number);
+        $processor->set_attribute('id', 1 === $run_number ? 'ultracache-font-mix-delayed-icon-fonts' : 'ultracache-font-mix-delayed-icon-fonts-' . $run_number);
         $processor->set_attribute('href', (string) $delayed_font_url);
         $processor->set_attribute('media', 'print');
-        $processor->set_attribute('onload', "this.media='all'");
+        $processor->set_attribute('data-ultracache-target-media', 'all');
         $processor->set_attribute('data-ultracache-delayed-icon-fonts', '1');
         $processor->set_attribute('data-ultracache-font-mix-delayed-icon-fonts', '1');
         $processor->set_attribute('data-ultracache-css-role', 'delayed-fonts-css');

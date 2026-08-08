@@ -52,7 +52,7 @@ trait ULTRACACHE_CLI_Media_Trait
     public function media($args, $assoc_args)
     {
         $media = $this->get_media();
-        if (!$media || !method_exists($media, 'generate_attachment_formats')) {
+        if (!$media || !method_exists($media, 'process_queued_attachment') || !method_exists($media, 'process_media_queue_batch')) {
             WP_CLI::error('Media converter is not available.');
         }
 
@@ -121,22 +121,49 @@ trait ULTRACACHE_CLI_Media_Trait
 
             $progress = \WP_CLI\Utils\make_progress_bar('Generating media variants', count($ids));
             $attachments = 0;
+            $unit_attempts = 0;
+            $unit_failures = 0;
             $avif = 0;
             $webp = 0;
             $failed = 0;
             foreach ($ids as $attachment_id) {
-                $result = $media->generate_attachment_formats((int) $attachment_id, $format, $only_missing);
-                if (!empty($result['success'])) {
-                    $attachments++;
+                $attachment_failed = false;
+                do {
+                    $result = $media->process_queued_attachment((int) $attachment_id, $format, $only_missing);
+                    $unit_attempts += max(0, (int) ($result['workCompletedThisRun'] ?? 0));
                     $avif += (int) ($result['avif'] ?? 0);
                     $webp += (int) ($result['webp'] ?? 0);
-                } else {
+                    if (empty($result['success']) && (int) ($result['workCompletedThisRun'] ?? 0) > 0) {
+                        $unit_failures += max(1, (int) ($result['workCompletedThisRun'] ?? 0));
+                    }
+                    $queue_status = (string) ($result['queueStatus'] ?? '');
+                    if (empty($result['success']) || 'failed' === $queue_status) {
+                        $attachment_failed = true;
+                        break;
+                    }
+                    if (!empty($result['complete']) || in_array($queue_status, array('done', 'skipped'), true)) {
+                        break;
+                    }
+                    if (!empty($result['paused']) || (int) ($result['workCompletedThisRun'] ?? 0) <= 0) {
+                        $attachment_failed = true;
+                        break;
+                    }
+                } while (true);
+
+                if ($attachment_failed) {
                     $failed++;
+                } else {
+                    $attachments++;
                 }
                 $progress->tick();
             }
             $progress->finish();
-            WP_CLI::success(sprintf('Processed %d attachments. Generated %d AVIF and %d WebP files. Failed: %d.', $attachments, $avif, $webp, $failed));
+            $message = sprintf('Processed %d attachment(s) across %d physical unit attempt(s). Generated %d AVIF and %d WebP files. Failed attachments: %d. Failed unit attempts: %d.', $attachments, $unit_attempts, $avif, $webp, $failed, $unit_failures);
+            if ($failed > 0) {
+                WP_CLI::warning($message);
+            } else {
+                WP_CLI::success($message);
+            }
             return;
         }
 
@@ -234,9 +261,9 @@ trait ULTRACACHE_CLI_Media_Trait
                 }
                 $print_result($result);
                 if (!empty($result['cancelled']) && 'json' !== $output_format) {
-                    WP_CLI::warning(sprintf('Media queue batch cancelled cleanly. Processed %d attachment(s). Remaining: %d.', (int) ($result['processed'] ?? 0), (int) ($result['remaining'] ?? 0)));
+                    WP_CLI::warning(sprintf('Media queue batch cancelled cleanly. Touched %d parent request(s), attempted %d physical unit(s), and completed %d attachment(s). Remaining attachments: %d.', (int) ($result['parentsTouchedThisRun'] ?? $result['processed'] ?? 0), (int) ($result['unitAttemptsThisRun'] ?? $result['unitsProcessed'] ?? 0), (int) ($result['attachmentsCompletedThisRun'] ?? 0), (int) ($result['remaining'] ?? 0)));
                 } elseif ('json' !== $output_format) {
-                    WP_CLI::success(sprintf('Media queue batch processed: %d attachment(s). Generated %d AVIF and %d WebP. Failed this run: %d. Remaining: %d.', (int) ($result['processed'] ?? 0), (int) ($result['avif'] ?? 0), (int) ($result['webp'] ?? 0), (int) ($result['failedThisRun'] ?? 0), (int) ($result['remaining'] ?? 0)));
+                    WP_CLI::success(sprintf('Media queue batch: touched %d parent request(s), attempted %d physical unit(s), completed %d attachment(s), generated %d AVIF and %d WebP. Unit failures this run: %d. Remaining attachments: %d.', (int) ($result['parentsTouchedThisRun'] ?? $result['processed'] ?? 0), (int) ($result['unitAttemptsThisRun'] ?? $result['unitsProcessed'] ?? 0), (int) ($result['attachmentsCompletedThisRun'] ?? 0), (int) ($result['avif'] ?? 0), (int) ($result['webp'] ?? 0), (int) ($result['unitFailuresThisRun'] ?? $result['failedThisRun'] ?? 0), (int) ($result['remaining'] ?? 0)));
                 }
                 return;
             }
@@ -264,15 +291,31 @@ trait ULTRACACHE_CLI_Media_Trait
         $time_budget = isset($assoc_args['time-budget']) ? max(0, absint($assoc_args['time-budget'])) : 20;
         $max_batches = isset($assoc_args['max-batches']) ? max(0, absint($assoc_args['max-batches'])) : 0;
 
-        $total_processed = 0;
+        $total_parent_touches = 0;
+        $total_attachment_touches = 0;
+        $total_local_asset_touches = 0;
+        $total_attachments_completed = 0;
+        $total_attachments_failed = 0;
+        $total_local_assets_completed = 0;
+        $total_local_assets_failed = 0;
+        $total_unit_attempts = 0;
+        $total_units_resolved = 0;
+        $total_units_skipped = 0;
+        $total_units_already_optimized = 0;
+        $total_unit_failures = 0;
+        $total_terminal_unit_failures = 0;
+        $total_unit_migration_parents = 0;
+        $total_unit_migration_changed_parents = 0;
+        $total_unit_migration_changed_units = 0;
         $total_avif = 0;
         $total_webp = 0;
-        $total_failed = 0;
         $total_skipped = 0;
         $batches = 0;
         $last_result = array();
         $pause_reason = '';
         $cancelled = false;
+        $previous_persisted_signature = '';
+        $unchanged_persisted_batches = 0;
 
         $this->begin_media_cli_interrupt_handling();
         try {
@@ -294,22 +337,44 @@ trait ULTRACACHE_CLI_Media_Trait
                     },
                 ));
 
-                $processed = (int) ($last_result['processed'] ?? 0);
-                $remaining = (int) ($last_result['remaining'] ?? 0);
+                $parent_touches = max(0, (int) ($last_result['parentsTouchedThisRun'] ?? $last_result['processed'] ?? 0));
+                $attachment_touches = max(0, (int) ($last_result['attachmentsTouchedThisRun'] ?? 0));
+                $local_asset_touches = max(0, (int) ($last_result['localAssetsTouchedThisRun'] ?? 0));
+                $unit_attempts = max(0, (int) ($last_result['unitAttemptsThisRun'] ?? $last_result['unitsProcessed'] ?? 0));
+                $unit_migration_parents = max(0, (int) ($last_result['unitMigrationParentsThisRun'] ?? 0));
+                $remaining = max(0, (int) ($last_result['remaining'] ?? 0));
 
-                $total_processed += $processed;
+                $total_parent_touches += $parent_touches;
+                $total_attachment_touches += $attachment_touches;
+                $total_local_asset_touches += $local_asset_touches;
+                $total_attachments_completed += max(0, (int) ($last_result['attachmentsCompletedThisRun'] ?? 0));
+                $total_attachments_failed += max(0, (int) ($last_result['attachmentsFailedThisRun'] ?? 0));
+                $total_local_assets_completed += max(0, (int) ($last_result['localAssetsCompletedThisRun'] ?? 0));
+                $total_local_assets_failed += max(0, (int) ($last_result['localAssetsFailedThisRun'] ?? 0));
+                $total_unit_attempts += $unit_attempts;
+                $total_units_resolved += max(0, (int) ($last_result['unitsResolvedThisRun'] ?? 0));
+                $total_units_skipped += max(0, (int) ($last_result['unitsSkippedThisRun'] ?? 0));
+                $total_units_already_optimized += max(0, (int) ($last_result['unitsAlreadyOptimizedThisRun'] ?? 0));
+                $total_unit_failures += max(0, (int) ($last_result['unitFailuresThisRun'] ?? 0));
+                $total_terminal_unit_failures += max(0, (int) ($last_result['terminalUnitFailuresThisRun'] ?? 0));
+                $total_unit_migration_parents += $unit_migration_parents;
+                $total_unit_migration_changed_parents += max(0, (int) ($last_result['unitMigrationChangedParentsThisRun'] ?? 0));
+                $total_unit_migration_changed_units += max(0, (int) ($last_result['unitMigrationChangedUnitsThisRun'] ?? 0));
                 $total_avif += (int) ($last_result['avif'] ?? 0);
                 $total_webp += (int) ($last_result['webp'] ?? 0);
-                $total_failed += (int) ($last_result['failedThisRun'] ?? 0);
                 $total_skipped += (int) ($last_result['skippedThisRun'] ?? 0) + (int) ($last_result['alreadyOptimizedThisRun'] ?? 0);
 
                 if ('json' !== $output_format) {
                     WP_CLI::log(sprintf(
-                        'Processed %d attachment(s). Generated %d AVIF / %d WebP. Remaining: %d.',
-                        $processed,
+                        'Touched %d parent request(s); attempted %d physical unit(s); materialized/reconciled %d parent inventory row(s); completed %d attachment(s); generated %d AVIF / %d WebP; remaining attachments: %d; remaining units: %d.',
+                        $parent_touches,
+                        $unit_attempts,
+                        $unit_migration_parents,
+                        (int) ($last_result['attachmentsCompletedThisRun'] ?? 0),
                         (int) ($last_result['avif'] ?? 0),
                         (int) ($last_result['webp'] ?? 0),
-                        $remaining
+                        $remaining,
+                        max(0, (int) ($last_result['unitRemaining'] ?? 0))
                     ));
                 }
 
@@ -318,22 +383,56 @@ trait ULTRACACHE_CLI_Media_Trait
                     $pause_reason = 'cancelled';
                     break;
                 }
-
                 if (!empty($last_result['leaseLost'])) {
                     $pause_reason = 'lease_lost';
                     break;
                 }
 
-                if (!empty($last_result['isComplete']) || !empty($last_result['complete']) || $remaining <= 0) {
+                $persisted_signature_values = array(
+                    max(0, (int) ($last_result['remaining'] ?? 0)),
+                    max(0, (int) ($last_result['unitOutstanding'] ?? 0)),
+                    max(0, (int) ($last_result['unitPending'] ?? 0)),
+                    max(0, (int) ($last_result['unitProcessing'] ?? 0)),
+                    max(0, (int) ($last_result['unitDone'] ?? 0)),
+                    max(0, (int) ($last_result['unitSkipped'] ?? 0)),
+                    max(0, (int) ($last_result['unitFailed'] ?? 0)),
+                    max(0, (int) ($last_result['unitUnmaterializedParents'] ?? 0)),
+                    max(0, (int) ($last_result['attachmentPending'] ?? 0)),
+                    max(0, (int) ($last_result['localAssetPending'] ?? 0)),
+                );
+                $persisted_signature = implode(':', array_map('strval', $persisted_signature_values));
+                $signature_has_outstanding = $persisted_signature_values[0] > 0
+                    || $persisted_signature_values[1] > 0
+                    || $persisted_signature_values[7] > 0;
+                if ($signature_has_outstanding && '' !== $previous_persisted_signature && hash_equals($previous_persisted_signature, $persisted_signature)) {
+                    $unchanged_persisted_batches++;
+                } else {
+                    $unchanged_persisted_batches = 0;
+                }
+                $previous_persisted_signature = $persisted_signature;
+                if ($signature_has_outstanding && $unchanged_persisted_batches >= 2) {
+                    $pause_reason = 'no_persisted_progress';
                     break;
                 }
 
+                $queue_failed = max(0, (int) ($last_result['failed'] ?? 0));
+                $unit_failed = max(0, (int) ($last_result['unitFailed'] ?? 0));
+                if (!empty($last_result['isComplete']) || !empty($last_result['complete'])) {
+                    break;
+                }
+                if ($remaining <= 0 && ($queue_failed > 0 || $unit_failed > 0)) {
+                    $pause_reason = 'failed';
+                    break;
+                }
                 if ($max_batches > 0 && $batches >= $max_batches) {
                     $pause_reason = 'max_batches';
                     break;
                 }
-
-                if ($processed <= 0 && $remaining > 0) {
+                if ($parent_touches <= 0 && $unit_attempts <= 0 && (int) ($last_result['unitMigrationFailuresThisRun'] ?? 0) > 0) {
+                    $pause_reason = 'unit_inventory_failed';
+                    break;
+                }
+                if ($parent_touches <= 0 && $unit_attempts <= 0 && $unit_migration_parents <= 0 && ((int) ($last_result['unitOutstanding'] ?? 0) > 0 || empty($last_result['unitInventoryComplete']))) {
                     $pause_reason = !empty($last_result['pauseReason']) ? (string) $last_result['pauseReason'] : 'no_progress';
                     break;
                 }
@@ -342,25 +441,55 @@ trait ULTRACACHE_CLI_Media_Trait
             $this->end_media_cli_interrupt_handling();
         }
 
+        $queue_failed = max(0, (int) ($last_result['failed'] ?? 0));
+        $unit_failed = max(0, (int) ($last_result['unitFailed'] ?? 0));
         $is_complete = !$cancelled
             && !empty($last_result)
-            && (!empty($last_result['isComplete']) || !empty($last_result['complete']) || (int) ($last_result['remaining'] ?? 0) <= 0);
+            && $queue_failed <= 0
+            && $unit_failed <= 0
+            && (!empty($last_result['isComplete']) || !empty($last_result['complete']));
+        $attachments_processed = $total_attachments_completed + $total_attachments_failed;
+        $local_assets_processed = $total_local_assets_completed + $total_local_assets_failed;
 
         return array(
-            'success' => true,
+            'success' => $is_complete,
             'action' => $action,
             'mediaFormat' => $format,
             'onlyMissing' => (bool) $only_missing,
             'batchSize' => $batch_limit,
             'timeBudget' => $time_budget,
             'batches' => $batches,
-            'processed' => $total_processed,
+            'processed' => $attachments_processed,
+            'attachmentsProcessed' => $attachments_processed,
+            'attachmentsCompleted' => $total_attachments_completed,
+            'attachmentsFailedThisRun' => $total_attachments_failed,
+            'attachmentParentTouches' => $total_attachment_touches,
+            'localAssetsProcessed' => $local_assets_processed,
+            'localAssetsCompleted' => $total_local_assets_completed,
+            'localAssetsFailedThisRun' => $total_local_assets_failed,
+            'localAssetParentTouches' => $total_local_asset_touches,
+            'parentTouches' => $total_parent_touches,
+            'unitAttempts' => $total_unit_attempts,
+            'unitsResolved' => $total_units_resolved,
+            'unitsSkipped' => $total_units_skipped,
+            'unitsAlreadyOptimized' => $total_units_already_optimized,
+            'unitsGenerated' => $total_avif + $total_webp,
+            'unitFailuresThisRun' => $total_unit_failures,
+            'terminalUnitFailuresThisRun' => $total_terminal_unit_failures,
+            'unitMigrationParents' => $total_unit_migration_parents,
+            'unitMigrationChangedParents' => $total_unit_migration_changed_parents,
+            'unitMigrationChangedUnits' => $total_unit_migration_changed_units,
             'avif' => $total_avif,
             'webp' => $total_webp,
-            'failedThisRun' => $total_failed,
+            'failedThisRun' => $total_unit_failures,
             'skippedThisRun' => $total_skipped,
             'isComplete' => $is_complete,
             'remaining' => (int) ($last_result['remaining'] ?? 0),
+            'failed' => $queue_failed,
+            'unitRemaining' => (int) ($last_result['unitRemaining'] ?? 0),
+            'unitFailed' => $unit_failed,
+            'unitOutstanding' => (int) ($last_result['unitOutstanding'] ?? 0),
+            'unitInventoryComplete' => !empty($last_result['unitInventoryComplete']),
             'pauseReason' => $pause_reason,
             'cancelled' => $cancelled,
         );
@@ -440,11 +569,11 @@ trait ULTRACACHE_CLI_Media_Trait
         }
 
         if (!empty($summary['isComplete'])) {
-            WP_CLI::success(sprintf('%s complete. Processed %d attachment(s). Generated %d AVIF and %d WebP.', $label, (int) ($summary['processed'] ?? 0), (int) ($summary['avif'] ?? 0), (int) ($summary['webp'] ?? 0)));
+            WP_CLI::success(sprintf('%s complete. Processed %d attachment(s) across %d physical unit attempt(s). Generated %d AVIF and %d WebP.', $label, (int) ($summary['attachmentsProcessed'] ?? $summary['processed'] ?? 0), (int) ($summary['unitAttempts'] ?? 0), (int) ($summary['avif'] ?? 0), (int) ($summary['webp'] ?? 0)));
             return;
         }
 
-        WP_CLI::warning(sprintf('%s paused/incomplete. Processed %d attachment(s). Remaining: %d. Reason: %s.', $label, (int) ($summary['processed'] ?? 0), (int) ($summary['remaining'] ?? 0), (string) ($summary['pauseReason'] ?? 'unknown')));
+        WP_CLI::warning(sprintf('%s paused/incomplete. Processed %d attachment(s) across %d physical unit attempt(s). Remaining attachments: %d. Outstanding units: %d. Failed units: %d. Reason: %s.', $label, (int) ($summary['attachmentsProcessed'] ?? $summary['processed'] ?? 0), (int) ($summary['unitAttempts'] ?? 0), (int) ($summary['remaining'] ?? 0), (int) ($summary['unitOutstanding'] ?? 0), (int) ($summary['unitFailed'] ?? 0), (string) ($summary['pauseReason'] ?? 'unknown')));
     }
 
     private function print_media_cli_help()

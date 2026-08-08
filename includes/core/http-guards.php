@@ -210,14 +210,32 @@ function ultracache_safe_configured_infrastructure_remote_request($url, array $a
 }
 
 
+function ultracache_get_loopback_ssl_status_state_name()
+{
+    return 'ultracache_state:runtime.loopback_ssl_status';
+}
+
+function ultracache_get_loopback_ssl_status_fingerprint()
+{
+    $payload = array(
+        'schema' => 1,
+        'homeUrl' => esc_url_raw(home_url('/')),
+        'siteUrl' => esc_url_raw(site_url('/')),
+    );
+
+    return substr(hash('sha256', (string) wp_json_encode($payload)), 0, 24);
+}
+
 function ultracache_get_loopback_ssl_status()
 {
-    $status = get_transient('ultracache_loopback_ssl_status_v1');
-    if (!is_array($status)) {
-        $status = array();
+    $status = array();
+    if (function_exists('ultracache_get_state_record_read_only')) {
+        $record = ultracache_get_state_record_read_only(ultracache_get_loopback_ssl_status_state_name());
+        $payload = is_array($record['payload'] ?? null) ? $record['payload'] : array();
+        $status = is_array($payload['status'] ?? null) ? $payload['status'] : array();
     }
 
-    return wp_parse_args($status, array(
+    $status = wp_parse_args($status, array(
         'strictByDefault' => true,
         'fallbackUsed'    => false,
         'lastUrl'         => '',
@@ -225,17 +243,67 @@ function ultracache_get_loopback_ssl_status()
         'context'         => '',
         'message'         => '',
         'updatedAt'       => 0,
+        'fingerprint'     => '',
+        'diagnosticStatus' => 'not-tested',
+        'configurationChanged' => false,
+        'ageSeconds' => 0,
     ));
+
+    $status['updatedAt'] = max(0, (int) $status['updatedAt']);
+    $status['ageSeconds'] = $status['updatedAt'] > 0 ? max(0, time() - $status['updatedAt']) : 0;
+    $current_fingerprint = ultracache_get_loopback_ssl_status_fingerprint();
+    $stored_fingerprint = sanitize_text_field((string) $status['fingerprint']);
+    $status['configurationChanged'] = '' !== $stored_fingerprint && !hash_equals($current_fingerprint, $stored_fingerprint);
+    $status['diagnosticStatus'] = $status['configurationChanged']
+        ? 'configuration-changed'
+        : ($status['updatedAt'] > 0 ? 'current' : 'not-tested');
+
+    return $status;
 }
 
 function ultracache_set_loopback_ssl_status(array $status)
 {
-    set_transient('ultracache_loopback_ssl_status_v1', $status, DAY_IN_SECONDS);
+    if (!function_exists('ultracache_mutate_state_record')) {
+        return false;
+    }
+
+    $status = wp_parse_args($status, array(
+        'strictByDefault' => true,
+        'fallbackUsed' => false,
+        'lastUrl' => '',
+        'lastError' => '',
+        'context' => '',
+        'message' => '',
+        'updatedAt' => time(),
+    ));
+    $status['updatedAt'] = max(0, (int) $status['updatedAt']);
+    $status['fingerprint'] = ultracache_get_loopback_ssl_status_fingerprint();
+    $status['diagnosticStatus'] = 'current';
+    $status['configurationChanged'] = false;
+    $status['ageSeconds'] = 0;
+
+    $mutation = ultracache_mutate_state_record(
+        ultracache_get_loopback_ssl_status_state_name(),
+        static function () use ($status) {
+            return array(
+                'schemaVersion' => 1,
+                'recordedAt' => (int) $status['updatedAt'],
+                'fingerprint' => (string) $status['fingerprint'],
+                'status' => $status,
+            );
+        },
+        5,
+        array()
+    );
+
+    return !empty($mutation['success']);
 }
 
 function ultracache_reset_loopback_ssl_status()
 {
-    delete_transient('ultracache_loopback_ssl_status_v1');
+    return function_exists('ultracache_delete_state_record')
+        ? ultracache_delete_state_record(ultracache_get_loopback_ssl_status_state_name())
+        : false;
 }
 
 function ultracache_is_local_https_url($url)

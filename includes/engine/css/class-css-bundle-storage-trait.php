@@ -12,6 +12,9 @@ if (!defined('ABSPATH')) {
 trait Ultra_Cache_Engine_CSS_Bundle_Storage_Trait
 {
 
+/** @var array<string,bool> */
+private $frontpage_css_manifest_freshness_cache_current_request = array();
+
 private function get_frontpage_css_dir()
     {
         return ultracache_generated_asset_dir('css-bundles');
@@ -51,14 +54,119 @@ private function normalize_frontpage_css_source_urls_for_manifest(array $source_
         return array_keys($normalized);
     }
 
+private function ultracache_build_frontpage_css_source_fingerprint($source_url)
+    {
+        $url = trim((string) $source_url);
+        if ('' === $url) {
+            return array();
+        }
+
+        $path = $this->resolve_local_path_from_public_url($url);
+        if ('' === (string) $path || !is_readable((string) $path)) {
+            return array();
+        }
+
+        $resolved_path = realpath((string) $path);
+        $canonical_path = false !== $resolved_path ? (string) $resolved_path : (string) $path;
+        $canonical_path = wp_normalize_path($canonical_path);
+        if ('' === $canonical_path) {
+            return array();
+        }
+
+        clearstatcache(true, (string) $path);
+        $bytes = function_exists('ultracache_safe_filesize')
+            ? (int) ultracache_safe_filesize((string) $path, 'frontpage_css_manifest_source_fingerprint')
+            : (int) filesize((string) $path);
+        $mtime = function_exists('ultracache_safe_filemtime')
+            ? (int) ultracache_safe_filemtime((string) $path, 'frontpage_css_manifest_source_fingerprint')
+            : (int) filemtime((string) $path);
+        if ($bytes < 0 || $mtime <= 0) {
+            return array();
+        }
+
+        return array(
+            'url' => $url,
+            'pathHash' => hash('sha256', $canonical_path),
+            'mtime' => $mtime,
+            'bytes' => $bytes,
+        );
+    }
+
+private function ultracache_normalize_frontpage_css_source_fingerprints_for_manifest(array $fingerprints)
+    {
+        $normalized = array();
+        foreach ($fingerprints as $fingerprint) {
+            if (!is_array($fingerprint)) {
+                continue;
+            }
+
+            $url = trim((string) ($fingerprint['url'] ?? ''));
+            $path_hash = strtolower(trim((string) ($fingerprint['pathHash'] ?? '')));
+            $mtime = isset($fingerprint['mtime']) ? (int) $fingerprint['mtime'] : 0;
+            $bytes = isset($fingerprint['bytes']) ? (int) $fingerprint['bytes'] : -1;
+            if ('' === $url || 1 !== preg_match('/^[a-f0-9]{64}$/', $path_hash) || $mtime <= 0 || $bytes < 0) {
+                continue;
+            }
+
+            $normalized[$url] = array(
+                'url' => $url,
+                'pathHash' => $path_hash,
+                'mtime' => $mtime,
+                'bytes' => $bytes,
+            );
+        }
+
+        ksort($normalized, SORT_STRING);
+        return array_values($normalized);
+    }
+
+private function ultracache_build_frontpage_css_source_fingerprints(array $source_urls)
+    {
+        $source_urls = $this->normalize_frontpage_css_source_urls_for_manifest($source_urls);
+        $fingerprints = array();
+        foreach ($source_urls as $source_url) {
+            $fingerprint = $this->ultracache_build_frontpage_css_source_fingerprint($source_url);
+            if (empty($fingerprint)) {
+                return array();
+            }
+            $fingerprints[] = $fingerprint;
+        }
+
+        return $this->ultracache_normalize_frontpage_css_source_fingerprints_for_manifest($fingerprints);
+    }
+
+private function ultracache_is_frontpage_css_manifest_source_fresh(array $entry)
+    {
+        $source_urls = $this->normalize_frontpage_css_source_urls_for_manifest((array) ($entry['sourceUrls'] ?? array()));
+        $expected = $this->ultracache_normalize_frontpage_css_source_fingerprints_for_manifest((array) ($entry['sourceFingerprints'] ?? array()));
+        if (empty($source_urls) || count($source_urls) !== count($expected)) {
+            return false;
+        }
+
+        $cache_payload = wp_json_encode($expected);
+        $cache_key = is_string($cache_payload) ? hash('sha256', $cache_payload) : '';
+        if ('' !== $cache_key && array_key_exists($cache_key, $this->frontpage_css_manifest_freshness_cache_current_request)) {
+            return (bool) $this->frontpage_css_manifest_freshness_cache_current_request[$cache_key];
+        }
+
+        $current = $this->ultracache_build_frontpage_css_source_fingerprints($source_urls);
+        $fresh = !empty($current) && $expected === $current;
+        if ('' !== $cache_key) {
+            $this->frontpage_css_manifest_freshness_cache_current_request[$cache_key] = $fresh;
+        }
+        return $fresh;
+    }
+
 private function build_frontpage_css_manifest_entry($url, array $prepared)
     {
         $source_urls = $this->normalize_frontpage_css_source_urls_for_manifest((array) ($prepared['sourceUrls'] ?? array()));
+        $source_fingerprints = $this->ultracache_build_frontpage_css_source_fingerprints($source_urls);
         return array(
             'normalizedUrl' => $this->normalize_url((string) $url),
             'bundleFile' => (string) ($prepared['bundleFile'] ?? ''),
             'bundleUrl' => (string) ($prepared['bundleUrl'] ?? ''),
             'sourceUrls' => $source_urls,
+            'sourceFingerprints' => $source_fingerprints,
             'sourceCount' => count($source_urls),
             'bundleCount' => 1,
             'mode' => (string) ($prepared['mode'] ?? 'safe'),
@@ -90,11 +198,14 @@ private function compact_frontpage_css_manifest_entry(array $entry)
             $source_urls = $this->normalize_frontpage_css_source_urls_for_manifest($source_urls);
         }
 
+        $source_fingerprints = $this->ultracache_normalize_frontpage_css_source_fingerprints_for_manifest((array) ($entry['sourceFingerprints'] ?? array()));
+
         $compact = array(
             'normalizedUrl' => isset($entry['normalizedUrl']) ? (string) $entry['normalizedUrl'] : '',
             'bundleFile' => isset($entry['bundleFile']) ? (string) $entry['bundleFile'] : '',
             'bundleUrl' => isset($entry['bundleUrl']) ? (string) $entry['bundleUrl'] : '',
             'sourceUrls' => $source_urls,
+            'sourceFingerprints' => $source_fingerprints,
             'sourceCount' => isset($entry['sourceCount']) ? max(0, (int) $entry['sourceCount']) : count($source_urls),
             'bundleCount' => isset($entry['bundleCount']) ? max(0, (int) $entry['bundleCount']) : 1,
             'mode' => isset($entry['mode']) ? (string) $entry['mode'] : 'safe',
@@ -121,7 +232,7 @@ private function compact_frontpage_css_manifest_entry(array $entry)
 
 private function compact_frontpage_css_manifest(array $manifest)
     {
-        $manifest['version'] = 3;
+        $manifest['version'] = 4;
         if (empty($manifest['entry']) || !is_array($manifest['entry'])) {
             $manifest['entry'] = array();
         } else {
@@ -301,6 +412,9 @@ private function get_frontpage_css_manifest_entry($url = '')
             return array();
         }
         if (empty($entry['bundleUrl']) || empty($entry['sourceUrls']) || !is_array($entry['sourceUrls'])) {
+            return array();
+        }
+        if (!$this->ultracache_is_frontpage_css_manifest_source_fresh($entry)) {
             return array();
         }
 

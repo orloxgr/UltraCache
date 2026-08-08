@@ -48,14 +48,29 @@ final class Ultra_Cache_Media_Converter {
 	private $optimized_variant_exists_memo = array();
 
 	/**
-	 * Per-request map from discovered upload image URL tokens to optimized URLs.
+	 * Per-request source/output freshness states for generated media variants.
 	 *
 	 * @var array<string,string>
 	 */
-	private $optimized_image_url_rewrite_map = array();
+	private $optimized_variant_freshness_memo = array();
 
 	/**
-	 * Per-request manifest-style lookup cache for public upload image URLs.
+	 * Per-request source file fingerprints used by freshness and queue dedupe.
+	 *
+	 * @var array<string,array<string,int|bool>>
+	 */
+	private $optimized_source_fingerprint_memo = array();
+
+
+	/**
+	 * Per-request canonical source descriptors for local public image URLs.
+	 *
+	 * @var array<string,array<string,mixed>>
+	 */
+	private $local_public_image_source_memo = array();
+
+	/**
+	 * Per-request manifest-style lookup cache for local public image URLs.
 	 *
 	 * Keeps media rewrite lookup-only paths from repeating URL parsing and
 	 * filesystem existence checks for the same generated image size.
@@ -101,6 +116,28 @@ final class Ultra_Cache_Media_Converter {
 	private $media_generation_context = 'frontend';
 
 	/**
+	 * Explicit public page URL for media discovery during cache-storage rewrites.
+	 *
+	 * Warm, cron, CLI, and stale workers rewrite HTML outside the original
+	 * frontend request, so REQUEST_URI cannot identify the page that must be
+	 * purged after a missing optimized image is generated.
+	 *
+	 * @var string
+	 */
+	private $media_rewrite_page_url_context = '';
+
+	/**
+	 * Last public page whose final HTML was scanned for missing media.
+	 *
+	 * One cron/CLI worker can process many pages in the same PHP request. Keep
+	 * the discovery budget and de-duplication scope per page rather than letting
+	 * the first warmed pages consume the budget for every later page.
+	 *
+	 * @var string
+	 */
+	private $media_rewrite_discovery_page_context = '';
+
+	/**
 	 * Explicit Accept header context for full-document media rewrites.
 	 *
 	 * Warm/CLI storage writes run in a parent PHP process that does not inherit
@@ -126,19 +163,21 @@ final class Ultra_Cache_Media_Converter {
 
 
 	/**
-	 * Missing-media on-demand queue dedupe transient prefix.
+	 * Missing-media on-demand queue dedupe lock prefix.
 	 */
-	const MEDIA_ON_DEMAND_QUEUE_TRANSIENT_PREFIX = 'ultracache_media_odq_';
+	const MEDIA_ON_DEMAND_QUEUE_LOCK_PREFIX = 'ultracache_media_odq_';
 
-	/**
-	 * Cached media work summary transient.
-	 */
-	const MEDIA_WORK_SUMMARY_TRANSIENT = 'ultracache_media_work_summary_v1';
+	/** Persistent media encoder capability state. */
+	const MEDIA_SUPPORT_STATE = 'ultracache_state:media.encoder_capabilities';
 
-	/**
-	 * Cached media optimized storage health transient base.
-	 */
-	const MEDIA_STORAGE_HEALTH_TRANSIENT = 'ultracache_media_storage_health_v1';
+	/** Persistent media library work-summary state. */
+	const MEDIA_WORK_SUMMARY_STATE = 'ultracache_state:media.work_summary';
+
+	/** Persistent optimized-media storage-health state prefix. */
+	const MEDIA_STORAGE_HEALTH_STATE_PREFIX = 'ultracache_state:media.storage_health.';
+
+	/** Persistent GD WebP behavior-probe state. */
+	const GD_WEBP_PROBE_STATE = 'ultracache_state:media.gd_webp_probe';
 
 	/** Persistent optimized-media file counters. */
 	const MEDIA_FILE_COUNTS_OPTION = 'ultracache_media_file_counts';
@@ -152,31 +191,39 @@ final class Ultra_Cache_Media_Converter {
 	const MEDIA_LIBRARY_CONVERSION_TEST_OPTION = 'ultracache_media_library_conversion_test_v1';
 
 	/** Legacy transient key used before the report became an explicit option. */
-	const MEDIA_LIBRARY_CONVERSION_TEST_TRANSIENT = 'ultracache_media_library_conversion_test_v1';
 
 	/** Stores the fixed Media Library attachment sample used by repeated conversion tests. */
 	const MEDIA_LIBRARY_CONVERSION_TEST_SAMPLE_OPTION = 'ultracache_media_library_conversion_test_sample_v1';
 
-	/** Persistent AVIF encoder self-test result. */
-	const AVIF_SELF_TEST_OPTION = 'ultracache_avif_encoder_self_test_v1';
+	/** Persistent AVIF encoder self-test state. */
+	const AVIF_SELF_TEST_STATE = 'ultracache_state:media.avif_self_test';
+
+	/** Superseded AVIF encoder self-test option removed during migration. */
+	const AVIF_SELF_TEST_LEGACY_OPTION = 'ultracache_avif_encoder_self_test_v1';
 
 	/** AVIF encoder self-test algorithm version. */
-	const AVIF_SELF_TEST_VERSION = 2;
+	const AVIF_SELF_TEST_VERSION = 4;
 
 	/** Persistent Media Library replacement table version. */
-	const MEDIA_REPLACEMENT_DB_VERSION = '10';
+	const MEDIA_REPLACEMENT_DB_VERSION = '14';
 
 	/** Media Library replacement orchestration generation. Legacy jobs are intentionally not migrated. */
-	const MEDIA_REPLACEMENT_ORCHESTRATION_VERSION = 6;
+	const MEDIA_REPLACEMENT_ORCHESTRATION_VERSION = 7;
 
 	/** Short-lived lock protecting readiness inventory cursor and counters from concurrent chunks. */
 	const MEDIA_REPLACEMENT_READINESS_LOCK = 'ultracache_media_replacement_readiness_lock_v1';
+
+	/** Lifetime of a destructive Media Replacement start-confirmation token. */
+	const MEDIA_REPLACEMENT_CONFIRMATION_TTL = 600;
 
 	/** Token-owned dashboard lease for resumable Media Library replacement jobs. */
 	const MEDIA_REPLACEMENT_MANUAL_SESSION_LOCK = 'ultracache_media_replacement_manual_session_v1';
 
 	/** Dashboard replacement lease lifetime. Each successful chunk renews it. */
 	const MEDIA_REPLACEMENT_MANUAL_SESSION_TTL = 120;
+
+	/** Backward-compatible name for the shared destructive confirmation TTL. */
+	const MEDIA_REPLACEMENT_DELETE_CONFIRMATION_TTL = self::MEDIA_REPLACEMENT_CONFIRMATION_TTL;
 
 	/** Persistent Media Library replacement database version option. */
 	const MEDIA_REPLACEMENT_DB_VERSION_OPTION = 'ultracache_media_replacement_db_version';
@@ -188,10 +235,19 @@ final class Ultra_Cache_Media_Converter {
 	const MEDIA_REPLACEMENT_SCHEMA_LOCK_TTL = 60;
 
 	/** Persistent media conversion queue table version. */
-	const MEDIA_QUEUE_DB_VERSION = '3';
+	const MEDIA_QUEUE_DB_VERSION = '6';
 
 	/** Persistent media conversion queue database version option. */
 	const MEDIA_QUEUE_DB_VERSION_OPTION = 'ultracache_media_queue_db_version';
+
+	/** Persistent physical media conversion unit table version. */
+	const MEDIA_QUEUE_UNITS_DB_VERSION = '2';
+
+	/** Persistent physical media conversion unit database version option. */
+	const MEDIA_QUEUE_UNITS_DB_VERSION_OPTION = 'ultracache_media_queue_units_db_version';
+
+	/** Persistent bounded physical media unit migration cursor. */
+	const MEDIA_QUEUE_UNITS_MIGRATION_STATE_OPTION = 'ultracache_media_queue_units_migration_state_v1';
 
 	/** Persistent media conversion queue rebuild cursor option. */
 	const MEDIA_QUEUE_BUILD_STATE_OPTION = 'ultracache_media_queue_build_state_v1';
@@ -200,7 +256,7 @@ final class Ultra_Cache_Media_Converter {
 	const MEDIA_QUEUE_REBUILD_GENERATION_OPTION = 'ultracache_media_queue_rebuild_generation_v1';
 
 	/** Persistent on-demand media affected page refs table version. */
-	const MEDIA_PAGE_REFS_DB_VERSION = '1';
+	const MEDIA_PAGE_REFS_DB_VERSION = '3';
 
 	/** Persistent on-demand media affected page refs database version option. */
 	const MEDIA_PAGE_REFS_DB_VERSION_OPTION = 'ultracache_media_page_refs_db_version';
@@ -245,6 +301,7 @@ final class Ultra_Cache_Media_Converter {
 	 * Constructor.
 	 */
 	private function __construct() {
+		add_filter('wp_unique_filename', array($this, 'filter_cross_extension_unique_image_filename'), 20, 6);
 		add_filter('wp_handle_upload', array($this, 'maybe_convert_uploaded_image_file'), 20, 2);
 		add_filter('wp_generate_attachment_metadata', array($this, 'maybe_generate_avif_on_upload'), 20, 2);
 		add_action('delete_attachment', array($this, 'delete_avif_by_attachment_id'));

@@ -77,36 +77,63 @@ trait Ultra_Cache_Engine_Warm_CSS_Bundle_Trait
                 $this->release_runtime_lock($lock_name, true);
             }
         }
-        public function purge_all()
+        public function purge_all($context = array())
         {
+            $context = is_array($context) ? $context : array();
+            $reason = sanitize_key((string) ($context['reason'] ?? 'purge_all'));
+            if ('' === $reason) {
+                $reason = 'purge_all';
+            }
             $lock_name = 'purge-all';
             if (!$this->acquire_runtime_lock($lock_name, 180)) {
                 return false;
             }
 
+            $after_purge_payload = array();
             try {
+                if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'reset_cron_warmup_queue_after_cache_flush')) {
+                    $queue_reset = Ultra_Cache_WP::reset_cron_warmup_queue_after_cache_flush($reason);
+                    if (is_array($queue_reset) && empty($queue_reset['queueResetSuccess'])) {
+                        return false;
+                    }
+                }
+                if (!$this->wait_for_cache_mutation_locks_to_drain()) {
+                    return false;
+                }
+                if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'maybe_flush_elementor_cache_before_purge')) {
+                    Ultra_Cache_WP::maybe_flush_elementor_cache_before_purge($context);
+                }
+
                 $this->purge_cache_directory_preserving_google_fonts();
                 if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'mark_all_cache_asset_refs_inactive')) {
                     Ultra_Cache_WP::mark_all_cache_asset_refs_inactive();
                 }
                 self::ensure_cache_directories();
-                if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'reset_cron_warmup_queue_after_cache_flush')) {
-                    Ultra_Cache_WP::reset_cron_warmup_queue_after_cache_flush('purge_all');
-                }
                 $this->delete_frontpage_css_bundle();
                 $this->invalidate_dashboard_cache_activity_snapshot();
 
                 if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
                     Ultra_Cache_Object_Cache_Manager::flush_cache();
                 }
+                if (function_exists('ultracache_clear_js_analysis_cache')) {
+                    ultracache_clear_js_analysis_cache();
+                }
 
                 $this->record_cache_event('purge-all');
                 $this->record_analytics_purge('all');
-                do_action('ultracache_after_purge_all', array('scope' => 'all'));
-                return true;
+                $after_purge_payload = array(
+                    'scope' => 'all',
+                    'reason' => $reason,
+                    'source' => sanitize_key((string) ($context['source'] ?? '')),
+                );
             } finally {
                 $this->release_runtime_lock($lock_name, true);
             }
+
+            // External cache clearing and optional warm-after-flush work start
+            // only after the purge mutation barrier has been released.
+            do_action('ultracache_after_purge_all', $after_purge_payload);
+            return true;
         }
         public function purge_url($url)
         {
@@ -199,16 +226,44 @@ trait Ultra_Cache_Engine_Warm_CSS_Bundle_Trait
         }
         private function purge_related_post_urls($post_id)
         {
+            $post_id = (int) $post_id;
+            $affected_plan = $this->get_affected_url_plan_for_post($post_id);
             $this->purge_urls(
-                $this->get_related_urls_for_post($post_id),
+                $affected_plan['purgeUrls'],
                 'related-post',
                 array(
-                    'post_id' => (int) $post_id,
+                    'post_id'        => $post_id,
+                    'warm_url_count' => count($affected_plan['warmUrls']),
                 )
             );
         }
         private function invalidate_dashboard_cache_activity_snapshot()
         {
-            delete_transient('ultracache_dashboard_cache_activity_v1');
+            if (!function_exists('ultracache_mutate_state_record')) {
+                return;
+            }
+
+            ultracache_mutate_state_record(
+                'ultracache_state:dashboard.page_cache_activity',
+                static function ($payload) {
+                    $payload = is_array($payload) ? $payload : array();
+                    $payload['dirty'] = true;
+                    $payload['dirtyAt'] = time();
+                    return $payload;
+                },
+                3,
+                array(
+                    'path' => '',
+                    'modified' => 0,
+                    'size' => 0,
+                    'pageFiles' => 0,
+                    'scannedFiles' => 0,
+                    'partial' => false,
+                    'partialReason' => '',
+                    'computedAt' => 0,
+                    'dirty' => true,
+                    'dirtyAt' => time(),
+                )
+            );
         }
 }

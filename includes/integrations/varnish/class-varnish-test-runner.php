@@ -1,6 +1,6 @@
 <?php
 /**
- * Lazy minimal Varnish test runner for UltraCache.
+ * Backward-compatible Varnish test runner facade.
  *
  * @package UltraCache
  */
@@ -9,19 +9,15 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-require_once ultracache_plugin_dir('includes/integrations/varnish/class-varnish-behavior-test-trait.php');
-
 class Ultra_Cache_WP_Varnish_Test_Runner extends Ultra_Cache_WP
 {
-    use Ultra_Cache_WP_Varnish_Behavior_Test_Trait;
-
     /**
-     * Run the minimal connection, exact invalidation, and public refill test.
+     * Run the test in the parent class scope where all private Varnish helpers exist.
      *
      * @return array
      */
     public static function run()
     {
-        return self::varnish_test_behavior();
+        return parent::varnish_test_behavior();
     }
 }

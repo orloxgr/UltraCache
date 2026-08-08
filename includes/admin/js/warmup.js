@@ -13,7 +13,7 @@
 		throw new Error('UltraCache admin core/api modules are required before warmup.js.');
 	}
 
-	const { __, sleep } = core;
+	const { __, sleep, reportNonFatalAdminError } = core;
 	const { apiRequest, normalizeBatchResponse } = api;
 
 	const WARM_HTML_JOB_TYPES = ['warm', 'warm_menu'];
@@ -104,7 +104,7 @@
 		return String(type || '').indexOf('warm_menu') === 0 ? 'menu' : 'full';
 	}
 
-	function getCanonicalWarmUrl(url) {
+	function getWarmRequestUrl(url) {
 		try {
 			const parsed = new URL(String(url || ''), window.location.origin);
 			parsed.hash = '';
@@ -112,10 +112,14 @@
 				parsed.searchParams.delete(key);
 			});
 			parsed.searchParams.sort();
-			return parsed.toString().replace(/\/+(\?|$)/, '$1');
+			return parsed.toString();
 		} catch (error) {
 			return String(url || '').split('#')[0];
 		}
+	}
+
+	function getCanonicalWarmUrl(url) {
+		return getWarmRequestUrl(url).replace(/\/+(\?|$)/, '$1');
 	}
 
 	function isWarmUrlSeen(type, url, manualSessionToken) {
@@ -134,42 +138,112 @@
 		manualWarmSeenUrls.get(sessionKey).add(canonicalUrl);
 	}
 
-	function clonePipelineState(value) {
-		if (!value || typeof value !== 'object') {
-			return null;
-		}
-		try {
-			return JSON.parse(JSON.stringify(value));
-		} catch (error) {
-			return null;
-		}
-	}
-
-	function getManualWarmStageLabel(stage, bucket) {
+	function getPipelineStageLabel(stage) {
 		if ('html' === stage) {
 			return 'HTML';
 		}
 		if ('css' === stage) {
 			return 'CSS';
 		}
-		if ('varnish' === stage) {
-			return 'Varnish ' + String(bucket || 'orig').toUpperCase();
+		if ('lcp' === stage) {
+			return 'LCP';
 		}
-		return 'Finalizing';
+		if ('varnish' === stage) {
+			return 'Varnish';
+		}
+		if ('litespeed' === stage) {
+			return 'LiteSpeed';
+		}
+		return String(stage || 'Pipeline');
 	}
 
-	async function requestManualWarmStage(payload) {
+	function getPipelineStageStatus(result, stage) {
+		const pipeline = result && result.pipeline && typeof result.pipeline === 'object' ? result.pipeline : {};
+		const stages = pipeline.stages && typeof pipeline.stages === 'object' ? pipeline.stages : {};
+		const stageResult = stages[stage] && typeof stages[stage] === 'object' ? stages[stage] : {};
+		return String(stageResult.status || '');
+	}
+
+	function buildWarmPipelineSummary(result) {
+		const pipeline = result && result.pipeline && typeof result.pipeline === 'object' ? result.pipeline : {};
+		const stages = pipeline.stages && typeof pipeline.stages === 'object' ? pipeline.stages : {};
+		const parts = [];
+		['html', 'css', 'lcp', 'varnish', 'litespeed'].forEach((stage) => {
+			const stageResult = stages[stage] && typeof stages[stage] === 'object' ? stages[stage] : null;
+			if (!stageResult) {
+				return;
+			}
+			const status = String(stageResult.status || '');
+			if ('disabled' === status || 'planned' === status) {
+				return;
+			}
+			const label = getPipelineStageLabel(stage);
+			if ('completed' === status) {
+				const details = stageResult.details && typeof stageResult.details === 'object' ? stageResult.details : {};
+				const variantCount = Math.max(0, Number(details.refilledCount || details.variantCount || 0));
+				parts.push(label + (variantCount > 1 ? ' ' + variantCount + ' variants' : '') + ' ✓');
+				return;
+			}
+			if ('warning' === status) {
+				parts.push(label + ' warning');
+				return;
+			}
+			if ('skipped' === status) {
+				parts.push(label + ' skipped');
+				return;
+			}
+			if ('failed' === status) {
+				parts.push(label + ' failed');
+			}
+		});
+		return parts.length ? parts.join(' · ') : String(result && result.message ? result.message : 'Page pipeline completed.');
+	}
+
+	function buildQueuedWarmPipelineSuccess(completed, fallbackText) {
+		const result = completed && completed.result && typeof completed.result === 'object' ? completed.result : {};
+		const pipeline = result.pipeline && typeof result.pipeline === 'object' ? result.pipeline : {};
+		const warmUrl = String(pipeline.url || result.url || '');
+		if (!warmUrl) {
+			return String(fallbackText || result.message || 'Homepage warm completed.');
+		}
+
+		return 'Cached: ' + getWarmRequestUrl(warmUrl) + ' — ' + buildWarmPipelineSummary(result);
+	}
+
+	async function requestManualWarmPage(payload) {
 		let attempt = 0;
 		let lastError = null;
 		while (attempt <= maxWarmItemRetries) {
 			try {
-				return await apiRequest('manual_warm_page_stage', payload);
+				const response = await apiRequest('crawl_page', payload);
+				if (!(response && response.coalesced)) {
+					return response;
+				}
+				if (attempt >= maxWarmItemRetries) {
+					return response;
+				}
+				await sleep((attempt + 1) * 750);
 			} catch (error) {
 				lastError = error;
-				if (attempt >= maxWarmItemRetries) {
-					break;
+				const errorData = error && error.data && typeof error.data === 'object' ? error.data : null;
+				if (errorData && errorData.coalesced) {
+					if (attempt >= maxWarmItemRetries) {
+						return errorData;
+					}
+					await sleep((attempt + 1) * 750);
+				} else if (error && error.rest && Number(error.rest.status || 0) === 409) {
+					return {
+						success: false,
+						skipped: false,
+						ownershipLost: true,
+						message: error && error.message ? String(error.message) : 'Foreground warm-up ownership was transferred.',
+					};
+				} else {
+					if (attempt >= maxWarmItemRetries) {
+						break;
+					}
+					await sleep((attempt + 1) * 500);
 				}
-				await sleep((attempt + 1) * 500);
 			}
 			attempt += 1;
 		}
@@ -181,12 +255,8 @@
 		};
 	}
 
-	async function processJobItem(type, item, shouldCancel, manualSessionToken, state, checkpointItem) {
-		const canonicalItem = getCanonicalWarmUrl(item);
-		const currentPipeline = state && getCanonicalWarmUrl(state.currentItem || '') === canonicalItem
-			? clonePipelineState(state.currentPipeline)
-			: null;
-		if (!currentPipeline && isWarmUrlSeen(type, item, manualSessionToken)) {
+	async function processJobItem(type, item, shouldCancel, manualSessionToken) {
+		if (isWarmUrlSeen(type, item, manualSessionToken)) {
 			return {
 				line: 'Skipped duplicate: ' + item,
 				progressIncrement: 1,
@@ -194,163 +264,62 @@
 			};
 		}
 
-		const buildCssBundle = shouldBuildCssBundleForWarmJob(type);
-		let pipeline = currentPipeline || {
-			url: canonicalItem,
-			nextStage: 'html',
-			buildCssBundle,
-			buckets: [],
-			bucketIndex: 0,
-			refilledBuckets: [],
-			varnishEnabled: false,
-			html: null,
-			css: null,
-		};
-		pipeline.buildCssBundle = buildCssBundle;
-
-		const checkpoint = (stage, bucket) => {
-			if (typeof checkpointItem !== 'function') {
-				return;
-			}
-			checkpointItem({
-				currentItem: canonicalItem,
-				currentStageLabel: getManualWarmStageLabel(stage, bucket),
-				currentPipeline: clonePipelineState(pipeline),
-			});
-		};
-		const clearCheckpoint = () => {
-			if (typeof checkpointItem === 'function') {
-				checkpointItem({ currentItem: '', currentStageLabel: '', currentPipeline: null });
-			}
-		};
-		const pauseIfRequested = (stage, bucket) => {
-			if (!shouldCancel()) {
-				return null;
-			}
-			checkpoint(stage, bucket);
+		if (shouldCancel()) {
 			return {
 				pauseItem: true,
-				line: 'Paused: ' + item + ' — resume from ' + getManualWarmStageLabel(stage, bucket) + '.',
+				line: 'Paused before page pipeline: ' + item + '.',
 			};
-		};
-		const failItem = (message) => {
-			markWarmUrlSeen(type, item, manualSessionToken);
-			clearCheckpoint();
+		}
+
+		const result = await requestManualWarmPage({
+			url: getWarmRequestUrl(item),
+			buildCssBundle: shouldBuildCssBundleForWarmJob(type),
+			manualToken: String(manualSessionToken || ''),
+		});
+
+		if (result && result.ownershipLost) {
 			return {
-				line: 'Failed: ' + item + (message ? ' — ' + message : ''),
-				progressIncrement: 1,
-				failedIncrement: 1,
+				pauseItem: true,
+				line: 'Foreground ownership transferred: ' + item + '.',
 			};
-		};
-
-		if ('html' === pipeline.nextStage) {
-			checkpoint('html');
-			const htmlResult = await requestManualWarmStage({
-				url: item,
-				stage: 'html',
-				buildCssBundle,
-				manualToken: String(manualSessionToken || ''),
-			});
-			if (htmlResult && htmlResult.skipped) {
-				markWarmUrlSeen(type, item, manualSessionToken);
-				clearCheckpoint();
-				return {
-					line: 'Skipped: ' + item + (htmlResult.message ? ' — ' + String(htmlResult.message) : ''),
-					progressIncrement: 1,
-					skippedIncrement: 1,
-				};
-			}
-			if (!htmlResult || !htmlResult.success) {
-				return failItem(htmlResult && htmlResult.message ? String(htmlResult.message) : 'HTML warm failed.');
-			}
-
-			const plan = htmlResult.varnishPlan && typeof htmlResult.varnishPlan === 'object' ? htmlResult.varnishPlan : {};
-			pipeline.html = {
-				success: true,
-				message: String(htmlResult.message || ''),
-				forceRefreshReachedOrigin: !!htmlResult.forceRefreshReachedOrigin,
-			};
-			pipeline.varnishEnabled = !!plan.enabled;
-			pipeline.buckets = Array.isArray(plan.buckets) && plan.buckets.length
-				? plan.buckets.filter((bucket) => ['orig', 'webp', 'avif'].indexOf(String(bucket)) !== -1)
-				: [];
-			pipeline.bucketIndex = Math.max(0, Number(pipeline.bucketIndex || 0));
-			pipeline.nextStage = buildCssBundle ? 'css' : (pipeline.varnishEnabled && pipeline.buckets.length ? 'varnish' : 'done');
-			checkpoint(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
-			const paused = pauseIfRequested(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
-			if (paused) {
-				return paused;
-			}
 		}
-
-		if ('css' === pipeline.nextStage) {
-			checkpoint('css');
-			const cssResult = await requestManualWarmStage({
-				url: item,
-				stage: 'css',
-				buildCssBundle: true,
-				manualToken: String(manualSessionToken || ''),
-			});
-			if (!cssResult || (!cssResult.success && !cssResult.skipped)) {
-				return failItem(cssResult && cssResult.message ? String(cssResult.message) : 'CSS warm failed.');
-			}
-			pipeline.css = {
-				success: !!cssResult.success,
-				skipped: !!cssResult.skipped,
-				message: String(cssResult.message || ''),
+		if (result && result.coalesced) {
+			return {
+				pauseItem: true,
+				line: 'Paused because another request still owns this URL: ' + item + '. Resume to retry the complete page pipeline.',
 			};
-			pipeline.nextStage = pipeline.varnishEnabled && pipeline.buckets.length ? 'varnish' : 'done';
-			checkpoint(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
-			const paused = pauseIfRequested(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
-			if (paused) {
-				return paused;
-			}
-		}
-
-		if ('varnish' === pipeline.nextStage) {
-			while (pipeline.bucketIndex < pipeline.buckets.length) {
-				const bucket = String(pipeline.buckets[pipeline.bucketIndex] || 'orig');
-				checkpoint('varnish', bucket);
-				const varnishResult = await requestManualWarmStage({
-					url: item,
-					stage: 'varnish',
-					bucket,
-					manualToken: String(manualSessionToken || ''),
-				});
-				if (!varnishResult || (!varnishResult.success && !varnishResult.skipped)) {
-					return failItem(varnishResult && varnishResult.message ? String(varnishResult.message) : ('Varnish ' + bucket.toUpperCase() + ' refill failed.'));
-				}
-				if (!varnishResult.skipped && pipeline.refilledBuckets.indexOf(bucket) === -1) {
-					pipeline.refilledBuckets.push(bucket);
-				}
-				pipeline.bucketIndex += 1;
-				pipeline.nextStage = pipeline.bucketIndex < pipeline.buckets.length
-					? 'varnish'
-					: 'done';
-				checkpoint(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
-				const paused = pauseIfRequested(pipeline.nextStage, pipeline.buckets[pipeline.bucketIndex]);
-				if (paused) {
-					return paused;
-				}
-			}
 		}
 
 		markWarmUrlSeen(type, item, manualSessionToken);
-		clearCheckpoint();
-		const varnishWarmed = pipeline.refilledBuckets.length > 0;
-		const stageSummary = [];
-		stageSummary.push('HTML ✓');
-		if (buildCssBundle) {
-			stageSummary.push('CSS ✓');
-		}
-		pipeline.refilledBuckets.forEach((bucket) => stageSummary.push('Varnish ' + String(bucket).toUpperCase() + ' ✓'));
 
+		if (result && result.skipped) {
+			return {
+				line: 'Skipped: ' + item + (result.message ? ' — ' + String(result.message) : ''),
+				progressIncrement: 1,
+				skippedIncrement: 1,
+			};
+		}
+
+		if (!result || !result.success) {
+			return {
+				line: 'Failed: ' + item + (result && result.message ? ' — ' + String(result.message) : ' — Page pipeline failed.'),
+				progressIncrement: 1,
+				failedIncrement: 1,
+			};
+		}
+
+		const canonicalUrl = result && result.pipeline && result.pipeline.url
+			? getWarmRequestUrl(result.pipeline.url)
+			: getWarmRequestUrl(item);
+		const summary = buildWarmPipelineSummary(result);
+		const canonicalNote = canonicalUrl !== getWarmRequestUrl(item) ? ' · Canonical URL: ' + canonicalUrl : '';
 		await sleep(40);
 		return {
-			line: 'Cached: ' + item + ' — ' + stageSummary.join(' · '),
+			line: 'Cached: ' + item + ' — ' + summary + canonicalNote,
 			progressIncrement: 1,
 			successIncrement: 1,
-			varnishWarmedIncrement: varnishWarmed ? 1 : 0,
+			varnishWarmedIncrement: 'completed' === getPipelineStageStatus(result, 'varnish') ? 1 : 0,
+			liteSpeedWarmedIncrement: 'completed' === getPipelineStageStatus(result, 'litespeed') ? 1 : 0,
 		};
 	}
 
@@ -398,7 +367,7 @@
 			const label = getCssWarmBundleLabel(scope, false);
 			const completed = await queueDashboardAction('warm_frontpage_html_css', {}, {
 				queued: label + ' build processing via dashboard…',
-				success: label + ' built and homepage HTML warmed.',
+				success: (job) => buildQueuedWarmPipelineSuccess(job, label + ' built and homepage HTML warmed.'),
 				failed: label + ' build failed.',
 				runningLabel: 'Building CSS…',
 			}, actionKey || ('prepare_' + scope + '_css_bundle'));
@@ -416,7 +385,7 @@
 			setHomepageHtmlBusy(true);
 			await queueDashboardAction('warm_frontpage_html', {}, {
 				queued: 'Frontpage HTML warm processing via dashboard…',
-				success: 'Frontpage HTML warm completed.',
+				success: (job) => buildQueuedWarmPipelineSuccess(job, 'Frontpage HTML warm completed.'),
 				failed: 'Frontpage HTML warm failed.',
 				runningLabel: 'Warming…',
 			}, 'warm_frontpage_html');
@@ -437,7 +406,7 @@
 			setHomepageHtmlCssBusy(true);
 			await queueDashboardAction('warm_frontpage_html_css', {}, {
 				queued: 'Homepage HTML + CSS bundle warm processing via dashboard…',
-				success: 'Homepage HTML + CSS bundle warm completed.',
+				success: (job) => buildQueuedWarmPipelineSuccess(job, 'Homepage HTML + CSS bundle warm completed.'),
 				failed: 'Homepage HTML + CSS bundle warm failed.',
 				runningLabel: 'Warming…',
 			}, 'warm_frontpage_html_css');
@@ -506,7 +475,15 @@
 				if (manualPriorityToken && !manualPriorityHandedOff) {
 					try {
 						await endManualWarmPriority(manualPriorityToken);
-					} catch (releaseError) {}
+					} catch (releaseError) {
+						reportNonFatalAdminError('warmup.manual-priority.release', releaseError, {
+							severity: 'warning',
+							dedupeKey: 'warmup.manual-priority.release',
+							pushToast,
+							userVisible: true,
+							toastText: __('Warm-up setup failed, and the manual priority lease could not be released. Refresh warm-up status before retrying.', 'ultracache'),
+						});
+					}
 				}
 				throw error;
 			} finally {
@@ -614,7 +591,15 @@
 				if (manualPriorityToken && !manualPriorityHandedOff) {
 					try {
 						await endManualWarmPriority(manualPriorityToken);
-					} catch (releaseError) {}
+					} catch (releaseError) {
+						reportNonFatalAdminError('warmup.manual-priority.release', releaseError, {
+							severity: 'warning',
+							dedupeKey: 'warmup.manual-priority.release',
+							pushToast,
+							userVisible: true,
+							toastText: __('Warm-up setup failed, and the manual priority lease could not be released. Refresh warm-up status before retrying.', 'ultracache'),
+						});
+					}
 				}
 				throw error;
 			} finally {

@@ -47,12 +47,25 @@ trait Ultra_Cache_Rest_Helpers_Trait
     }
 
 
-    private function format_batch_response(array $items, $total, $offset, $limit)
+    /**
+     * Paginate one complete in-memory item set.
+     *
+     * Callers must pass the full global set, never an already paginated page.
+     * The total is derived here so page contents and pagination metadata cannot
+     * describe different datasets.
+     *
+     * @param array $items  Complete global item set.
+     * @param int   $offset Requested global offset.
+     * @param int   $limit  Requested page size.
+     * @return array{items: array, total: int, offset: int, limit: int, nextOffset: int, hasMore: bool}
+     */
+    private function paginate_complete_item_set(array $items, $offset, $limit)
     {
-        $offset = max(0, (int) $offset);
+        $items = array_values($items);
+        $total = count($items);
+        $offset = min($total, max(0, (int) $offset));
         $limit = max(1, min(500, (int) $limit));
-        $total = max(0, (int) $total);
-        $sliced = array_values(array_slice($items, $offset, $limit));
+        $sliced = array_slice($items, $offset, $limit);
         $next_offset = min($total, $offset + count($sliced));
 
         return array(

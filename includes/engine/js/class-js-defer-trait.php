@@ -12,6 +12,61 @@ if (!defined('ABSPATH')) {
 trait Ultra_Cache_Engine_JS_Defer_Trait
 {
 
+    /**
+     * Add diagnostic-only WordPress handle/dependency metadata to printed scripts.
+     *
+     * The metadata is emitted only for the internal JS inventory loopback request,
+     * so normal frontend HTML is unchanged. This lets the Console Error Handler
+     * compare UltraCache's effective Delay/Defer strategy with WordPress' declared
+     * dependency graph instead of inferring dependencies from filenames.
+     *
+     * @param string $tag    Rendered script tag.
+     * @param string $handle WordPress script handle.
+     * @param string $src    Script source URL.
+     * @return string
+     */
+    public function annotate_runtime_js_inventory_script_tag($tag, $handle, $src)
+    {
+        unset($src);
+
+        if (is_admin() || '1' !== sanitize_text_field(ultracache_query_value('ultracache_js_inventory'))) {
+            return $tag;
+        }
+
+        $handle = sanitize_key((string) $handle);
+        if ('' === $handle || !class_exists('WP_HTML_Tag_Processor')) {
+            return $tag;
+        }
+
+        $deps = array();
+        if (function_exists('wp_scripts')) {
+            $wp_scripts = wp_scripts();
+            if (is_object($wp_scripts) && !empty($wp_scripts->registered[$handle]) && is_object($wp_scripts->registered[$handle])) {
+                foreach ((array) ($wp_scripts->registered[$handle]->deps ?? array()) as $dependency) {
+                    $dependency = sanitize_key((string) $dependency);
+                    if ('' !== $dependency) {
+                        $deps[$dependency] = true;
+                    }
+                }
+            }
+        }
+
+        try {
+            $processor = new WP_HTML_Tag_Processor((string) $tag);
+            if (!$processor->next_tag('SCRIPT')) {
+                return $tag;
+            }
+            $processor->set_attribute('data-ultracache-handle', $handle);
+            if (!empty($deps)) {
+                $processor->set_attribute('data-ultracache-deps', implode(',', array_keys($deps)));
+            }
+            $updated = $processor->get_updated_html();
+            return is_string($updated) && '' !== $updated ? $updated : $tag;
+        } catch (\Throwable $e) {
+            return $tag;
+        }
+    }
+
     public function defer_scripts($tag, $handle, $src)
     {
         $settings = $this->get_settings();

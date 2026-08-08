@@ -235,7 +235,7 @@ trait Ultra_Cache_WP_Admin_Trait
             ),
             'ultracache-admin-jobs' => array(
                 'path'      => 'includes/admin/js/jobs.js',
-                'deps'      => array('ultracache-admin-namespace', 'ultracache-admin-diagnostics'),
+                'deps'      => array('ultracache-admin-namespace', 'ultracache-admin-core', 'ultracache-admin-diagnostics'),
                 'in_footer' => true,
                 'module'    => false,
             ),
@@ -269,12 +269,6 @@ trait Ultra_Cache_WP_Admin_Trait
                 'in_footer' => true,
                 'module'    => false,
             ),
-            'ultracache-admin-varnish-refresh-ahead' => array(
-                'path'      => 'includes/admin/js/varnish-refresh-ahead.js',
-                'deps'      => array('wp-element', 'wp-i18n', 'ultracache-admin-core', 'ultracache-admin-ui'),
-                'in_footer' => true,
-                'module'    => false,
-            ),
             'ultracache-admin-varnish-flush-scope' => array(
                 'path'      => 'includes/admin/js/varnish-flush-scope.js',
                 'deps'      => array('wp-element', 'wp-i18n', 'ultracache-admin-core', 'ultracache-admin-ui'),
@@ -283,7 +277,7 @@ trait Ultra_Cache_WP_Admin_Trait
             ),
             'ultracache-admin-varnish' => array(
                 'path'      => 'includes/admin/js/varnish.js',
-                'deps'      => array('wp-element', 'wp-i18n', 'ultracache-admin-core', 'ultracache-admin-api', 'ultracache-admin-ui', 'ultracache-admin-cache-shared', 'ultracache-admin-varnish-refresh-ahead', 'ultracache-admin-varnish-flush-scope'),
+                'deps'      => array('wp-element', 'wp-i18n', 'ultracache-admin-core', 'ultracache-admin-api', 'ultracache-admin-ui', 'ultracache-admin-cache-shared', 'ultracache-admin-varnish-flush-scope'),
                 'in_footer' => true,
                 'module'    => false,
             ),
@@ -408,6 +402,7 @@ trait Ultra_Cache_WP_Admin_Trait
             'runtimeJsScanNonce' => wp_create_nonce('ultracache_runtime_js_scan'),
             'frontendProbeUrl' => esc_url_raw(home_url('/')),
             'version'      => ULTRACACHE_VERSION,
+            'cwpVarnishTemplateUrl' => esc_url_raw(ultracache_plugin_url('resources/varnish/control-web-panel/ultracache-cwp-varnish.tpl')),
             'adminTheme'   => self::get_ultracache_admin_theme_preference(),
             'canManageInfrastructure' => current_user_can('manage_options') && (current_user_can('activate_plugins') || current_user_can('manage_network_plugins')),
             'stats'        => $dashboard_stats,
@@ -437,7 +432,7 @@ trait Ultra_Cache_WP_Admin_Trait
         if (false === $ultracache_runtime_config_json) {
             $ultracache_runtime_config_json = '{}';
         }
-        wp_add_inline_script('ultracache-admin-js', 'window.ultracacheData = ' . $ultracache_runtime_config_json . ';', 'before');
+        wp_add_inline_script('ultracache-admin-namespace', 'window.ultracacheData = ' . $ultracache_runtime_config_json . ';', 'before');
     }
 
     /**
@@ -688,6 +683,149 @@ trait Ultra_Cache_WP_Admin_Trait
         }
     }
 
+
+    /**
+     * Return the persistent notice state name for one administrator or the
+     * activation-wide fallback scope when no authenticated user exists.
+     *
+     * @param int|null $user_id Optional user ID.
+     * @return string
+     */
+    private static function get_admin_notice_state_name($user_id = null)
+    {
+        $user_id = null === $user_id && function_exists('get_current_user_id')
+            ? (int) get_current_user_id()
+            : (int) $user_id;
+
+        if ($user_id > 0) {
+            return 'ultracache_state:admin.notice.user.' . $user_id;
+        }
+
+        return 'ultracache_state:admin.notice.global';
+    }
+
+    /**
+     * Persist one bounded delete-on-read admin notice without using transients.
+     *
+     * @param string   $message_key Internal message key.
+     * @param string   $type        Notice type.
+     * @param int      $ttl         Logical expiry in seconds.
+     * @param int|null $user_id     Optional target user ID.
+     * @return bool
+     */
+    private static function persist_admin_notice($message_key, $type = 'success', $ttl = 60, $user_id = null)
+    {
+        if (!function_exists('ultracache_mutate_state_record')) {
+            return false;
+        }
+
+        $message_key = sanitize_key((string) $message_key);
+        $type = sanitize_key((string) $type);
+        $ttl = max(15, min(DAY_IN_SECONDS, (int) $ttl));
+        $allowed_message_keys = array(
+            'all_cache_cleared',
+            'current_page_cache_cleared',
+            'browser_cache_rules_sync_failed',
+            'apache_static_rules_sync_failed',
+            'litespeed_cache_rules_sync_failed',
+        );
+        if (!in_array($message_key, $allowed_message_keys, true)) {
+            return false;
+        }
+        if (!in_array($type, array('success', 'warning', 'error', 'info'), true)) {
+            $type = 'success';
+        }
+
+        $resolved_user_id = null === $user_id && function_exists('get_current_user_id')
+            ? (int) get_current_user_id()
+            : max(0, (int) $user_id);
+        $now = time();
+        $payload = array(
+            'schemaVersion' => 1,
+            'messageKey' => $message_key,
+            'type' => $type,
+            'userId' => $resolved_user_id,
+            'createdAt' => $now,
+            'expiresAt' => $now + $ttl,
+        );
+        $result = ultracache_mutate_state_record(
+            self::get_admin_notice_state_name($resolved_user_id),
+            static function () use ($payload) {
+                return $payload;
+            },
+            3,
+            array()
+        );
+
+        return !empty($result['success']);
+    }
+
+    /**
+     * Translate one known notice key only when the admin notice is rendered.
+     *
+     * @param string $message_key Internal message key.
+     * @return string
+     */
+    private static function resolve_admin_notice_message($message_key)
+    {
+        switch (sanitize_key((string) $message_key)) {
+            case 'all_cache_cleared':
+                return __('UltraCache: all cache cleared.', 'ultracache');
+            case 'current_page_cache_cleared':
+                return __('UltraCache: current page cache cleared.', 'ultracache');
+            case 'browser_cache_rules_sync_failed':
+                return __('UltraCache: Browser Cache Headers are enabled, but .htaccess could not be updated during activation. Check file permissions or disable Browser Cache Headers.', 'ultracache');
+            case 'apache_static_rules_sync_failed':
+                return __('UltraCache: Apache Static HTML Delivery is enabled, but .htaccess could not be updated during activation. Check file permissions or disable Apache Static HTML Delivery.', 'ultracache');
+            case 'litespeed_cache_rules_sync_failed':
+                return __('UltraCache: LiteSpeed HTML Cache is enabled, but .htaccess could not be updated during activation. Check file permissions or disable LiteSpeed HTML Cache.', 'ultracache');
+            default:
+                return '';
+        }
+    }
+
+    /**
+     * Consume the current administrator notice, preferring user-scoped state
+     * over the activation-wide fallback state.
+     *
+     * @return array<string,mixed>
+     */
+    private static function consume_admin_notice()
+    {
+        if (!function_exists('ultracache_get_state_record') || !function_exists('ultracache_delete_state_record')) {
+            return array();
+        }
+
+        $user_id = function_exists('get_current_user_id') ? (int) get_current_user_id() : 0;
+        $state_names = array(self::get_admin_notice_state_name($user_id));
+        if ($user_id > 0) {
+            $state_names[] = self::get_admin_notice_state_name(0);
+        }
+
+        foreach (array_values(array_unique($state_names)) as $state_name) {
+            $record = ultracache_get_state_record($state_name);
+            $payload = is_array($record['payload'] ?? null) ? $record['payload'] : array();
+            if (empty($payload)) {
+                continue;
+            }
+
+            ultracache_delete_state_record($state_name);
+            $expires_at = max(0, (int) ($payload['expiresAt'] ?? 0));
+            if ($expires_at > 0 && $expires_at < time()) {
+                continue;
+            }
+
+            $target_user_id = max(0, (int) ($payload['userId'] ?? 0));
+            if ($target_user_id > 0 && $target_user_id !== $user_id) {
+                continue;
+            }
+
+            return $payload;
+        }
+
+        return array();
+    }
+
     public function handle_admin_bar_actions()
     {
         if (empty($_GET['ultracache_action']) || !current_user_can('manage_options')) {
@@ -706,7 +844,7 @@ trait Ultra_Cache_WP_Admin_Trait
         $action = sanitize_key(wp_unslash($_GET['ultracache_action']));
         if ('purge_all' === $action && method_exists($engine, 'purge_all')) {
             $engine->purge_all();
-            set_transient('ultracache_admin_notice', __('UltraCache: all cache cleared.', 'ultracache'), 30);
+            self::persist_admin_notice('all_cache_cleared', 'success', 60);
         } elseif ('purge_page' === $action) {
             $url = self::get_current_url_without_plugin_args();
             if ($url) {
@@ -716,7 +854,7 @@ trait Ultra_Cache_WP_Admin_Trait
                     $engine->purge_page_by_url($url);
                 }
 
-                set_transient('ultracache_admin_notice', __('UltraCache: current page cache cleared.', 'ultracache'), 30);
+                self::persist_admin_notice('current_page_cache_cleared', 'success', 60);
             }
         }
 
@@ -726,26 +864,22 @@ trait Ultra_Cache_WP_Admin_Trait
 
     public function render_admin_notice()
     {
-        $notice = get_transient('ultracache_admin_notice');
-        if (!$notice) {
+        if (!current_user_can('manage_options')) {
             return;
         }
 
-        delete_transient('ultracache_admin_notice');
-
-        $type = 'success';
-        $message = $notice;
-        if (is_array($notice)) {
-            $message = isset($notice['message']) ? (string) $notice['message'] : '';
-            $type = isset($notice['type']) ? sanitize_key((string) $notice['type']) : 'success';
-        }
-
-        if ('' === trim((string) $message)) {
+        $notice = self::consume_admin_notice();
+        if (empty($notice)) {
             return;
         }
 
+        $type = sanitize_key((string) ($notice['type'] ?? 'success'));
         if (!in_array($type, array('success', 'warning', 'error', 'info'), true)) {
             $type = 'success';
+        }
+        $message = self::resolve_admin_notice_message((string) ($notice['messageKey'] ?? ''));
+        if ('' === trim($message)) {
+            return;
         }
 
         echo '<div class="notice notice-' . esc_attr($type) . ' is-dismissible"><p>' . esc_html($message) . '</p></div>';

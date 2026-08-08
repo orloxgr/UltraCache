@@ -373,12 +373,48 @@ private static function get_analytics_hit_backend_diagnostic(array $settings = a
             );
         }
 
-private static function get_page_cache_activity_snapshot()
+private static function get_page_cache_activity_state_name()
         {
-            $cache_key = 'ultracache_dashboard_cache_activity_v1';
-            $cached    = get_transient($cache_key);
-            if (is_array($cached)) {
-                return $cached;
+            return 'ultracache_state:dashboard.page_cache_activity';
+        }
+
+private static function get_page_cache_activity_snapshot($force_refresh = false)
+        {
+            $state_name = self::get_page_cache_activity_state_name();
+            $record = function_exists('ultracache_get_state_record_read_only')
+                ? ultracache_get_state_record_read_only($state_name)
+                : array();
+            $stored = isset($record['payload']) && is_array($record['payload']) ? $record['payload'] : array();
+
+            if (!$force_refresh) {
+                if (isset($stored['pageFiles'])) {
+                    $stored['cached'] = true;
+                    $stored['persistent'] = true;
+                    $stored['scanSkipped'] = true;
+                    $stored['dirty'] = !empty($stored['dirty']);
+                    $stored['computedAt'] = max(0, (int) ($stored['computedAt'] ?? ($record['updatedAt'] ?? 0)));
+                    $stored['message'] = !empty($stored['dirty'])
+                        ? self::maybe_translate('Page-cache activity changed after the last persisted scan. Refresh storage diagnostics to recompute the bounded snapshot.')
+                        : self::maybe_translate('Page-cache activity is loaded from persistent diagnostics state.');
+                    return $stored;
+                }
+
+                return array(
+                    'path'          => '',
+                    'modified'      => 0,
+                    'size'          => 0,
+                    'pageFiles'     => 0,
+                    'scannedFiles'  => 0,
+                    'partial'       => false,
+                    'partialReason' => '',
+                    'scanLimit'     => 0,
+                    'computedAt'    => 0,
+                    'cached'        => false,
+                    'persistent'    => true,
+                    'scanSkipped'   => true,
+                    'dirty'         => false,
+                    'message'       => self::maybe_translate('Page-cache activity has not been scanned yet. Refresh storage diagnostics to create the persistent bounded snapshot.'),
+                );
             }
 
             $snapshot = array(
@@ -389,95 +425,201 @@ private static function get_page_cache_activity_snapshot()
                 'scannedFiles'  => 0,
                 'partial'       => false,
                 'partialReason' => '',
+                'scanLimit'     => 0,
+                'computedAt'    => time(),
+                'cached'        => false,
+                'persistent'    => true,
+                'scanSkipped'   => false,
+                'dirty'         => false,
+                'message'       => self::maybe_translate('Page-cache activity was refreshed with a bounded filesystem scan.'),
             );
 
-            if (!is_dir(ULTRACACHE_CACHE_DIR)) {
-                set_transient($cache_key, $snapshot, MINUTE_IN_SECONDS);
-                return $snapshot;
-            }
+            if (is_dir(ULTRACACHE_CACHE_DIR)) {
+                $max_scan_files = (int) apply_filters('ultracache_page_cache_activity_snapshot_max_scan_files', 5000);
+                $max_scan_files = max(250, min(50000, $max_scan_files));
+                $deadline_seconds = (float) apply_filters('ultracache_page_cache_activity_snapshot_timeout', 1);
+                $deadline_seconds = max(0.1, min(3, $deadline_seconds));
+                $deadline = microtime(true) + $deadline_seconds;
+                $snapshot['scanLimit'] = $max_scan_files;
 
-            $max_scan_files = (int) apply_filters('ultracache_page_cache_activity_snapshot_max_scan_files', 5000);
-            $max_scan_files = max(250, min(50000, $max_scan_files));
-            $deadline_seconds = (float) apply_filters('ultracache_page_cache_activity_snapshot_timeout', 1);
-            $deadline_seconds = max(0.1, min(3, $deadline_seconds));
-            $deadline = microtime(true) + $deadline_seconds;
-            $snapshot['scanLimit'] = $max_scan_files;
+                try {
+                    $iterator = new RecursiveIteratorIterator(
+                        new RecursiveDirectoryIterator(ULTRACACHE_CACHE_DIR, FilesystemIterator::SKIP_DOTS)
+                    );
 
-            try {
-                $iterator = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator(ULTRACACHE_CACHE_DIR, FilesystemIterator::SKIP_DOTS)
-                );
+                    foreach ($iterator as $file_info) {
+                        if (microtime(true) > $deadline) {
+                            $snapshot['partial'] = true;
+                            $snapshot['partialReason'] = 'deadline';
+                            break;
+                        }
 
-                foreach ($iterator as $file_info) {
-                    if (microtime(true) > $deadline) {
-                        $snapshot['partial'] = true;
-                        $snapshot['partialReason'] = 'deadline';
-                        break;
+                        if (!$file_info->isFile()) {
+                            continue;
+                        }
+
+                        $snapshot['scannedFiles']++;
+                        if ($snapshot['scannedFiles'] >= $max_scan_files) {
+                            $snapshot['partial'] = true;
+                            $snapshot['partialReason'] = 'limit';
+                            break;
+                        }
+
+                        $path = str_replace('\\', '/', (string) $file_info->getPathname());
+                        $name = strtolower((string) $file_info->getFilename());
+
+                        if (false !== strpos($path, '/font-css/')) {
+                            continue;
+                        }
+
+                        if (in_array($name, array('index.php', 'analytics.json'), true)) {
+                            continue;
+                        }
+
+                        if (!preg_match('/\.html(?:\.(?:gz|br))?$/', $name)) {
+                            continue;
+                        }
+
+                        $snapshot['pageFiles']++;
+                        $mtime = (int) $file_info->getMTime();
+                        if ($mtime > $snapshot['modified']) {
+                            $snapshot['modified'] = $mtime;
+                            $snapshot['path']     = $path;
+                            $snapshot['size']     = (int) $file_info->getSize();
+                        }
                     }
-
-                    if (!$file_info->isFile()) {
-                        continue;
-                    }
-
-                    $snapshot['scannedFiles']++;
-                    if ($snapshot['scannedFiles'] >= $max_scan_files) {
-                        $snapshot['partial'] = true;
-                        $snapshot['partialReason'] = 'limit';
-                        break;
-                    }
-
-                    $path = str_replace('\\', '/', (string) $file_info->getPathname());
-                    $name = strtolower((string) $file_info->getFilename());
-
-                    if (false !== strpos($path, '/font-css/')) {
-                        continue;
-                    }
-
-                    if (in_array($name, array('index.php', 'analytics.json'), true)) {
-                        continue;
-                    }
-
-                    if (!preg_match('/\.html(?:\.(?:gz|br))?$/', $name)) {
-                        continue;
-                    }
-
-                    $snapshot['pageFiles']++;
-                    $mtime = (int) $file_info->getMTime();
-                    if ($mtime > $snapshot['modified']) {
-                        $snapshot['modified'] = $mtime;
-                        $snapshot['path']     = $path;
-                        $snapshot['size']     = (int) $file_info->getSize();
-                    }
+                } catch (Exception $e) {
+                    $snapshot['error'] = (string) $e->getMessage();
+                    $snapshot['partial'] = true;
+                    $snapshot['partialReason'] = 'error';
                 }
-            } catch (Exception $e) {
-                $snapshot['error'] = (string) $e->getMessage();
-                $snapshot['partial'] = true;
-                $snapshot['partialReason'] = 'error';
             }
 
-            set_transient($cache_key, $snapshot, MINUTE_IN_SECONDS);
+            if (function_exists('ultracache_mutate_state_record')) {
+                $mutation = ultracache_mutate_state_record(
+                    $state_name,
+                    static function () use ($snapshot) {
+                        return $snapshot;
+                    },
+                    3,
+                    $snapshot
+                );
+                if (empty($mutation['success'])) {
+                    $snapshot['persistent'] = false;
+                    $snapshot['persistenceError'] = (string) ($mutation['reason'] ?? 'write_failed');
+                }
+            } else {
+                $snapshot['persistent'] = false;
+                $snapshot['persistenceError'] = 'state_storage_unavailable';
+            }
+
             return $snapshot;
+        }
+
+private static function get_object_cache_support_state_name()
+        {
+            return 'ultracache_state:runtime.object_cache_support';
+        }
+
+private static function get_object_cache_support_fingerprint()
+        {
+            $payload = array(
+                'schema' => 1,
+                'phpVersion' => PHP_VERSION,
+                'redisVersion' => extension_loaded('redis') ? (string) phpversion('redis') : '',
+                'apcuVersion' => extension_loaded('apcu') ? (string) phpversion('apcu') : '',
+                'sqliteVersion' => extension_loaded('sqlite3') ? (string) phpversion('sqlite3') : '',
+                'wpContentDir' => defined('WP_CONTENT_DIR') ? wp_normalize_path((string) WP_CONTENT_DIR) : '',
+                'dropinManager' => class_exists('Ultra_Cache_Object_Cache_Manager'),
+                'contractVersion' => 1,
+            );
+
+            return substr(hash('sha256', (string) wp_json_encode($payload)), 0, 24);
+        }
+
+private static function read_object_cache_support_status()
+        {
+            if (!function_exists('ultracache_get_state_record_read_only')) {
+                return array();
+            }
+
+            $record = ultracache_get_state_record_read_only(self::get_object_cache_support_state_name());
+            $payload = is_array($record['payload'] ?? null) ? $record['payload'] : array();
+            $status = is_array($payload['status'] ?? null) ? $payload['status'] : array();
+            if (empty($status)) {
+                return array();
+            }
+
+            $tested_at = max(0, (int) ($status['testedAt'] ?? ($payload['recordedAt'] ?? 0)));
+            $fingerprint = sanitize_text_field((string) ($status['fingerprint'] ?? ($payload['fingerprint'] ?? '')));
+            $age = $tested_at > 0 ? max(0, time() - $tested_at) : 0;
+            $configuration_changed = '' === $fingerprint || !hash_equals(self::get_object_cache_support_fingerprint(), $fingerprint);
+            $stale = $tested_at > 0 && $age > DAY_IN_SECONDS;
+            $status['testedAt'] = $tested_at;
+            $status['fingerprint'] = $fingerprint;
+            $status['ageSeconds'] = $age;
+            $status['configurationChanged'] = $configuration_changed;
+            $status['stale'] = $stale;
+            $status['diagnosticStatus'] = $configuration_changed ? 'configuration-changed' : ($stale ? 'stale' : 'current');
+            $status['source'] = 'persistent';
+
+            return $status;
+        }
+
+private static function persist_object_cache_support_status(array $status)
+        {
+            if (!function_exists('ultracache_mutate_state_record')) {
+                return false;
+            }
+
+            $status['testedAt'] = time();
+            $status['fingerprint'] = self::get_object_cache_support_fingerprint();
+            $status['ageSeconds'] = 0;
+            $status['configurationChanged'] = false;
+            $status['stale'] = false;
+            $status['diagnosticStatus'] = 'current';
+            $status['source'] = 'live';
+
+            $mutation = ultracache_mutate_state_record(
+                self::get_object_cache_support_state_name(),
+                static function () use ($status) {
+                    return array(
+                        'schemaVersion' => 1,
+                        'recordedAt' => (int) $status['testedAt'],
+                        'fingerprint' => (string) $status['fingerprint'],
+                        'status' => $status,
+                    );
+                },
+                5,
+                array()
+            );
+
+            return !empty($mutation['success']);
         }
 
 private static function get_object_cache_support_status($allow_live_check = true)
         {
-            $cache_key = 'ultracache_object_cache_support_status_v1';
             $allow_live_check = (bool) $allow_live_check;
+            $stored = self::read_object_cache_support_status();
 
             if (!$allow_live_check) {
-                $cached = get_transient($cache_key);
-                if (is_array($cached)) {
-                    $cached['source'] = 'cached';
-                    return $cached;
+                if (!empty($stored) && 'current' === (string) ($stored['diagnosticStatus'] ?? '')) {
+                    return $stored;
                 }
 
                 $light = self::get_object_cache_support_status_light();
-                $light['source'] = 'light_frontend_default';
+                $light['source'] = empty($stored)
+                    ? 'light_frontend_default'
+                    : ('configuration-changed' === (string) ($stored['diagnosticStatus'] ?? '') ? 'light_configuration_changed' : 'light_stale');
+                $light['diagnosticStatus'] = empty($stored) ? 'not-tested' : (string) ($stored['diagnosticStatus'] ?? 'stale');
+                $light['previousTestedAt'] = max(0, (int) ($stored['testedAt'] ?? 0));
+                $light['configurationChanged'] = !empty($stored['configurationChanged']);
+                $light['stale'] = !empty($stored['stale']);
                 return $light;
             }
 
             $dropin_installable = true;
-            $message   = '';
+            $message = '';
 
             if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
                 if (method_exists('Ultra_Cache_Object_Cache_Manager', 'supports_dropin')) {
@@ -494,8 +636,7 @@ private static function get_object_cache_support_status($allow_live_check = true
             $status['dropinInstallable'] = $dropin_installable;
             $status['message'] = $message;
             $status['source'] = 'live';
-
-            set_transient($cache_key, $status, 5 * MINUTE_IN_SECONDS);
+            self::persist_object_cache_support_status($status);
 
             return $status;
         }
@@ -720,9 +861,14 @@ private static function get_media_runtime_diagnostic()
                 'lastAvifEncodeFile' => (string) ($support['last_avif_encode_file'] ?? ''),
                 'lastAvifEncodeAt' => (int) ($support['last_avif_encode_at'] ?? 0),
                 'gdAvif' => !empty($support['gd_avif']),
+                'gdAvifDecode' => !empty($support['gd_avif_decode']),
+                'gdAvifToWebp' => !empty($support['gd_avif_to_webp']),
                 'gdWebp' => !empty($support['gd_webp']),
                 'imagickAvif' => !empty($support['imagick_avif']),
+                'imagickAvifDecode' => !empty($support['imagick_avif_decode']),
+                'imagickAvifToWebp' => !empty($support['imagick_avif_to_webp']),
                 'imagickWebp' => !empty($support['imagick_webp']),
+                'avifSourceToWebp' => !empty($support['avif_source_to_webp']),
                 'queue' => is_array($queue_status) ? $queue_status : array('enabled' => false),
             );
         }

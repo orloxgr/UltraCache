@@ -17,9 +17,12 @@
 	function createMediaReplacementUi(config) {
 		const source = config && typeof config === 'object' ? config : {};
 		const {
+			renderLabelWithHelp,
+			SelectField,
+			settings,
+			updateSetting,
 			busy,
 			mediaConversionTestBusy,
-			mediaOptimizationEnabled,
 			mediaSupport,
 			mediaLibraryReplacementBusy,
 			mediaLibraryReplacementStatus,
@@ -27,6 +30,11 @@
 			mediaLibraryReplacementPreviewOpen,
 			mediaLibraryReplacementDbPreview,
 			mediaLibraryReplacementDbPreviewOpen,
+			mediaLibraryReplacementBlockers,
+			mediaLibraryReplacementBlockersOpen,
+			mediaLibraryReplacementBlockerDecisions,
+			setMediaLibraryReplacementBlockersOpen,
+			setMediaLibraryReplacementBlockerDecisions,
 			mediaLibraryReplacementCleanupPreview,
 			mediaLibraryReplacementCleanupPreviewOpen,
 			mediaLibraryReplacementWarningAction,
@@ -39,6 +47,9 @@
 			closeMediaLibraryReplacementCleanupPreviewModal,
 			changeMediaLibraryReplacementPreviewPage,
 			changeMediaLibraryReplacementDbPreviewPage,
+			changeMediaLibraryReplacementBlockersPage,
+			openMediaLibraryReplacementBlockersModal,
+			saveMediaLibraryReplacementBlockerDecisions,
 			changeMediaLibraryReplacementCleanupPreviewPage,
 			runMediaConversionTest,
 			openMediaConversionTestModal,
@@ -60,6 +71,7 @@
 			verifyMediaLibraryReplacementWorkflow,
 			deleteMediaLibraryReplacementOriginalsWorkflow,
 			restartMediaLibraryReplacementWorkflow,
+			recoverMediaLibraryReplacementWorkflow,
 			prepareMediaLibraryReplacementFoundation,
 			openMediaLibraryReplacementPreviewModal,
 			openMediaLibraryReplacementDbPreviewModal,
@@ -76,8 +88,7 @@
 			previewMediaLibraryReplacementThemeCssReplacements,
 			applyMediaLibraryReplacementThemeCssReplacements,
 			verifyMediaLibraryReplacementThemeCssReplacements,
-			rollbackMediaLibraryReplacementMetadataUpdates,
-			applyMediaLibraryReplacementCleanup
+			rollbackMediaLibraryReplacementMetadataUpdates
 		} = source;
 
 
@@ -88,6 +99,11 @@ function closeMediaLibraryReplacementPreviewModal() {
 
 function closeMediaLibraryReplacementDbPreviewModal() {
 	setMediaLibraryReplacementDbPreviewOpen(false);
+}
+
+
+function closeMediaLibraryReplacementBlockersModal() {
+	setMediaLibraryReplacementBlockersOpen(false);
 }
 
 
@@ -176,7 +192,6 @@ function renderMediaLibraryReplacementPreviewModal() {
 	const preview = mediaLibraryReplacementPreview && typeof mediaLibraryReplacementPreview === 'object' ? mediaLibraryReplacementPreview : {};
 	const summary = preview.summary && typeof preview.summary === 'object' ? preview.summary : {};
 	const items = Array.isArray(preview.items) ? preview.items : [];
-	const jobId = preview.jobId ? String(preview.jobId) : '';
 	const targetFormat = preview.targetFormat ? String(preview.targetFormat).toUpperCase() : __('Target', 'ultracache');
 	const returned = typeof preview.returned !== 'undefined' ? Number(preview.returned || 0) : items.length;
 	const offset = typeof preview.offset !== 'undefined' ? Math.max(0, Number(preview.offset || 0)) : 0;
@@ -207,7 +222,7 @@ function renderMediaLibraryReplacementPreviewModal() {
 		className: 'uc-media-test-modal uc-media-replacement-preview-modal',
 		onClick: closeMediaLibraryReplacementPreviewModal,
 		role: 'presentation',
-		key: 'media-library-replacement-preview-modal-' + (jobId || 'empty'),
+		key: 'media-library-replacement-preview-modal',
 	}, [
 		h('div', {
 			className: 'uc-media-test-modal__dialog uc-support-modal__dialog uc-media-replacement-preview-modal__dialog',
@@ -227,7 +242,7 @@ function renderMediaLibraryReplacementPreviewModal() {
 			h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, __('Media Library replacement', 'ultracache')),
 			h('h3', { className: 'uc-support-modal__title', id: 'uc-media-replacement-preview-title', key: 'title' }, __('Mapping preview', 'ultracache')),
 			h('p', { className: 'uc-support-modal__text', key: 'summary' }, preview.hasPreview
-				? ('Job: ' + jobId + ' · ' + targetFormat + ' · ' + formatNumber(matched + copied + metadataReady + metadataUpdated + refsScanned + metadataRestored) + ' eligible of ' + formatNumber(total) + ' registry rows. Site content references were not replaced.')
+				? (targetFormat + ' · ' + formatNumber(matched + copied + metadataReady + metadataUpdated + refsScanned + metadataRestored) + ' eligible of ' + formatNumber(total) + ' registry rows. Site content references were not replaced.')
 				: (preview.message || __('No mapping preview is available yet.', 'ultracache'))
 			),
 			preview.hasPreview ? h('div', { className: 'uc-media-replacement-preview-summary', key: 'preview-summary' }, [
@@ -274,8 +289,9 @@ function renderMediaLibraryReplacementPreviewModal() {
 						h('span', { key: 'generated' }, h('code', {}, generatedPath)),
 						h('span', { key: 'planned' }, [
 							h('code', { key: 'path' }, plannedPath),
-							collision ? h('small', { className: 'uc-media-replacement-preview-warning', key: 'collision' }, __('Filename collision: WordPress unique filename would be used.', 'ultracache')) : null,
+							collision ? h('small', { className: 'uc-media-replacement-preview-warning', key: 'collision' }, __('Different destination file exists. Prepare blocks it unless overwrite with verified backup is selected.', 'ultracache')) : null,
 							existingReplacement ? h('small', { className: validExistingReplacement ? 'uc-media-replacement-preview-note' : 'uc-media-replacement-preview-warning', key: 'existing' }, validExistingReplacement ? __('Existing replacement file will be reused; no duplicate will be created.', 'ultracache') : __('Existing replacement file is invalid; no duplicate will be created.', 'ultracache')) : null,
+							item && item.destinationOverwritten ? h('small', { className: 'uc-media-replacement-preview-note', key: 'overwritten' }, __('Existing destination was atomically overwritten after a verified backup was persisted.', 'ultracache')) : null,
 						]),
 						h('span', { key: 'size' }, sizeText),
 						h('span', { key: 'status' }, [h('strong', { key: 'status-text' }, status), item && item.errorMessage ? h('small', { key: 'error' }, String(item.errorMessage)) : null]),
@@ -317,7 +333,6 @@ function renderMediaLibraryReplacementDbPreviewModal() {
 	const summary = preview.summary && typeof preview.summary === 'object' ? preview.summary : {};
 	const items = Array.isArray(preview.items) ? preview.items : [];
 	const tables = Array.isArray(summary.tables) ? summary.tables : [];
-	const jobId = preview.jobId ? String(preview.jobId) : '';
 	const totalRefs = Number(summary.totalRefs || 0);
 	const pendingRefs = Number(summary.pendingRefs || 0);
 	const serializedRefs = Number(summary.serializedRefs || 0);
@@ -345,7 +360,7 @@ function renderMediaLibraryReplacementDbPreviewModal() {
 		className: 'uc-media-test-modal uc-media-replacement-preview-modal',
 		onClick: closeMediaLibraryReplacementDbPreviewModal,
 		role: 'presentation',
-		key: 'media-library-replacement-db-preview-modal-' + (jobId || 'empty'),
+		key: 'media-library-replacement-db-preview-modal',
 	}, [
 		h('div', {
 			className: 'uc-media-test-modal__dialog uc-support-modal__dialog uc-media-replacement-preview-modal__dialog',
@@ -365,7 +380,7 @@ function renderMediaLibraryReplacementDbPreviewModal() {
 			h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, __('Media Library replacement', 'ultracache')),
 			h('h3', { className: 'uc-support-modal__title', id: 'uc-media-replacement-db-preview-title', key: 'title' }, __('Database replacement preview', 'ultracache')),
 			h('p', { className: 'uc-support-modal__text', key: 'summary' }, preview.hasReplacementPreview
-				? ('Job: ' + jobId + ' · ' + formatNumber(totalRefs) + ' database replacement' + (totalRefs === 1 ? '' : 's') + '. ' + (restoredRefs === totalRefs && totalRefs > 0 ? __('Site content references have been rolled back for the completed rows.', 'ultracache') : ((verifiedRefs > 0 || (pendingRefs === 0 && totalRefs > 0)) ? __('Site content references have been updated for the completed rows.', 'ultracache') : __('Site content has not been changed by this preview step.', 'ultracache'))))
+				? (formatNumber(totalRefs) + ' database replacement' + (totalRefs === 1 ? '' : 's') + '. ' + (restoredRefs === totalRefs && totalRefs > 0 ? __('Site content references have been rolled back for the completed rows.', 'ultracache') : ((verifiedRefs > 0 || (pendingRefs === 0 && totalRefs > 0)) ? __('Site content references have been updated for the completed rows.', 'ultracache') : __('Site content has not been changed by this preview step.', 'ultracache'))))
 				: (preview.message || __('No database replacement preview is available yet.', 'ultracache'))
 			),
 			preview.hasReplacementPreview ? h('div', { className: 'uc-media-replacement-preview-summary', key: 'db-preview-summary' }, [
@@ -411,7 +426,7 @@ function renderMediaLibraryReplacementDbPreviewModal() {
 			preview.hasReplacementPreview ? h('div', { className: 'uc-media-replacement-preview-pagination', key: 'db-preview-pagination' }, [
 				h('span', { className: 'uc-support-modal__text', key: 'range' }, totalRefs > 0
 					? __('Showing', 'ultracache') + ' ' + formatNumber(visibleFrom) + '–' + formatNumber(visibleTo) + ' ' + __('of', 'ultracache') + ' ' + formatNumber(totalRefs) + ' ' + __('database references.', 'ultracache')
-					: __('No database references are pending for this job.', 'ultracache')
+					: __('No database references are pending for this workflow.', 'ultracache')
 				),
 				totalRefs > 0 ? h('div', { className: 'uc-media-replacement-preview-pagination__buttons', key: 'buttons' }, [
 					h('button', {
@@ -437,6 +452,145 @@ function renderMediaLibraryReplacementDbPreviewModal() {
 
 
 
+
+function renderMediaLibraryReplacementBlockersModal() {
+	if (!mediaLibraryReplacementBlockersOpen) {
+		return null;
+	}
+
+	const preview = mediaLibraryReplacementBlockers && typeof mediaLibraryReplacementBlockers === 'object' ? mediaLibraryReplacementBlockers : {};
+	const groups = Array.isArray(preview.groups) ? preview.groups : [];
+	const items = Array.isArray(preview.items) ? preview.items : [];
+	const activeCode = String(preview.activeBlockerCode || (groups[0] && groups[0].code) || '');
+	const activeGroup = groups.find((group) => String(group && group.code || '') === activeCode) || groups[0] || {};
+	const decisions = mediaLibraryReplacementBlockerDecisions && typeof mediaLibraryReplacementBlockerDecisions === 'object' ? mediaLibraryReplacementBlockerDecisions : {};
+	const unresolved = groups.filter((group) => !String(decisions[String(group && group.code || '')] || (group && group.decision) || '')).length;
+	const total = Math.max(0, Number(preview.total || 0));
+	const returned = typeof preview.returned !== 'undefined' ? Math.max(0, Number(preview.returned || 0)) : items.length;
+	const offset = Math.max(0, Number(preview.offset || 0));
+	const limit = Math.max(1, Number(preview.limit || 100));
+	const previousOffset = typeof preview.previousOffset !== 'undefined' ? Math.max(0, Number(preview.previousOffset || 0)) : Math.max(0, offset - limit);
+	const nextOffset = typeof preview.nextOffset !== 'undefined' ? Math.max(0, Number(preview.nextOffset || 0)) : offset + returned;
+	const hasMore = !!preview.hasMore;
+	const visibleFrom = total > 0 && returned > 0 ? offset + 1 : 0;
+	const visibleTo = total > 0 && returned > 0 ? offset + returned : 0;
+	const actionLabel = (action) => action === 'overwrite_with_backup'
+		? __('Overwrite with verified backup', 'ultracache')
+		: __('Keep affected attachments as originals', 'ultracache');
+	const actionDescription = (action) => action === 'overwrite_with_backup'
+		? __('Back up each different destination, then atomically replace it with the prepared file.', 'ultracache')
+		: __('Exclude every affected attachment from this replacement plan. Its files, metadata, references, and originals remain unchanged.', 'ultracache');
+	const fileActionLabel = (action) => action === 'overwrite_with_backup'
+		? __('Overwrite this destination with verified backup', 'ultracache')
+		: __('Keep this attachment as original', 'ultracache');
+
+	return h('div', {
+		className: 'uc-media-test-modal uc-media-replacement-preview-modal',
+		onClick: closeMediaLibraryReplacementBlockersModal,
+		role: 'presentation',
+		key: 'media-library-replacement-blockers-modal',
+	}, [
+		h('div', {
+			className: 'uc-media-test-modal__dialog uc-support-modal__dialog uc-media-replacement-preview-modal__dialog',
+			onClick: (event) => event.stopPropagation(),
+			role: 'dialog',
+			'aria-modal': 'true',
+			'aria-labelledby': 'uc-media-replacement-blockers-title',
+			key: 'dialog',
+		}, [
+			h('button', { type: 'button', className: 'uc-media-test-modal__close uc-support-modal__close', onClick: closeMediaLibraryReplacementBlockersModal, 'aria-label': __('Close blocker decisions', 'ultracache'), key: 'close' }, '×'),
+			h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, __('Media Library replacement', 'ultracache')),
+			h('h3', { className: 'uc-support-modal__title', id: 'uc-media-replacement-blockers-title', key: 'title' }, __('Decide Blockers', 'ultracache')),
+			h('p', { className: 'uc-support-modal__text', key: 'summary' }, __('Prepare found conditions that require decisions before Apply can be enabled. Choose a group policy, then override individual files where needed.', 'ultracache')),
+			h('div', { className: 'uc-media-replacement-preview-summary', key: 'blocker-summary' }, [
+				h('div', { className: 'uc-media-replacement-preview-summary__item', key: 'groups' }, [h('span', { key: 'label' }, __('Blocker groups', 'ultracache')), h('strong', { key: 'value' }, formatNumber(preview.groupCount || groups.length))]),
+				h('div', { className: 'uc-media-replacement-preview-summary__item', key: 'attachments' }, [h('span', { key: 'label' }, __('Affected attachments', 'ultracache')), h('strong', { key: 'value' }, formatNumber(preview.affectedAttachments || 0))]),
+				h('div', { className: 'uc-media-replacement-preview-summary__item', key: 'variants' }, [h('span', { key: 'label' }, __('Affected units', 'ultracache')), h('strong', { key: 'value' }, formatNumber(preview.affectedVariants || 0))]),
+				h('div', { className: 'uc-media-replacement-preview-summary__item', key: 'unresolved' }, [h('span', { key: 'label' }, __('Awaiting decision', 'ultracache')), h('strong', { key: 'value' }, formatNumber(unresolved))]),
+			]),
+			groups.length ? h('div', { className: 'space-y-3 mt-4', key: 'groups-list' }, groups.map((group, groupIndex) => {
+				const code = String(group && group.code || '');
+				const selected = String(decisions[code] || (group && group.decision) || '');
+				const actions = Array.isArray(group && group.actions) ? group.actions : [];
+				const active = code === activeCode;
+				return h('div', { className: 'rounded-xl border p-4 ' + (active ? 'border-cyan-400/60 bg-cyan-400/5' : 'border-white/10 bg-white/5'), key: 'blocker-group-' + (code || groupIndex) }, [
+					h('button', { type: 'button', className: 'w-full text-left bg-transparent border-0 p-0 cursor-pointer', onClick: () => changeMediaLibraryReplacementBlockersPage(0, code), key: 'group-heading' }, [
+						h('div', { className: 'flex flex-col gap-1 md:flex-row md:items-center md:justify-between', key: 'heading-row' }, [
+							h('strong', { className: 'text-white', key: 'title' }, String(group.title || code)),
+							h('span', { className: 'text-xs text-zinc-400', key: 'counts' }, formatNumber(group.attachmentCount || 0) + ' ' + __('attachments', 'ultracache') + ' · ' + formatNumber(group.variantCount || 0) + ' ' + __('units', 'ultracache')),
+						]),
+						group.detail ? h('div', { className: 'text-xs text-zinc-400 mt-1', key: 'detail' }, String(group.detail)) : null,
+					]),
+					h('div', { className: 'mt-3 space-y-2', key: 'actions' }, actions.map((action) => h('label', { className: 'flex items-start gap-3 rounded-lg border border-white/10 px-3 py-2 cursor-pointer', key: 'action-' + action }, [
+						h('input', { type: 'radio', name: 'uc-blocker-decision-' + code, value: action, checked: selected === action, onChange: () => setMediaLibraryReplacementBlockerDecisions((current) => Object.assign({}, current || {}, { [code]: action })), key: 'input' }),
+						h('span', { key: 'copy' }, [h('strong', { className: 'block text-sm text-white', key: 'label' }, actionLabel(action)), h('small', { className: 'block text-xs text-zinc-400 mt-1', key: 'description' }, actionDescription(action))]),
+					]))),
+				]);
+			})) : h('div', { className: 'rounded-xl bg-white/5 text-zinc-400 text-sm px-4 py-4 mt-4', key: 'no-groups' }, __('Prepare found no blocker groups.', 'ultracache')),
+			activeCode ? h('div', { className: 'mt-5', key: 'active-group-units' }, [
+				h('div', { className: 'flex items-center justify-between gap-3 mb-3', key: 'units-heading' }, [
+					h('strong', { className: 'text-white', key: 'title' }, __('Affected units', 'ultracache') + ': ' + String(activeGroup.title || activeCode)),
+					h('span', { className: 'text-xs text-zinc-400', key: 'range' }, formatNumber(visibleFrom) + '–' + formatNumber(visibleTo) + ' / ' + formatNumber(total)),
+				]),
+				items.length ? h('div', { className: 'uc-media-replacement-preview-table', key: 'items-table' }, [
+					h('div', { className: 'uc-media-replacement-preview-row uc-media-replacement-preview-row--blockers uc-media-replacement-preview-row--head', key: 'head' }, [
+						h('span', { key: 'attachment' }, __('Attachment', 'ultracache')),
+						h('span', { key: 'scope' }, __('Scope', 'ultracache')),
+						h('span', { key: 'source' }, __('Source', 'ultracache')),
+						h('span', { key: 'format' }, __('Format', 'ultracache')),
+						h('span', { key: 'destination' }, __('Destination', 'ultracache')),
+						h('span', { key: 'detail' }, __('Details', 'ultracache')),
+						h('span', { key: 'decision' }, __('File decision', 'ultracache')),
+					]),
+					items.map((item, index) => {
+						const itemKey = 'item:' + String(item.id || index);
+						const groupDecision = String(decisions[activeCode] || activeGroup.decision || '');
+						const itemOverride = Object.prototype.hasOwnProperty.call(decisions, itemKey) ? String(decisions[itemKey] || '') : '';
+						const itemActions = Array.isArray(item.actions) && item.actions.length ? item.actions : (Array.isArray(activeGroup.actions) ? activeGroup.actions : []);
+						return h('div', { className: 'uc-media-replacement-preview-row uc-media-replacement-preview-row--blockers is-' + String(item.status || 'blocked'), key: 'blocker-item-' + String(item.id || index) }, [
+							h('span', { key: 'attachment' }, [h('strong', { key: 'id' }, '#' + String(item.attachmentId || '—')), h('small', { key: 'status' }, String(item.status || 'blocked'))]),
+							h('span', { key: 'scope' }, item.scope === 'intermediate' ? String(item.sizeName || __('Intermediate', 'ultracache')) : __('Main image', 'ultracache')),
+							h('span', { key: 'source' }, h('code', {}, String(item.source || '—'))),
+							h('span', { key: 'format' }, String(item.targetFormat || '').toUpperCase()),
+							h('span', { key: 'destination' }, h('code', {}, String(item.destination || '—'))),
+							h('span', { key: 'detail' }, [h('strong', { key: 'code' }, String(item.blockerCode || activeCode)), h('small', { key: 'text' }, String(item.detail || '—'))]),
+							h('span', { key: 'decision' }, [
+								h('select', {
+								className: 'uc-select w-full',
+								value: itemOverride,
+								onChange: (event) => setMediaLibraryReplacementBlockerDecisions((current) => {
+									const next = Object.assign({}, current || {});
+									const value = String(event && event.target ? event.target.value : '');
+									if (value) next[itemKey] = value; else delete next[itemKey];
+									return next;
+								}),
+								disabled: mediaLibraryReplacementBusy || !groupDecision,
+								key: 'select',
+							}, [
+								h('option', { value: '', key: 'group' }, groupDecision ? __('Use group decision', 'ultracache') + ': ' + actionLabel(groupDecision) : __('Choose group decision first', 'ultracache')),
+								...itemActions.map((action) => h('option', { value: action, key: action }, fileActionLabel(action))),
+							]),
+							itemOverride ? h('small', { key: 'override' }, __('Individual override', 'ultracache')) : h('small', { key: 'group-label' }, __('Uses group decision', 'ultracache')),
+						]),
+						]);
+					}),
+				]) : h('div', { className: 'rounded-xl bg-white/5 text-zinc-400 text-sm px-4 py-4', key: 'empty-items' }, __('No affected units were returned for this page.', 'ultracache')),
+				(total > limit || offset > 0 || hasMore) ? h('div', { className: 'uc-media-replacement-preview-pagination', key: 'pagination' }, [
+					h('span', { key: 'page-summary' }, formatNumber(visibleFrom) + '–' + formatNumber(visibleTo) + ' / ' + formatNumber(total)),
+					h('div', { className: 'uc-media-replacement-preview-pagination__actions', key: 'actions' }, [
+						h('button', { type: 'button', className: 'uc-btn', onClick: () => changeMediaLibraryReplacementBlockersPage(previousOffset, activeCode), disabled: mediaLibraryReplacementBusy || offset <= 0, key: 'previous' }, __('Previous', 'ultracache')),
+						h('button', { type: 'button', className: 'uc-btn uc-btn--primary', onClick: () => changeMediaLibraryReplacementBlockersPage(nextOffset, activeCode), disabled: mediaLibraryReplacementBusy || !hasMore, key: 'next' }, __('Next', 'ultracache')),
+					]),
+				]) : null,
+			]) : null,
+			h('div', { className: 'uc-media-replacement-warning__actions mt-5', key: 'footer' }, [
+				h('button', { type: 'button', className: 'uc-btn', onClick: closeMediaLibraryReplacementBlockersModal, key: 'cancel' }, __('Cancel', 'ultracache')),
+				h('button', { type: 'button', className: 'uc-btn uc-btn--primary', onClick: saveMediaLibraryReplacementBlockerDecisions, disabled: mediaLibraryReplacementBusy || groups.length === 0 || unresolved > 0, key: 'save' }, mediaLibraryReplacementBusy ? __('Saving decisions…', 'ultracache') : __('Save Decisions & Finish Prepare', 'ultracache')),
+			]),
+		]),
+	]);
+}
+
 function renderMediaLibraryReplacementCleanupPreviewModal() {
 	if (!mediaLibraryReplacementCleanupPreviewOpen) {
 		return null;
@@ -445,7 +599,6 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 	const preview = mediaLibraryReplacementCleanupPreview && typeof mediaLibraryReplacementCleanupPreview === 'object' ? mediaLibraryReplacementCleanupPreview : {};
 	const summary = preview.summary && typeof preview.summary === 'object' ? preview.summary : {};
 	const items = Array.isArray(preview.items) ? preview.items : [];
-	const jobId = preview.jobId ? String(preview.jobId) : '';
 	const totalItems = Number(summary.totalItems || 0);
 	const candidateItems = Number(summary.candidateItems || preview.cleanupCandidates || 0);
 	const blockedItems = Number(summary.blockedItems || preview.cleanupBlockedItems || 0);
@@ -472,7 +625,7 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 		className: 'uc-media-test-modal uc-media-replacement-preview-modal',
 		onClick: closeMediaLibraryReplacementCleanupPreviewModal,
 		role: 'presentation',
-		key: 'media-library-replacement-cleanup-preview-modal-' + (jobId || 'empty'),
+		key: 'media-library-replacement-cleanup-preview-modal',
 	}, [
 		h('div', {
 			className: 'uc-media-test-modal__dialog uc-support-modal__dialog uc-media-replacement-preview-modal__dialog',
@@ -492,7 +645,7 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 			h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, __('Media Library replacement', 'ultracache')),
 			h('h3', { className: 'uc-support-modal__title', id: 'uc-media-replacement-cleanup-preview-title', key: 'title' }, __('Cleanup preview', 'ultracache')),
 			h('p', { className: 'uc-support-modal__text', key: 'summary' }, preview.hasCleanupPreview
-				? ('Job: ' + jobId + ' · ' + formatNumber(candidateItems) + ' original main/intermediate rows · ' + formatNumber(uniqueOriginalFiles || candidateItems) + ' unique files. ' + __('No files were deleted by this preview.', 'ultracache'))
+				? (formatNumber(candidateItems) + ' original main/intermediate rows · ' + formatNumber(uniqueOriginalFiles || candidateItems) + ' unique files. ' + __('No files were deleted by this preview.', 'ultracache'))
 				: (preview.message || __('No cleanup preview is available yet.', 'ultracache'))
 			),
 			preview.hasCleanupPreview ? h('div', { className: 'uc-media-replacement-preview-summary', key: 'cleanup-preview-summary' }, [
@@ -551,96 +704,202 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 	]);
 }
 
+		function renderMediaConversionTestControls() {
+			return h('div', {
+				className: 'mt-5 uc-media-batch-actions',
+				style: { display: 'flex', flexDirection: 'column', gap: '12px' },
+				key: 'media-conversion-test-actions'
+			}, [
+				h('div', {
+					style: {
+						display: 'grid',
+						gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+						gap: '12px',
+						alignItems: 'start',
+						width: '100%',
+					},
+					key: 'media-conversion-test-button-row'
+				}, [
+					h('button', {
+						type: 'button',
+						className: 'uc-btn uc-btn--primary w-full text-white py-3 font-bold',
+						style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+						onClick: runMediaConversionTest,
+						disabled: busy || mediaConversionTestBusy || !mediaSupport.supported,
+						key: 'run-image-conversion-test',
+					}, mediaConversionTestBusy ? __('Testing images…', 'ultracache') : __('Image conversion test', 'ultracache')),
+					h('button', {
+						type: 'button',
+						className: 'uc-btn w-full text-white py-3 font-bold',
+						style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+						onClick: openMediaConversionTestModal,
+						disabled: mediaConversionTestBusy,
+						key: 'check-image-conversion-test',
+					}, mediaConversionTestBusy ? __('Loading…', 'ultracache') : __('Check test', 'ultracache')),
+				]),
+				h('div', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'media-conversion-test-help' }, __('Runs a 10-image Media Library sample through the existing AVIF/WebP converter, clears the previous test files, and stores the latest result for review. The sample uses up to 3 PNG images and fills the rest with JPG images; if no PNG exists, it uses JPG images only.', 'ultracache')),
+			]);
+		}
+
 		function renderMediaLibraryReplacementControls() {
 			return h('div', { key: 'media-replacement-actions' }, [
 				h('div', {
-					className: 'mt-5 uc-media-batch-actions',
+					className: 'uc-media-batch-actions',
 					style: { display: 'flex', flexDirection: 'column', gap: '12px' },
-					key: 'media-conversion-test-actions'
+					key: 'media-library-replacement-actions'
 				}, [
-					h('div', {
-						style: {
-							display: 'grid',
-							gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-							gap: '12px',
-							alignItems: 'start',
-							width: '100%',
-						},
-						key: 'media-conversion-test-button-row'
-					}, [
-						h('button', {
-							type: 'button',
-							className: 'uc-btn uc-btn--primary w-full text-white py-3 font-bold',
-							style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
-							onClick: runMediaConversionTest,
-							disabled: busy || mediaConversionTestBusy || !mediaOptimizationEnabled || !mediaSupport.supported,
-							key: 'run-image-conversion-test',
-						}, mediaConversionTestBusy ? __('Testing images…', 'ultracache') : __('Image conversion test', 'ultracache')),
-						h('button', {
-							type: 'button',
-							className: 'uc-btn w-full text-white py-3 font-bold',
-							style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
-							onClick: openMediaConversionTestModal,
-							disabled: mediaConversionTestBusy,
-							key: 'check-image-conversion-test',
-						}, mediaConversionTestBusy ? __('Loading…', 'ultracache') : __('Check test', 'ultracache')),
-					]),
-					h('div', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'media-conversion-test-help' }, __('Runs a 10-image Media Library sample through the existing AVIF/WebP converter, clears the previous test files, and stores the latest result for review. The sample uses up to 3 PNG images and fills the rest with JPG images; if no PNG exists, it uses JPG images only.', 'ultracache')),
 					(() => {
 						const deleteOriginalsDisabledReason = getMediaLibraryReplacementDeleteDisabledReason();
 						const replacementRecovery = getMediaLibraryReplacementRecoveryStatus();
 						const workflowBusy = busy || mediaConversionTestBusy || mediaLibraryReplacementBusy || !isMediaLibraryReplacementRunnerReady() || isMediaLibraryReplacementOwnedByAnotherDashboard();
 						const prepareState = getMediaLibraryReplacementWorkflowButtonState('prepare', deleteOriginalsDisabledReason);
+						const prepareStatus = mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.prepare && typeof mediaLibraryReplacementStatus.prepare === 'object'
+							? mediaLibraryReplacementStatus.prepare
+							: {};
+						const prepareFailureGuidance = __('Preparation failed. Open Advanced / Manual Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again.', 'ultracache');
 						const doState = getMediaLibraryReplacementWorkflowButtonState('do', deleteOriginalsDisabledReason);
+						const doStatus = mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.do && typeof mediaLibraryReplacementStatus.do === 'object'
+							? mediaLibraryReplacementStatus.do
+							: {};
 						const verifyState = getMediaLibraryReplacementWorkflowButtonState('verify', deleteOriginalsDisabledReason);
 						const deleteState = getMediaLibraryReplacementWorkflowButtonState('delete', deleteOriginalsDisabledReason);
+						const replacementOverview = __('Replace existing JPG/PNG Media Library files and references with the selected image replacement format. Complete the steps in order: prepare the replacement, apply the changes, verify the result, and delete the original files when verification is complete.', 'ultracache');
+						const replacementFormatLocked = !!(mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.formatLocked);
+						const replacementPolicyChanged = !!(mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.replacementPolicyChanged && !replacementFormatLocked);
+						const replacementFormatSource = replacementFormatLocked && mediaLibraryReplacementStatus.formatLockTarget
+							? mediaLibraryReplacementStatus.formatLockTarget
+							: ((settings && settings.mediaReplacementFormat) || 'webp');
+						const replacementTargetFormat = ('avif' === String(replacementFormatSource).toLowerCase()) ? 'avif' : 'webp';
+						const replacementTitle = (typeof renderLabelWithHelp === 'function')
+							? renderLabelWithHelp(__('Media Library Replacement', 'ultracache'), replacementOverview)
+							: __('Media Library Replacement', 'ultracache');
 						return h('div', { className: 'space-y-3', key: 'media-library-replacement-simple-workflow' }, [
+							h('div', { className: 'flex items-center justify-between py-4', key: 'media-library-replacement-workflow-introduction' }, [
+								h('div', { key: 'left' }, [
+									h('div', { className: 'text-sm font-medium text-white', key: 'media-library-replacement-workflow-title' }, replacementTitle),
+									h('div', { className: 'text-xs text-zinc-500', key: 'media-library-replacement-workflow-overview' }, replacementOverview),
+								]),
+							]),
+							h('div', { className: 'uc-media-replacement-format-field', key: 'media-replacement-format-wrap' }, [
+								h(SelectField, {
+									label: __('Image replacement format', 'ultracache'),
+									description: __('Choose the target format that replaces existing JPG/PNG Media Library files and references.', 'ultracache'),
+									value: replacementTargetFormat,
+									onChange: (value) => updateSetting('mediaReplacementFormat', value),
+									disabled: workflowBusy || replacementFormatLocked,
+									options: [
+										{ value: 'avif', label: (mediaSupport.imagick_avif || mediaSupport.gd_avif) ? __('AVIF Format', 'ultracache') : __('AVIF Format (Self-Test Failed)', 'ultracache') },
+										{ value: 'webp', label: __('WebP Format', 'ultracache') },
+									],
+								}),
+								replacementFormatLocked ? h('div', { className: 'text-xs text-amber-300 mt-2', key: 'media-replacement-format-locked' },
+									String(mediaLibraryReplacementStatus.formatLockMessage || __('Image replacement format is locked until the current destructive replacement workflow is complete or recovered.', 'ultracache'))
+								) : null,
+								replacementPolicyChanged
+									? h('div', { className: 'text-xs text-amber-300 mt-2', key: 'media-replacement-format-changed' }, __('The image replacement format changed after the previous readiness or Prepare plan. Run Prepare again to build a new plan for the selected format.', 'ultracache'))
+									: null,
+							]),
 							h('div', {
 								style: { display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' },
 								key: 'media-library-replacement-primary-workflow-column',
 							}, [
-								h('button', {
-									type: 'button',
-									className: getMediaLibraryReplacementWorkflowButtonClass(prepareState),
-									style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
-									onClick: () => prepareMediaLibraryReplacementWorkflow(false),
-									disabled: prepareState.disabled,
-									title: prepareState.reason || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.workflowMessage ? String(mediaLibraryReplacementStatus.workflowMessage) : ''),
-									key: 'prepare-media-library-replacement-workflow',
-								}, getMediaLibraryReplacementPrepareLabel()),
-								h('button', {
-									type: 'button',
-									className: getMediaLibraryReplacementWorkflowButtonClass(doState),
-									style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
-									onClick: doMediaLibraryReplacementWorkflow,
-									disabled: doState.disabled,
-									title: doState.reason || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.workflowMessage ? String(mediaLibraryReplacementStatus.workflowMessage) : ''),
-									key: 'do-media-library-replacement-workflow',
-								}, getMediaLibraryReplacementDoLabel()),
-								h('button', {
-									type: 'button',
-									className: getMediaLibraryReplacementWorkflowButtonClass(verifyState),
-									style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
-									onClick: verifyMediaLibraryReplacementWorkflow,
-									disabled: verifyState.disabled,
-									title: verifyState.reason || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.workflowMessage ? String(mediaLibraryReplacementStatus.workflowMessage) : ''),
-									key: 'verify-media-library-replacement-workflow',
-								}, getMediaLibraryReplacementVerifyLabel()),
-								h('button', {
-									type: 'button',
-									className: getMediaLibraryReplacementWorkflowButtonClass(deleteState),
-									style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
-									onClick: deleteMediaLibraryReplacementOriginalsWorkflow,
-									disabled: deleteState.disabled,
-									title: deleteState.reason || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.workflowMessage ? String(mediaLibraryReplacementStatus.workflowMessage) : ''),
-									key: 'delete-originals-media-library-replacement-workflow',
-								}, getMediaLibraryReplacementDeleteLabel()),
+								h('div', { className: 'space-y-1', key: 'prepare-media-library-replacement-workflow-group' }, [
+									h('button', {
+										type: 'button',
+										className: getMediaLibraryReplacementWorkflowButtonClass(prepareState),
+										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+										onClick: () => prepareMediaLibraryReplacementWorkflow(replacementPolicyChanged),
+										disabled: prepareState.disabled,
+										title: prepareState.reason || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.workflowMessage ? String(mediaLibraryReplacementStatus.workflowMessage) : ''),
+										key: 'prepare-media-library-replacement-workflow',
+									}, getMediaLibraryReplacementPrepareLabel()),
+									prepareStatus.prepareFailed ? h('p', { className: 'text-xs text-amber-300 leading-relaxed', key: 'prepare-media-library-replacement-failure-guidance' }, prepareFailureGuidance) : null,
+									h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'prepare-media-library-replacement-workflow-help' }, __('Scans the Media Library, verifies that the required replacement files are ready, and prepares metadata, database, and active-theme CSS changes. No live references are changed during this step.', 'ultracache')),
+								]),
+								h('div', { className: 'space-y-1', key: 'decide-media-library-replacement-blockers-group' }, [
+									h('button', {
+										type: 'button',
+										className: 'uc-btn w-full text-white py-3 font-bold' + (!prepareStatus.decisionsRequired ? ' opacity-50 cursor-not-allowed grayscale' : ''),
+										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+										onClick: openMediaLibraryReplacementBlockersModal,
+										disabled: workflowBusy || !prepareStatus.decisionsRequired,
+										title: prepareStatus.decisionsRequired ? String(prepareStatus.message || __('Review and resolve every blocker group.', 'ultracache')) : __('Prepare has no unresolved blocker decisions.', 'ultracache'),
+										key: 'decide-media-library-replacement-blockers',
+									}, prepareStatus.decisionsRequired
+										? __('Decide Blockers', 'ultracache') + (Number(prepareStatus.unresolvedBlockerGroups || 0) > 0 ? ' (' + formatNumber(prepareStatus.unresolvedBlockerGroups) + ')' : '')
+										: __('No Blocker Decisions', 'ultracache')),
+									h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'decide-media-library-replacement-blockers-help' }, __('When Prepare finds blocked units or destination collisions, choose one bulk decision for each blocker group. Apply remains disabled until every group is resolved.', 'ultracache')),
+								]),
+								h('div', { className: 'space-y-1', key: 'do-media-library-replacement-workflow-group' }, [
+									h('button', {
+										type: 'button',
+										className: getMediaLibraryReplacementWorkflowButtonClass(doState),
+										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+										onClick: doMediaLibraryReplacementWorkflow,
+										disabled: doState.disabled,
+										title: doState.reason || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.workflowMessage ? String(mediaLibraryReplacementStatus.workflowMessage) : ''),
+										key: 'do-media-library-replacement-workflow',
+									}, getMediaLibraryReplacementDoLabel()),
+									h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'do-media-library-replacement-workflow-help' }, __('Applies the prepared changes to attachment metadata, database references, and active-theme CSS. The website starts using the replacement files after this step.', 'ultracache')),
+								]),
+								doStatus.doFailed ? h('div', {
+									className: 'space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3',
+									key: 'media-library-replacement-do-recovery-controls',
+								}, [
+									h('div', { className: 'text-xs text-amber-200 leading-relaxed', key: 'media-library-replacement-do-recovery-message' },
+										doStatus.message || __('Replacement stopped after preserving the completed work. Choose how to continue.', 'ultracache')
+									),
+									doStatus.canContinue ? h('button', {
+										type: 'button',
+										className: 'uc-btn w-full text-white py-3 font-bold',
+										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+										onClick: () => recoverMediaLibraryReplacementWorkflow('continue'),
+										disabled: workflowBusy,
+										key: 'continue-media-library-replacement',
+									}, __('Continue Replacement', 'ultracache')) : null,
+									doStatus.canContinue ? h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'continue-media-library-replacement-help' },
+										__('Keeps every completed metadata and database change, excludes UltraCache internal state, and retries only unresolved replacement rows.', 'ultracache')
+									) : null,
+									doStatus.canRestartDatabase ? h('button', {
+										type: 'button',
+										className: 'uc-btn w-full text-white py-3 font-bold',
+										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+										onClick: () => recoverMediaLibraryReplacementWorkflow('restart_database'),
+										disabled: workflowBusy,
+										key: 'restart-media-library-replacement-database',
+									}, __('Restart Database Replacement', 'ultracache')) : null,
+									doStatus.canRestartDatabase ? h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'restart-media-library-replacement-database-help' },
+										__('Preserves completed metadata and database changes, rebuilds only the unresolved database plan from the current database state, and then resumes replacement.', 'ultracache')
+									) : null,
+								]) : null,
+								h('div', { className: 'space-y-1', key: 'verify-media-library-replacement-workflow-group' }, [
+									h('button', {
+										type: 'button',
+										className: getMediaLibraryReplacementWorkflowButtonClass(verifyState),
+										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+										onClick: verifyMediaLibraryReplacementWorkflow,
+										disabled: verifyState.disabled,
+										title: verifyState.reason || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.workflowMessage ? String(mediaLibraryReplacementStatus.workflowMessage) : ''),
+										key: 'verify-media-library-replacement-workflow',
+									}, getMediaLibraryReplacementVerifyLabel()),
+									h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'verify-media-library-replacement-workflow-help' }, __('Checks that replacement files exist and that attachment metadata, database references, and active-theme CSS references were updated correctly.', 'ultracache')),
+								]),
+								h('div', { className: 'space-y-1', key: 'delete-originals-media-library-replacement-workflow-group' }, [
+									h('button', {
+										type: 'button',
+										className: getMediaLibraryReplacementWorkflowButtonClass(deleteState),
+										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+										onClick: deleteMediaLibraryReplacementOriginalsWorkflow,
+										disabled: deleteState.disabled,
+										title: deleteState.reason || (mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.workflowMessage ? String(mediaLibraryReplacementStatus.workflowMessage) : ''),
+										key: 'delete-originals-media-library-replacement-workflow',
+									}, getMediaLibraryReplacementDeleteLabel()),
+									h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'delete-originals-media-library-replacement-workflow-help' }, __('Permanently deletes the original JPG/PNG files after the replacement has been applied and verified.', 'ultracache')),
+								]),
 							]),
-							replacementRecovery.activeElsewhere ? h('div', { className: 'text-xs text-amber-300 leading-relaxed', key: 'media-library-replacement-active-elsewhere' }, __('This job is currently owned by another dashboard. Status refreshes automatically; Resume becomes available after that dashboard pauses or its lease expires.', 'ultracache')) : null,
-							replacementRecovery.resumable ? h('div', { className: 'text-xs text-emerald-300 leading-relaxed', key: 'media-library-replacement-resumable' }, __('A paused server job was recovered. Use the active workflow button to continue from the saved phase and cursor.', 'ultracache')) : null,
-							h('div', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'media-library-replacement-help' }, isMediaLibraryReplacementReadinessRunnerReady()
-							? __('Prepare includes the replacement-file readiness scan and continues automatically into registry, copy, validation, and planning when every required file is ready. Prepare, Do, Verify, and Delete Originals use the shared resumable long-job popup and token-owned server lease.', 'ultracache')
-							: getMediaLibraryReplacementRunnerUnavailableMessage()),
+							replacementRecovery.activeElsewhere ? h('div', { className: 'text-xs text-amber-300 leading-relaxed', key: 'media-library-replacement-active-elsewhere' }, __('This workflow is currently owned by another dashboard. Status refreshes automatically; Resume becomes available after that dashboard pauses or its lease expires.', 'ultracache')) : null,
+							replacementRecovery.resumable ? h('div', { className: 'text-xs text-emerald-300 leading-relaxed', key: 'media-library-replacement-resumable' }, __('A paused server workflow was recovered. Use the active workflow button to continue from the saved phase and cursor.', 'ultracache')) : null,
+							!isMediaLibraryReplacementReadinessRunnerReady() ? h('div', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'media-library-replacement-help' }, getMediaLibraryReplacementRunnerUnavailableMessage()) : null,
 						h('details', { className: 'pt-2', key: 'media-library-replacement-advanced-controls' }, [
 								h('summary', { className: 'cursor-pointer text-sm font-semibold text-zinc-200', style: { paddingBottom: '10px' } }, __('Advanced / Manual Recovery', 'ultracache')),
 								h('div', { className: 'mt-3 uc-media-batch-actions', style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, [
@@ -678,8 +937,7 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 									h('button', { type: 'button', className: 'uc-btn w-full text-white py-3 font-bold', style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: rollbackMediaLibraryReplacementDatabaseReplacements, disabled: workflowBusy, key: 'rollback-media-library-replacement-db-replacements' }, mediaLibraryReplacementBusy ? __('Rolling back DB replacements…', 'ultracache') : __('Rollback DB Replacements', 'ultracache')),
 									h('button', { type: 'button', className: 'uc-btn w-full text-white py-3 font-bold', style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: rollbackMediaLibraryReplacementMetadataUpdates, disabled: workflowBusy, key: 'rollback-media-library-replacement-metadata' }, mediaLibraryReplacementBusy ? __('Rolling back metadata…', 'ultracache') : __('Rollback Attachment Metadata', 'ultracache')),
 									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('cleanup_preview', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: openMediaLibraryReplacementCleanupPreviewModal, disabled: workflowBusy, key: 'preview-media-library-replacement-cleanup' }, mediaLibraryReplacementBusy ? __('Loading cleanup preview…', 'ultracache') : __('Cleanup Preview', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('cleanup_apply', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: applyMediaLibraryReplacementCleanup, disabled: workflowBusy, key: 'apply-media-library-replacement-cleanup' }, mediaLibraryReplacementBusy ? __('Applying cleanup…', 'ultracache') : __('Cleanup Apply', 'ultracache')),
-								]),
+											]),
 							]),
 						]);
 					})(),
@@ -689,10 +947,21 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 							__('Prepare file readiness', 'ultracache') + ': ',
 							mediaLibraryReplacementStatus.readiness.inventoryComplete
 								? (mediaLibraryReplacementStatus.readiness.readyForReplacement ? __('Ready', 'ultracache') : __('Blocked', 'ultracache'))
-								: (mediaLibraryReplacementStatus.readiness.status === 'scanning' ? __('Scanning', 'ultracache') : __('Not scanned', 'ultracache')),
+								: (mediaLibraryReplacementStatus.readiness.status === 'scanning'
+									? (Number(mediaLibraryReplacementStatus.readiness.verificationPass || 0) > 0 ? __('Generating', 'ultracache') : __('Scanning', 'ultracache'))
+									: (mediaLibraryReplacementStatus.readiness.status === 'paused' ? __('Paused', 'ultracache') : __('Not scanned', 'ultracache'))),
 							' · ',
-							String(mediaLibraryReplacementStatus.readiness.readyVariants || 0) + '/' + String(mediaLibraryReplacementStatus.readiness.requiredVariants || 0) + ' ' + String(mediaLibraryReplacementStatus.readiness.targetFormat || '').toUpperCase(),
+							String(mediaLibraryReplacementStatus.readiness.readyVariants || 0) + '/' + String(mediaLibraryReplacementStatus.readiness.requiredVariants || 0) + ' ' + String(mediaLibraryReplacementStatus.readiness.targetFormat || '').toUpperCase()
+								+ (Number(mediaLibraryReplacementStatus.readiness.generatedUnits || 0) > 0 ? ' · ' + String(mediaLibraryReplacementStatus.readiness.generatedUnits || 0) + ' ' + __('generated unit(s)', 'ultracache') : ''),
 						]) : null,
+						mediaLibraryReplacementStatus.readiness && mediaLibraryReplacementStatus.readiness.inventoryComplete && !mediaLibraryReplacementStatus.readiness.readyForReplacement && mediaLibraryReplacementStatus.readiness.blockerSamples && mediaLibraryReplacementStatus.readiness.blockerSamples.length ? h('div', { key: 'media-library-replacement-primary-blocker', className: 'text-amber-300' }, (() => {
+							const blocker = mediaLibraryReplacementStatus.readiness.blockerSamples[0] || {};
+							const scope = blocker.scope === 'intermediate' ? (blocker.sizeName || __('Intermediate image', 'ultracache')) : __('Main image', 'ultracache');
+							const detail = blocker.failureDetail || blocker.skipDetail || blocker.reason || __('Required output is not ready.', 'ultracache');
+							const blockerCode = blocker.failureCode || blocker.skippedReason || '';
+							const code = blockerCode ? String(blockerCode) + ': ' : '';
+							return String(scope) + ' · #' + String(blocker.attachmentId || 0) + ' · ' + String(blocker.source || '') + ' · ' + code + String(detail);
+						})()) : null,
 						mediaLibraryReplacementStatus.startGuard ? h('div', { key: 'media-library-replacement-start-guard' }, [
 							__('Start guard', 'ultracache') + ': ',
 							mediaLibraryReplacementStatus.startGuard.allowed ? __('Ready', 'ultracache') : __('Blocked', 'ultracache'),
@@ -700,28 +969,36 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 								? ' · ' + String(mediaLibraryReplacementStatus.startGuard.blockers.length) + ' ' + __('blocker(s)', 'ultracache')
 								: '',
 						]) : null,
-						mediaLibraryReplacementStatus.preDoGuard && mediaLibraryReplacementStatus.jobId && (!mediaLibraryReplacementStatus.do || ['', 'prepare_complete'].includes(String(mediaLibraryReplacementStatus.do.activeStep || ''))) ? h('div', { key: 'media-library-replacement-pre-do-guard' }, [
+						mediaLibraryReplacementStatus.preDoGuard && Math.max(0, Number(mediaLibraryReplacementStatus.registryRows || 0)) > 0 && (!mediaLibraryReplacementStatus.do || ['', 'prepare_complete'].includes(String(mediaLibraryReplacementStatus.do.activeStep || ''))) ? h('div', { key: 'media-library-replacement-pre-do-guard' }, [
 							__('Pre-Do guard', 'ultracache') + ': ',
 							mediaLibraryReplacementStatus.preDoGuard.allowed ? __('Ready', 'ultracache') : __('Blocked', 'ultracache'),
 							mediaLibraryReplacementStatus.preDoGuard.blockers && mediaLibraryReplacementStatus.preDoGuard.blockers.length
 								? ' · ' + String(mediaLibraryReplacementStatus.preDoGuard.blockers.length) + ' ' + __('blocker(s)', 'ultracache')
 								: '',
 						]) : null,
-						mediaLibraryReplacementStatus.prepare && mediaLibraryReplacementStatus.prepare.jobId ? h('div', { key: 'media-library-replacement-prepare-status' }, [
+						mediaLibraryReplacementStatus.prepare && (mediaLibraryReplacementStatus.prepare.activeStep || mediaLibraryReplacementStatus.prepare.prepareComplete || mediaLibraryReplacementStatus.prepare.prepareFailed) ? h('div', { key: 'media-library-replacement-prepare-status' }, [
 							__('Prepare', 'ultracache') + ': ',
 							mediaLibraryReplacementStatus.prepare.prepareComplete
 								? __('Complete', 'ultracache')
 								: (mediaLibraryReplacementStatus.prepare.prepareFailed ? __('Failed', 'ultracache') : String(mediaLibraryReplacementStatus.prepare.activeStep || __('Pending', 'ultracache'))),
 							' · ' + String(mediaLibraryReplacementStatus.prepare.processed || 0) + '/' + String(mediaLibraryReplacementStatus.prepare.total || 0),
 						]) : null,
-						mediaLibraryReplacementStatus.do && mediaLibraryReplacementStatus.do.jobId ? h('div', { key: 'media-library-replacement-do-status' }, [
+						mediaLibraryReplacementStatus.prepare && String(mediaLibraryReplacementStatus.prepare.activeStep || '') === 'database_scan' ? h('div', { key: 'media-library-replacement-database-scan-live' }, [
+							__('Database scan', 'ultracache') + ': ',
+							String(mediaLibraryReplacementStatus.prepare.databaseColumnsScanned || 0) + '/' + String(mediaLibraryReplacementStatus.prepare.databaseColumnsTotal || 0),
+							' · ' + String(mediaLibraryReplacementStatus.prepare.databaseScanTable || '—') + '.' + String(mediaLibraryReplacementStatus.prepare.databaseScanColumn || '—'),
+							' · ' + __('rows', 'ultracache') + ': ' + String(mediaLibraryReplacementStatus.prepare.databaseRowsScanned || 0),
+							' · ' + __('last batch', 'ultracache') + ': ' + String(mediaLibraryReplacementStatus.prepare.databaseScanLastBatchRows || 0),
+							' · ' + __('cursor', 'ultracache') + ': ' + String(mediaLibraryReplacementStatus.prepare.databaseScanPagination === 'keyset' ? (mediaLibraryReplacementStatus.prepare.databaseScanCursorPrimary || '—') : (mediaLibraryReplacementStatus.prepare.databaseScanCursorOffset || 0)),
+							' · ' + String(mediaLibraryReplacementStatus.prepare.databaseScanQueryMs || 0) + ' ms',
+						]) : null,
+						mediaLibraryReplacementStatus.do && (mediaLibraryReplacementStatus.do.activeStep || mediaLibraryReplacementStatus.do.doComplete || mediaLibraryReplacementStatus.do.doFailed) ? h('div', { key: 'media-library-replacement-do-status' }, [
 							__('Do', 'ultracache') + ': ',
 							mediaLibraryReplacementStatus.do.doComplete
 								? __('Complete', 'ultracache')
 								: (mediaLibraryReplacementStatus.do.doFailed ? __('Failed', 'ultracache') : String(mediaLibraryReplacementStatus.do.activeStep || __('Pending', 'ultracache'))),
 							' · ' + String(mediaLibraryReplacementStatus.do.processed || 0) + '/' + String(mediaLibraryReplacementStatus.do.total || 0),
 						]) : null,
-						mediaLibraryReplacementStatus.jobId ? h('div', { key: 'media-library-replacement-job' }, __('Job', 'ultracache') + ': ' + mediaLibraryReplacementStatus.jobId) : null,
 						(typeof mediaLibraryReplacementStatus.progressPercent !== 'undefined') ? h('div', { key: 'media-library-replacement-progress' }, [
 							__('Progress', 'ultracache') + ': ' + String(mediaLibraryReplacementStatus.progressPercent || 0) + '%',
 							getMediaLibraryReplacementProgressSuffix(mediaLibraryReplacementStatus.status, mediaLibraryReplacementStatus.hasMore),
@@ -833,10 +1110,13 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 		return {
 			closeMediaLibraryReplacementPreviewModal,
 			closeMediaLibraryReplacementDbPreviewModal,
+			closeMediaLibraryReplacementBlockersModal,
 			renderMediaLibraryReplacementWarningModal,
 			renderMediaLibraryReplacementPreviewModal,
 			renderMediaLibraryReplacementDbPreviewModal,
+			renderMediaLibraryReplacementBlockersModal,
 			renderMediaLibraryReplacementCleanupPreviewModal,
+			renderMediaConversionTestControls,
 			renderMediaLibraryReplacementControls,
 		};
 	}

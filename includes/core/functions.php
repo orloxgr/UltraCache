@@ -12,10 +12,13 @@ if (!defined('ABSPATH')) {
 }
 
 require_once plugin_dir_path(__FILE__) . 'paths.php';
+require_once plugin_dir_path(__FILE__) . 'query-policy.php';
 require_once plugin_dir_path(__FILE__) . 'storage.php';
+require_once plugin_dir_path(__FILE__) . 'media-variant-paths.php';
 require_once plugin_dir_path(__FILE__) . 'debug.php';
 require_once plugin_dir_path(__FILE__) . 'request-profiler.php';
 require_once plugin_dir_path(__FILE__) . 'locks.php';
+require_once plugin_dir_path(__FILE__) . 'coordination-state.php';
 require_once plugin_dir_path(__FILE__) . 'filesystem-guards.php';
 require_once plugin_dir_path(__FILE__) . 'http-guards.php';
 require_once plugin_dir_path(__FILE__) . 'varnish.php';

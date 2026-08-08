@@ -9,4 +9,9 @@ final class Ultra_Cache_Object_Cache_Runtime_Backend extends Ultra_Cache_Object_
 	public function __construct(Ultra_Cache_Object_Cache_Backend_Context $context) {
 		parent::__construct('runtime', $context);
 	}
+
+
+	public function get($key, $group = 'default', $force = false, &$found = null) {
+		return parent::get($key, $group, false, $found);
+	}
 }

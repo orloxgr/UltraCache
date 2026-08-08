@@ -139,6 +139,42 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
     }
 
     /**
+     * Build one exact BAN operation per normalized URL.
+     *
+     * This is the production fallback when exact BAN is verified but the
+     * configured endpoint set does not have current two-or-more URL batch proof.
+     *
+     * @param array $prepared_urls Normalized URL records.
+     * @return array
+     */
+    private static function build_varnish_exact_ban_batches(array $prepared_urls)
+    {
+        $operations = array();
+        foreach ($prepared_urls as $item) {
+            $host = (string) ($item['host'] ?? '');
+            $path = (string) ($item['path'] ?? '');
+            $url = (string) ($item['url'] ?? '');
+            if ('' === $host || '' === $path || '' === $url) {
+                continue;
+            }
+
+            $expression = self::build_varnish_ban_expression($host, $path, false);
+            if ('' === $expression || strlen($expression) > self::get_varnish_ban_batch_expression_limit()) {
+                continue;
+            }
+
+            $operations[] = array(
+                'host' => $host,
+                'paths' => array($path),
+                'urls' => array($url),
+                'expression' => $expression,
+            );
+        }
+
+        return $operations;
+    }
+
+    /**
      * Limit a retry target set to currently configured Varnish endpoints.
      *
      * @param array $configured_targets Configured endpoint labels.
@@ -339,17 +375,49 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
      * @param string $scope            Invalidation scope label.
      * @param string $strategy_override Optional invalidation strategy override.
      * @param array  $endpoint_targets Optional configured endpoint labels to retry.
+     * @param array  $settings_snapshot Optional immutable settings snapshot for bounded queue dispatch.
      * @return array
      */
-    private static function varnish_flush_url_batch(array $urls, $scope = 'batch', $strategy_override = '', array $endpoint_targets = array())
+    private static function varnish_flush_url_batch(array $urls, $scope = 'batch', $strategy_override = '', array $endpoint_targets = array(), array $settings_snapshot = array())
     {
-        $settings = self::get_varnish_cli_settings();
+        $settings = !empty($settings_snapshot) ? $settings_snapshot : self::get_varnish_cli_settings();
         $mode = (string) ($settings['mode'] ?? 'http');
         $method = (string) ($settings['method'] ?? 'BAN');
-        $strategy_status = self::get_varnish_invalidation_strategy_status($settings, $strategy_override);
+        $requested_strategy_override = sanitize_key((string) $strategy_override);
+        $probe_urls = array_values(array_unique(array_filter(array_map('strval', $urls))));
+        $probe_endpoints = !empty($endpoint_targets)
+            ? array_values(array_unique(array_filter(array_map('strval', $endpoint_targets))))
+            : array_values(array_unique(array_filter(array_map('strval', (array) ($settings['servers'] ?? array())))));
+        $probe_scope = count($probe_urls) > 1 ? 'batch' : 'exact-url';
+        $soft_probe_authorized = 'soft' === $requested_strategy_override
+            && method_exists(static::class, 'is_varnish_capability_probe_authorized')
+            && self::is_varnish_capability_probe_authorized('targeted', array(
+                'strategy' => 'soft-purge',
+                'requestedScope' => $probe_scope,
+                'endpoints' => $probe_endpoints,
+                'urls' => $probe_urls,
+            ));
+        $effective_strategy_override = 'soft' === $requested_strategy_override && !$soft_probe_authorized
+            ? ''
+            : $requested_strategy_override;
+        $strategy_status = self::get_varnish_invalidation_strategy_status($settings, $effective_strategy_override);
         $effective_strategy = (string) ($strategy_status['effective'] ?? 'ban');
         $method = 'purge' === $effective_strategy || 'soft' === $effective_strategy ? 'PURGE' : 'BAN';
         $effective_method = 'soft' === $effective_strategy ? 'soft PURGE' : (('admin' === $mode) ? 'admin BAN' : $method);
+        if ('soft' === $effective_strategy) {
+            $probe_strategy = 'soft-purge';
+        } elseif ('admin' === $mode || 'BAN' === $method) {
+            $probe_strategy = count($probe_urls) > 1 ? 'batch-ban' : 'exact-ban';
+        } else {
+            $probe_strategy = 'exact-purge';
+        }
+        $runtime_plan = self::plan_varnish_runtime_operation('targeted', array(
+            'strategyOverride' => $effective_strategy_override,
+            'probeStrategy' => $probe_strategy,
+            'probeScope' => $probe_scope,
+            'probeEndpoints' => $probe_endpoints,
+            'probeUrls' => $probe_urls,
+        ));
         $support = is_array($settings['support'] ?? null) ? $settings['support'] : array();
 
         if (empty($support['available'])) {
@@ -359,6 +427,7 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
                 'time' => time(),
                 'scope' => sanitize_key((string) $scope),
             );
+            $result = self::finalize_varnish_runtime_result($result, $runtime_plan, false);
             self::set_varnish_last_result($result);
             return $result;
         }
@@ -370,6 +439,7 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
                 'time' => time(),
                 'scope' => sanitize_key((string) $scope),
             );
+            $result = self::finalize_varnish_runtime_result($result, $runtime_plan, false);
             self::set_varnish_last_result($result);
             return $result;
         }
@@ -381,6 +451,7 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
                 'time' => time(),
                 'scope' => sanitize_key((string) $scope),
             );
+            $result = self::finalize_varnish_runtime_result($result, $runtime_plan, false);
             self::set_varnish_last_result($result);
             return $result;
         }
@@ -403,6 +474,7 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
                 'rejectionsTruncated' => !empty($prepared['rejectionsTruncated']),
                 'urlResults' => array(),
             );
+            $result = self::finalize_varnish_runtime_result($result, $runtime_plan, false);
             self::set_varnish_last_result($result);
             return $result;
         }
@@ -444,15 +516,104 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
                 'missingEndpointTargets' => $missing_targets,
                 'attemptedEndpointTargets' => array(),
             );
+            $result = self::finalize_varnish_runtime_result($result, $runtime_plan, true);
             $persisted_result = $result;
             unset($persisted_result['urlResults']);
             self::set_varnish_last_result($persisted_result);
             return $result;
         }
 
-        if ('soft' === $effective_strategy) {
-            return self::send_varnish_soft_purge_prepared_urls($prepared, $scope, $targets, $requested_targets_supplied);
+        if ('soft' === $effective_strategy && !empty($runtime_plan['canExecute'])) {
+            $result = self::send_varnish_soft_purge_prepared_urls($prepared, $scope, $targets, $requested_targets_supplied);
+            $result = self::finalize_varnish_runtime_result($result, $runtime_plan, true);
+            $persisted_result = $result;
+            unset($persisted_result['urlResults']);
+            self::set_varnish_last_result($persisted_result, false);
+            return $result;
         }
+
+        $exact_capability = self::get_varnish_exact_invalidation_capability($settings);
+        if (empty($runtime_plan['canExecute'])) {
+            $capability_message = self::sanitize_varnish_string(
+                (string) ($runtime_plan['reason'] ?? ($exact_capability['message'] ?? self::maybe_translate('Exact URL invalidation is not verified for the configured Varnish transport.')))
+            );
+            $url_results = self::initialize_varnish_url_results($prepared['urls']);
+            foreach ($url_results as $url => $url_result) {
+                $url_results[$url]['success'] = false;
+                $url_results[$url]['partial'] = false;
+                $url_results[$url]['retryable'] = false;
+                $url_results[$url]['failedEndpointTargets'] = array_values($targets);
+                $url_results[$url]['message'] = $capability_message;
+            }
+
+            $result = array(
+                'success' => false,
+                'partial' => false,
+                'skipped' => true,
+                'unsupported' => 'unsupported' === (string) ($runtime_plan['plannedOutcome'] ?? ''),
+                'degraded' => 'degraded' === (string) ($runtime_plan['plannedOutcome'] ?? ''),
+                'verificationRequired' => true,
+                'exactInvalidationVerified' => false,
+                'transportAccepted' => false,
+                'message' => $capability_message,
+                'time' => time(),
+                'mode' => $mode,
+                'method' => $method,
+                'effectiveMethod' => $effective_method,
+                'invalidationStrategy' => $effective_strategy,
+                'capabilityStatus' => sanitize_key((string) ($exact_capability['status'] ?? 'not-verified')),
+                'capabilityTestedAt' => absint($exact_capability['testedAt'] ?? 0),
+                'endpointCount' => count($targets),
+                'configuredEndpointCount' => count((array) $settings['servers']),
+                'adminModeUsed' => ('admin' === $mode),
+                'httpEndpointModeUsed' => ('http' === $mode),
+                'secretConfigured' => !empty($settings['key']),
+                'scope' => sanitize_key((string) $scope),
+                'operationType' => 'batch-invalidation',
+                'receivedUrlCount' => (int) $prepared['receivedCount'],
+                'validUrlCount' => (int) $prepared['validCount'],
+                'uniqueUrlCount' => (int) $prepared['uniqueCount'],
+                'duplicateUrlCount' => (int) $prepared['duplicateCount'],
+                'rejectedUrlCount' => (int) $prepared['rejectedCount'],
+                'hostCount' => count(array_unique(array_map(static function ($item) {
+                    return (string) ($item['host'] ?? '');
+                }, $prepared['urls']))),
+                'batchCount' => 0,
+                'requestCount' => 0,
+                'successfulEndpointRequestCount' => 0,
+                'failedEndpointRequestCount' => 0,
+                'requestedEndpointTargets' => $requested_targets_supplied ? array_values($requested_targets) : array(),
+                'attemptedEndpointTargets' => array(),
+                'blockedEndpointTargets' => array_values($targets),
+                'rejections' => $prepared['rejections'],
+                'rejectionsTruncated' => !empty($prepared['rejectionsTruncated']),
+                'detailCount' => 0,
+                'detailsTruncated' => false,
+                'details' => array(),
+                'urlResults' => $url_results,
+                'fullyInvalidatedUrlCount' => 0,
+                'partiallyInvalidatedUrlCount' => 0,
+                'failedUrlCount' => count($url_results),
+            );
+            if (!empty($runtime_plan['ttlFallbackAvailable']) && !empty($runtime_plan['ttlFallbackMinutes'])) {
+                $result['message'] .= ' ' . self::maybe_translate_sprintf(
+                    'No transport request was sent; eligible shared-cache objects will expire within the configured %d-minute TTL-only window.',
+                    absint($runtime_plan['ttlFallbackMinutes'])
+                );
+            }
+            $result = self::finalize_varnish_runtime_result($result, $runtime_plan, false);
+            $persisted_result = $result;
+            unset($persisted_result['urlResults']);
+            self::set_varnish_last_result($persisted_result);
+            return $result;
+        }
+
+        $batch_probe_authorized = !empty($runtime_plan['capabilityProbeAuthorized'])
+            && 'batch-ban' === $probe_strategy
+            && 'batch' === $probe_scope;
+        $batch_ban_verified = !empty($runtime_plan['batchBanVerified']);
+        $batch_ban_allowed = count($prepared['urls']) > 1
+            && ($batch_ban_verified || $batch_probe_authorized);
 
         $details = array();
         $request_count = 0;
@@ -466,7 +627,9 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
         }
 
         if ('admin' === $mode || 'BAN' === $method) {
-            $batches = self::build_varnish_ban_batches($prepared['urls']);
+            $batches = $batch_ban_allowed
+                ? self::build_varnish_ban_batches($prepared['urls'])
+                : self::build_varnish_exact_ban_batches($prepared['urls']);
             $batch_count = count($batches);
             foreach ($batches as $batch_index => $batch) {
                 foreach ($targets as $server) {
@@ -479,18 +642,22 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
                         ++$failed_endpoint_requests;
                     }
                     self::record_varnish_url_endpoint_result($url_results, (array) ($batch['urls'] ?? array()), $server, $res);
+                    $detail_format = $batch_ban_allowed
+                        ? self::maybe_translate('Batch %1$d/%2$d · %3$d URL(s) · %4$s')
+                        : self::maybe_translate('Exact BAN %1$d/%2$d · %3$d URL(s) · %4$s');
                     $details[] = array(
                         'server' => $server,
                         'success' => $success,
-                        'detail' => self::sanitize_varnish_string(
-                            self::maybe_translate_sprintf(
-                                'Batch %1$d/%2$d · %3$d URL(s) · %4$s',
-                                $batch_index + 1,
-                                $batch_count,
-                                count($batch['paths']),
-                                (string) ($res['detail'] ?? '')
-                            )
-                        ),
+                        'connectionAccepted' => !empty($res['connectionAccepted']),
+                        'commandAccepted' => !empty($res['commandAccepted']) || $success,
+                        'code' => absint($res['code'] ?? 0),
+                        'detail' => self::sanitize_varnish_string(sprintf(
+                            $detail_format,
+                            $batch_index + 1,
+                            $batch_count,
+                            count($batch['paths']),
+                            (string) ($res['detail'] ?? '')
+                        )),
                     );
                 }
             }
@@ -618,6 +785,12 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
             'rejectedUrlCount' => (int) $prepared['rejectedCount'],
             'hostCount' => count($host_lookup),
             'batchCount' => $batch_count,
+            'batchBanVerified' => $batch_ban_verified,
+            'batchBanProbeAuthorized' => $batch_probe_authorized,
+            'batchBanUsed' => $batch_ban_allowed,
+            'exactBanPerUrlFallbackUsed' => ('admin' === $mode || 'BAN' === $method)
+                && count($prepared['urls']) > 1
+                && !$batch_ban_allowed,
             'requestCount' => $request_count,
             'successfulEndpointRequestCount' => $successful_endpoint_requests,
             'failedEndpointRequestCount' => $failed_endpoint_requests,
@@ -630,6 +803,7 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
             'details' => $details,
         ), $accounting);
 
+        $result = self::finalize_varnish_runtime_result($result, $runtime_plan, true);
         $persisted_result = $result;
         unset($persisted_result['urlResults']);
         self::set_varnish_last_result($persisted_result);

@@ -150,7 +150,8 @@ trait Ultra_Cache_Media_Queue_Rebuild_Trait
 				$generation = wp_generate_uuid4();
 			}
 			$generation = $this->set_media_queue_rebuild_generation_intent($generation);
-			$wpdb->delete($table, array('format' => $format), array('%s'));
+			$this->delete_media_queue_units_for_parent_format($format);
+			$wpdb->delete($table, array('source_kind' => 'attachment', 'format' => $format), array('%s', '%s'));
 			update_option(self::MEDIA_QUEUE_BUILD_STATE_OPTION, array(
 				'format' => $format,
 				'offset' => 0,
@@ -247,6 +248,7 @@ trait Ultra_Cache_Media_Queue_Rebuild_Trait
 				$processed++;
 				$item_state = $this->get_media_queue_rebuild_item_state($attachment_id, $format);
 				if ($this->upsert_media_queue_item($attachment_id, $format, $item_state['status'], $item_state['message'], 0, true)) {
+					$this->reconcile_media_queue_units_for_attachment($attachment_id, $format, false);
 					$queued++;
 				}
 			}
@@ -397,6 +399,7 @@ trait Ultra_Cache_Media_Queue_Rebuild_Trait
 							$scanned++;
 							$item_state = $this->get_media_queue_rebuild_item_state($attachment_id, $format);
 							if ($this->upsert_media_queue_item($attachment_id, $format, $item_state['status'], $item_state['message'], 0, true)) {
+								$this->reconcile_media_queue_units_for_attachment($attachment_id, $format, false);
 								$queued++;
 							}
 						}

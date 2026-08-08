@@ -57,6 +57,24 @@ trait Ultra_Cache_Rest_LCP_Diagnostics_Trait
         ));
     }
 
+    public function lcp_observation_manual_selector(WP_REST_Request $request)
+    {
+        if (!class_exists('Ultra_Cache_Engine') || !method_exists('Ultra_Cache_Engine', 'get_instance')) {
+            return new WP_Error('ultracache_lcp_engine_unavailable', __('The LCP engine is unavailable.', 'ultracache'), array('status' => 500));
+        }
+
+        $engine = Ultra_Cache_Engine::get_instance();
+        if (!$engine || !method_exists($engine, 'save_lcp_page_manual_selector')) {
+            return new WP_Error('ultracache_lcp_selector_unavailable', __('Per-URL Manual LCP selector is unavailable.', 'ultracache'), array('status' => 500));
+        }
+
+        $result = $engine->save_lcp_page_manual_selector(
+            strtolower(trim((string) $request->get_param('pageHash'))),
+            (string) $request->get_param('manualSelector')
+        );
+        return is_wp_error($result) ? $result : rest_ensure_response($result);
+    }
+
     public function lcp_observation_action(WP_REST_Request $request)
     {
         if (!class_exists('Ultra_Cache_Engine') || !method_exists('Ultra_Cache_Engine', 'get_instance')) {

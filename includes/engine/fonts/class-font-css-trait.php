@@ -497,20 +497,37 @@ private function decode_google_fonts_html_url($url)
             // declarations, then leave inline @font-face TTF blocks in the final HTML.
             // Rewrite any local @font-face TTF declaration using the full active
             // stylesheet/manifest WOFF2 registry, not a vendor-specific target.
-            $font_face_updated = preg_replace_callback('/@font-face\s*\{.*?\}/is', function ($matches) use ($registry, &$changed) {
-                $block = isset($matches[0]) ? (string) $matches[0] : '';
-                if ('' === $block || false === stripos($block, '.ttf')) {
-                    return $block;
-                }
+            $font_face_updated = preg_replace_callback(
+                '~(<style\b[^>]*>)([\s\S]*?)(</style\s*>)~i',
+                function ($style_matches) use ($registry, &$changed) {
+                    $style_css = isset($style_matches[2]) ? (string) $style_matches[2] : '';
+                    if ('' === $style_css || false === stripos($style_css, '@font-face')) {
+                        return (string) ($style_matches[0] ?? '');
+                    }
 
-                $rewritten = $this->rewrite_inline_font_face_ttf_css_with_woff2_registry($block, $registry);
-                if (is_string($rewritten) && $rewritten !== $block) {
-                    $changed = true;
-                    return $rewritten;
-                }
+                    $rewritten_css = ultracache_css_rewrite_font_face_blocks($style_css, function ($block) use ($registry, &$changed) {
+                        $block = (string) $block;
+                        if ('' === $block || false === stripos($block, '.ttf')) {
+                            return $block;
+                        }
 
-                return $block;
-            }, $updated);
+                        $rewritten = $this->rewrite_inline_font_face_ttf_css_with_woff2_registry($block, $registry);
+                        if (is_string($rewritten) && $rewritten !== $block) {
+                            $changed = true;
+                            return $rewritten;
+                        }
+
+                        return $block;
+                    });
+
+                    if ($rewritten_css === $style_css) {
+                        return (string) ($style_matches[0] ?? '');
+                    }
+
+                    return (string) $style_matches[1] . $rewritten_css . (string) $style_matches[3];
+                },
+                $updated
+            );
 
             if (is_string($font_face_updated) && '' !== $font_face_updated) {
                 $updated = $font_face_updated;
@@ -586,8 +603,8 @@ private function decode_google_fonts_html_url($url)
         }
 
         $changed = false;
-        $updated = preg_replace_callback('/@font-face\s*\{.*?\}/is', function ($matches) use ($registry, &$changed) {
-            $block = isset($matches[0]) ? (string) $matches[0] : '';
+        $updated = ultracache_css_rewrite_font_face_blocks($css, function ($block) use ($registry, &$changed) {
+            $block = (string) $block;
             if ('' === $block || false === stripos($block, '.ttf')) {
                 return $block;
             }
@@ -614,9 +631,9 @@ private function decode_google_fonts_html_url($url)
             }
 
             $replacement_format = $this->get_font_format_for_font_url($replacement_url);
-            $new_src = 'src:url(' . $replacement_url . ') format("' . $replacement_format . '");';
-            $rewritten = preg_replace('/src\s*:\s*[^;}]+\s*;?/i', $new_src, $block, 1);
-            if (!is_string($rewritten) || '' === $rewritten) {
+            $new_src = 'url(' . $replacement_url . ') format("' . $replacement_format . '")';
+            $rewritten = ultracache_font_css_replace_declaration_value($block, 'src', $new_src);
+            if (!is_string($rewritten) || '' === $rewritten || $rewritten === $block) {
                 return $this->normalize_font_face_display_in_css($block);
             }
 
@@ -626,7 +643,7 @@ private function decode_google_fonts_html_url($url)
             }
 
             return $rewritten;
-        }, $css);
+        });
 
         return is_string($updated) && $changed ? $updated : $css;
     }
@@ -640,75 +657,69 @@ private function decode_google_fonts_html_url($url)
 
         $base_url = '' !== (string) $base_url ? (string) $base_url : home_url('/');
         $changed = false;
-        $updated = preg_replace_callback('/@font-face\s*\{.*?\}/is', function ($matches) use ($base_url, &$changed) {
-            $block = isset($matches[0]) ? (string) $matches[0] : '';
+        $updated = ultracache_css_rewrite_font_face_blocks($css, function ($block) use ($base_url, &$changed) {
+            $block = (string) $block;
             if ('' === $block || false === stripos($block, '.ttf')) {
                 return $block;
             }
 
             $block_changed = false;
-            $rewritten = preg_replace_callback('/src\s*:\s*([^;}]+)\s*;?/i', function ($src_matches) use ($base_url, &$block_changed) {
-                $src = isset($src_matches[1]) ? (string) $src_matches[1] : '';
-                if ('' === trim($src)) {
-                    return (string) ($src_matches[0] ?? '');
-                }
-
+            $src = ultracache_font_css_extract_declaration($block, 'src');
+            $rewritten = $block;
+            if ('' !== trim($src)) {
                 $items = function_exists('ultracache_font_css_split_src_items') ? ultracache_font_css_split_src_items($src) : array_map('trim', explode(',', $src));
-                if (empty($items)) {
-                    return (string) ($src_matches[0] ?? '');
-                }
-
-                $has_better_source = false;
-                foreach ($items as $item) {
-                    $item_lc = strtolower((string) $item);
-                    if (false !== strpos($item_lc, '.woff2') || false !== strpos($item_lc, "format('woff2')") || false !== strpos($item_lc, 'format("woff2")') || preg_match('/format\(\s*woff2\s*\)/i', $item_lc)) {
-                        $has_better_source = true;
-                        break;
-                    }
-                    if (false !== strpos($item_lc, '.woff') || false !== strpos($item_lc, "format('woff')") || false !== strpos($item_lc, 'format("woff")') || preg_match('/format\(\s*woff\s*\)/i', $item_lc)) {
-                        $has_better_source = true;
-                    }
-                }
-
-                $seen = array();
-                $kept = array();
-                foreach ($items as $item) {
-                    $item = trim((string) $item);
-                    if ('' === $item) {
-                        continue;
-                    }
-
-                    $is_ttf_item = (false !== stripos($item, '.ttf')) || (bool) preg_match('/format\(\s*["\']?truetype["\']?\s*\)/i', $item);
-                    if ($is_ttf_item) {
-                        $ttf_url = $this->extract_first_ttf_url_from_css_src_item($item, $base_url);
-                        $replacement_url = '' !== $ttf_url ? $this->find_same_path_preferred_font_url_for_ttf_url($ttf_url) : '';
-                        if ('' !== $replacement_url) {
-                            $format = $this->get_font_format_for_font_url($replacement_url);
-                            $item = 'url(' . esc_url_raw($replacement_url) . ') format("' . $format . '")';
-                            $block_changed = true;
-                        } elseif ($has_better_source) {
-                            // A WOFF2/WOFF source is already present in the same src list.
-                            // Keep the better source and drop the TTF fallback from delayed CSS.
-                            $block_changed = true;
-                            continue;
+                if (!empty($items)) {
+                    $has_better_source = false;
+                    foreach ($items as $item) {
+                        $item_lc = strtolower((string) $item);
+                        if (false !== strpos($item_lc, '.woff2') || false !== strpos($item_lc, "format('woff2')") || false !== strpos($item_lc, 'format("woff2")') || preg_match('/format\(\s*woff2\s*\)/i', $item_lc)) {
+                            $has_better_source = true;
+                            break;
+                        }
+                        if (false !== strpos($item_lc, '.woff') || false !== strpos($item_lc, "format('woff')") || false !== strpos($item_lc, 'format("woff")') || preg_match('/format\(\s*woff\s*\)/i', $item_lc)) {
+                            $has_better_source = true;
                         }
                     }
 
-                    $key = strtolower((string) preg_replace('/\s+/', '', $item));
-                    if (isset($seen[$key])) {
-                        $block_changed = true;
-                        continue;
+                    $seen = array();
+                    $kept = array();
+                    foreach ($items as $item) {
+                        $item = trim((string) $item);
+                        if ('' === $item) {
+                            continue;
+                        }
+
+                        $is_ttf_item = (false !== stripos($item, '.ttf')) || (bool) preg_match('/format\(\s*["\']?truetype["\']?\s*\)/i', $item);
+                        if ($is_ttf_item) {
+                            $ttf_url = $this->extract_first_ttf_url_from_css_src_item($item, $base_url);
+                            $replacement_url = '' !== $ttf_url ? $this->find_same_path_preferred_font_url_for_ttf_url($ttf_url) : '';
+                            if ('' !== $replacement_url) {
+                                $format = $this->get_font_format_for_font_url($replacement_url);
+                                $item = 'url(' . esc_url_raw($replacement_url) . ') format("' . $format . '")';
+                                $block_changed = true;
+                            } elseif ($has_better_source) {
+                                $block_changed = true;
+                                continue;
+                            }
+                        }
+
+                        $key = strtolower((string) preg_replace('/\s+/', '', $item));
+                        if (isset($seen[$key])) {
+                            $block_changed = true;
+                            continue;
+                        }
+                        $seen[$key] = true;
+                        $kept[] = $item;
                     }
-                    $seen[$key] = true;
-                    $kept[] = $item;
-                }
 
-                if (empty($kept)) {
-                    return (string) ($src_matches[0] ?? '');
+                    if (!empty($kept)) {
+                        $candidate = ultracache_font_css_replace_declaration_value($block, 'src', implode(',', $kept));
+                        if (is_string($candidate) && '' !== $candidate) {
+                            $rewritten = $candidate;
+                        }
+                    }
                 }
-
-                return 'src:' . implode(',', $kept) . ';';
-            }, $block);
+            }
 
             if (!is_string($rewritten) || '' === $rewritten) {
                 return $block;
@@ -721,7 +732,7 @@ private function decode_google_fonts_html_url($url)
             }
 
             return $block;
-        }, $css);
+        });
 
         return is_string($updated) && $changed ? $updated : $css;
     }
@@ -905,7 +916,7 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
     private function normalize_font_face_display_in_css($css, &$stats = null)
     {
         $css = (string) $css;
-        if (null === $stats) {
+        if (null === $stats || !is_array($stats)) {
             $stats = array();
         }
         foreach (array('fontFaceBlocksScanned', 'fontDisplayAdded', 'fontDisplayExisting', 'fontFaceBlocksChanged') as $key) {
@@ -918,38 +929,39 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
             return $css;
         }
 
-        return (string) preg_replace_callback(
-            '/@font-face\s*{.*?}/is',
-            function ($matches) use (&$stats) {
-                $block = (string) $matches[0];
+        return ultracache_css_rewrite_font_face_blocks(
+            $css,
+            function ($block) use (&$stats) {
+                $block = (string) $block;
                 $stats['fontFaceBlocksScanned']++;
-                $block = (string) preg_replace('/([^;{}\s])\s+(font-display\s*:)/i', '$1; $2', $block);
+                $declaration_scan = ultracache_font_css_scan_declarations($block);
+                if (!empty($declaration_scan['malformed'])) {
+                    return $block;
+                }
 
-                if (preg_match('/font-display\s*:\s*([^;}]+);?/i', $block, $display_match)) {
-                    $value = strtolower(trim((string) ($display_match[1] ?? '')));
+                $display = ultracache_font_css_find_declaration($block, 'font-display');
+                if (!empty($display)) {
+                    $value = strtolower(trim(ultracache_font_css_extract_declaration($block, 'font-display')));
                     $stats['fontDisplayExisting']++;
                     if (in_array($value, array('auto', 'block'), true)) {
-                        $updated_block = (string) preg_replace('/font-display\s*:\s*[^;}]+;?/i', 'font-display: swap;', $block, 1);
+                        $updated_block = ultracache_font_css_replace_declaration_value($block, 'font-display', 'swap');
                         if ($updated_block !== $block) {
                             $stats['fontFaceBlocksChanged']++;
                             return $updated_block;
                         }
                     }
-
                     return $block;
                 }
 
-                $body = (string) preg_replace('/}\s*$/', '', $block, 1);
-                $body = rtrim($body);
-                if ('' !== $body && '{' !== substr($body, -1) && ';' !== substr($body, -1)) {
-                    $body .= ';';
+                $updated_block = ultracache_font_css_append_declaration($block, 'font-display: swap;');
+                if ($updated_block !== $block) {
+                    $stats['fontDisplayAdded']++;
+                    $stats['fontFaceBlocksChanged']++;
+                    return $updated_block;
                 }
 
-                $stats['fontDisplayAdded']++;
-                $stats['fontFaceBlocksChanged']++;
-                return $body . "\n  font-display: swap;\n}";
-            },
-            $css
+                return $block;
+            }
         );
     }
 

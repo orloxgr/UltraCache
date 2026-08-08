@@ -32,6 +32,8 @@
 		joinWarmSourceList: (items) => (Array.isArray(items) ? items : []).join('\n'),
 	};
 
+	const CWP_VARNISH_TEMPLATE_URL = String((window.ultracacheData && window.ultracacheData.cwpVarnishTemplateUrl) || '');
+
 	const SUPPORT_LINKS = {
 		coffee: 'https://www.paypal.com/ncp/payment/LDBFB3RRB3E9J',
 		beer: 'https://www.paypal.com/ncp/payment/G5RNTC3UF58VU',
@@ -243,6 +245,146 @@
 	}
 
 
+	const VARNISH_ESI_SUGGESTED_VCL = [
+		'sub vcl_recv {',
+		'    if (req.esi_level == 0) {',
+		'        # Reject spoofed handshake/private-transport headers.',
+		'        unset req.http.X-ESI-Private-Request;',
+		'        unset req.http.X-ESI-Request-Level;',
+		'        unset req.http.X-ESI-Original-Cookie;',
+		'        unset req.http.X-UltraCache-ESI-Candidate;',
+		'        unset req.http.X-UltraCache-ESI-Cookie-Check;',
+		'        unset req.http.X-UltraCache-ESI-Opt-In;',
+		'        unset req.http.X-UltraCache-ESI-Shared-Parent;',
+		'',
+		'        if (req.http.Cookie ~ "(?i)(^|;[ ]*)ultracache_esi_optin=1(?:;|$)") {',
+		'            set req.http.X-UltraCache-ESI-Opt-In = "1";',
+		'        }',
+		'',
+		'        # Copy only the built-in private transport allowlist.',
+		'        if (req.http.Cookie ~ "(?i)(^|;[ ]*)esi_session=") {',
+		'            set req.http.X-ESI-Original-Cookie = regsub(req.http.Cookie, "(?i)^.*?(?:^|;[ ]*)(esi_session=[^;]*).*$", "\\1");',
+		'        }',
+		'        if (req.http.Cookie ~ "(?i)(^|;[ ]*)woocommerce_items_in_cart=") {',
+		'            if (req.http.X-ESI-Original-Cookie) {',
+		'                set req.http.X-ESI-Original-Cookie = req.http.X-ESI-Original-Cookie + "; " + regsub(req.http.Cookie, "(?i)^.*?(?:^|;[ ]*)(woocommerce_items_in_cart=[^;]*).*$", "\\1");',
+		'            } else {',
+		'                set req.http.X-ESI-Original-Cookie = regsub(req.http.Cookie, "(?i)^.*?(?:^|;[ ]*)(woocommerce_items_in_cart=[^;]*).*$", "\\1");',
+		'            }',
+		'        }',
+		'        if (req.http.Cookie ~ "(?i)(^|;[ ]*)woocommerce_cart_hash=") {',
+		'            if (req.http.X-ESI-Original-Cookie) {',
+		'                set req.http.X-ESI-Original-Cookie = req.http.X-ESI-Original-Cookie + "; " + regsub(req.http.Cookie, "(?i)^.*?(?:^|;[ ]*)(woocommerce_cart_hash=[^;]*).*$", "\\1");',
+		'            } else {',
+		'                set req.http.X-ESI-Original-Cookie = regsub(req.http.Cookie, "(?i)^.*?(?:^|;[ ]*)(woocommerce_cart_hash=[^;]*).*$", "\\1");',
+		'            }',
+		'        }',
+		'        if (req.http.Cookie ~ "(?i)(^|;[ ]*)wp_woocommerce_session_[^=; ]+=") {',
+		'            if (req.http.X-ESI-Original-Cookie) {',
+		'                set req.http.X-ESI-Original-Cookie = req.http.X-ESI-Original-Cookie + "; " + regsub(req.http.Cookie, "(?i)^.*?(?:^|;[ ]*)((?:wp_woocommerce_session_[^=; ]+)=[^;]*).*$", "\\1");',
+		'            } else {',
+		'                set req.http.X-ESI-Original-Cookie = regsub(req.http.Cookie, "(?i)^.*?(?:^|;[ ]*)((?:wp_woocommerce_session_[^=; ]+)=[^;]*).*$", "\\1");',
+		'            }',
+		'        }',
+		'',
+		'        # Remove UltraCache-only marker cookies before origin/hash.',
+		'        if (req.http.Cookie ~ "(?i)(^|;[ ]*)(esi_session|ultracache_esi_optin)=") {',
+		'            set req.http.Cookie = regsuball(req.http.Cookie, "(?i)(^|;[ ]*)(esi_session|ultracache_esi_optin)=[^;]*", "");',
+		'            set req.http.Cookie = regsuball(req.http.Cookie, "^[; ]+|[; ]+$", "");',
+		'            set req.http.Cookie = regsuball(req.http.Cookie, ";[ ]*;", ";");',
+		'            if (req.http.Cookie == "") { unset req.http.Cookie; }',
+		'        }',
+		'',
+		'        # Woo shared-parent lookup requires the browser marker.',
+		'        if (req.http.Cookie ~ "(?i)(^|;[ ]*)(woocommerce_items_in_cart|woocommerce_cart_hash|wp_woocommerce_session_[^=; ]+)=") {',
+		'            if (req.http.X-UltraCache-ESI-Opt-In != "1") {',
+		'                set req.http.X-Cache-Mode = "PASS";',
+		'                return (pass);',
+		'            }',
+		'            set req.http.X-UltraCache-ESI-Cookie-Check = req.http.Cookie;',
+		'            set req.http.X-UltraCache-ESI-Cookie-Check = regsuball(req.http.X-UltraCache-ESI-Cookie-Check, "(?i)(^|;[ ]*)(woocommerce_items_in_cart|woocommerce_cart_hash|wp_woocommerce_session_[^=; ]+)=[^;]*", "");',
+		'            set req.http.X-UltraCache-ESI-Cookie-Check = regsuball(req.http.X-UltraCache-ESI-Cookie-Check, "^[; ]+|[; ]+$", "");',
+		'            if (req.http.X-UltraCache-ESI-Cookie-Check == "") {',
+		'                set req.http.X-UltraCache-ESI-Candidate = "1";',
+		'            } else {',
+		'                set req.http.X-Cache-Mode = "PASS";',
+		'                return (pass);',
+		'            }',
+		'            unset req.http.X-UltraCache-ESI-Cookie-Check;',
+		'        }',
+		'    } else if (',
+		'        req.url ~ "(?i)([?&])esi_scope=private(?:&|$)" &&',
+		'        req.url ~ "(?i)([?&])(ultracache_esi|ultracache_esi_probe_private_fragment)="',
+		'    ) {',
+		'        set req.http.X-ESI-Private-Request = "1";',
+		'        set req.http.X-ESI-Request-Level = "1";',
+		'        set req.http.X-Cache-Mode = "PASS";',
+		'        if (req_top.http.X-ESI-Original-Cookie) {',
+		'            set req.http.Cookie = req_top.http.X-ESI-Original-Cookie;',
+		'        } else {',
+		'            unset req.http.Cookie;',
+		'        }',
+		'        return (pass);',
+		'    } else {',
+		'        unset req.http.Cookie;',
+		'    }',
+		'}',
+		'',
+		'sub vcl_hit {',
+		'    if (req.http.X-UltraCache-ESI-Candidate == "1" && obj.http.X-UltraCache-ESI-Shared-Parent != "1") {',
+		'        set req.http.X-Cache-Mode = "PASS";',
+		'        return (pass);',
+		'    }',
+		'}',
+		'',
+		'sub vcl_backend_fetch {',
+		'    set bereq.http.Surrogate-Capability = "varnish=ESI/1.0";',
+		'    unset bereq.http.X-ESI-Original-Cookie;',
+		'    unset bereq.http.X-UltraCache-ESI-Cookie-Check;',
+		'    unset bereq.http.X-UltraCache-ESI-Opt-In;',
+		'    unset bereq.http.X-UltraCache-ESI-Shared-Parent;',
+		'}',
+		'',
+		'sub vcl_backend_response {',
+		'    if (bereq.http.X-ESI-Private-Request == "1") {',
+		'        set beresp.ttl = 0s;',
+		'        set beresp.uncacheable = true;',
+		'        set beresp.http.Cache-Control = "private, no-store";',
+		'        set beresp.http.Surrogate-Control = "no-store";',
+		'        return (deliver);',
+		'    }',
+		'',
+		'    if (bereq.http.X-UltraCache-ESI-Candidate == "1" && beresp.http.X-UltraCache-ESI-Shared-Parent != "1") {',
+		'        set beresp.ttl = 0s;',
+		'        set beresp.uncacheable = true;',
+		'        return (deliver);',
+		'    }',
+		'',
+		'    if (beresp.status == 200 && beresp.http.Content-Type ~ "(?i)^text/html" && beresp.http.Surrogate-Control ~ "(?i)ESI/1[.]0") {',
+		'        set beresp.do_esi = true;',
+		'        unset beresp.http.Surrogate-Control;',
+		'    }',
+		'}',
+	].join('\n');
+
+	function copyVersionHelpText(text) {
+		if (window.navigator && window.navigator.clipboard && typeof window.navigator.clipboard.writeText === 'function') {
+			return window.navigator.clipboard.writeText(String(text || ''));
+		}
+
+		const textarea = window.document.createElement('textarea');
+		textarea.value = String(text || '');
+		textarea.setAttribute('readonly', 'readonly');
+		textarea.style.position = 'fixed';
+		textarea.style.opacity = '0';
+		window.document.body.appendChild(textarea);
+		textarea.select();
+		window.document.execCommand('copy');
+		window.document.body.removeChild(textarea);
+		return Promise.resolve();
+	}
+
+
 	const VERSION_HELP_FAQ_SECTIONS = [
 		{
 			key: "page-cache",
@@ -312,11 +454,28 @@
 				},
 				{
 					question: __("What does Warm affected pages after save do?", 'ultracache'),
-					answer: __("When content changes, UltraCache identifies related URLs, removes their previous page cache, and schedules those URLs to be warmed again instead of rebuilding the entire site.", 'ultracache'),
+					answer: __("When content changes, UltraCache builds one canonical affected-URL plan, purges its old HTML and CSS cache, and queues the cacheable pages for HTML, configured CSS bundle, and optional Varnish rebuild without warming the entire site.", 'ultracache'),
 				},
 				{
-					question: __("What is Cron Warm Up?", 'ultracache'),
-					answer: __("Cron Warm Up periodically prepares the selected URLs in the background. Start Cron Warm Up after Scheduled Cleanup begins a new warm-up after scheduled cache cleanup finishes.", 'ultracache'),
+					question: __("How does background full-site warm-up start?", 'ultracache'),
+					answer: __("Enable Warm full site after Flush All Cache and/or Warm full site after Scheduled Cleanup. Each trigger builds a background plan from the selected Full-site warm-up sources and applies the Scheduled / Cron warm limit.", 'ultracache'),
+				},
+				{
+					question: __("How do I run a full-site warm-up from WP-CLI?", 'ultracache'),
+					content: h('div', { className: 'uc-version-help-modal__faq-answer uc-version-help-modal__faq-answer--rich' }, [
+						h('p', { key: 'overview' }, __("This command uses UltraCache's existing full-site URL discovery and foreground warm-up pipeline. It warms the original, WebP, and AVIF HTML buckets, builds Separate CSS Bundles, and runs verified Varnish or LiteSpeed stages for the same URLs. Dynamic cart, checkout, account, and other non-cacheable pages are skipped normally.", 'ultracache')),
+						h('p', { key: 'paths' }, __("Replace the three example paths with the PHP executable, WP-CLI file, and WordPress installation paths on your server:", 'ultracache')),
+						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'command' }, h('code', null, [
+							'/full/path/to/php \\',
+							'    -d memory_limit=2048M \\',
+							'    -d max_execution_time=0 \\',
+							'    /full/path/to/wp/wp \\',
+							'    --path=/full/path/to/wordpress \\',
+							'    ultracache warm_html_all_css \\',
+							'    --buckets=orig,webp,avif',
+						].join('\n'))),
+						h('p', { key: 'ownership' }, __("WP-CLI runs as a foreground warm-up owner. A newer UI or WP-CLI warm-up takes ownership, while background cron work yields automatically.", 'ultracache')),
+					]),
 				},
 				{
 					question: __("Does cache warm-up also convert images?", 'ultracache'),
@@ -376,7 +535,7 @@
 				},
 				{
 					question: __("Does UltraCache assume that the LCP element is always an image?", 'ultracache'),
-					answer: __("No. UltraCache can learn text, images, posters, and background images. It creates an image preload only when the confirmed LCP actually uses an image resource.", 'ultracache'),
+					answer: __("No. UltraCache can learn text, images, video first frames, posters, and background images. Confirmed video LCP elements receive direct priority markup, while image and poster mappings can also emit image preloads.", 'ultracache'),
 				},
 				{
 					question: __("How does automatic LCP detection work?", 'ultracache'),
@@ -445,6 +604,10 @@
 					answer: __("Compact suits most normal website images and usually provides a strong file-size reduction with little visible difference. Photography, artwork, or detailed product imagery may need a higher-quality setting.", 'ultracache'),
 				},
 				{
+					question: __("Some converted images have a color shift, but I need strict color accuracy. What should I do?", 'ultracache'),
+					answer: __("Disable Ignore color profile preservation. UltraCache will then require embedded ICC/ICM profiles to be read and preserved or converted safely. Images whose profiles cannot be verified or preserved may be skipped and remain in their original JPG/PNG format instead of being converted to AVIF/WebP.", 'ultracache'),
+				},
+				{
 					question: __("What does Maximum upload image side control?", 'ultracache'),
 					answer: __("It limits the largest width or height of newly uploaded raster images. A value of 1920 suits most websites; increase it when the site genuinely needs larger source images.", 'ultracache'),
 				},
@@ -454,7 +617,7 @@
 				},
 				{
 					question: __("What does Convert new uploads do?", 'ultracache'),
-					answer: __("It prepares newly uploaded raster images using the selected primary format, fallback format, maximum side, and image compression level.", 'ultracache'),
+					answer: __("It converts newly uploaded raster images to the selected Upload image format, applies the Maximum upload image side limit, and uses the shared Image compression level.", 'ultracache'),
 				},
 				{
 					question: __("Does changing image quality rebuild existing optimized files?", 'ultracache'),
@@ -477,6 +640,10 @@
 					answer: __("It removes completed records from the media queue. It does not delete the generated AVIF/WebP files.", 'ultracache'),
 				},
 				{
+					question: __("Some images outside the Media Library stay as JPEG or PNG even though Image Rewrite is enabled. Can I do something?", 'ultracache'),
+					answer: __("Yes. UltraCache normally creates optimized AVIF or WebP versions of local images used by your theme or plugins in the background. If a conversion was interrupted or failed, open Media Optimization and press Retry Failed. UltraCache will recover interrupted jobs and retry failed image conversions. The original theme or plugin image remains unchanged.", 'ultracache'),
+				},
+				{
 					question: __("What is the difference between Image Optimization and Media Library Replacement?", 'ultracache'),
 					answer: __("Image Optimization creates alternative AVIF/WebP files while retaining the normal Media Library structure. Media Library Replacement is a separate advanced workflow that can promote verified converted files into attachment metadata, generated sizes, database references, and supported active-theme CSS references.", 'ultracache'),
 				},
@@ -487,6 +654,59 @@
 				{
 					question: __("Can Media Library Replacement continue after an interrupted request?", 'ultracache'),
 					answer: __("Yes. Its long-running stages persist progress and can pause, resume, or retry.", 'ultracache'),
+				},
+				{
+					question: __("I have SSH access, but no root access or WP-CLI. How can I run the image conversion?", 'ultracache'),
+					content: h('div', { className: 'uc-version-help-modal__faq-answer uc-version-help-modal__faq-answer--rich', key: 'answer' }, [
+						h('p', { key: 'intro' }, __("You can download and run WP-CLI inside your own hosting account. Root access is not required.", 'ultracache')),
+						h('h5', { className: 'uc-version-help-modal__faq-answer-title', key: 'download-title' }, __("A. Download WP-CLI", 'ultracache')),
+						h('p', { key: 'download-copy' }, __("It is usually best to keep the WP-CLI executable outside the WordPress installation directory.", 'ultracache')),
+						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'download-code' }, h('code', null, [
+							'cd ~',
+							'',
+							'mkdir -p wp',
+							'cd wp',
+							'',
+							'wget -q \\',
+							'    https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \\',
+							'    -O wp',
+							'',
+							'chmod 755 wp',
+						].join('\n'))),
+						h('p', { key: 'download-pwd-copy' }, __("Run the following command and note the returned directory:", 'ultracache')),
+						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'download-pwd-code' }, h('code', null, 'pwd')),
+						h('p', { key: 'download-path-copy' }, __("Your WP-CLI executable will be located at:", 'ultracache')),
+						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'download-path-code' }, h('code', null, '/full/path/returned/by/pwd/wp')),
+						h('h5', { className: 'uc-version-help-modal__faq-answer-title', key: 'php-title' }, __("B. Find the correct PHP executable", 'ultracache')),
+						h('p', { key: 'php-copy' }, __("Run:", 'ultracache')),
+						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'php-code' }, h('code', null, [
+							'find / \\',
+							'    -type f \\',
+							'    -name "php" \\',
+							'    -path "*/bin/*" \\',
+							'    -print \\',
+							'    2>/dev/null',
+						].join('\n'))),
+						h('p', { key: 'php-result-copy' }, __("The server may return several PHP executables. Select the same PHP version that your WordPress website uses. You can find the website’s current PHP version in UltraCache → Advanced Diagnostics → PHP Version.", 'ultracache')),
+						h('h5', { className: 'uc-version-help-modal__faq-answer-title', key: 'wordpress-title' }, __("C. Find the WordPress installation path", 'ultracache')),
+						h('p', { key: 'wordpress-copy' }, __("Go to the directory containing wp-config.php and run:", 'ultracache')),
+						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'wordpress-code' }, h('code', null, 'pwd')),
+						h('p', { key: 'wordpress-result-copy' }, __("Note the full path returned by the command.", 'ultracache')),
+						h('h5', { className: 'uc-version-help-modal__faq-answer-title', key: 'conversion-title' }, __("D. Run the image conversion", 'ultracache')),
+						h('p', { key: 'conversion-copy' }, __("Replace the example paths below with the PHP, WP-CLI, and WordPress paths you found above:", 'ultracache')),
+						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'conversion-code' }, h('code', null, [
+							'/full/path/to/php \\',
+							'    -d memory_limit=2048M \\',
+							'    -d max_execution_time=0 \\',
+							'    /full/path/to/wp/wp \\',
+							'    --path=/full/path/to/wordpress \\',
+							'    ultracache media process \\',
+							'    --media-format=best \\',
+							'    --batch-size=100 \\',
+							'    --time-budget=300',
+						].join('\n'))),
+						h('p', { key: 'conversion-result-copy' }, __("The command processes the media queue using the website’s configured UltraCache image format and quality settings.", 'ultracache')),
+					]),
 				},
 			],
 		},
@@ -549,12 +769,66 @@
 					answer: __("Yes. UltraCache can vary cached pages by the active TranslatePress language so translated URLs do not share the wrong HTML cache.", 'ultracache'),
 				},
 				{
+					question: __("I use Elementor. How should Element Cache be configured?", 'ultracache'),
+					answer: __("For mostly static Elementor sites, set Elementor's Element Cache expiration to 1 Year if that cache lifetime fits the site's dynamic content. This controls Elementor's cached element output; it does not control generated CSS-file clearing. UltraCache does not change this Elementor setting. When Elementor generated CSS is cleared, UltraCache verifies the Elementor CSS referenced by each page and regenerates missing files before that page is stored or warmed. Verify dynamic widgets, shortcodes, forms, personalized content, cart, checkout, and account output before using a long Element Cache expiration.", 'ultracache'),
+				},
+				{
+					question: __("Should I use BAN or HTTP PURGE for Varnish?", 'ultracache'),
+					content: h('div', { className: 'uc-version-help-modal__faq-answer uc-version-help-modal__faq-answer--rich' }, [
+						h('p', { key: 'simple' }, __("Think of PURGE as removing one exact box from a shelf. BAN adds a rule that marks every matching box as unusable. Both prevent visitors from receiving old cached content, but BAN can describe a much larger group in one operation.", 'ultracache')),
+						h('p', { key: 'admin' }, [
+							h('strong', { key: 'label' }, __("Best choice when available: Admin / BAN.", 'ultracache')),
+							' ',
+							__("Use it when your host provides a working Varnish admin endpoint and secret. UltraCache can verify one URL with Exact BAN, combine many URLs with Batch BAN, clear all HTML for the site, or clear the entire host. It is the most capable option.", 'ultracache'),
+						]),
+						h('p', { key: 'http' }, [
+							h('strong', { key: 'label' }, __("Use HTTP PURGE when Admin / BAN is not available.", 'ultracache')),
+							' ',
+							__("Many managed hosts expose only a local HTTP purge endpoint. UltraCache can still invalidate and refill exact URLs correctly, but site-wide clearing may need known-URL purges plus TTL expiry unless the host exposes additional verified HTTP capabilities.", 'ultracache'),
+						]),
+						h('p', { key: 'meaning' }, __("Choosing Admin / BAN does not mean exact invalidation is missing. Exact BAN performs that job in Admin mode, so Exact PURGE is shown as “Unavailable in Admin/BAN mode.” That label describes the selected control method, not a lost feature. Choose the mode your server actually exposes, then use Test Varnish to see which capabilities are Supported.", 'ultracache')),
+					]),
+				},
+				{
 					question: __("Can UltraCache purge Varnish?", 'ultracache'),
 					answer: __("Yes. Configure and test the Varnish connection and purge details in the Varnish Cache section.", 'ultracache'),
 				},
 				{
 					question: __("Can Varnish and UltraCache Page Cache be used together?", 'ultracache'),
 					answer: __("Yes. UltraCache can manage its WordPress page cache while Varnish acts as an additional delivery layer, provided the Varnish purge integration is configured so both layers are invalidated together.", 'ultracache'),
+				},
+				{
+					question: __("My Varnish server has only a basic setup. How can I enable ESI and WooCommerce mini-cart support?", 'ultracache'),
+					content: h('div', { className: 'uc-version-help-modal__faq-answer uc-version-help-modal__faq-answer--rich' }, [
+						h('p', { key: 'overview' }, __("Public ESI requires Varnish to advertise ESI/1.0 and process only HTML responses that explicitly request it. Private/session ESI additionally uses req_top to carry only the built-in allowlisted cookies into signed UltraCache no-store fragment subrequests.", 'ultracache')),
+						h('p', { key: 'handshake' }, [
+							h('strong', { key: 'label' }, __("Suggested request-opt-in configuration:", 'ultracache')),
+							' ',
+							__("The recommended snippet requires two independent signals: the request-side ultracache_esi_optin=1 browser marker and the X-UltraCache-ESI-Shared-Parent: 1 response approval. UltraCache sets the session marker only on pages that render the verified classic mini-cart ESI adapter. Without both signals, WooCommerce requests remain PASS and normal cart behavior is preserved.", 'ultracache'),
+						]),
+						h('p', { key: 'install-note' }, __("This is a suggestion and is not installed automatically. Merge the relevant rules into your existing VCL instead of replacing an unrelated full configuration blindly. Compile/reload Varnish and run Test Varnish again. Frontend ESI composition probes use an independent 20-second timeout; the Admin endpoint timeout controls only Varnish admin socket operations.", 'ultracache')),
+						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'snippet' }, h('code', null, VARNISH_ESI_SUGGESTED_VCL)),
+						h('div', { className: 'mt-2', key: 'copy' }, h(Button, {
+							onClick: () => copyVersionHelpText(VARNISH_ESI_SUGGESTED_VCL),
+							variant: 'light',
+						}, __("Copy handshake VCL snippet", 'ultracache'))),
+					]),
+				},
+				{
+					question: __("I need a ready solution for my Control Web Panel (CWP) server.", 'ultracache'),
+					content: h('div', { className: 'uc-version-help-modal__faq-answer uc-version-help-modal__faq-answer--rich' }, [
+						h('p', { key: 'template' }, [
+							h('strong', { key: 'label' }, __("UltraCache CWP Varnish template:", 'ultracache')),
+							' ',
+							__("Use the bundled fail-closed template on CWP servers. Sites without the UltraCache request marker keep normal WooCommerce PASS behavior. On verified adapter pages, UltraCache approves only cached parents that contain the classic WooCommerce mini-cart ESI fragment.", 'ultracache'),
+						]),
+						h('p', { key: 'placeholders' }, __("The file preserves the CWP placeholders %domain%, %backend_domain%, %proxy_ip%, and %proxy_port%. Review the active include structure, rebuild affected domain configurations, compile/reload Varnish, and run Test Varnish.", 'ultracache')),
+						CWP_VARNISH_TEMPLATE_URL ? h('div', { className: 'mt-2', key: 'download' }, h('a', {
+							className: 'uc-btn uc-btn--primary text-white',
+							href: CWP_VARNISH_TEMPLATE_URL,
+							download: 'ultracache-cwp-varnish.tpl',
+						}, __("Download UltraCache CWP Varnish template (.tpl)", 'ultracache'))) : null,
+					]),
 				},
 				{
 					question: __("Do third-party script matching rules load or contact those services?", 'ultracache'),
@@ -617,6 +891,11 @@
 
 	function VersionHelpModal({ open, version, onClose }) {
 		const closeButtonRef = useRef(null);
+		const onCloseRef = useRef(onClose);
+
+		useEffect(() => {
+			onCloseRef.current = onClose;
+		}, [onClose]);
 
 		useEffect(() => {
 			if (!open) {
@@ -624,20 +903,23 @@
 			}
 
 			const handleKeyDown = (event) => {
-				if ('Escape' === event.key) {
-					onClose();
+				if ('Escape' === event.key && typeof onCloseRef.current === 'function') {
+					onCloseRef.current();
 				}
 			};
 
 			window.addEventListener('keydown', handleKeyDown);
-			window.setTimeout(() => {
+			const focusTimer = window.setTimeout(() => {
 				if (closeButtonRef.current && typeof closeButtonRef.current.focus === 'function') {
-					closeButtonRef.current.focus();
+					closeButtonRef.current.focus({ preventScroll: true });
 				}
 			}, 0);
 
-			return () => window.removeEventListener('keydown', handleKeyDown);
-		}, [open, onClose]);
+			return () => {
+				window.clearTimeout(focusTimer);
+				window.removeEventListener('keydown', handleKeyDown);
+			};
+		}, [open]);
 
 		if (!open) {
 			return null;
@@ -688,7 +970,7 @@
 					h('li', { key: 'mailerlite' }, [h('strong', null, __('For MailerLite, enable Lazy MailerLite nonce refresh.', 'ultracache')), ' ', __('The option is available in Advanced Settings.', 'ultracache')]),
 					h('li', { key: 'object-cache' }, [h('strong', null, __('Confirm the detected Object Cache backend.', 'ultracache')), ' ', __('APCu is usually the fastest local option but is not persistent across PHP restarts. Redis is persistent. SQLite is available when neither is present, with performance depending on disk speed.', 'ultracache')]),
 					h('li', { key: 'varnish' }, [h('strong', null, __('Configure Varnish when present.', 'ultracache')), ' ', __('Enter the required connection and purge details in the Varnish Cache box.', 'ultracache')]),
-					h('li', { key: 'automation' }, [h('strong', null, __('Enable scheduled warm-up.', 'ultracache')), ' ', __('In Automation & Scheduling, turn on Cron Warm Up and Start Cron Warm Up after Scheduled Cleanup.', 'ultracache')]),
+					h('li', { key: 'automation' }, [h('strong', null, __('Enable automatic warm-up.', 'ultracache')), ' ', __('Turn on Warm full site after Flush All Cache and/or Warm uncached URLs after first visit.', 'ultracache')]),
 				]),
 				h('div', { className: 'uc-version-help-modal__section', key: 'first-run' }, [
 					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('Prepare the website after saving', 'ultracache')),
@@ -714,6 +996,19 @@
 						h('li', { key: 'flush-warm' }, [h('strong', null, __('Flush and warm the cache again.', 'ultracache')), ' ', __('Run Flush All Cache, then warm the front page. Front-page warm-up is enough during this testing loop.', 'ultracache')]),
 						h('li', { key: 'repeat' }, [h('strong', null, __('Repeat until the Console is clear.', 'ultracache')), ' ', __('Reload the anonymous page and repeat the same process until no JavaScript errors remain.', 'ultracache')]),
 					]),
+					h('h5', { className: 'uc-version-help-modal__section-title', key: 'silent-title' }, __('I completed all the steps above and there are no JavaScript errors, but something still does not work. What should I do?', 'ultracache')),
+					h('p', { className: 'uc-version-help-modal__section-copy', key: 'silent-intro' }, __('Open JS Defer / Delay Safeguards & Diagnostics and click Analyze HTML JS Dependencies. Some JavaScript problems do not produce console errors. A script may load successfully but execute too late, miss an initialization event, or run in the wrong order relative to another script it depends on.', 'ultracache')),
+					h('p', { className: 'uc-version-help-modal__section-copy', key: 'silent-guidance' }, __('UltraCache will analyze the scripts used on the page and look for strong signs of dependency and execution-order conflicts. Do not add every suggested script blindly. Start with the page element or functionality that is not working, identify which plugin, theme, or component it belongs to, and compare that with the findings. Apply the most relevant safeguard first, then test the page again.', 'ultracache')),
+				]),
+
+				h('div', { className: 'uc-version-help-modal__section', key: 'performance-scores' }, [
+					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('How to Improve Performance and PageSpeed Scores', 'ultracache')),
+					h('ol', { className: 'uc-version-help-modal__steps', key: 'steps' }, [
+						h('li', { key: 'css-sources' }, [h('strong', null, __('Review the largest CSS bundle sources.', 'ultracache')), ' ', __('Open CSS Bundle Exclusions & Diagnostics, then click Run CSS Diagnostics. Under Top CSS bundle sources by bytes, you will see which CSS files contribute the most to the generated bundle. Excluding one or two of the largest files—especially large theme stylesheets—can often provide a significant performance improvement. Add exclusions one at a time and run another performance test after each change, as the best configuration depends on the theme and page structure.', 'ultracache')]),
+						h('li', { key: 'delay-local-js' }, [h('strong', null, __('Enable Delay non-critical/local JS.', 'ultracache')), ' ', __('This can provide a significant PageSpeed/Lighthouse boost, but it can break JavaScript without visible errors, making problems difficult to find and fix.', 'ultracache')]),
+						h('li', { key: 'query-string-caching' }, [h('strong', null, __('Cache query-string URLs.', 'ultracache')), ' ', __('Open Query-string args caching and enable it. Under Query-string args whitelist, click Populate, then click Save Query-string Whitelist. UltraCache can then cache eligible query URLs such as /YourProductURL?color=red.', 'ultracache')]),
+						h('li', { key: 'selective-options' }, [h('strong', null, __('Do not enable options blindly.', 'ultracache')), ' ', __('The Aggressive profile usually provides the best starting point for higher performance scores. Some options are intended only for specific themes, plugins, or compatibility cases. Enabling options that your website does not need may reduce performance or cause visual or functional problems.', 'ultracache')]),
+					]),
 				]),
 
 				h('div', { className: 'uc-version-help-modal__section', key: 'faq' }, [
@@ -728,13 +1023,12 @@
 							h('div', { className: 'uc-version-help-modal__faq-items', key: 'items' }, section.items.map((item, itemIndex) =>
 								h('details', { className: 'uc-version-help-modal__faq-item', key: section.key + '-' + String(itemIndex) }, [
 									h('summary', { className: 'uc-version-help-modal__faq-question', key: 'question' }, item.question),
-									h('p', { className: 'uc-version-help-modal__faq-answer', key: 'answer' }, item.answer),
+									item.content || h('p', { className: 'uc-version-help-modal__faq-answer', key: 'answer' }, item.answer),
 								])
 							)),
 						])
 					)),
 				]),
-				h('div', { className: 'uc-version-help-modal__note', key: 'note' }, __('After this initial setup and post-install check, UltraCache handles page caching, affected-page warming, scheduled warm-up, and new image conversion according to the saved settings.', 'ultracache')),
 				h('div', { className: 'uc-version-help-modal__support', key: 'support' }, [
 					h('span', { className: 'uc-version-help-modal__support-text', key: 'text' }, __('Still having questions?', 'ultracache')),
 					h('a', {
@@ -787,6 +1081,90 @@
 		]);
 	}
 
+	function IntegrationAccordionCard({
+		title,
+		description,
+		mainLabel,
+		mainDescription,
+		enabled,
+		onEnabledChange,
+		toggleDisabled,
+		toggleDisabledReason,
+		children,
+		keyName,
+	}) {
+		const [open, setOpen] = useState(!!enabled);
+
+		useEffect(() => {
+			if (enabled) {
+				setOpen(true);
+			} else {
+				setOpen(false);
+			}
+		}, [enabled]);
+
+		const bodyId = 'uc-integration-body-' + String(keyName || title || 'integration').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+		const disabledReason = toggleDisabled ? String(toggleDisabledReason || '') : '';
+		const toggleTitle = disabledReason || String(mainDescription || '');
+		const handleEnabledChange = (value) => {
+			setOpen(!!value);
+			if (typeof onEnabledChange === 'function') {
+				onEnabledChange(!!value);
+			}
+		};
+
+		return h('div', {
+			className: classNames('uc-card uc-integration-accordion', enabled ? 'is-enabled' : 'is-disabled'),
+			key: (keyName || String(title || 'integration')) + '-card',
+		}, [
+			h('div', { className: 'uc-integration-accordion__header', key: 'header' }, [
+				h('button', {
+					type: 'button',
+					className: 'uc-integration-accordion__summary',
+					disabled: !enabled,
+					'aria-expanded': enabled && open ? 'true' : 'false',
+					'aria-controls': bodyId,
+					onClick: () => {
+						if (enabled) {
+							setOpen((current) => !current);
+						}
+					},
+					key: 'summary',
+				}, [
+					h('span', { className: 'uc-integration-accordion__copy', key: 'copy' }, [
+						h('span', { className: 'uc-integration-accordion__title', key: 'title' }, title),
+						description ? h('span', { className: 'uc-integration-accordion__description', key: 'description' }, description) : null,
+						!enabled ? h('span', { className: 'uc-integration-accordion__status', key: 'status' }, __('Disabled', 'ultracache')) : null,
+					]),
+					h('span', {
+						className: classNames('uc-integration-accordion__chevron', enabled && open ? 'is-open' : ''),
+						'aria-hidden': 'true',
+						key: 'chevron',
+					}, '▸'),
+				]),
+				h('div', {
+					className: classNames('uc-integration-accordion__main-switch', toggleDisabled ? 'is-locked' : ''),
+					title: toggleTitle,
+					key: 'main-switch',
+				}, [
+					h('div', { className: 'uc-integration-accordion__main-switch-label', key: 'label' }, renderLabelWithHelp(mainLabel, mainDescription)),
+					h('label', { className: classNames('uc-toggle', toggleDisabled ? 'opacity-60' : ''), key: 'toggle' }, [
+						h('input', {
+							type: 'checkbox',
+							checked: !!enabled,
+							disabled: !!toggleDisabled,
+							onChange: (event) => handleEnabledChange(event.target.checked),
+						}),
+						h('span', { className: 'slider' }),
+					]),
+				]),
+			]),
+			enabled && open
+				? h('div', { className: 'uc-integration-accordion__body', id: bodyId, key: 'body' }, children)
+				: null,
+		]);
+	}
+
 	function StatCard({ label, value, hint, action }) {
 		return h('div', { className: 'uc-card relative' }, [
 			h('div', { className: 'text-xs tracking-widest text-zinc-500 mb-2 pr-8', key: 'label' }, label),
@@ -826,9 +1204,12 @@
 		);
 	}
 
-	function ToggleRow({ label, description, checked, onChange, disabled, tooltip, hideDescription }) {
+	function ToggleRow({ label, description, checked, onChange, disabled, tooltip, hideDescription, disabledReason }) {
 		const helpText = getOptionHelpText(label, description, tooltip);
-		return h('div', { className: 'flex items-center justify-between py-4' }, [
+		return h('div', {
+			className: classNames('flex items-center justify-between py-4', disabled && disabledReason ? 'uc-setting-row--locked' : ''),
+			title: disabled && disabledReason ? String(disabledReason) : '',
+		}, [
 			h('div', { key: 'left' }, [
 				h('div', { className: 'text-sm font-medium text-white' }, renderLabelWithHelp(label, helpText)),
 				description ? h('div', { className: 'text-xs text-zinc-500' }, description) : null,
@@ -1232,10 +1613,15 @@
 
 		const safeTotal = Math.max(0, Number(process.total || 0));
 		const safeCurrent = safeTotal > 0 ? Math.min(Math.max(0, Number(process.current || 0)), safeTotal) : Math.max(0, Number(process.current || 0));
-		const percent = safeTotal > 0 ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100)) : 0;
-		const progressText = safeTotal > 0
-			? safeCurrent + ' / ' + safeTotal + (process.queueBuilding ? ' (building queue)' : '') + ' (' + percent + '%)'
-			: (process.complete ? 'Complete' : (process.queueBuilding ? 'Building queue…' : 'Preparing…'));
+		const isJsDependencyScan = process.type === 'js_dependency_scan';
+		const percent = isJsDependencyScan
+			? Math.max(0, Math.min(100, Math.round(Number(process.jsProgressPercent || 0))))
+			: (safeTotal > 0 ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100)) : 0);
+		const progressText = isJsDependencyScan && !process.active
+			? (process.failed ? 'Failed' : 'Complete')
+			: (safeTotal > 0
+				? safeCurrent + ' / ' + safeTotal + (process.queueBuilding ? ' (building queue)' : '') + ' (' + percent + '%)'
+				: (process.complete ? 'Complete' : (process.queueBuilding ? 'Building queue…' : 'Preparing…')));
 		const unitText = process.type === 'media' && Number(process.unitCount || 0) > 0
 			? ('Image units checked: ' + Math.max(0, Number(process.unitCount || 0)))
 			: '';
@@ -1245,7 +1631,9 @@
 		const skippedCount = Math.max(0, Number(process.skippedCount || 0));
 		const failedCount = Math.max(0, Number(process.failedCount || 0));
 		const varnishWarmedCount = Math.max(0, Number(process.varnishWarmedCount || 0));
-		const hasCounters = successCount > 0 || skippedCount > 0 || failedCount > 0 || avifCount > 0 || webpCount > 0 || varnishWarmedCount > 0 || Number(process.unitCount || 0) > 0;
+		const liteSpeedWarmedCount = Math.max(0, Number(process.liteSpeedWarmedCount || 0));
+		const hasCounters = isJsDependencyScan
+			|| successCount > 0 || skippedCount > 0 || failedCount > 0 || avifCount > 0 || webpCount > 0 || varnishWarmedCount > 0 || liteSpeedWarmedCount > 0 || Number(process.unitCount || 0) > 0;
 
 
 		return h('div', { className: 'uc-process-popup', role: 'status', 'aria-live': 'polite' }, [
@@ -1299,7 +1687,15 @@
 					className: 'uc-media-operation-counters mt-3 text-[11px]',
 					key: 'job-counters',
 					style: { display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center' },
-				}, process.type === 'media'
+				}, isJsDependencyScan
+					? [
+						h('span', { className: 'text-zinc-400 font-bold', key: 'page-scripts' }, 'Page inventory: ' + Math.max(0, Number(process.jsTotalScripts || 0)) + ' scripts'),
+						h('span', { className: 'text-emerald-400 font-bold', key: 'local-files' }, 'Local JS: ' + Math.max(0, Number(process.jsTotalFiles || 0))),
+						h('span', { className: 'text-zinc-400 font-bold', key: 'processed-files' }, 'Processed: ' + Math.max(0, Number(process.jsProcessedFiles || 0)) + (Number(process.jsTotalFiles || 0) > 0 ? ' / ' + Math.max(0, Number(process.jsTotalFiles || 0)) : '')),
+						h('span', { className: 'text-emerald-400 font-bold', key: 'cache-hits' }, 'Cached: ' + Math.max(0, Number(process.jsCacheHits || 0))),
+						h('span', { className: 'text-zinc-400 font-bold', key: 'fresh-files' }, 'Parsed now: ' + Math.max(0, Number(process.jsFreshFiles || 0))),
+					]
+					: (process.type === 'media'
 					? [
 						h('span', { className: 'text-emerald-400 font-bold', key: 'checked' }, 'Attachments checked: ' + safeCurrent + (safeTotal > 0 ? ' / ' + safeTotal : '')),
 						h('span', { className: 'text-zinc-400 font-bold', key: 'units' }, 'Image units checked: ' + Math.max(0, Number(process.unitCount || 0))),
@@ -1313,7 +1709,8 @@
 						h('span', { className: 'text-zinc-400 font-bold', key: 'skipped' }, 'Skipped: ' + skippedCount),
 						h('span', { className: failedCount > 0 ? 'text-amber-400 font-bold' : 'text-zinc-500 font-bold', key: 'failed' }, 'Failed: ' + failedCount),
 						varnishWarmedCount > 0 ? h('span', { className: 'text-emerald-400 font-bold', key: 'varnish-warmed' }, 'Varnish warmed: ' + varnishWarmedCount) : null,
-					].filter(Boolean))
+						liteSpeedWarmedCount > 0 ? h('span', { className: 'text-emerald-400 font-bold', key: 'litespeed-warmed' }, 'LiteSpeed warmed: ' + liteSpeedWarmedCount) : null,
+					].filter(Boolean)))
 				: null,
 			process.logs && process.logs.length
 				? h(
@@ -1340,6 +1737,7 @@
 		VersionHelpModal,
 		Card,
 		SettingsAccordionCard,
+		IntegrationAccordionCard,
 		StatCard,
 		Button,
 		ToggleRow,

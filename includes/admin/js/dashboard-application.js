@@ -48,6 +48,8 @@
 		formatLooseTime,
 		formatBytes,
 		sleep,
+		ignoreExpectedAdminFailure,
+		reportNonFatalAdminError,
 	} = core;
 	const { configure: configureApi, apiRequest } = api;
 	const {
@@ -162,6 +164,7 @@
 		APCuCard,
 		getExternalCacheLayer,
 		ExternalCacheCard,
+		LiteSpeedCard,
 		ExternalCacheFlushSettingsCard,
 		RedisCard,
 	} = cacheModule;
@@ -719,6 +722,11 @@
 			setMediaLibraryReplacementDbPreview,
 			mediaLibraryReplacementDbPreviewOpen,
 			setMediaLibraryReplacementDbPreviewOpen,
+			mediaLibraryReplacementBlockers,
+			mediaLibraryReplacementBlockersOpen,
+			setMediaLibraryReplacementBlockersOpen,
+			mediaLibraryReplacementBlockerDecisions,
+			setMediaLibraryReplacementBlockerDecisions,
 			mediaLibraryReplacementCleanupPreview,
 			setMediaLibraryReplacementCleanupPreview,
 			mediaLibraryReplacementCleanupPreviewOpen,
@@ -802,6 +810,7 @@
 			stageDashboardPayloadForQueue,
 		});
 		const {
+			updateVarnishEnabled,
 			updateVarnishField,
 			updateRedisField,
 			saveRedisSettings,
@@ -812,11 +821,14 @@
 			removeConflictingCacheDropins,
 			runFullObjectCount,
 			saveVarnishSettings,
+			runVarnishDiscovery,
 			runVarnishTest,
+			runVarnishPerformanceSnapshot,
 			runVarnishFlushAll,
 			runVarnishFlushEntireHost,
 			flushOpcache,
 			flushApcu,
+			runLiteSpeedTest,
 			flushLiteSpeed,
 			flushNginx,
 			redetectExternalCaches,
@@ -885,6 +897,28 @@
 			} catch (error) {
 				pushToast({ type: 'error', text: error && error.message ? error.message : __('The selected LCP URL details could not be loaded.', 'ultracache') });
 				return null;
+			}
+		}
+
+		async function saveLcpObservationManualSelector(pageHash, manualSelector) {
+			const normalizedHash = String(pageHash || '');
+			if (!normalizedHash || lcpDiagnosticsBusyKey) {
+				return null;
+			}
+
+			setLcpDiagnosticsBusyKey(normalizedHash + ':manual-selector');
+			try {
+				const response = await apiRequest('lcp_observation_manual_selector', {
+					pageHash: normalizedHash,
+					manualSelector: String(manualSelector || ''),
+				});
+				pushToast({ type: response && response.refreshQueued === false ? 'warning' : 'success', text: response && response.message ? response.message : __('Manual LCP selector updated.', 'ultracache') });
+				return response;
+			} catch (error) {
+				pushToast({ type: 'error', text: error && error.message ? error.message : __('The Manual LCP selector could not be saved.', 'ultracache') });
+				return null;
+			} finally {
+				setLcpDiagnosticsBusyKey('');
 			}
 		}
 
@@ -1253,6 +1287,7 @@
 				varnish_flush_all: 'Flush Varnish',
 				google_fonts_rebuild_cache: 'Rebuild Google Fonts Cache',
 				performance_profile: 'Performance Profile',
+				js_dependency_scan: 'HTML JS Dependency Scan',
 			};
 			return labels[action] || String(action || 'Dashboard action').replace(/_/g, ' ');
 		}
@@ -1315,7 +1350,9 @@
 				if (!result.stats && !result.diagnostics && ['purge_all', 'object_cache_flush', 'object_cache_full_count', 'warm_frontpage_html', 'warm_frontpage_html_css', 'opcache_flush', 'apcu_flush', 'varnish_flush_all', 'google_fonts_rebuild_cache'].indexOf(action) !== -1) {
 					try {
 						await refreshStats();
-					} catch (error) {}
+					} catch (error) {
+						reportNonFatalAdminError('dashboard.queued-action.stats-refresh', error, { severity: 'debug', dedupeKey: 'dashboard.queued-action.stats-refresh', dedupeWindowMs: 30000 });
+					}
 				}
 				const ok = completed && completed.status === 'done';
 				if (!ok) {
@@ -1531,6 +1568,20 @@
 		}
 
 		function updateSetting(key, value) {
+			if (key === 'liteSpeedCacheEnabled') {
+				queueSettingsPatch({
+					liteSpeedCacheEnabled: !!value,
+					apacheStaticHtmlDeliveryEnabled: value ? false : !!(settingsRef.current || {}).apacheStaticHtmlDeliveryEnabled,
+				});
+				return;
+			}
+			if (key === 'apacheStaticHtmlDeliveryEnabled') {
+				queueSettingsPatch({
+					apacheStaticHtmlDeliveryEnabled: !!value,
+					liteSpeedCacheEnabled: value ? false : !!(settingsRef.current || {}).liteSpeedCacheEnabled,
+				});
+				return;
+			}
 			if (key === 'objectCacheEnabled') {
 				const currentForm = redisForm || {};
 				const currentSettings = settingsRef.current || {};
@@ -1843,7 +1894,7 @@
 					onStatus(message);
 				}
 			}
-			const scanUrl = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
+			let scanUrl = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
 			const scanId = 'rt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 			const runtimeUrl = buildRuntimeJsScanUrl(scanUrl, scanId, scanContext);
 			setRuntimeStatus('Opening ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' diagnostic page…');
@@ -1854,7 +1905,9 @@
 				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scanContext: scanContext, scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl), debugUrl: runtimeUrl };
 			}
 
-			try { popup.focus(); } catch (error) {}
+			try { popup.focus(); } catch (error) {
+				ignoreExpectedAdminFailure(error);
+			}
 			setRuntimeStatus('Diagnostic page opened in ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' mode. Waiting for browser errors…');
 			pushToast({ type: 'info', text: 'Browser Runtime Scan opened the page in ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' mode. Keep it open for a few seconds.' });
 			let latestReport = null;
@@ -1890,7 +1943,9 @@
 							break;
 						}
 					}
-				} catch (error) {}
+				} catch (error) {
+					reportNonFatalAdminError('dashboard.runtime-js-scan.poll', error, { severity: 'debug', dedupeKey: 'dashboard.runtime-js-scan.poll', dedupeWindowMs: 30000 });
+				}
 			}
 			const finalDirectReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, true, scanOptions.queueJobId || '');
 			if (finalDirectReport && (!latestReport || Number(finalDirectReport.errorCount || 0) >= Number(latestReport.errorCount || 0))) {
@@ -1917,32 +1972,199 @@
 		}
 
 
-		async function runJsDelaySafetyScanForUrl(url) {
-			const scanUrl = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
-			const completed = await queueDashboardAction('performance_profile', { mode: 'compact', url: scanUrl }, {
-				queued: 'JS Delay Safety Scan queued…',
-				success: 'JS Delay Safety Scan completed.',
-				failed: 'JS Delay Safety Scan failed.',
-				runningLabel: 'Scanning JS delay issues…',
-			}, 'performance_profile_js_delay_scan', (result) => {
+		async function runJsDelaySafetyScanForUrl(url, onProgress, scanOptions) {
+			const options = scanOptions && typeof scanOptions === 'object' ? scanOptions : {};
+			let scanUrl = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
+			const sessionKey = 'ultracache_js_dependency_scan_active_v1';
+			const reportProgress = typeof onProgress === 'function' ? onProgress : function() {};
+			const progressLogRef = { lines: [], lastProgress: {} };
+			const projectProgressPopup = function(progress, message, active, failed) {
+				const incomingProgress = progress && typeof progress === 'object' ? progress : {};
+				const data = Object.assign({}, progressLogRef.lastProgress || {}, incomingProgress);
+				progressLogRef.lastProgress = data;
+				const phase = String(data.phase || (active ? 'prepare' : (failed ? 'failed' : 'complete')));
+				const totalFiles = Math.max(0, Number(data.totalFiles || 0));
+				const processedFiles = totalFiles > 0
+					? Math.min(totalFiles, Math.max(0, Number(data.processedFiles || 0)))
+					: Math.max(0, Number(data.processedFiles || 0));
+				const cleanMessage = String(message || '').trim();
+				if (cleanMessage && progressLogRef.lines[progressLogRef.lines.length - 1] !== cleanMessage) {
+					progressLogRef.lines = progressLogRef.lines.concat([cleanMessage]).slice(-10);
+				}
+				const stageLabel = phase === 'analyze'
+					? 'Analyzing local JavaScript'
+					: (phase === 'correlate' ? 'Correlating dependency evidence' : (phase === 'complete' ? 'Complete' : (phase === 'failed' ? 'Failed' : 'Preparing page inventory')));
+				setProcess({
+					type: 'js_dependency_scan',
+					active: !!active,
+					label: __('Analyzing HTML JS Dependencies', 'ultracache'),
+					current: processedFiles,
+					total: totalFiles,
+					queueBuilding: phase === 'prepare',
+					logs: progressLogRef.lines.slice(),
+					startTime: Date.now(),
+					cancellable: false,
+					cancelRequested: false,
+					showWhenInactive: !active,
+					complete: !active && !failed,
+					currentStageLabel: stageLabel,
+					currentItem: '',
+					jsTotalScripts: Math.max(0, Number(data.totalScripts || 0)),
+					jsTotalFiles: totalFiles,
+					jsProcessedFiles: processedFiles,
+					jsCacheHits: Math.max(0, Number(data.cacheHits || 0)),
+					jsFreshFiles: Math.max(0, Number(data.freshlyAnalyzedFiles || 0)),
+					jsProgressPercent: Math.max(0, Math.min(100, Number(data.progressPercent || (active ? 0 : 100)))),
+					failed: !!failed,
+				});
+			};
+			const publishProgress = function(progress, message) {
+				reportProgress(progress || {}, message || 'Analyzing HTML JS dependencies…');
+				projectProgressPopup(progress || {}, message || 'Analyzing HTML JS dependencies…', true, false);
+			};
+			const readStoredJob = function() {
+				try {
+					const raw = window.sessionStorage ? window.sessionStorage.getItem(sessionKey) : '';
+					const parsed = raw ? JSON.parse(raw) : null;
+					return parsed && parsed.id ? parsed : null;
+				} catch (error) {
+					return null;
+				}
+			};
+			const storeJob = function(job) {
+				if (!job || !job.id) {
+					return;
+				}
+				try {
+					if (window.sessionStorage) {
+						window.sessionStorage.setItem(sessionKey, JSON.stringify({ id: String(job.id), url: scanUrl }));
+					}
+				} catch (error) {
+					// Browser storage is an optional resume hint; server-side URL deduplication remains authoritative.
+				}
+			};
+			const clearStoredJob = function(jobId) {
+				try {
+					if (!window.sessionStorage) {
+						return;
+					}
+					const stored = readStoredJob();
+					if (!stored || !jobId || String(stored.id) === String(jobId)) {
+						window.sessionStorage.removeItem(sessionKey);
+					}
+				} catch (error) {
+					// Ignore optional browser-storage cleanup failures.
+				}
+			};
+
+			let resumeHint = null;
+			let resumeJob = null;
+			if (options.resumeOnly) {
+				resumeHint = readStoredJob();
+				if (!resumeHint || !String(resumeHint.url || '').trim()) {
+					return null;
+				}
+				scanUrl = String(resumeHint.url || '').trim();
+				try {
+					const statusResponse = await apiRequest('queue_status', { id: resumeHint.id });
+					resumeJob = statusResponse && statusResponse.job ? statusResponse.job : null;
+				} catch (error) {
+					clearStoredJob(resumeHint.id);
+					return null;
+				}
+				if (!resumeJob || resumeJob.action !== 'js_dependency_scan') {
+					clearStoredJob(resumeHint.id);
+					return null;
+				}
+			}
+
+			const completed = await enqueueUiOperation('js_dependency_scan', 'HTML JS Dependency Scan', async (toastId) => {
+				let job = null;
+				if (options.resumeOnly) {
+					job = resumeJob;
+				} else {
+					await syncQueuedSettingsBeforeAction();
+					const queued = await apiRequest('queue_action', { action: 'js_dependency_scan', params: { url: scanUrl } });
+					job = queued && queued.job ? queued.job : null;
+					if (!job || !job.id) {
+						throw new Error('HTML JS dependency analysis job was not created.');
+					}
+					storeJob(job);
+				}
+
+				publishProgress(job && job.progress ? job.progress : {}, job && job.message ? job.message : 'Preparing HTML JS dependency analysis…');
+
+				for (let batch = 0; batch < 256 && job && ['done', 'failed'].indexOf(job.status) === -1; batch++) {
+					const response = await apiRequest('queue_run', { id: job.id });
+					job = response && response.job ? response.job : job;
+					publishProgress(job && job.progress ? job.progress : {}, job && job.message ? job.message : 'Analyzing HTML JS dependencies…');
+					if (job && job.status === 'running') {
+						await sleep(500);
+					} else if (job && job.status === 'queued') {
+						await sleep(40);
+					}
+				}
+
+				if (!job) {
+					return null;
+				}
+				if (['done', 'failed'].indexOf(job.status) !== -1) {
+					clearStoredJob(job.id);
+				}
+				if (['done', 'failed'].indexOf(job.status) === -1) {
+					throw new Error('HTML JS dependency analysis did not reach a terminal state.');
+				}
+				if (job.status !== 'done') {
+					throw new Error(job.message || 'HTML JS dependency analysis failed.');
+				}
+
+				const result = job.result || {};
+				applyDashboardPayload(result);
 				if (result && result.performanceProfile) {
 					setPerformanceProfile(result.performanceProfile);
 				}
+				return job;
+			}, {
+				processingText: options.resumeOnly ? 'Resuming HTML JS dependency analysis…' : 'Analyzing HTML JS dependencies…',
+				successText: 'HTML JS dependency analysis completed.',
+				failedText: 'HTML JS dependency analysis failed.',
 			});
+
+			if (!completed) {
+				projectProgressPopup({ phase: 'failed', progressPercent: 100 }, 'HTML JS dependency analysis failed.', false, true);
+				return null;
+			}
+			projectProgressPopup(completed && completed.progress ? completed.progress : { phase: 'complete', progressPercent: 100 }, completed && completed.message ? completed.message : 'HTML JS dependency analysis completed.', false, false);
 			const result = completed && completed.result ? completed.result : {};
 			const profile = result && result.performanceProfile ? result.performanceProfile : null;
 			const scan = profile && profile.jsDelaySafetyScan ? profile.jsDelaySafetyScan : null;
 			if (!scan || !scan.available) {
-				pushToast({ type: 'warning', text: __("No JS delay dependency suggestions were found for this URL.", 'ultracache') });
-				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl };
+				if (!options.resumeOnly) {
+					pushToast({ type: 'warning', text: __('HTML JS dependency analysis was not available for this URL.', 'ultracache') });
+				}
+				return { available: false, source: 'html-strong-dependency-analysis', suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl };
 			}
+			const strongSuggestions = Array.isArray(scan.strongSuggestions) ? scan.strongSuggestions : [];
 			const enrichedScan = Object.assign({}, scan, {
+				available: true,
+				source: 'html-strong-dependency-analysis',
+				suggestions: strongSuggestions,
+				suggestionCount: Number(scan.strongSuggestionCount || strongSuggestions.length || 0),
+				missingCount: Number(scan.strongMissingCount || 0),
+				alreadySafeguardedCount: Number(scan.strongAlreadySafeguardedCount || 0),
+				otherHeuristicSuggestionCount: Number(scan.suggestionCount || 0),
 				scannedUrl: (profile && (profile.profileUrl || profile.url)) ? (profile.profileUrl || profile.url) : scanUrl,
 				scannedAt: profile && profile.scannedAt ? profile.scannedAt : '',
 			});
-			pushToast({ type: enrichedScan.missingCount ? 'warning' : 'success', text: enrichedScan.missingCount ? ('Found ' + enrichedScan.missingCount + ' missing suggested Defer/Delay exclusion(s).') : 'No missing JS delay exclusions found for this URL.' });
+			pushToast({
+				type: enrichedScan.missingCount ? 'warning' : 'success',
+				text: enrichedScan.missingCount
+					? ('Found ' + enrichedScan.missingCount + ' strong JS dependency suggestion(s).')
+					: 'No missing high-confidence silent JS dependency conflicts were found for this URL.'
+			});
 			return enrichedScan;
 		}
+
 		function updateMediaOptimizationSetting(value) {
 
 			queueSettingsPatch({
@@ -2130,6 +2352,14 @@
 			return !!(result && result.success);
 		}
 
+		async function cancelManualWarmSession(token) {
+			const result = await apiRequest('manual_warm_session', {
+				action: 'cancel',
+				token: String(token || ''),
+			});
+			return !!(result && result.success);
+		}
+
 		async function endManualWarmSession(token) {
 			const result = await apiRequest('manual_warm_session', {
 				action: 'end',
@@ -2202,7 +2432,7 @@
 					? endManualWarmSession(token)
 					: endManualMediaSession(token),
 				pauseExclusiveSession: (state, token) => isWarmJobType(state.type)
-					? pauseManualWarmSession(token)
+					? cancelManualWarmSession(token)
 					: true,
 				failExclusiveSession: (state, token) => isWarmJobType(state.type)
 					? pauseManualWarmSession(token)
@@ -2225,8 +2455,12 @@
 					const skippedCount = Math.max(0, Number(state.skippedCount || 0));
 					const successCount = Math.max(0, Number(state.successCount || 0));
 					const varnishWarmedCount = Math.max(0, Number(state.varnishWarmedCount || 0));
+					const liteSpeedWarmedCount = Math.max(0, Number(state.liteSpeedWarmedCount || 0));
 					const varnishSummary = varnishWarmedCount > 0
 						? ' Varnish: ' + varnishWarmedCount + ' warmed.'
+						: '';
+					const liteSpeedSummary = liteSpeedWarmedCount > 0
+						? ' LiteSpeed: ' + liteSpeedWarmedCount + ' warmed.'
 						: '';
 					let finalNotice = { type: 'success', text: isWarmJobType(state.type) ? 'Cache warming complete.' : (state.forceRegenerateExisting ? 'Media regeneration complete.' : 'Media optimization complete.') };
 					if (isWarmJobType(state.type)) {
@@ -2246,6 +2480,9 @@
 						}
 						if (varnishSummary) {
 							finalNotice.text += varnishSummary;
+						}
+						if (liteSpeedSummary) {
+							finalNotice.text += liteSpeedSummary;
 						}
 					} else if (failedCount > 0) {
 						finalNotice = { type: 'warning', text: 'Media optimization completed with ' + failedCount + ' failed item' + (failedCount === 1 ? '' : 's') + '.' };
@@ -2270,8 +2507,13 @@
 							: 'Media conversion finished, but exclusive background ownership could not be released immediately. It will expire automatically.',
 					});
 				},
-				onPaused: () => {
-					pushToast({ type: 'success', text: __("Job paused. You can resume it later.", 'ultracache') });
+				onPaused: (state) => {
+					pushToast({
+						type: 'success',
+						text: isWarmJobType(state && state.type)
+							? __("Warm-up cancelled. Background automation may continue.", 'ultracache')
+							: __("Job paused. You can resume it later.", 'ultracache'),
+					});
 				},
 			});
 			return runner(job, forceRestart, existingManualSessionToken);
@@ -2472,13 +2714,13 @@
 			getMediaLibraryReplacementRecoveryStatus,
 			isMediaLibraryReplacementOwnedByAnotherDashboard,
 			restartMediaLibraryReplacementWorkflow,
+			recoverMediaLibraryReplacementWorkflow,
 			closeMediaLibraryReplacementWarning,
 			confirmMediaLibraryReplacementWarning,
 			getMediaLibraryReplacementRunnerUnavailableMessage,
 			showMediaLibraryReplacementRunnerUnavailable,
 			getMediaLibraryReplacementWorkflowButtonState,
 			getMediaLibraryReplacementWorkflowButtonClass,
-			getMediaLibraryReplacementCurrentJobId,
 			getMediaLibraryReplacementDeleteDisabledReason,
 			prepareMediaLibraryReplacementWorkflow,
 			doMediaLibraryReplacementWorkflow,
@@ -2490,11 +2732,14 @@
 			loadMediaLibraryReplacementDbPreviewPage,
 			openMediaLibraryReplacementDbPreviewModal,
 			changeMediaLibraryReplacementDbPreviewPage,
+			loadMediaLibraryReplacementBlockersPage,
+			openMediaLibraryReplacementBlockersModal,
+			changeMediaLibraryReplacementBlockersPage,
+			saveMediaLibraryReplacementBlockerDecisions,
 			loadMediaLibraryReplacementCleanupPreviewPage,
 			openMediaLibraryReplacementCleanupPreviewModal,
 			changeMediaLibraryReplacementCleanupPreviewPage,
 			closeMediaLibraryReplacementCleanupPreviewModal,
-			applyMediaLibraryReplacementCleanup,
 			copyMediaLibraryReplacementFiles,
 			prepareMediaLibraryReplacementMetadataUpdates,
 			applyMediaLibraryReplacementMetadataUpdates,
@@ -2893,6 +3138,8 @@ async function deleteAllPluginDataAndDeactivate() {
 		const mediaQueueTotal = Math.max(0, Number(effectiveMediaQueueStatus.total || 0));
 		const mediaQueuePending = Math.max(0, Number(effectiveMediaQueueStatus.pending || 0));
 		const mediaQueueFailed = Math.max(0, Number(effectiveMediaQueueStatus.failed || 0));
+		const mediaQueueRecoverableInterrupted = Math.max(0, Number(effectiveMediaQueueStatus.recoverableInterrupted || 0));
+		const mediaQueueRetryable = Math.max(0, Number(effectiveMediaQueueStatus.retryable || (mediaQueueFailed + mediaQueueRecoverableInterrupted)));
 		const mediaQueueAlreadyOptimized = Math.max(0, Number(effectiveMediaQueueStatus.alreadyOptimized || effectiveMediaQueueStatus.skipped || 0));
 		const mediaQueueNeedsRepair = !!effectiveMediaQueueStatus.needsRepair;
 		const mediaQueueIsComplete = !!effectiveMediaQueueStatus.isComplete;
@@ -2909,11 +3156,100 @@ async function deleteAllPluginDataAndDeactivate() {
 		].join(' ').toLowerCase();
 		const reverseProxyLooksLikeVarnish = !!(reverseProxyDiagnostic && reverseProxyDiagnostic.detected && reverseProxyTextForVarnish.indexOf('varnish') !== -1);
 		const varnishConfigured = !!(
-			(settings && (settings.varnishCliEnabled || settings.varnishCliServers || settings.flushAllIncludeVarnish)) ||
-			(varnishForm && (varnishForm.varnishCliEnabled || varnishForm.varnishCliServers || varnishForm.varnishCliKeyConfigured)) ||
+			(settings && (settings.varnishCliEnabled || settings.varnishConnectionConfigured || settings.varnishCliServers || settings.flushAllIncludeVarnish)) ||
+			(varnishForm && (varnishForm.varnishCliEnabled || varnishForm.varnishConnectionConfigured || varnishForm.varnishCliServers || varnishForm.varnishCliKeyConfigured)) ||
 			(varnishDiagnostic && (varnishDiagnostic.enabled || varnishDiagnostic.available || varnishDiagnostic.servers || varnishDiagnostic.endpointCount))
 		);
 		const showVarnishCard = !!((varnishLayer && varnishLayer.detected) || reverseProxyLooksLikeVarnish || varnishConfigured);
+		const liteSpeedLayer = getExternalCacheLayer(stats, 'litespeed');
+		const liteSpeedDiagnostic = diagnostics && diagnostics.liteSpeed ? diagnostics.liteSpeed : {};
+		const liteSpeedConfigured = !!(settings && (
+			settings.liteSpeedCacheEnabled ||
+			settings.liteSpeedRefillAfterTargetedInvalidation ||
+			settings.liteSpeedWarmDuringSiteWarmup ||
+			settings.liteSpeedStalePurgeEnabled ||
+			settings.liteSpeedRefreshAheadEnabled ||
+			settings.liteSpeedRefreshAheadPinnedUrls ||
+			settings.flushAllIncludeLiteSpeed
+		));
+		const showLiteSpeedCard = !!(
+			(liteSpeedLayer && liteSpeedLayer.detected) ||
+			(liteSpeedDiagnostic && (liteSpeedDiagnostic.detected || liteSpeedDiagnostic.serverDetected || liteSpeedDiagnostic.nativeEnabled)) ||
+			liteSpeedConfigured
+		);
+		const cronWarmStatus = diagnostics && diagnostics.cronWarm && typeof diagnostics.cronWarm === 'object'
+			? diagnostics.cronWarm
+			: {};
+		const automationWorker = cronWarmStatus.workerHealth && typeof cronWarmStatus.workerHealth === 'object'
+			? cronWarmStatus.workerHealth
+			: { status: 'ready', message: __('No automation work is waiting.', 'ultracache'), pendingUrls: 0, processingUrls: 0, pendingStages: 0, processingStages: 0, nextScheduledAt: 0 };
+		const automationWorkerLabels = {
+			ready: __('Ready', 'ultracache'),
+			'running-scheduled': __('Running scheduled warm-up', 'ultracache'),
+			'running-targeted': __('Running targeted work', 'ultracache'),
+			'running-ui': __('Running UI warm-up', 'ultracache'),
+			'running-cli': __('Running WP-CLI warm-up', 'ultracache'),
+			'scheduled-full-site': __('Scheduled full-site warm-up', 'ultracache'),
+			'scheduled-targeted': __('Scheduled targeted work', 'ultracache'),
+			'scheduled-varnish-invalidation': __('Scheduled Varnish invalidation', 'ultracache'),
+			'waiting-retry': __('Waiting for retry', 'ultracache'),
+			'paused-configuration': __('Paused by configuration', 'ultracache'),
+			recovered: __('Recovered', 'ultracache'),
+			attention: __('Attention required', 'ultracache'),
+		};
+		const automationWorkerStageLabels = {
+			html: __('HTML', 'ultracache'),
+			css_bundle: __('CSS bundle', 'ultracache'),
+			lcp_refresh: __('LCP refresh', 'ultracache'),
+			varnish: __('Varnish', 'ultracache'),
+			litespeed: __('LiteSpeed', 'ultracache'),
+		};
+		const automationWorkerStatus = String(automationWorker.status || 'ready');
+		const automationWorkerLabel = automationWorkerLabels[automationWorkerStatus] || __('Ready', 'ultracache');
+		const automationWorkerAttention = automationWorkerStatus === 'paused-configuration' || automationWorkerStatus === 'attention';
+		const automationWorkerPendingUrls = Math.max(0, Number(automationWorker.pendingUrls || 0));
+		const automationWorkerProcessingUrls = Math.max(0, Number(automationWorker.processingUrls || 0));
+		const automationWorkerPendingStages = Math.max(0, Number(automationWorker.pendingStages || 0));
+		const automationWorkerProcessingStages = Math.max(0, Number(automationWorker.processingStages || 0));
+		const automationWorkerOpenStages = automationWorkerPendingStages + automationWorkerProcessingStages;
+		const automationWorkerNextAt = Math.max(0, Number(automationWorker.nextScheduledAt || cronWarmStatus.nextScheduledAt || 0));
+		const automationWorkerNextRetryAt = Math.max(0, Number(automationWorker.nextRetryAt || 0));
+		const automationWorkerQueueText = __('Queue', 'ultracache') + ': '
+			+ formatNumber(automationWorkerPendingUrls) + ' ' + __('URLs pending', 'ultracache')
+			+ ' · ' + formatNumber(automationWorkerProcessingUrls) + ' ' + __('processing', 'ultracache')
+			+ ' · ' + formatNumber(automationWorkerOpenStages) + ' ' + __('stages open', 'ultracache');
+		const automationWorkerNextText = automationWorkerNextRetryAt > 0 && automationWorkerStatus === 'waiting-retry'
+			? __('Retry after', 'ultracache') + ': ' + formatLooseTime(automationWorkerNextRetryAt)
+			: (automationWorkerNextAt > 0
+				? __('Next run', 'ultracache') + ': ' + formatLooseTime(automationWorkerNextAt)
+				: '');
+		const automationWorkerOwner = String(automationWorker.ownerSource || '');
+		const automationWorkerCurrentUrl = String(automationWorker.currentUrl || '');
+		const automationWorkerCurrentStage = String(automationWorker.currentStage || '');
+		const automationWorkerCurrentStageLabel = automationWorkerStageLabels[automationWorkerCurrentStage] || automationWorkerCurrentStage;
+		const automationWorkerActivityParts = [];
+		if (automationWorkerOwner) {
+			automationWorkerActivityParts.push(__('Owner', 'ultracache') + ': ' + (automationWorkerOwner === 'cli' ? __('WP-CLI', 'ultracache') : (automationWorkerOwner === 'ui' ? __('UI', 'ultracache') : __('Cron', 'ultracache'))));
+		}
+		if (automationWorkerCurrentStageLabel) {
+			automationWorkerActivityParts.push(__('Stage', 'ultracache') + ': ' + automationWorkerCurrentStageLabel);
+		}
+		if (automationWorkerCurrentUrl) {
+			automationWorkerActivityParts.push(__('URL', 'ultracache') + ': ' + automationWorkerCurrentUrl);
+		}
+		const automationWorkerPausedSession = automationWorker.pausedForegroundSession && typeof automationWorker.pausedForegroundSession === 'object'
+			? automationWorker.pausedForegroundSession
+			: {};
+		const automationWorkerPausedSessionText = automationWorkerPausedSession.paused
+			? __('Paused UI session available to resume.', 'ultracache')
+			: '';
+		const automationWorkerFullSiteText = String(cronWarmStatus.workloadType || '') === 'full_site'
+			? __('Full-site plan', 'ultracache') + ': '
+				+ formatNumber(Math.max(0, Number(cronWarmStatus.fullSiteProcessed || 0))) + ' / '
+				+ formatNumber(Math.max(0, Number(cronWarmStatus.fullSitePlanned || 0))) + ' ' + __('processed', 'ultracache')
+				+ ' · ' + formatNumber(Math.max(0, Number(cronWarmStatus.fullSitePlanned || 0))) + ' / '
+				+ formatNumber(Math.max(0, Number(cronWarmStatus.scheduledWarmLimit || 0))) + ' ' + __('selected', 'ultracache')
+			: '';
 
 		const {
 			closeMediaLibraryReplacementPreviewModal,
@@ -2921,12 +3257,17 @@ async function deleteAllPluginDataAndDeactivate() {
 			renderMediaLibraryReplacementWarningModal,
 			renderMediaLibraryReplacementPreviewModal,
 			renderMediaLibraryReplacementDbPreviewModal,
+			renderMediaLibraryReplacementBlockersModal,
 			renderMediaLibraryReplacementCleanupPreviewModal,
+			renderMediaConversionTestControls,
 			renderMediaLibraryReplacementControls,
 		} = createMediaReplacementUi({
+			renderLabelWithHelp,
+			SelectField,
+			settings,
+			updateSetting,
 			busy,
 			mediaConversionTestBusy,
-			mediaOptimizationEnabled,
 			mediaSupport,
 			mediaLibraryReplacementBusy,
 			mediaLibraryReplacementStatus,
@@ -2934,6 +3275,11 @@ async function deleteAllPluginDataAndDeactivate() {
 			mediaLibraryReplacementPreviewOpen,
 			mediaLibraryReplacementDbPreview,
 			mediaLibraryReplacementDbPreviewOpen,
+			mediaLibraryReplacementBlockers,
+			mediaLibraryReplacementBlockersOpen,
+			mediaLibraryReplacementBlockerDecisions,
+			setMediaLibraryReplacementBlockersOpen,
+			setMediaLibraryReplacementBlockerDecisions,
 			mediaLibraryReplacementCleanupPreview,
 			mediaLibraryReplacementCleanupPreviewOpen,
 			mediaLibraryReplacementWarningAction,
@@ -2946,6 +3292,9 @@ async function deleteAllPluginDataAndDeactivate() {
 			closeMediaLibraryReplacementCleanupPreviewModal,
 			changeMediaLibraryReplacementPreviewPage,
 			changeMediaLibraryReplacementDbPreviewPage,
+			changeMediaLibraryReplacementBlockersPage,
+			openMediaLibraryReplacementBlockersModal,
+			saveMediaLibraryReplacementBlockerDecisions,
 			changeMediaLibraryReplacementCleanupPreviewPage,
 			runMediaConversionTest,
 			openMediaConversionTestModal,
@@ -2967,6 +3316,7 @@ async function deleteAllPluginDataAndDeactivate() {
 			verifyMediaLibraryReplacementWorkflow,
 			deleteMediaLibraryReplacementOriginalsWorkflow,
 			restartMediaLibraryReplacementWorkflow,
+			recoverMediaLibraryReplacementWorkflow,
 			prepareMediaLibraryReplacementFoundation,
 			openMediaLibraryReplacementPreviewModal,
 			openMediaLibraryReplacementDbPreviewModal,
@@ -2984,7 +3334,6 @@ async function deleteAllPluginDataAndDeactivate() {
 			applyMediaLibraryReplacementThemeCssReplacements,
 			verifyMediaLibraryReplacementThemeCssReplacements,
 			rollbackMediaLibraryReplacementMetadataUpdates,
-			applyMediaLibraryReplacementCleanup,
 		});
 		return h('div', { className: 'max-w-6xl p-6 space-y-8' }, [
 			h('header', { className: 'uc-dashboard-header flex flex-col gap-4 md:flex-row md:justify-between md:items-end', key: 'header' }, [
@@ -3007,8 +3356,8 @@ async function deleteAllPluginDataAndDeactivate() {
 					}),
 					h(Button, {
 						onClick: purgeCache,
-						disabled: busy || !!asyncActions.purge_all || (!canManageInfrastructure && !!settings.flushAllIncludeVarnish && !!settings.varnishCliEnabled),
-						title: (!canManageInfrastructure && !!settings.flushAllIncludeVarnish && !!settings.varnishCliEnabled) ? 'Flush All Cache includes Varnish and requires plugin activation or network plugin management permission.' : '',
+						disabled: busy || !!asyncActions.purge_all || (!canManageInfrastructure && !!settings.flushAllIncludeVarnish && !!settings.varnishCliEnabled && !!settings.varnishConnectionConfigured),
+						title: (!canManageInfrastructure && !!settings.flushAllIncludeVarnish && !!settings.varnishCliEnabled && !!settings.varnishConnectionConfigured) ? 'Flush All Cache includes Varnish and requires plugin activation or network plugin management permission.' : '',
 						variant: 'primary'
 					}, asyncActions.purge_all ? 'Processing via dashboard…' : (busy ? 'Working…' : 'Flush All Cache')),
 				]),
@@ -3033,6 +3382,7 @@ async function deleteAllPluginDataAndDeactivate() {
 			renderMediaLibraryReplacementWarningModal(),
 			renderMediaLibraryReplacementPreviewModal(),
 			renderMediaLibraryReplacementDbPreviewModal(),
+			renderMediaLibraryReplacementBlockersModal(),
 			renderMediaLibraryReplacementCleanupPreviewModal(),
 
 			h(CacheStatisticsPanel, {
@@ -3127,7 +3477,7 @@ async function deleteAllPluginDataAndDeactivate() {
 						}),
 h(ToggleRow, {
 							label: __("Warm affected pages after save", 'ultracache'),
-							description: __("Automatically warm only affected public pages after a real content save. Autosaves, revisions, admin AJAX, and feeds are skipped; non-200 responses are not cached or retried.", 'ultracache'),
+							description: __("Automatically rebuild affected public HTML pages after real content changes. The shared queue warms active HTML variants and configured CSS bundles; when Varnish is enabled, it also invalidates and refills the same URLs. Autosaves, revisions, and feeds are excluded from warm processing.", 'ultracache'),
 							checked: settings.preRenderOnSave,
 							onChange: (value) => updateSetting('preRenderOnSave', value),
 							disabled: busy,
@@ -3146,7 +3496,10 @@ h(ToggleRow, {
 							description: __("Serve already-built anonymous HTML cache aliases directly through Apache for safe queryless GET requests before WordPress/PHP starts.", 'ultracache'),
 							checked: !!settings.apacheStaticHtmlDeliveryEnabled,
 							onChange: (value) => updateSetting('apacheStaticHtmlDeliveryEnabled', value),
-							disabled: busy || !settings.pageCacheEnabled,
+							disabled: busy || !settings.pageCacheEnabled || !!settings.liteSpeedCacheEnabled,
+							disabledReason: settings.liteSpeedCacheEnabled
+								? __('Apache Static HTML Delivery cannot be enabled while Native LiteSpeed HTML Cache is active. Disable Native LiteSpeed HTML Cache first.', 'ultracache')
+								: '',
 							tooltip: __("What it does: lets Apache serve a ready-made cached HTML file before WordPress and PHP start.\n\nWhy it helps: safe repeat visits can skip the WordPress kitchen completely and get the saved page from the shelf.\n\nWatch for: this only applies to safe anonymous queryless GET requests. It skips unsafe cookies, query strings, admin, login, REST, AJAX, WooCommerce dynamic paths, cart, checkout, account, and session-like visits. PHP debug headers and PHP hit counters do not run for these server-level hits.", 'ultracache'),
 							key: 'apache-static-html-delivery',
 						}),
@@ -3211,6 +3564,14 @@ h(ToggleRow, {
 					},
 					[
 						warmDisabledMessage ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', key: 'warm-disabled-message' }, warmDisabledMessage) : null,
+						h(ToggleRow, {
+							label: __("Warm uncached URLs after first visit", 'ultracache'),
+							description: __("When an uncached public URL is first visited, UltraCache queues that URL for background warming through the shared warm pipeline. Processing follows the Background warm pages per minute limit.", 'ultracache'),
+							checked: !!settings.warmUncachedUrlsOnFirstVisit,
+							onChange: (value) => updateSetting('warmUncachedUrlsOnFirstVisit', value),
+							disabled: busy || !pageCacheReady,
+							key: 'warm-uncached-first-visit',
+						}),
 						h('div', { className: 'mt-4 uc-warm-cache-actions', style: { display: 'flex', flexDirection: 'column', gap: '12px' }, key: 'warm-homepage-actions' }, [
 							h(
 								'button',
@@ -3472,6 +3833,14 @@ h(ToggleRow, {
 						disabled: busy,
 						key: 'media-lazy-load-images',
 					}),
+					h(ToggleRow, {
+						label: __("Lazy load third-party iframes", 'ultracache'),
+						description: __("Delays eligible offscreen third-party embeds, such as Google Maps and videos, until they are within 400 pixels of the viewport. Payment, authentication, CAPTCHA, hidden or functional frames, and critical checkout/account pages remain unchanged.", 'ultracache'),
+						checked: !!settings.lazyLoadThirdPartyIframesEnabled,
+						onChange: (value) => updateSetting('lazyLoadThirdPartyIframesEnabled', value),
+						disabled: busy,
+						key: 'media-lazy-load-third-party-iframes',
+					}),
 					!mediaSupport.supported
 						? h(
 							'div',
@@ -3503,12 +3872,12 @@ h(ToggleRow, {
 						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'queue-status' }, [
 							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Media status", 'ultracache')),
 							h('div', { className: 'text-2xl font-black text-white mt-1' }, formatNumber(mediaQueueTotal)),
-							h('div', { className: 'text-xs text-zinc-500 mt-1' }, formatNumber(mediaQueuePending) + ' pending · ' + formatNumber(mediaQueueAlreadyOptimized) + ' already optimized · ' + formatNumber(mediaQueueFailed) + ' failed'),
+							h('div', { className: 'text-xs text-zinc-500 mt-1' }, formatNumber(mediaQueuePending) + ' pending · ' + formatNumber(mediaQueueAlreadyOptimized) + ' already optimized · ' + formatNumber(mediaQueueFailed) + ' failed' + (mediaQueueRecoverableInterrupted > 0 ? (' · ' + formatNumber(mediaQueueRecoverableInterrupted) + ' interrupted') : '')),
 						]),
 						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'queue-health' }, [
 							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Queue health", 'ultracache')),
 							h('div', { className: mediaQueueNeedsRepair ? 'text-lg font-black text-amber-300 mt-1' : 'text-lg font-black text-emerald-300 mt-1' }, mediaQueueNeedsRepair ? 'Needs repair' : (mediaQueueIsComplete ? 'Complete' : 'Ready')),
-							h('div', { className: 'text-xs text-zinc-500 mt-1' }, 'Target policy: ' + (('avif' === settings.mediaOutputMode) ? ('avif / fallback ' + (('webp' === settings.mediaFallbackFormat) ? 'webp' : 'jpeg/png')) : 'webp / fallback jpeg/png') + ' · queue format: best'),
+							h('div', { className: 'text-xs text-zinc-500 mt-1' }, 'Target policy: ' + (('avif' === settings.mediaOutputMode) ? ('avif / fallback ' + (('webp' === settings.mediaFallbackFormat) ? 'webp' : 'original')) : 'webp / fallback original') + ' · queue format: best'),
 						]),
 					]),
 
@@ -3565,9 +3934,9 @@ h(ToggleRow, {
 							h('button', {
 								className: 'uc-btn w-full text-white py-3 font-bold',
 								onClick: retryFailedMediaQueue,
-								disabled: busy || !mediaOptimizationEnabled || !mediaSupport.supported || mediaQueueFailed <= 0,
+								disabled: busy || !mediaOptimizationEnabled || !mediaSupport.supported || mediaQueueRetryable <= 0,
 							}, busy ? 'Engine Busy' : 'Retry Failed'),
-							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Moves failed queue rows back to pending so they can be processed again.", 'ultracache')),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Recovers interrupted queue rows and moves failed rows back to pending so image conversion can continue.", 'ultracache')),
 						]),
 						h('div', { key: 'clear-completed' }, [
 							h('button', {
@@ -3601,6 +3970,7 @@ h(ToggleRow, {
 					onQuery: queryLcpObservations,
 					onDetail: queryLcpObservationDetail,
 					queryBusy: lcpDiagnosticsQueryBusy,
+					onSaveManualSelector: saveLcpObservationManualSelector,
 					onAction: runLcpObservationAction,
 					busyKey: lcpDiagnosticsBusyKey,
 					key: 'lcp-diagnostics-card',
@@ -3615,7 +3985,7 @@ h(ToggleRow, {
 							h('div', { className: 'grid grid-cols-1 gap-4', key: 'media-settings-left' }, [
 								h(ToggleRow, {
 									label: __("Convert new uploads", 'ultracache'),
-									description: __("Convert the actual uploaded image file to the selected Image Output Format during WordPress upload.", 'ultracache'),
+									description: __("Convert the actual uploaded image file to the selected Upload image format during WordPress upload.", 'ultracache'),
 									checked: !!settings.mediaUploadConversionEnabled,
 									onChange: (value) => updateSetting('mediaUploadConversionEnabled', value),
 									disabled: busy,
@@ -3623,7 +3993,7 @@ h(ToggleRow, {
 								}),
 								h(NumberRow, {
 									label: __("Maximum upload image side", 'ultracache'),
-									description: __("Maximum width or height for newly converted uploads. Smaller images keep their original dimensions and are only converted to the selected output format.", 'ultracache'),
+									description: __("Maximum width or height for newly converted uploads. Smaller images keep their original dimensions and are only converted to the selected upload format.", 'ultracache'),
 									value: Math.max(1, Number(settings.imageUploadMaxSide || 1920)),
 									onChange: (value) => updateSetting('imageUploadMaxSide', value),
 									disabled: busy,
@@ -3632,9 +4002,28 @@ h(ToggleRow, {
 									step: 1,
 									key: 'media-upload-max-side',
 								}),
+								h('div', { className: 'uc-media-upload-format-field', key: 'media-upload-format-wrap' }, h(SelectField, {
+									label: __("Upload image format", 'ultracache'),
+									description: __("Choose the format used for the actual uploaded attachment file when Convert new uploads is enabled.", 'ultracache'),
+									value: ('avif' === settings.mediaUploadFormat) ? 'avif' : 'webp',
+									onChange: (value) => updateSetting('mediaUploadFormat', value),
+									disabled: busy,
+									options: [
+										{ value: 'avif', label: (mediaSupport.imagick_avif || mediaSupport.gd_avif) ? __("AVIF Format", 'ultracache') : __("AVIF Format (Self-Test Failed)", 'ultracache') },
+										{ value: 'webp', label: __("WebP Format", 'ultracache') },
+									],
+								})),
+								h(ToggleRow, {
+									label: __("Ignore color profile preservation", 'ultracache'),
+									description: __("Allow AVIF/WebP conversion when an embedded ICC/ICM profile cannot be verified or preserved. Converted colors may differ slightly; Convert new uploads and Media Library Replacement still change attachment files when their workflows run.", 'ultracache'),
+									checked: !!settings.mediaIgnoreColorProfilePreservation,
+									onChange: (value) => updateSetting('mediaIgnoreColorProfilePreservation', value),
+									disabled: busy,
+									key: 'media-ignore-color-profile-preservation',
+								}),
 								h('div', { className: 'uc-media-output-mode-field', key: 'media-output-mode-wrap' }, h(SelectField, {
-									label: __("Image Output Format", 'ultracache'),
-									description: __("Choose the primary format used for generated media and frontend rewrites. Older Automatic settings are migrated to WebP.", 'ultracache'),
+									label: __("Image Rewrite Format", 'ultracache'),
+									description: __("Choose the primary format used for generated variants and frontend rewrites. Older Automatic settings are migrated to WebP.", 'ultracache'),
 									value: ('avif' === settings.mediaOutputMode) ? 'avif' : 'webp',
 									onChange: (value) => updateSetting('mediaOutputMode', value),
 									disabled: busy || !mediaOptimizationEnabled,
@@ -3644,36 +4033,36 @@ h(ToggleRow, {
 									],
 								})),
 								h('div', { className: 'uc-media-fallback-format-field', key: 'media-fallback-format-wrap' }, h(SelectField, {
-									label: __("Fallback Format", 'ultracache'),
+									label: __("Image Rewrite Fallback Format", 'ultracache'),
 									description: ('avif' === settings.mediaOutputMode)
 										? __("Choose what UltraCache should use when AVIF is unavailable or not accepted by the browser.", 'ultracache')
-										: __("WebP output falls back to the original JPEG/PNG file.", 'ultracache'),
+										: __("WebP output falls back to the original attachment file.", 'ultracache'),
 									value: ('avif' === settings.mediaOutputMode && 'webp' === settings.mediaFallbackFormat) ? 'webp' : 'original',
 									onChange: (value) => updateSetting('mediaFallbackFormat', value),
 									disabled: busy || !mediaOptimizationEnabled || 'avif' !== settings.mediaOutputMode,
 									options: ('avif' === settings.mediaOutputMode) ? [
 										{ value: 'webp', label: __("WebP fallback", 'ultracache') },
-										{ value: 'original', label: __("JPEG/PNG fallback", 'ultracache') },
+										{ value: 'original', label: __("Original file fallback", 'ultracache') },
 									] : [
-										{ value: 'original', label: __("JPEG/PNG fallback", 'ultracache') },
+										{ value: 'original', label: __("Original file fallback", 'ultracache') },
 									],
 								})),
 								h('div', { className: 'text-xs text-zinc-500 mt-2', key: 'media-output-mode-description' },
 									('avif' === settings.mediaOutputMode)
 										? (('webp' === settings.mediaFallbackFormat)
 											? __("Generate and prefer AVIF variants, with WebP as the optimized fallback.", 'ultracache')
-											: __("Generate and prefer AVIF variants, with the original JPEG/PNG file as fallback.", 'ultracache'))
-										: __("Generate and prefer WebP variants, with the original JPEG/PNG file as fallback.", 'ultracache')
+											: __("Generate and prefer AVIF variants, with the original attachment file as fallback.", 'ultracache'))
+										: __("Generate and prefer WebP variants, with the original attachment file as fallback.", 'ultracache')
 								),
 								h('div', { className: 'uc-media-quality-field', key: 'media-quality-wrap' }, h(SelectField, {
 									label: __("Image compression level", 'ultracache'),
-									description: __("Choose the quality/file-size target used for generated AVIF/WebP variants and converted uploads.", 'ultracache'),
+									description: __("Choose the shared quality/file-size target used for generated AVIF/WebP variants, converted uploads, and Media Library Replacement files.", 'ultracache'),
 									value: settings.mediaQuality || 'balanced',
 									id: 'ultracache-media-quality-select',
 									name: 'ultracache-media-quality-select',
 									dataSettingKey: 'mediaQuality',
 									onChange: (value) => updateSetting('mediaQuality', value),
-									disabled: busy || !mediaOptimizationEnabled,
+									disabled: busy,
 									options: [
 										{ value: 'original', label: __("Original-like quality — minimal loss, largest files", 'ultracache') },
 										{ value: 'high', label: __("High quality — slight loss, smaller files", 'ultracache') },
@@ -3693,6 +4082,7 @@ h(ToggleRow, {
 													? __("Maximum size reduction; use only when file size matters more than image fidelity.", 'ultracache')
 													: __("Balanced keeps the previous UltraCache defaults: AVIF 60 and WebP 82.", 'ultracache')
 								),
+								renderMediaConversionTestControls(),
 							]),
 							renderMediaLibraryReplacementControls(),
 						]),
@@ -4360,6 +4750,26 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 					key: 'automation-scheduling-reworked',
 				},
 				[
+					h('div', { className: classNames('uc-inline-diagnostic', automationWorkerAttention ? 'is-disabled' : ''), key: 'automation-worker-status' }, [
+						h('div', { className: 'uc-inline-diagnostic-row' }, [
+							h('span', { className: 'uc-inline-diagnostic-label' }, __('AUTOMATION WORKER', 'ultracache')),
+							h('span', { className: 'uc-inline-diagnostic-state' }, automationWorkerLabel),
+						]),
+						h('div', { className: 'uc-inline-diagnostic-copy' }, String(automationWorker.message || __('No automation work is waiting.', 'ultracache'))),
+						h('div', { className: 'uc-inline-diagnostic-copy' }, automationWorkerQueueText),
+						automationWorkerActivityParts.length > 0
+							? h('div', { className: 'uc-inline-diagnostic-copy break-words' }, automationWorkerActivityParts.join(' · '))
+							: null,
+						automationWorkerFullSiteText
+							? h('div', { className: 'uc-inline-diagnostic-copy' }, automationWorkerFullSiteText)
+							: null,
+						automationWorkerPausedSessionText
+							? h('div', { className: 'uc-inline-diagnostic-copy text-amber-300' }, automationWorkerPausedSessionText)
+							: null,
+						automationWorkerNextText
+							? h('div', { className: 'uc-inline-diagnostic-copy' }, automationWorkerNextText)
+							: null,
+					]),
 					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
 						h(ToggleRow, {
 							label: __("Scheduled Cache Cleanup", 'ultracache'),
@@ -4370,27 +4780,27 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 							key: 'cleanup',
 						}),
 						h(ToggleRow, {
-							label: __("Cron Warm Up", 'ultracache'),
-							description: __("Enable the minute-by-minute background warm queue. Homepage is warmed first. If CSS Bundling and bundle-on-entry/warm are enabled, missing CSS bundles may be prepared before HTML is cached; otherwise the queue warms HTML only.", 'ultracache'),
-							checked: settings.cronWarmEnabled,
-							onChange: (value) => updateSetting('cronWarmEnabled', value),
+							label: __("Stale While Revalidate", 'ultracache'),
+							description: __("Serve stale HTML only within the max stale window while UltraCache refreshes it in the background.", 'ultracache'),
+							checked: settings.staleWhileRevalidateEnabled,
+							onChange: (value) => updateSetting('staleWhileRevalidateEnabled', value),
 							disabled: busy,
-							key: 'cron-warm-enabled',
+							key: 'swr-toggle',
 						}),
 						h(ToggleRow, {
-							label: __("Start Cron Warm Up after Scheduled Cleanup", 'ultracache'),
-							description: __("Start the cron warm queue after the scheduled cleanup purge completes.", 'ultracache'),
+							label: __("Warm full site after Scheduled Cleanup", 'ultracache'),
+							description: __("Start the background full-site warm-up after the scheduled cleanup purge completes.", 'ultracache'),
 							checked: settings.cronWarmStartAfterCleanup,
 							onChange: (value) => updateSetting('cronWarmStartAfterCleanup', value),
-							disabled: busy || !settings.cacheCleanupEnabled || !settings.cronWarmEnabled,
+							disabled: busy || !settings.cacheCleanupEnabled,
 							key: 'cleanup-warm',
 						}),
 						h(ToggleRow, {
-							label: __("Start Cron Warm Up after Flush All Cache", 'ultracache'),
-							description: __("Start the cron warm queue after a manual full cache purge.", 'ultracache'),
+							label: __("Warm full site after Flush All Cache", 'ultracache'),
+							description: __("Start the background full-site warm-up after Flush All Cache completes.", 'ultracache'),
 							checked: !!settings.cronWarmStartAfterManualPurge,
 							onChange: (value) => updateSetting('cronWarmStartAfterManualPurge', value),
-							disabled: busy || !settings.cronWarmEnabled,
+							disabled: busy,
 							key: 'manual-purge-warm',
 						}),
 						h(NumberRow, {
@@ -4403,8 +4813,8 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 							key: 'cleanup-hours',
 						}),
 						h(NumberRow, {
-							label: __("Cron warm pages per minute", 'ultracache'),
-							description: __("How many HTML URLs to warm per minute in the cron warm-up queue. Homepage is always warmed first. If CSS Bundling is enabled, missing bundles may be prepared before HTML is cached. Lower values are safer on slower servers. Set 0 to pause queue processing.", 'ultracache'),
+							label: __("Background warm pages per minute", 'ultracache'),
+							description: __("How many HTML URLs the shared background automation worker may process per minute. This rate applies to scheduled full-site warm-up and targeted work from updates, imports, LCP refreshes, media discovery, and external-cache refill. Lower values are gentler on the server. Set 0 to pause background page processing.", 'ultracache'),
 							value: advancedForm.cronWarmPagesPerMinute,
 							onChange: (value) => updateAdvancedField('cronWarmPagesPerMinute', value),
 							disabled: busy,
@@ -4420,30 +4830,24 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 							min: 1,
 							key: 'scheduled-warm-limit',
 						}),
-						h(ToggleRow, {
-							label: __("Stale While Revalidate", 'ultracache'),
-							description: __("Serve stale HTML only within the max stale window while UltraCache refreshes it in the background.", 'ultracache'),
-							checked: settings.staleWhileRevalidateEnabled,
-							onChange: (value) => updateSetting('staleWhileRevalidateEnabled', value),
-							disabled: busy,
-							key: 'swr-toggle',
-						}),
 						h(NumberRow, {
 							label: __("Fresh TTL (minutes)", 'ultracache'),
-							description: __("Serve a normal cache hit while the file age stays within this freshness window. Default: 15 minutes.", 'ultracache'),
+							description: __("How long cached HTML remains fresh. When Varnish is enabled, this value is also used as the Varnish HTML TTL. Default: 1440 minutes (24 hours).", 'ultracache'),
 							value: advancedForm.cacheFreshTtlMinutes,
 							onChange: (value) => updateAdvancedField('cacheFreshTtlMinutes', value),
-							disabled: busy || !settings.staleWhileRevalidateEnabled,
+							disabled: busy,
 							min: 1,
+							max: 525600,
 							key: 'fresh-ttl',
 						}),
 						h(NumberRow, {
 							label: __("Max stale window (minutes)", 'ultracache'),
-							description: __("After freshness expires, UltraCache may still serve the stale file until this limit while it refreshes in the background. Default: 720 minutes (12 hours).", 'ultracache'),
+							description: __("Maximum total age at which expired HTML may still be served while UltraCache refreshes it. Stale serving starts after Fresh TTL expires. Default: 2880 minutes (48 hours).", 'ultracache'),
 							value: advancedForm.cacheMaxStaleMinutes,
 							onChange: (value) => updateAdvancedField('cacheMaxStaleMinutes', value),
 							disabled: busy || !settings.staleWhileRevalidateEnabled,
 							min: 1,
+							max: 525600,
 							key: 'max-stale',
 						}),
 						h(NumberRow, {
@@ -4475,11 +4879,11 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 				]
 			),
 
-			showVarnishCard ? h(VarnishCard, { form: varnishForm, diagnostics, busy: false, canManageInfrastructure, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onTest: runVarnishTest, onFlushAll: runVarnishFlushAll, onFlushEntireHost: runVarnishFlushEntireHost, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'varnish-card' }) : null,
+			showVarnishCard ? h(VarnishCard, { form: varnishForm, savedSettings: settings, diagnostics, busy: false, canManageInfrastructure, onEnabledChange: updateVarnishEnabled, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onDetect: runVarnishDiscovery, onTest: runVarnishTest, onMeasurePerformance: runVarnishPerformanceSnapshot, onFlushAll: runVarnishFlushAll, onFlushEntireHost: runVarnishFlushEntireHost, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'varnish-card' }) : null,
+			showLiteSpeedCard ? h(LiteSpeedCard, { layer: liteSpeedLayer, diagnostics, settings, busy, onSettingChange: updateSetting, onRedetect: redetectExternalCaches, onFlush: flushLiteSpeed, onTest: runLiteSpeedTest, key: 'litespeed-cache-card' }) : null,
 			h('div', { className: 'uc-info-grid', key: 'php-cache-cards' }, [
 			h(OPcacheCard, { stats, busy: false, onFlush: flushOpcache, key: 'opcache-card' }),
 			h(APCuCard, { stats, settings, busy: false, onFlush: flushApcu, onToggleScheduledCleanup: (value) => updateSetting('apcuFlushOnScheduledCleanup', value), key: 'apcu-card' }),
-			h(ExternalCacheCard, { title: __("LiteSpeed Cache", 'ultracache'), description: __("Detected LiteSpeed/OpenLiteSpeed cache integration. UltraCache uses the LiteSpeed plugin API when present, otherwise it requests server-level purge with the X-LiteSpeed-Purge response header.", 'ultracache'), layer: getExternalCacheLayer(stats, 'litespeed'), busy: false, onFlush: flushLiteSpeed, key: 'litespeed-cache-card' }),
 			h(ExternalCacheCard, { title: __("Nginx Cache", 'ultracache'), description: __("Detected Nginx cache integration. UltraCache flushes Nginx only when a safe WordPress purge hook/integration is available.", 'ultracache'), layer: getExternalCacheLayer(stats, 'nginx'), busy: false, onFlush: flushNginx, key: 'nginx-cache-card' }),
 			]),
 			h(ExternalCacheFlushSettingsCard, { stats, diagnostics, settings, busy: false, canManageInfrastructure, onRedetect: redetectExternalCaches, onToggle: (key, value) => updateSetting(key, value), key: 'external-cache-flush-settings' }),

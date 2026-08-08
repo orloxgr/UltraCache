@@ -54,6 +54,9 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         update_option(ULTRACACHE_SETTINGS_KEY, $restore, false);
         self::reset_settings_cache();
         self::sync_page_cache_bootstrap(!empty($restore['pageCacheEnabled']), (bool) $sync_wp_config);
+        self::sync_browser_cache_rules();
+        self::sync_apache_static_html_delivery_rules();
+        self::sync_litespeed_cache_rules();
 
         if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
             Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
@@ -107,21 +110,23 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
             'redisPersistent',
             'redisConnectTimeoutMs',
             'redisReadTimeoutMs',
+            'liteSpeedCacheEnabled',
+            'liteSpeedRefillAfterTargetedInvalidation',
+            'liteSpeedWarmDuringSiteWarmup',
+            'liteSpeedStalePurgeEnabled',
+            'liteSpeedRefreshAheadEnabled',
+            'liteSpeedRefreshAheadThresholdPercent',
+            'liteSpeedRefreshAheadMaxPages',
+            'liteSpeedRefreshAheadPinnedUrls',
+            'flushAllIncludeLiteSpeed',
             'varnishCliEnabled',
+            'varnishConnectionConfigured',
             'varnishCliMode',
             'varnishCliServers',
             'varnishCliTimeoutSeconds',
             'varnishCliMethod',
             'varnishInvalidationStrategy',
             'varnishFlushScope',
-            'varnishHtmlTtlMinutes',
-            'varnishStaleWhileRevalidateSeconds',
-            'varnishRefillAfterTargetedInvalidation',
-            'varnishWarmDuringManualWarmup',
-            'varnishRefreshAheadEnabled',
-            'varnishRefreshAheadThresholdPercent',
-            'varnishRefreshAheadMaxPages',
-            'varnishRefreshAheadPinnedUrls',
             'flushAllIncludeVarnish',
         );
         foreach ($infrastructure_keys as $key) {
@@ -140,22 +145,77 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         return $object_cache_changed && ('redis' === $current_backend || 'redis' === $previous_backend);
     }
 
+    private static function get_media_replacement_format_save_lock()
+    {
+        $state = get_option('ultracache_media_replacement_workflow_state_v1', array());
+        if (!is_array($state) || (empty($state['active_step']) && empty($state['do_started_at']) && empty($state['verify_started_at']) && empty($state['delete_started_at']))) {
+            return array('locked' => false, 'targetFormat' => '');
+        }
+
+        $active_step = sanitize_key((string) ($state['active_step'] ?? ''));
+        $workflow_stage = sanitize_key((string) ($state['workflow_stage'] ?? ''));
+        if ('complete' === $workflow_stage || 'delete_complete' === $active_step) {
+            return array('locked' => false, 'targetFormat' => '');
+        }
+
+        $destructive_steps = array(
+            'metadata_apply',
+            'database_apply',
+            'theme_css_apply',
+            'do_complete',
+            'do_failed',
+            'destination_verify',
+            'metadata_verify',
+            'database_verify',
+            'theme_css_verify',
+            'cleanup_preview',
+            'verify_complete',
+            'verify_failed',
+            'delete_originals',
+            'delete_failed',
+        );
+        $locked = '' !== (string) ($state['do_started_at'] ?? '')
+            || '' !== (string) ($state['do_completed_at'] ?? '')
+            || '' !== (string) ($state['verify_started_at'] ?? '')
+            || '' !== (string) ($state['delete_started_at'] ?? '')
+            || in_array($active_step, $destructive_steps, true);
+
+        return array(
+            'locked'       => $locked,
+            'targetFormat' => $locked ? self::sanitize_media_output_mode($state['target_format'] ?? 'webp') : '',
+        );
+    }
+
     public static function persist_dashboard_settings(array $settings)
     {
+        $settings = self::normalize_page_delivery_mode_patch($settings);
         $force_redis_validation = !empty($settings['validateRedisSettings']);
-        unset($settings['validateRedisSettings']);
+        $configure_varnish_connection = !empty($settings['configureVarnishConnection']);
+        unset($settings['validateRedisSettings'], $settings['configureVarnishConnection']);
 
         $previous_settings = self::get_dashboard_settings();
+        if ($configure_varnish_connection) {
+            $settings['varnishConnectionConfigured'] = true;
+        }
         $secret_patch = self::normalize_secret_constant_patch($settings);
         $secret_change_requested = self::secret_constant_patch_has_changes($secret_patch);
 
         $current_settings = self::sanitize_dashboard_settings(self::merge_protected_dashboard_settings($settings, $previous_settings));
+        $replacement_format_lock = self::get_media_replacement_format_save_lock();
+        if (!empty($replacement_format_lock['locked'])
+            && (string) ($current_settings['mediaReplacementFormat'] ?? 'webp') !== (string) ($replacement_format_lock['targetFormat'] ?? 'webp')
+        ) {
+            return new WP_Error(
+                'ultracache_media_replacement_format_locked',
+                self::maybe_translate('Image replacement format cannot change after the destructive Do stage has started. Complete the current workflow or use the existing recovery path first.')
+            );
+        }
         $current_settings = self::apply_lcp_frontend_discovery_timer_state($current_settings, $previous_settings);
         if (self::infrastructure_settings_change_requested($current_settings, $previous_settings, $force_redis_validation, $secret_change_requested)
             && !self::current_user_can_manage_infrastructure()) {
             return new WP_Error(
                 'ultracache_infrastructure_permission_denied',
-                self::maybe_translate('Configuring or validating Redis or Varnish requires manage_options plus plugin activation or network plugin management permission.')
+                self::maybe_translate('Configuring or validating Redis, LiteSpeed, or Varnish requires manage_options plus plugin activation or network plugin management permission.')
             );
         }
         $lcp_discovery_enabled_now = !empty($current_settings['lcpFrontendDiscoveryEnabled']);
@@ -285,21 +345,28 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
             return is_wp_error($rollback) ? $rollback : $page_cache_sync;
         }
 
-        if (empty($current_settings['cronWarmEnabled'])) {
-            self::stop_cron_warmup_queue('disabled');
-        } else {
-            $state = self::get_cron_warm_state();
-            if (!empty($state['active'])) {
-                $state['pagesPerMinute'] = max(0, (int) $current_settings['cronWarmPagesPerMinute']);
-                $state['updatedAt'] = time();
-                $state['lastMessage'] = $state['pagesPerMinute'] > 0 ? 'Cron warm up settings updated.' : 'Cron warm up paused because pages per minute is 0.';
-                self::save_cron_warm_state($state);
-                if ($state['pagesPerMinute'] > 0) {
-                    self::ensure_cron_warm_events_scheduled();
-                } else {
-                    self::unschedule_cron_warm_events();
-                }
+        $state = self::get_cron_warm_state();
+        $background_rate = max(0, (int) $current_settings['cronWarmPagesPerMinute']);
+        if (!empty($state['active'])) {
+            $state['pagesPerMinute'] = $background_rate;
+            $state['updatedAt'] = time();
+            $state['lastMessage'] = $state['pagesPerMinute'] > 0 ? 'Background warm settings updated.' : 'Background warm processing paused because pages per minute is 0.';
+            self::save_cron_warm_state($state);
+            if ($state['pagesPerMinute'] > 0) {
+                self::ensure_cron_warm_events_scheduled();
+            } else {
+                self::unschedule_cron_warm_events();
             }
+        } elseif (
+            $background_rate > 0
+            && method_exists(static::class, 'get_warm_plan_state')
+            && method_exists(static::class, 'is_warm_plan_active')
+            && self::is_warm_plan_active(self::get_warm_plan_state())
+            && method_exists(static::class, 'resume_active_full_site_warm_plan')
+        ) {
+            self::resume_active_full_site_warm_plan(
+                self::maybe_translate('Full-site background warm-up resumed after its rate setting was enabled.')
+            );
         }
         self::sync_scheduled_events();
         $browser_cache_sync = self::sync_browser_cache_rules();
@@ -317,6 +384,14 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
                 return $rollback;
             }
             return new WP_Error('ultracache_apache_static_html_rules_not_writable', self::maybe_translate('Apache Static HTML Delivery rules could not be written to .htaccess. Check file permissions or disable Apache Static HTML Delivery.'));
+        }
+        $litespeed_sync = self::sync_litespeed_cache_rules();
+        if (false === $litespeed_sync) {
+            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction);
+            if (is_wp_error($rollback)) {
+                return $rollback;
+            }
+            return new WP_Error('ultracache_litespeed_cache_rules_not_writable', self::maybe_translate('LiteSpeed HTML Cache rules could not be written to .htaccess. Check file permissions or disable LiteSpeed HTML Cache.'));
         }
 
         $object_cache_sync = null;
@@ -340,6 +415,17 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
             return new WP_Error('ultracache_object_cache_dropin_sync_failed', self::maybe_translate('Object Cache could not be enabled because the UltraCache object-cache drop-in could not be installed or verified. Check the WordPress content-directory object-cache.php permissions and conflicting object-cache drop-ins.'));
         }
 
+        if (method_exists(static::class, 'sync_warm_rate_limit')) {
+            self::sync_warm_rate_limit(max(0, (int) $current_settings['cronWarmPagesPerMinute']), time());
+        }
+
+        if (method_exists(static::class, 'sync_varnish_invalidation_rate_limit')) {
+            self::sync_varnish_invalidation_rate_limit(
+                max(1, min(600, (int) ($current_settings['varnishInvalidationsPerMinute'] ?? 10))),
+                time()
+            );
+        }
+
         $google_fonts_job = null;
         $google_fonts_enabled_now = !empty($current_settings['googleFontsLocalOptimizationEnabled']);
         $google_fonts_was_enabled = !empty($previous_settings['googleFontsLocalOptimizationEnabled']);
@@ -358,7 +444,11 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
 
         $manual_lcp_selector_split = self::split_manual_lcp_selector_setting($current_settings['manualLcpHeroSelector'] ?? '');
         $engine = self::get_engine_instance();
-        if ($engine && method_exists($engine, 'sync_lcp_observation_selectors')) {
+        if (
+            empty($current_settings['lcpFrontendDiscoveryEnabled'])
+            && $engine
+            && method_exists($engine, 'sync_lcp_observation_selectors')
+        ) {
             $engine->sync_lcp_observation_selectors((array) ($manual_lcp_selector_split['selectors'] ?? array()));
         }
 

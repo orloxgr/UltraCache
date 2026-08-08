@@ -76,11 +76,21 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
 
         $has_pending_varnish = method_exists(static::class, 'has_pending_varnish_queue_rows')
             && self::has_pending_varnish_queue_rows();
-        $keep_refresh_ahead = method_exists(static::class, 'should_keep_varnish_refresh_ahead_cron')
+        $has_pending_varnish_invalidations = method_exists(static::class, 'has_pending_varnish_invalidation_rows')
+            && self::has_pending_varnish_invalidation_rows();
+        $keep_varnish_refresh_ahead = method_exists(static::class, 'should_keep_varnish_refresh_ahead_cron')
             && self::should_keep_varnish_refresh_ahead_cron();
-        if (!$force && ($has_pending_varnish || $keep_refresh_ahead)) {
+        $keep_litespeed_refresh_ahead = method_exists(static::class, 'should_keep_litespeed_refresh_ahead_cron')
+            && self::should_keep_litespeed_refresh_ahead_cron();
+        $background_rate_enabled = method_exists(static::class, 'get_shared_automation_pages_per_minute')
+            && self::get_shared_automation_pages_per_minute(self::get_settings()) > 0;
+        $foreground_active = method_exists(static::class, 'is_manual_warmup_blocking_cron')
+            && self::is_manual_warmup_blocking_cron();
+        $keep_background_worker = $has_pending_varnish_invalidations
+            || ($background_rate_enabled && ($has_pending_varnish || $keep_varnish_refresh_ahead || $keep_litespeed_refresh_ahead));
+        if (!$force && !$foreground_active && $keep_background_worker) {
             wp_schedule_event(time() + MINUTE_IN_SECONDS, 'ultracache_every_minute', 'ultracache_cron_warm_tick');
-            if ($has_pending_varnish) {
+            if ($has_pending_varnish_invalidations) {
                 wp_schedule_single_event(time() + 5, 'ultracache_cron_warm_tick_kickoff');
             }
         }
@@ -101,8 +111,14 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
             self::ensure_targeted_page_warm_worker_ready();
         }
 
-        if (method_exists(static::class, 'should_keep_varnish_refresh_ahead_cron') && self::should_keep_varnish_refresh_ahead_cron()) {
-            self::ensure_cron_warm_events_scheduled();
+        $keep_varnish_refresh_ahead = method_exists(static::class, 'should_keep_varnish_refresh_ahead_cron')
+            && self::should_keep_varnish_refresh_ahead_cron();
+        $keep_litespeed_refresh_ahead = method_exists(static::class, 'should_keep_litespeed_refresh_ahead_cron')
+            && self::should_keep_litespeed_refresh_ahead_cron();
+        $has_pending_varnish_invalidations = method_exists(static::class, 'has_pending_varnish_invalidation_rows')
+            && self::has_pending_varnish_invalidation_rows();
+        if ($has_pending_varnish_invalidations || $keep_varnish_refresh_ahead || $keep_litespeed_refresh_ahead) {
+            self::ensure_cron_warm_events_scheduled($has_pending_varnish_invalidations ? 1 : null);
         } else {
             $warm_state = self::get_cron_warm_state();
             $queue_stats = method_exists(static::class, 'get_varnish_queue_stats')
@@ -115,6 +131,29 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
             if (empty($warm_state['active']) && !$has_queue_work) {
                 self::unschedule_cron_warm_events();
             }
+        }
+    }
+
+    private static function get_cron_warm_scheduler_lock_name()
+    {
+        return 'ultracache_cron_warm_scheduler';
+    }
+
+    private static function acquire_cron_warm_scheduler_lock($token, $ttl = 15)
+    {
+        return function_exists('ultracache_acquire_lock')
+            && ultracache_acquire_lock(
+                self::get_cron_warm_scheduler_lock_name(),
+                (string) $token,
+                max(5, (int) $ttl),
+                array('startedAt' => time())
+            );
+    }
+
+    private static function release_cron_warm_scheduler_lock($token)
+    {
+        if (function_exists('ultracache_release_lock')) {
+            ultracache_release_lock(self::get_cron_warm_scheduler_lock_name(), (string) $token);
         }
     }
 
@@ -145,14 +184,34 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
             self::unschedule_cron_warm_events();
             return false;
         }
-
-        if (!self::has_cron_warm_recurring_event_scheduled()) {
-            wp_schedule_event(time() + MINUTE_IN_SECONDS, 'ultracache_every_minute', 'ultracache_cron_warm_tick');
+        $has_pending_varnish_invalidations = method_exists(static::class, 'has_pending_varnish_invalidation_rows')
+            && self::has_pending_varnish_invalidation_rows();
+        if (
+            self::get_shared_automation_pages_per_minute(self::get_settings()) < 1
+            && !$has_pending_varnish_invalidations
+        ) {
+            self::unschedule_cron_warm_events(true);
+            return false;
         }
 
-        if (null !== $kickoff_delay && !wp_next_scheduled('ultracache_cron_warm_tick_kickoff')) {
-            $kickoff_delay = max(1, min(300, (int) $kickoff_delay));
-            wp_schedule_single_event(time() + $kickoff_delay, 'ultracache_cron_warm_tick_kickoff');
+        $schedule_token = 'cron-warm-schedule-' . wp_generate_password(20, false, false);
+        if (!self::acquire_cron_warm_scheduler_lock($schedule_token)) {
+            return self::get_next_cron_warm_scheduled_at() > 0;
+        }
+
+        try {
+            if (!self::has_cron_warm_recurring_event_scheduled()) {
+                wp_schedule_event(time() + MINUTE_IN_SECONDS, 'ultracache_every_minute', 'ultracache_cron_warm_tick');
+            }
+
+            if (null !== $kickoff_delay && !wp_next_scheduled('ultracache_cron_warm_tick_kickoff')) {
+                $kickoff_delay = max(1, min(300, (int) $kickoff_delay));
+                wp_schedule_single_event(time() + $kickoff_delay, 'ultracache_cron_warm_tick_kickoff');
+            }
+
+            return self::get_next_cron_warm_scheduled_at() > 0;
+        } finally {
+            self::release_cron_warm_scheduler_lock($schedule_token);
         }
     }
 
@@ -179,7 +238,7 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
     public static function maybe_start_cron_warmup_after_purge($reason = 'manual_purge', $run_immediately = false)
     {
         if (self::is_manual_warmup_blocking_cron()) {
-            return array('success' => false, 'message' => self::maybe_translate('Cron warm up is blocked while a manual warm-up is active or paused.'), 'state' => self::get_cron_warm_status());
+            return array('success' => false, 'message' => self::maybe_translate('Background automation is yielding to an active foreground warm-up.'), 'state' => self::get_cron_warm_status());
         }
 
         if (!empty(self::$suppress_after_purge_warm)) {
@@ -187,20 +246,17 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
         }
 
         $settings = self::get_settings();
-        if (empty($settings['cron_warm_enabled'])) {
-            return array('success' => false, 'message' => self::maybe_translate('Cron warm up is disabled.'), 'state' => self::get_cron_warm_status());
-        }
 
-        if (!in_array((string) $reason, array('scheduled_cleanup', 'manual_purge', 'manual', 'cli'), true)) {
+        if (!in_array((string) $reason, array('scheduled_cleanup', 'manual_purge', 'manual', 'cli', 'plugin_update'), true)) {
             $reason = 'manual_purge';
         }
 
         if ('scheduled_cleanup' === $reason && empty($settings['cron_warm_start_after_cleanup'])) {
-            return array('success' => false, 'message' => self::maybe_translate('Cron warm up after scheduled cleanup is disabled.'), 'state' => self::get_cron_warm_status());
+            return array('success' => false, 'message' => self::maybe_translate('Full-site warm-up after scheduled cleanup is disabled.'), 'state' => self::get_cron_warm_status());
         }
 
-        if (in_array((string) $reason, array('manual_purge', 'manual', 'cli'), true) && empty($settings['cron_warm_start_after_manual_purge'])) {
-            return array('success' => false, 'message' => self::maybe_translate('Cron warm up after manual purge is disabled.'), 'state' => self::get_cron_warm_status());
+        if (in_array((string) $reason, array('manual_purge', 'manual', 'cli', 'plugin_update'), true) && empty($settings['cron_warm_start_after_manual_purge'])) {
+            return array('success' => false, 'message' => self::maybe_translate('Full-site warm-up after Flush All Cache is disabled.'), 'state' => self::get_cron_warm_status());
         }
 
         $pages_per_minute = max(0, (int) $settings['cron_warm_pages_per_minute']);
@@ -237,7 +293,7 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
                 break;
             case 'cron_processed':
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only processed UltraCache-owned warm queue rows.
-                $deleted = $wpdb->query($wpdb->prepare("DELETE FROM %i WHERE status IN ('done','error') AND processed_at > 0 AND processed_at < %d LIMIT %d", $table, (int) ($args[0] ?? 0), (int) ($args[1] ?? 0)));
+                $deleted = $wpdb->query($wpdb->prepare("DELETE FROM %i WHERE status IN ('done','skipped','error') AND processed_at > 0 AND processed_at < %d LIMIT %d", $table, (int) ($args[0] ?? 0), (int) ($args[1] ?? 0)));
                 break;
             case 'cron_orphan':
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only orphaned UltraCache-owned warm queue rows when the queue is inactive.
@@ -500,8 +556,13 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
             'limit' => self::get_database_retention_delete_limit(500),
         ));
 
+        $lcp_lifecycle_cleanup = array('success' => false);
+        if ($engine && method_exists($engine, 'ultracache_run_lcp_observation_lifecycle_cleanup')) {
+            $lcp_lifecycle_cleanup = $engine->ultracache_run_lcp_observation_lifecycle_cleanup();
+        }
+
         return array(
-            'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed || $css_files_before !== $css_files_after || !empty($runtime_artifacts_cleanup['deleted']) || !empty($db_retention_cleanup['deleted']) || !empty($db_retention_cleanup['updated'])),
+            'success' => ($purged || $object_cache_removed > 0 || $apcu_flushed || $css_files_before !== $css_files_after || !empty($runtime_artifacts_cleanup['deleted']) || !empty($db_retention_cleanup['deleted']) || !empty($db_retention_cleanup['updated']) || !empty($lcp_lifecycle_cleanup['deletedRows']) || !empty($lcp_lifecycle_cleanup['staledRows'])),
             'warmed'  => $warmed,
             'queueStarted' => $queue_started,
             'objectCacheRemoved' => $object_cache_removed,
@@ -523,6 +584,12 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
             'databaseRetentionDeleted' => (int) ($db_retention_cleanup['deleted'] ?? 0),
             'databaseRetentionUpdated' => (int) ($db_retention_cleanup['updated'] ?? 0),
             'databaseRetentionTables' => isset($db_retention_cleanup['tables']) && is_array($db_retention_cleanup['tables']) ? $db_retention_cleanup['tables'] : array(),
+            'lcpLifecycleCleanup' => is_array($lcp_lifecycle_cleanup) ? $lcp_lifecycle_cleanup : array('success' => false),
+            'lcpLifecycleProbed' => (int) ($lcp_lifecycle_cleanup['probed'] ?? 0),
+            'lcpLifecycleDeletedPages' => (int) ($lcp_lifecycle_cleanup['deletedPages'] ?? 0),
+            'lcpLifecycleDeletedRows' => (int) ($lcp_lifecycle_cleanup['deletedRows'] ?? 0),
+            'lcpLifecycleStaledPages' => (int) ($lcp_lifecycle_cleanup['staledPages'] ?? 0),
+            'lcpLifecycleStaledRows' => (int) ($lcp_lifecycle_cleanup['staledRows'] ?? 0),
         );
     }
 

@@ -38,21 +38,33 @@ trait Ultra_Cache_WP_Runtime_Config_Trait
     {
         $settings = self::get_settings();
         $variant_policy = ultracache_get_html_variant_policy($settings);
+        $query_policy = ultracache_get_query_cache_policy($settings);
+        $litespeed_query_cache_key_proof = ultracache_build_litespeed_query_cache_key_proof($query_policy);
 
         return self::normalize_runtime_config(array(
             'excluded_paths'                  => $settings['excluded_paths'],
             'excluded_query_args'             => array_values(array_unique(array_merge((array) $settings['excluded_query_args'], array('ultracache_runtime_js_scan', 'ultracache_runtime_js_scan_id', 'ultracache_runtime_js_scan_nonce')))),
-            'cache_query_strings'             => !empty($settings['cache_query_strings']),
-            'cache_query_allowlist'           => !empty($settings['cache_query_allowlist']) ? self::parse_textarea_setting(self::sanitize_setting_key_list((array) $settings['cache_query_allowlist'])) : array(),
+            'cache_query_strings'             => !empty($query_policy['enabled']),
+            'cache_query_allowlist'           => (array) ($query_policy['allowlist'] ?? array()),
+            'query_cache_policy'              => $query_policy,
+            'litespeed_query_cache_key_proof'  => $litespeed_query_cache_key_proof,
             'cache_safe_tracking_cookies'      => !empty($settings['cache_safe_tracking_cookies']),
             'safe_tracking_cookie_patterns'   => !empty($settings['safe_tracking_cookie_patterns']) ? self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) $settings['safe_tracking_cookie_patterns'])) : array(),
             'unsafe_cache_cookie_patterns'    => !empty($settings['unsafe_cache_cookie_patterns']) ? self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) $settings['unsafe_cache_cookie_patterns'])) : array(),
             'woo_safe_mode'                   => !empty($settings['woo_safe_mode']),
             'cache_stats_enabled'             => !empty($settings['cache_stats_enabled']),
             'debug_headers_enabled'           => !empty($settings['debug_headers_enabled']),
+            'shared_cache_delivery_enabled'  => !empty($settings['shared_cache_delivery_enabled']),
+            'shared_cache_control_verified'  => !empty($settings['shared_cache_control_verified']),
+            'shared_cache_control_proof_expires_at' => absint($settings['shared_cache_control_proof_expires_at'] ?? 0),
+            'shared_cache_delivery_mode'     => sanitize_key((string) ($settings['shared_cache_delivery_mode'] ?? 'disabled')),
+            'shared_cache_ttl_minutes'       => max(0, min(525600, absint($settings['shared_cache_ttl_minutes'] ?? 0))),
+            'shared_cache_managed_ttl_minutes' => max(1, min(525600, absint($settings['shared_cache_managed_ttl_minutes'] ?? 1440))),
+            'shared_cache_ttl_only_minutes'  => max(1, min(1440, absint($settings['shared_cache_ttl_only_minutes'] ?? 10))),
             'varnish_enabled'                 => !empty($settings['varnish_cli_enabled']),
-            'varnish_html_ttl_minutes'        => max(0, min(525600, absint($settings['varnish_html_ttl_minutes'] ?? 0))),
             'varnish_stale_while_revalidate_seconds' => max(0, min(86400, absint($settings['varnish_stale_while_revalidate_seconds'] ?? 0))),
+            'litespeed_enabled'                => !empty($settings['litespeed_cache_enabled']),
+            'litespeed_site_tag'               => function_exists('ultracache_get_litespeed_site_tag') ? ultracache_get_litespeed_site_tag() : '',
             'home_url'                        => esc_url_raw(home_url('/')),
             'html_vary_accept'                => !empty($variant_policy['vary_accept']),
             'html_variant_buckets'            => (array) $variant_policy['buckets'],
@@ -108,23 +120,43 @@ trait Ultra_Cache_WP_Runtime_Config_Trait
     private static function normalize_runtime_config(array $runtime)
     {
         $defaults = self::get_dashboard_defaults();
-        $fresh_minutes = max(1, absint($runtime['cache_fresh_ttl_minutes'] ?? $defaults['cacheFreshTtlMinutes']));
-        $max_stale_minutes = max($fresh_minutes, absint($runtime['cache_max_stale_minutes'] ?? $defaults['cacheMaxStaleMinutes']));
+        $fresh_minutes = max(1, min(525600, absint($runtime['cache_fresh_ttl_minutes'] ?? $defaults['cacheFreshTtlMinutes'])));
+        $max_stale_minutes = max($fresh_minutes, min(525600, absint($runtime['cache_max_stale_minutes'] ?? $defaults['cacheMaxStaleMinutes'])));
         $html_variant_buckets = self::normalize_html_variant_buckets($runtime['html_variant_buckets'] ?? array('orig'));
+        $excluded_query_args = self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($runtime['excluded_query_args'] ?? array())));
+        $query_policy = ultracache_normalize_query_cache_policy(
+            $runtime['query_cache_policy'] ?? array(),
+            array(
+                'cache_query_strings' => !empty($runtime['cache_query_strings']),
+                'cache_query_allowlist' => $runtime['cache_query_allowlist'] ?? array(),
+                'excluded_query_args' => $excluded_query_args,
+            )
+        );
+        $litespeed_query_cache_key_proof = ultracache_build_litespeed_query_cache_key_proof($query_policy);
 
         $normalized = array(
             'excluded_paths'                 => self::parse_textarea_setting(self::sanitize_excluded_paths_setting((array) ($runtime['excluded_paths'] ?? array()))),
-            'excluded_query_args'            => self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($runtime['excluded_query_args'] ?? array()))),
-            'cache_query_strings'            => !empty($runtime['cache_query_strings']),
-            'cache_query_allowlist'          => self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($runtime['cache_query_allowlist'] ?? array()))),
+            'excluded_query_args'            => $excluded_query_args,
+            'cache_query_strings'            => !empty($query_policy['enabled']),
+            'cache_query_allowlist'          => (array) ($query_policy['allowlist'] ?? array()),
+            'query_cache_policy'             => $query_policy,
+            'litespeed_query_cache_key_proof' => $litespeed_query_cache_key_proof,
             'safe_tracking_cookie_patterns' => self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) ($runtime['safe_tracking_cookie_patterns'] ?? array()))),
             'unsafe_cache_cookie_patterns'  => self::parse_textarea_setting(self::sanitize_cookie_pattern_setting((array) ($runtime['unsafe_cache_cookie_patterns'] ?? array()))),
             'woo_safe_mode'                  => !empty($runtime['woo_safe_mode']),
             'cache_stats_enabled'            => !empty($runtime['cache_stats_enabled']),
             'debug_headers_enabled'          => !empty($runtime['debug_headers_enabled']),
+            'shared_cache_delivery_enabled' => !empty($runtime['shared_cache_delivery_enabled']),
+            'shared_cache_control_verified' => !empty($runtime['shared_cache_control_verified']),
+            'shared_cache_control_proof_expires_at' => absint($runtime['shared_cache_control_proof_expires_at'] ?? 0),
+            'shared_cache_delivery_mode'    => in_array(sanitize_key((string) ($runtime['shared_cache_delivery_mode'] ?? 'disabled')), array('managed', 'ttl-only', 'disabled'), true) ? sanitize_key((string) $runtime['shared_cache_delivery_mode']) : 'disabled',
+            'shared_cache_ttl_minutes'      => max(0, min(525600, absint($runtime['shared_cache_ttl_minutes'] ?? 0))),
+            'shared_cache_managed_ttl_minutes' => max(1, min(525600, absint($runtime['shared_cache_managed_ttl_minutes'] ?? 1440))),
+            'shared_cache_ttl_only_minutes' => max(1, min(1440, absint($runtime['shared_cache_ttl_only_minutes'] ?? 10))),
             'varnish_enabled'                => !empty($runtime['varnish_enabled']),
-            'varnish_html_ttl_minutes'       => max(0, min(525600, absint($runtime['varnish_html_ttl_minutes'] ?? 0))),
             'varnish_stale_while_revalidate_seconds' => max(0, min(86400, absint($runtime['varnish_stale_while_revalidate_seconds'] ?? 0))),
+            'litespeed_enabled'               => !empty($runtime['litespeed_enabled']),
+            'litespeed_site_tag'              => 1 === preg_match('/\Auc_s_[a-f0-9]{20}\z/', (string) ($runtime['litespeed_site_tag'] ?? '')) ? (string) $runtime['litespeed_site_tag'] : '',
             'home_url'                       => esc_url_raw((string) ($runtime['home_url'] ?? home_url('/'))),
             'html_vary_accept'               => !empty($runtime['html_vary_accept']) && count($html_variant_buckets) > 1,
             'html_variant_buckets'           => $html_variant_buckets,

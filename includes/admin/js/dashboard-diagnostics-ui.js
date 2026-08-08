@@ -59,10 +59,12 @@
 		const browserCacheRulesDiag = pathDiagnostics.browserCacheRules || {};
 		const proxyProviderText = reverseProxy && reverseProxy.provider ? reverseProxy.provider : (reverseProxy && reverseProxy.detected ? 'Detected' : 'Not detected');
 		const reverseProxyText = reverseProxy.detected
-			? (proxyProviderText + (reverseProxy.x_cache ? ' · ' + reverseProxy.x_cache : '') + (reverseProxy.x_litespeed_cache ? ' · ' + reverseProxy.x_litespeed_cache : '') + (reverseProxy.x_cache_status ? ' · ' + reverseProxy.x_cache_status : ''))
+			? (proxyProviderText + (reverseProxy.x_cache ? ' · ' + reverseProxy.x_cache : '') + (reverseProxy.x_cache_status ? ' · ' + reverseProxy.x_cache_status : ''))
 			: 'Not detected';
 		const loadedRuntime = runtimeConfigDiag.loaded || {};
-		const allowlist = Array.isArray(loadedRuntime.cache_query_allowlist) ? loadedRuntime.cache_query_allowlist : [];
+		const queryPolicy = loadedRuntime.query_cache_policy && typeof loadedRuntime.query_cache_policy === 'object' ? loadedRuntime.query_cache_policy : {};
+		const allowlist = Array.isArray(queryPolicy.allowlist) ? queryPolicy.allowlist : (Array.isArray(loadedRuntime.cache_query_allowlist) ? loadedRuntime.cache_query_allowlist : []);
+		const hardBlockedQueryKeys = Array.isArray(queryPolicy.hard_blocked_keys) ? queryPolicy.hard_blocked_keys : [];
 		const queryStringCachingText = loadedRuntime.cache_query_strings
 			? ('Enabled' + (allowlist.length ? ' - Whitelist: ' + allowlist.join(', ') : ' - Whitelist empty: query-string variants bypass cache'))
 			: 'Disabled';
@@ -101,7 +103,7 @@
 			['Active object cache backend', !!objectCacheStatus.active, objectCacheStatus.active ? (activeObjectBackendText + (objectFallbackActive ? ' fallback' : '')) : (objectCacheStatus.enabled ? 'Drop-in inactive' : 'Disabled'), objectCacheActiveTone],
 			['Object cache fallback', !objectFallbackActive, objectFallbackActive ? (fallbackObjectBackendText + ' active') : (fallbackObjectBackendText + ' standby'), objectCacheFallbackTone],
 			['Analytics hit backend', !!analyticsBackend.enabled && analyticsBackend.readWrite !== false, analyticsBackend.enabled ? ('Active · ' + (analyticsBackend.activeBackend || 'apcu') + analyticsProbeText) : ('Disabled' + (analyticsBackend.message ? ' · ' + analyticsBackend.message : ''))],
-			['Cron Warm Up', diagnostics.cronWarm && diagnostics.cronWarm.active, diagnostics.cronWarm && diagnostics.cronWarm.blockedByManualWarm ? __('Blocked by manual warm-up', 'ultracache') : (diagnostics.cronWarm && diagnostics.cronWarm.active ? ('Running · ' + formatNumber(diagnostics.cronWarm.processed || 0) + '/' + formatNumber(diagnostics.cronWarm.total || 0)) : diagnostics.cronWarm && diagnostics.cronWarm.enabled ? ((diagnostics.cronWarm.completed ? 'Completed' : 'Enabled') + ' · ' + formatNumber(diagnostics.cronWarm.pagesPerMinute || 0) + '/min') : 'Disabled')],
+			['Background warm worker', diagnostics.cronWarm && diagnostics.cronWarm.active, diagnostics.cronWarm && diagnostics.cronWarm.blockedByManualWarm ? __('Blocked by manual warm-up', 'ultracache') : (diagnostics.cronWarm && diagnostics.cronWarm.active ? ('Running · ' + formatNumber(diagnostics.cronWarm.processed || 0) + '/' + formatNumber(diagnostics.cronWarm.total || 0)) : diagnostics.cronWarm && diagnostics.cronWarm.enabled ? ((diagnostics.cronWarm.completed ? 'Completed' : 'Ready') + ' · ' + formatNumber(diagnostics.cronWarm.pagesPerMinute || 0) + '/min') : 'Disabled')],
 			['Varnish', diagnostics.varnish && diagnostics.varnish.enabled, diagnostics.varnish && diagnostics.varnish.enabled ? ('Varnish mode: ' + ((diagnostics.varnish.configuredMode || diagnostics.varnish.mode || 'http') === 'admin' ? 'admin-secret' : 'HTTP endpoint') + ' · ' + (diagnostics.varnish.effectiveMethod || (((diagnostics.varnish.mode || 'http') === 'admin') ? 'admin BAN' : (diagnostics.varnish.method || 'BAN'))) + ' · ' + ((diagnostics.varnish.endpointCount || 0) ? (diagnostics.varnish.endpointCount + ' endpoint(s)') : ((diagnostics.varnish.servers || '').trim() || 'No endpoints'))) : 'Disabled'],
 			['Reverse Proxy', !!reverseProxy.detected, reverseProxyText],
 			['Brotli Compression', compressionStatus.brotli && compressionStatus.brotli.available, compressionStatus.brotli && compressionStatus.brotli.available ? (compressionStatus.preferred === 'brotli' ? 'Available · Preferred' : 'Available') : 'Unavailable'],
@@ -140,7 +142,10 @@
 			['Fresh TTL', false, formatNumber(loadedRuntime.cache_fresh_ttl_minutes || 0) + ' min'],
 			['Max stale window', false, formatNumber(loadedRuntime.cache_max_stale_minutes || 0) + ' min'],
 			['Stale-while-revalidate', !!loadedRuntime.stale_while_revalidate_enabled, loadedRuntime.stale_while_revalidate_enabled ? 'Enabled' : 'Disabled'],
+			['Query policy version', false, queryPolicy.version ? ('v' + String(queryPolicy.version)) : 'Legacy'],
+			['Query policy fingerprint', false, queryPolicy.fingerprint || 'Unavailable'],
 			['Query allowlist', false, allowlist.length ? (formatNumber(allowlist.length) + ' key' + (allowlist.length === 1 ? '' : 's') + ' · ' + allowlist.join(', ')) : 'None'],
+			['Hard-blocked query keys', false, formatNumber(hardBlockedQueryKeys.length)],
 			['Woo safe mode', !!loadedRuntime.woo_safe_mode, loadedRuntime.woo_safe_mode ? 'Enabled' : 'Disabled'],
 			['Excluded paths', false, formatNumber((loadedRuntime.excluded_paths || []).length) + ' path' + (((loadedRuntime.excluded_paths || []).length === 1) ? '' : 's')],
 			['Excluded query-string args', false, formatNumber((loadedRuntime.excluded_query_args || []).length) + ' arg' + (((loadedRuntime.excluded_query_args || []).length === 1) ? '' : 's')],
@@ -238,6 +243,7 @@
 		const storageMediaCache = cacheStorageDiag.mediaCache || {};
 		const storageWarnings = Array.isArray(cacheStorageDiag.warnings) ? cacheStorageDiag.warnings : [];
 		const storageWarningLevel = cacheStorageDiag.warningLevel || 'ok';
+
 		const cacheDetailRows = [
 			['Original HTML', false, statsCountText(bucketHits.orig)],
 			['WebP HTML', false, statsCountText(bucketHits.webp)],
@@ -300,10 +306,15 @@
 		const mediaRuntimeRows = [
 			['Preferred image editor', false, mediaRuntimeDiag.preferredEditor || 'Unavailable'],
 			['Last image editor class', false, mediaRuntimeDiag.lastImageEditorClass || 'Unavailable'],
-			['Imagick AVIF self-test', !!mediaRuntimeDiag.imagickAvif, mediaRuntimeDiag.imagickAvif ? 'Passed' : 'Failed'],
+			['Imagick AVIF encode self-test', !!mediaRuntimeDiag.imagickAvif, mediaRuntimeDiag.imagickAvif ? 'Passed' : 'Failed'],
+			['Imagick AVIF decode self-test', !!mediaRuntimeDiag.imagickAvifDecode, mediaRuntimeDiag.imagickAvifDecode ? 'Passed' : 'Failed'],
+			['Imagick AVIF to WebP self-test', !!mediaRuntimeDiag.imagickAvifToWebp, mediaRuntimeDiag.imagickAvifToWebp ? 'Passed' : 'Failed'],
 			['Imagick WebP support', !!mediaRuntimeDiag.imagickWebp, mediaRuntimeDiag.imagickWebp ? 'Available' : 'Unavailable'],
-			['GD AVIF self-test', !!mediaRuntimeDiag.gdAvif, mediaRuntimeDiag.gdAvif ? 'Passed' : 'Failed'],
+			['GD AVIF encode self-test', !!mediaRuntimeDiag.gdAvif, mediaRuntimeDiag.gdAvif ? 'Passed' : 'Failed'],
+			['GD AVIF decode self-test', !!mediaRuntimeDiag.gdAvifDecode, mediaRuntimeDiag.gdAvifDecode ? 'Passed' : 'Failed'],
+			['GD AVIF to WebP self-test', !!mediaRuntimeDiag.gdAvifToWebp, mediaRuntimeDiag.gdAvifToWebp ? 'Passed' : 'Failed'],
 			['GD WebP support', !!mediaRuntimeDiag.gdWebp, mediaRuntimeDiag.gdWebp ? 'Available' : 'Unavailable'],
+			['AVIF source to WebP capability', !!mediaRuntimeDiag.avifSourceToWebp, mediaRuntimeDiag.avifSourceToWebp ? 'Available' : 'Unavailable'],
 			['Media conversion queue', !!mediaQueueDiag.enabled, mediaQueueDiag.enabled ? (formatNumber(mediaQueueDiag.pending || 0) + ' pending · ' + formatNumber(mediaQueueDiag.done || 0) + ' done · ' + formatNumber(mediaQueueDiag.failed || 0) + ' failed · ' + formatNumber(mediaQueueDiag.alreadyOptimized || mediaQueueDiag.skipped || 0) + ' already optimized' + (mediaQueueDiag.needsRepair ? ' · repair needed' : '')) : 'Unavailable'],
 			['Last AVIF encode engine', false, mediaRuntimeDiag.lastAvifEncodeEngine || 'Unavailable'],
 			['Last AVIF encode error', false, mediaRuntimeDiag.lastAvifEncodeError || 'None'],
@@ -355,6 +366,7 @@
 				h('div', { className: 'uc-accordion__body' }, [
 					h(SettingsTransparencyPanel, { diagnostics: diagnostics, key: 'advanced-diagnostics-settings-transparency' }),
 					h(SecurityCorrectnessPanel, { diagnostics: diagnostics, key: 'advanced-diagnostics-security-correctness' }),
+
 					h('div', { className: 'uc-diagnostic-group', key: 'last-cache-write' }, [
 						h('div', { className: 'uc-section-title' }, __("Last page cache write", 'ultracache')),
 						(lastCacheWrite && (lastCacheWrite.path || lastCacheWrite.pageFiles)) ? h('div', { className: 'rounded bg-black/10 p-4 space-y-3' }, [
@@ -404,18 +416,19 @@
 							}),
 						]) : null,
 					]),
+
 					reverseProxy.detected ? h('div', { className: 'uc-diagnostic-group', key: 'proxy-box' }, [
 						h('div', { className: 'uc-section-title' }, __("Reverse Proxy Details", 'ultracache')),
 						h('div', { className: 'rounded bg-black/10 p-4 space-y-3' }, [
 							h(DetailRow, { label: __("Provider", 'ultracache'), value: reverseProxy.provider || 'Detected' }),
+							h(DetailRow, { label: __("Detection state", 'ultracache'), value: String(reverseProxy.diagnosticStatus || 'not-tested').replace(/-/g, ' ') }),
+							h(DetailRow, { label: __("Tested", 'ultracache'), value: reverseProxy.testedAt ? formatLooseTime(reverseProxy.testedAt) : __("Not tested", 'ultracache') }),
 							h(DetailRow, { label: __("Server", 'ultracache'), value: reverseProxy.server || '' }),
 							h(DetailRow, { label: 'Via', value: reverseProxy.via || '' }),
 							h(DetailRow, { label: 'X-Cache', value: reverseProxy.x_cache || '' }),
 							h(DetailRow, { label: 'X-Cache-Status', value: reverseProxy.x_cache_status || '' }),
 							h(DetailRow, { label: 'X-Proxy-Cache', value: reverseProxy.x_proxy_cache || '' }),
 							h(DetailRow, { label: 'X-FastCGI-Cache', value: reverseProxy.x_fastcgi_cache || '' }),
-							h(DetailRow, { label: 'X-LiteSpeed-Cache', value: reverseProxy.x_litespeed_cache || '' }),
-							h(DetailRow, { label: 'X-QC-Cache', value: reverseProxy.x_qc_cache || '' }),
 							h(DetailRow, { label: 'CF-Cache-Status', value: reverseProxy.cf_cache_status || '' }),
 							h(DetailRow, { label: __("Age", 'ultracache'), value: reverseProxy.age || '' }),
 						]),
@@ -508,7 +521,7 @@
 	}
 
 
-	function LcpDiagnosticsCard({ settings, busy, onSettingChange, onQuery, onDetail, queryBusy, onAction, busyKey }) {
+	function LcpDiagnosticsCard({ settings, busy, onSettingChange, onQuery, onDetail, queryBusy, onSaveManualSelector, onAction, busyKey }) {
 		const [open, setOpen] = useState(false);
 
 		return h('div', { className: 'uc-card', style: { gridColumn: '1 / -1' } }, [
@@ -533,6 +546,7 @@
 						onQuery,
 						onDetail,
 						queryBusy,
+						onSaveManualSelector,
 						onAction,
 						busyKey,
 						key: 'lcp-observations-panel',
@@ -543,7 +557,7 @@
 	}
 
 
-	function LcpObservationsPanel({ settings, busy, onSettingChange, onQuery, onDetail, queryBusy, onAction, busyKey }) {
+	function LcpObservationsPanel({ settings, busy, onSettingChange, onQuery, onDetail, queryBusy, onSaveManualSelector, onAction, busyKey }) {
 		const [listData, setListData] = useState(null);
 		const [detailDataByHash, setDetailDataByHash] = useState({});
 		const [openDetails, setOpenDetails] = useState({});
@@ -554,6 +568,8 @@
 		const [currentCursor, setCurrentCursor] = useState('');
 		const [cursorStack, setCursorStack] = useState([]);
 		const [confirmation, setConfirmation] = useState(null);
+		const [manualSelectorDrafts, setManualSelectorDrafts] = useState({});
+		const [manualSelectorSavingByHash, setManualSelectorSavingByHash] = useState({});
 		const [loadError, setLoadError] = useState('');
 
 		const summary = listData && listData.summary ? listData.summary : {};
@@ -655,6 +671,7 @@
 				return null;
 			}
 			setDetailDataByHash((current) => Object.assign({}, current, { [normalizedHash]: response.lcpDetail }));
+			setManualSelectorDrafts((current) => Object.assign({}, current, { [normalizedHash]: String(response.lcpDetail.manualSelector || '') }));
 			setDetailLoadingByHash((current) => Object.assign({}, current, { [normalizedHash]: false }));
 			return response.lcpDetail;
 		}
@@ -780,6 +797,24 @@
 			});
 		}
 
+		async function saveManualSelector(pageHash, currentValue) {
+			if (!pageHash || typeof onSaveManualSelector !== 'function' || manualSelectorSavingByHash[pageHash]) {
+				return;
+			}
+			setManualSelectorSavingByHash((current) => Object.assign({}, current, { [pageHash]: true }));
+			const response = await onSaveManualSelector(pageHash, currentValue);
+			if (response) {
+				const savedValue = String(response.manualSelector || '');
+				setManualSelectorDrafts((current) => Object.assign({}, current, { [pageHash]: savedValue }));
+				setDetailDataByHash((current) => Object.assign({}, current, {
+					[pageHash]: Object.assign({}, current[pageHash] || {}, { manualSelector: savedValue }),
+				}));
+				await loadList({ search: appliedSearch, cursor: currentCursor, includeSummary: true });
+				await loadDetail(pageHash, true);
+			}
+			setManualSelectorSavingByHash((current) => Object.assign({}, current, { [pageHash]: false }));
+		}
+
 		function renderDetailPanel(item) {
 			const pageHash = String(item && item.pageHash ? item.pageHash : '');
 			const detailData = detailDataByHash[pageHash] || null;
@@ -787,6 +822,11 @@
 			const detailLoading = !!detailLoadingByHash[pageHash];
 			const detailError = String(detailErrorByHash[pageHash] || '');
 			const pageUrl = detailData && detailData.pageUrl ? detailData.pageUrl : (item && item.pageUrl ? item.pageUrl : '');
+			const savedManualSelector = detailData ? String(detailData.manualSelector || '') : '';
+			const manualSelectorDraft = Object.prototype.hasOwnProperty.call(manualSelectorDrafts, pageHash)
+				? String(manualSelectorDrafts[pageHash] || '')
+				: savedManualSelector;
+			const manualSelectorSaving = !!manualSelectorSavingByHash[pageHash];
 
 			return h('div', { className: 'uc-lcp-diagnostics__detail-panel is-inline', key: 'detail-' + pageHash }, [
 				h('div', { className: 'uc-lcp-diagnostics__detail-head' }, [
@@ -798,6 +838,32 @@
 				]),
 				detailLoading ? h('div', { className: 'uc-lcp-diagnostics__loading', role: 'status' }, __('Loading details for this URL…', 'ultracache')) : null,
 				detailError ? h('div', { className: 'uc-lcp-diagnostics__empty is-error' }, detailError) : null,
+				detailData ? h('div', { className: 'uc-lcp-diagnostics__manual-selector' }, [
+					h('label', { className: 'uc-field-label', htmlFor: 'uc-lcp-manual-selector-' + pageHash }, __('Manual LCP selector', 'ultracache')),
+					h('div', { className: 'uc-lcp-diagnostics__manual-selector-row' }, [
+						h('input', {
+							id: 'uc-lcp-manual-selector-' + pageHash,
+							type: 'text',
+							className: 'uc-field-input',
+							value: manualSelectorDraft,
+							disabled: manualSelectorSaving,
+							placeholder: 'Enter CSS selectors, plain IDs, or image URL/fragments',
+							onChange: (event) => setManualSelectorDrafts((current) => Object.assign({}, current, { [pageHash]: event.target.value })),
+							onKeyDown: (event) => {
+								if (event.key === 'Enter' && manualSelectorDraft !== savedManualSelector && !manualSelectorSaving) {
+									event.preventDefault();
+									saveManualSelector(pageHash, manualSelectorDraft);
+								}
+							},
+						}),
+						h('button', {
+							type: 'button',
+							className: 'uc-btn uc-btn--primary',
+							disabled: manualSelectorSaving || manualSelectorDraft === savedManualSelector,
+							onClick: () => saveManualSelector(pageHash, manualSelectorDraft),
+						}, manualSelectorSaving ? __('Saving…', 'ultracache') : __('Save', 'ultracache')),
+					]),
+				]) : null,
 				detailData && detailMappings.length ? h('div', { className: 'uc-lcp-diagnostics__detail-mappings' }, detailMappings.map((record) => {
 					const rowBusy = !!busyKey && String(busyKey).indexOf(String(record.id) + ':') === 0;
 					const learningState = String(record.learningState || 'locked');
@@ -1090,7 +1156,6 @@
 						h('div', { className: 'rounded-lg bg-black/20 px-3 py-2', key: 'secrets' }, [
 							h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __("Secret configuration", 'ultracache')),
 							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Redis: ' + (summary.redisSecretConfigured ? 'WP_REDIS_PASSWORD configured' : 'not configured')),
-							h('div', { className: 'text-xs text-zinc-300 mt-1' }, 'Varnish: ' + (summary.varnishSecretConfigured ? 'ULTRACACHE_VARNISH_PASSWORD configured' : 'not configured')),
 						]),
 					]),
 				]),

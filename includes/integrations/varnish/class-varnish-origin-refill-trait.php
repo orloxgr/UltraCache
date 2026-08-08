@@ -69,11 +69,13 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
         $status['status'] = sanitize_key((string) ($status['status'] ?? 'inconclusive'));
         $status['message'] = self::sanitize_varnish_string((string) ($status['message'] ?? ''));
 
-        set_transient(
-            'ultracache_varnish_two_stage_refill_v1',
-            self::sanitize_varnish_result($status),
-            WEEK_IN_SECONDS
-        );
+        if (method_exists(static::class, 'persist_varnish_capability_diagnostic')) {
+            self::persist_varnish_capability_diagnostic(
+                'originrevalidation',
+                $status,
+                array('soft-purge', 'refill')
+            );
+        }
     }
 
     /**
@@ -87,36 +89,50 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
             return self::get_varnish_origin_revalidation_not_applicable_status();
         }
 
-        $value = get_transient('ultracache_varnish_two_stage_refill_v1');
-        if (!is_array($value)) {
-            return array(
-                'applicable' => true,
-                'available' => false,
-                'status' => 'untested',
-                'testedAt' => 0,
-                'message' => self::maybe_translate('Authenticated force-refresh has not been verified for the current HTTP soft-purge configuration.'),
-            );
+        $settings = self::get_varnish_cli_settings();
+        $registry = method_exists(static::class, 'get_varnish_endpoint_capability_registry_status')
+            ? self::get_varnish_endpoint_capability_registry_status($settings)
+            : array();
+        $effective = is_array($registry['effective'] ?? null) ? $registry['effective'] : array();
+        $capability_state = is_array($registry['capabilityStates']['originRevalidation'] ?? null)
+            ? $registry['capabilityStates']['originRevalidation']
+            : array();
+        $diagnostic = method_exists(static::class, 'get_varnish_capability_diagnostic')
+            ? self::get_varnish_capability_diagnostic('originrevalidation', array('soft-purge', 'refill'))
+            : array();
+        $available = !empty($effective['originRevalidation']);
+        $status = $available ? 'verified' : sanitize_key((string) ($capability_state['state'] ?? 'not-tested'));
+        if (!empty($diagnostic['configurationChanged']) && !$available) {
+            $status = 'configuration-changed';
         }
 
-        if (!self::varnish_capability_contracts_match($value, array('soft-purge', 'refill'))) {
-            return array(
-                'applicable' => true,
-                'available' => false,
-                'status' => 'configuration-changed',
-                'testedAt' => absint($value['testedAt'] ?? 0),
-                'message' => self::maybe_translate('The soft-purge or public-refill contract changed. Two-stage refill must be verified again during the next strict soft-purge operation.'),
-            );
+        $tested_at = max(
+            absint($capability_state['testedAt'] ?? 0),
+            empty($diagnostic['configurationChanged']) ? absint($diagnostic['testedAt'] ?? 0) : 0
+        );
+        if ($available) {
+            $message = self::maybe_translate('Every configured HTTP Varnish endpoint has current authenticated origin-revalidation proof.');
+        } elseif (empty($diagnostic['configurationChanged']) && '' !== (string) ($diagnostic['message'] ?? '')) {
+            $message = self::sanitize_varnish_string((string) $diagnostic['message']);
+        } elseif ('proof-expired' === $status) {
+            $message = self::maybe_translate('The authenticated origin-revalidation proof has expired and must be verified again.');
+        } elseif ('configuration-changed' === $status) {
+            $message = self::maybe_translate('The soft-purge or public-refill contract changed. Origin revalidation must be verified again.');
+        } else {
+            $message = self::maybe_translate('Authenticated force-refresh has not been verified for every configured HTTP Varnish endpoint.');
         }
 
         return array(
             'applicable' => true,
-            'available' => !empty($value['available']),
-            'status' => sanitize_key((string) ($value['status'] ?? 'inconclusive')),
-            'testedAt' => absint($value['testedAt'] ?? 0),
-            'reachedBucketCount' => absint($value['reachedBucketCount'] ?? 0),
-            'expectedBucketCount' => absint($value['expectedBucketCount'] ?? 0),
-            'fallbackUsed' => !empty($value['fallbackUsed']),
-            'message' => self::sanitize_varnish_string((string) ($value['message'] ?? '')),
+            'available' => $available,
+            'status' => $status,
+            'testedAt' => $tested_at,
+            'proofExpiresAt' => absint($capability_state['proofExpiresAt'] ?? 0),
+            'reachedBucketCount' => empty($diagnostic['configurationChanged']) ? absint($diagnostic['reachedBucketCount'] ?? 0) : 0,
+            'expectedBucketCount' => empty($diagnostic['configurationChanged']) ? absint($diagnostic['expectedBucketCount'] ?? 0) : 0,
+            'fallbackUsed' => empty($diagnostic['configurationChanged']) && !empty($diagnostic['fallbackUsed']),
+            'message' => $message,
+            'endpointRegistry' => $registry,
         );
     }
 

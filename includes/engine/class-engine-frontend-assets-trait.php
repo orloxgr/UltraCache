@@ -130,6 +130,38 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
 
 
     /**
+     * Enqueue the external async CSS activation runtime when this request can emit
+     * UltraCache-managed non-blocking stylesheet links.
+     *
+     * @return void
+     */
+    public function enqueue_async_css_runtime_helper()
+    {
+        if (is_admin()) {
+            return;
+        }
+
+        $settings = $this->get_settings();
+        $critical_chain_delay_enabled = !empty($settings['critical_request_chain_relief'])
+            && !empty($settings['critical_request_chain_delay_list'])
+            && is_array($settings['critical_request_chain_delay_list']);
+
+        $runtime_required = !empty($settings['async_css'])
+            || !empty($settings['async_external_css'])
+            || !empty($settings['aggressive_async_css'])
+            || !empty($settings['font_mix_css_bundle_async'])
+            || !empty($settings['delay_icon_fonts'])
+            || $critical_chain_delay_enabled;
+
+        if (!$runtime_required) {
+            return;
+        }
+
+        $handle = 'ultracache-async-css-runtime';
+        $this->ultracache_enqueue_frontend_js_helper($handle, 'async-css-runtime.js', array(), false);
+    }
+
+    /**
      * Enqueue the runtime JavaScript scan collector through WordPress-native script APIs.
      *
      * The collector is active only for verified runtime-scan requests. It must be
@@ -139,6 +171,31 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
      *
      * @return void
      */
+    /**
+     * Enqueue the strict viewport-based third-party iframe activation runtime.
+     *
+     * @return void
+     */
+    public function enqueue_lazy_third_party_iframe_runtime_helper()
+    {
+        if (is_admin()) {
+            return;
+        }
+
+        $settings = $this->get_settings();
+        if (empty($settings['lazy_load_third_party_iframes']) || $this->should_skip_lazy_third_party_iframes_for_request()) {
+            return;
+        }
+
+        $this->ultracache_enqueue_frontend_js_helper(
+            'ultracache-lazy-third-party-iframes',
+            'lazy-third-party-iframes.js',
+            array(),
+            false
+        );
+    }
+
+
     public function enqueue_runtime_js_scan_collector()
     {
         if (is_admin()) {
@@ -239,6 +296,11 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
             return $script_data;
         }
 
+        if (method_exists($this, 'is_woocommerce_esi_mini_cart_rendered_for_request')
+            && $this->is_woocommerce_esi_mini_cart_rendered_for_request()) {
+            return $script_data;
+        }
+
         if (is_admin()) {
             return $script_data;
         }
@@ -302,7 +364,10 @@ trait Ultra_Cache_Engine_Frontend_Assets_Trait
         }
 
         $settings = $this->get_settings();
-        if (empty($settings['woocommerce_cart_fragments_delay']) || $this->should_skip_woocommerce_cart_fragments_delay()) {
+        if (empty($settings['woocommerce_cart_fragments_delay'])
+            || $this->should_skip_woocommerce_cart_fragments_delay()
+            || (method_exists($this, 'is_woocommerce_esi_mini_cart_rendered_for_request')
+                && $this->is_woocommerce_esi_mini_cart_rendered_for_request())) {
             return;
         }
 

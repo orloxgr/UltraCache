@@ -7,6 +7,31 @@ defined('ABSPATH') || exit;
 
 trait ULTRACACHE_CLI_Integrations_Trait
 {
+    /**
+     * Report one capability-driven Varnish operation to WP-CLI.
+     *
+     * @param array  $result          Operation result.
+     * @param string $success_message Default complete message.
+     * @param string $failure_message Default failure message.
+     * @return void
+     */
+    private function report_varnish_runtime_cli_result(array $result, $success_message, $failure_message)
+    {
+        $outcome = sanitize_key((string) ($result['runtimeOutcome'] ?? ''));
+        $message = (string) ($result['message'] ?? '');
+
+        if ('complete' === $outcome || ('' === $outcome && !empty($result['success']))) {
+            WP_CLI::success('' !== $message ? $message : $success_message);
+            return;
+        }
+
+        if (in_array($outcome, array('degraded', 'partial'), true)) {
+            WP_CLI::warning('' !== $message ? $message : ucfirst($outcome) . ' Varnish result.');
+            return;
+        }
+
+        WP_CLI::error('' !== $message ? $message : $failure_message);
+    }
     public function varnish($args, $assoc_args)
     {
         $action = !empty($args[0]) ? strtolower((string) $args[0]) : 'test';
@@ -32,10 +57,7 @@ trait ULTRACACHE_CLI_Integrations_Trait
                 WP_CLI::error('Varnish helper is not available.');
             }
             $result = Ultra_Cache_WP::varnish_flush_all_current_host();
-            if (empty($result['success'])) {
-                WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Varnish flush-all failed.');
-            }
-            WP_CLI::success((string) ($result['message'] ?? 'Varnish flush-all succeeded.'));
+            $this->report_varnish_runtime_cli_result($result, 'Varnish flush-all succeeded.', 'Varnish flush-all failed.');
             return;
         }
 
@@ -53,10 +75,7 @@ trait ULTRACACHE_CLI_Integrations_Trait
                 WP_CLI::error('Varnish helper is not available.');
             }
             $result = Ultra_Cache_WP::varnish_flush_url($url);
-            if (empty($result['success'])) {
-                WP_CLI::error(!empty($result['message']) ? $result['message'] : 'Varnish flush-url failed.');
-            }
-            WP_CLI::success((string) ($result['message'] ?? 'Varnish flush-url succeeded.'));
+            $this->report_varnish_runtime_cli_result($result, 'Varnish flush-url succeeded.', 'Varnish flush-url failed.');
             return;
         }
 

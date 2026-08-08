@@ -21,8 +21,12 @@ trait Ultra_Cache_WP_Plugin_Data_Cleanup_Trait
         self::sync_page_cache_bootstrap(false);
         self::unschedule_scheduled_events();
         self::unschedule_cron_warm_events(true);
+        wp_clear_scheduled_hook('ultracache_process_media_conversion_queue');
+        wp_clear_scheduled_hook('ultracache_flush_affected_url_batch');
+        delete_option('ultracache_affected_url_batch_v1');
         self::sync_browser_cache_rules(false);
         self::sync_apache_static_html_delivery_rules(false);
+        self::sync_litespeed_cache_rules(false);
 
         if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
             if (method_exists('Ultra_Cache_Object_Cache_Manager', 'flush_cache')) {
@@ -61,8 +65,10 @@ if (!($wpdb instanceof wpdb)) {
 
 $tables = array(
     $wpdb->prefix . 'ultracache_media_queue',
+    $wpdb->prefix . 'ultracache_media_queue_units',
     $wpdb->prefix . 'ultracache_media_page_refs',
     $wpdb->prefix . 'ultracache_media_replacement_items',
+    $wpdb->prefix . 'ultracache_media_replacement_attachment_plans',
     $wpdb->prefix . 'ultracache_media_replacement_refs',
     $wpdb->prefix . 'ultracache_media_replacement_ref_index',
     $wpdb->prefix . 'ultracache_media_replacement_file_refs',
@@ -132,10 +138,10 @@ foreach (array('css-bundles', 'font-css', 'google-fonts', 'optimized-css', 'defe
 }
 
 if (function_exists('ultracache_uploads_storage_dir')) {
-    foreach (array('theme-css-temp', 'theme-css-backups') as $private_bucket) {
+    foreach (array('theme-css-temp', 'theme-css-backups', 'varnishtest') as $private_bucket) {
         $dir = ultracache_uploads_storage_dir('ultracache/' . $private_bucket);
         if (is_string($dir) && '' !== $dir && is_dir($dir)) {
-            ultracache_safe_rmdir($dir, 'delete_all_plugin_data private theme css asset dir');
+            ultracache_safe_rmdir($dir, 'delete_all_plugin_data private runtime asset dir');
         }
     }
 }
@@ -156,6 +162,7 @@ $option_names = array(
     'ultracache_media_diagnostics_v1',
     'ultracache_media_library_conversion_test_v1',
     'ultracache_media_library_conversion_test_sample_v1',
+    'ultracache_media_replacement_workflow_state_v1',
     'ultracache_avif_encoder_self_test_v1',
     'ultracache_object_cache_last_flush_report',
     'ultracache_last_css_bundle_summary',
@@ -164,11 +171,22 @@ $option_names = array(
     'ultracache_external_cache_detection',
     'ultracache_action_queue_heavy_lock_v1',
     'ultracache_warmup_generation',
+    'ultracache_warm_runtime_reset_version',
+    'ultracache_warm_runtime_reset_state',
+    'ultracache_locks_schema_install_lock',
+    'ultracache_affected_url_batch_v1',
     'ultracache_lcp_last_refresh',
     'ultracache_varnish_refresh_ahead_state_v1',
     'ultracache_varnish_refresh_candidates_v1',
     'ultracache_varnish_metrics_v1',
+    'ultracache_litespeed_metrics_v1',
+    'ultracache_litespeed_diagnostic_behavior_v1',
+    'ultracache_litespeed_refresh_candidates_v1',
+    'ultracache_litespeed_refresh_ahead_state_v1',
     'ultracache_varnish_diagnostic_basic_v1',
+    'ultracache_varnish_endpoint_capabilities_v1',
+    'ultracache_varnish_esi_capability_v1',
+    'ultracache_varnish_html_variant_capability_v1',
     'ultracache_varnish_diagnostic_flush_scope_v1',
     'ultracache_varnish_diagnostic_validators_v1',
     'ultracache_varnish_diagnostic_accept_vcl_v1',
@@ -184,6 +202,8 @@ if (!$keep_settings) {
 
 if (!$keep_tables) {
     $option_names[] = 'ultracache_media_queue_db_version';
+    $option_names[] = 'ultracache_media_queue_units_db_version';
+    $option_names[] = 'ultracache_media_queue_units_migration_state_v1';
     $option_names[] = 'ultracache_media_page_refs_db_version';
     $option_names[] = 'ultracache_media_replacement_db_version';
     $option_names[] = 'ultracache_media_replacement_schema_lock_v1';
@@ -203,18 +223,13 @@ foreach ($option_names as $option_name) {
     delete_site_option($option_name);
 }
 
-delete_transient(ULTRACACHE_CRON_WARM_LOCK_KEY);
-delete_transient('ultracache_loopback_ssl_status_v1');
-delete_transient('ultracache_frontend_compression_probe_v1');
-delete_transient('ultracache_media_conversion_queue_lock');
-delete_transient('ultracache_media_queue_process_lock_v1');
-delete_transient('ultracache_runtime_font_css_url_map_v3');
-delete_transient('ultracache_lcp_observation_map_v1');
-delete_transient('ultracache_media_work_summary_v1');
-delete_transient('ultracache_media_page_refs_cleanup_lock');
-delete_transient('ultracache_dashboard_cache_activity_v1');
-delete_transient('ultracache_reverse_proxy_status_v2');
-delete_transient('ultracache_varnish_refresh_ahead_capability_v1');
+foreach (self::get_legacy_transient_names() as $legacy_transient) {
+    self::delete_legacy_transient($legacy_transient);
+}
+
+if (function_exists('ultracache_delete_coordination_records_by_prefix')) {
+    ultracache_delete_coordination_records_by_prefix('state', 'ultracache_state:admin.notice.');
+}
 
 self::delete_option_rows_by_like_patterns(array(
     '_transient_ultracache_%',
@@ -222,6 +237,7 @@ self::delete_option_rows_by_like_patterns(array(
     '_site_transient_ultracache_%',
     '_site_transient_timeout_ultracache_%',
     'ultracache_google_fonts_lock_%',
+    'ultracache_lcp_manual_selector_%',
 ));
 
 if (!$keep_tables) {
@@ -269,6 +285,7 @@ if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
 
 self::sync_browser_cache_rules(false);
 self::sync_apache_static_html_delivery_rules(false);
+self::sync_litespeed_cache_rules(false);
 self::set_wp_cache_flag(false);
 
 if ($delete_cache_files) {
@@ -319,6 +336,7 @@ return array(
 
     public static function activate()
     {
+        self::maybe_run_public_warm_runtime_upgrade_reset('activation');
         self::ensure_directories();
         self::cleanup_legacy_dropin_backup_directory();
 
@@ -358,25 +376,15 @@ return array(
         }
         $browser_cache_sync = self::sync_browser_cache_rules();
         if (false === $browser_cache_sync) {
-            set_transient(
-                'ultracache_admin_notice',
-                array(
-                    'type'    => 'warning',
-                    'message' => self::maybe_translate('UltraCache: Browser Cache Headers are enabled, but .htaccess could not be updated during activation. Check file permissions or disable Browser Cache Headers.'),
-                ),
-                90
-            );
+            self::persist_admin_notice('browser_cache_rules_sync_failed', 'warning', 90);
         }
         $apache_static_sync = self::sync_apache_static_html_delivery_rules();
         if (false === $apache_static_sync) {
-            set_transient(
-                'ultracache_admin_notice',
-                array(
-                    'type'    => 'warning',
-                    'message' => self::maybe_translate('UltraCache: Apache Static HTML Delivery is enabled, but .htaccess could not be updated during activation. Check file permissions or disable Apache Static HTML Delivery.'),
-                ),
-                90
-            );
+            self::persist_admin_notice('apache_static_rules_sync_failed', 'warning', 90);
+        }
+        $litespeed_sync = self::sync_litespeed_cache_rules();
+        if (false === $litespeed_sync) {
+            self::persist_admin_notice('litespeed_cache_rules_sync_failed', 'warning', 90);
         }
 
         if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {

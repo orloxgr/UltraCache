@@ -14,12 +14,28 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
     private function get_media_replacement_readiness_defaults()
     {
         return array(
-            'version'                  => 1,
-            'generation'               => '',
+            'version'                  => 3,
             'status'                   => 'idle',
             'target_format'            => 'webp',
             'fallback_format'          => 'original',
             'cursor_attachment_id'     => 0,
+            'verification_pass'         => 0,
+            'queueable_variants'        => 0,
+            'queue_enqueued_attachments'=> 0,
+            'queue_processed_attachments'=> 0,
+            'generated_units'           => 0,
+            'attempted_units'           => 0,
+            'last_queue_message'        => '',
+            'last_queue_pause_reason'   => '',
+            'pass_blocker_signature'   => '',
+            'previous_blocker_signature'=> '',
+            'pass_queue_enqueued_start'=> 0,
+            'pass_queue_processed_start'=> 0,
+            'pass_generated_units_start'=> 0,
+            'pass_attempted_units_start'=> 0,
+            'no_progress_detected'      => false,
+            'no_progress_reason'        => '',
+            'completion_reason'         => '',
             'candidate_attachments'    => 0,
             'scanned_attachments'      => 0,
             'eligible_attachments'     => 0,
@@ -45,20 +61,33 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
     private function normalize_media_replacement_readiness_state($state)
     {
         $state = is_array($state) ? $state : array();
+        $stored_version = max(0, (int) ($state['version'] ?? 0));
         $state = array_merge($this->get_media_replacement_readiness_defaults(), $state);
-        $state['version']               = 1;
-        $state['generation']            = sanitize_key((string) $state['generation']);
+        $state['version']               = 3;
         $state['status']                = in_array((string) $state['status'], array('idle', 'scanning', 'paused', 'completed', 'failed'), true) ? (string) $state['status'] : 'idle';
         $state['target_format']         = in_array((string) $state['target_format'], array('avif', 'webp'), true) ? (string) $state['target_format'] : 'webp';
         $state['fallback_format']       = ('avif' === $state['target_format'] && 'webp' === (string) $state['fallback_format']) ? 'webp' : 'original';
         $state['cursor_attachment_id']  = max(0, absint($state['cursor_attachment_id']));
         $state['library_changed']       = !empty($state['library_changed']);
         $state['last_error']            = sanitize_text_field((string) $state['last_error']);
+        $state['last_queue_message']    = sanitize_text_field((string) $state['last_queue_message']);
+        $state['last_queue_pause_reason'] = sanitize_key((string) $state['last_queue_pause_reason']);
+        $state['pass_blocker_signature'] = preg_match('/^[a-f0-9]{64}$/', (string) $state['pass_blocker_signature']) ? (string) $state['pass_blocker_signature'] : '';
+        $state['previous_blocker_signature'] = preg_match('/^[a-f0-9]{64}$/', (string) $state['previous_blocker_signature']) ? (string) $state['previous_blocker_signature'] : '';
+        $state['no_progress_detected'] = !empty($state['no_progress_detected']);
+        $state['no_progress_reason'] = sanitize_key((string) $state['no_progress_reason']);
+        $state['completion_reason'] = sanitize_key((string) $state['completion_reason']);
         foreach (array('created_at', 'updated_at', 'completed_at') as $timestamp_key) {
             $state[$timestamp_key] = sanitize_text_field((string) $state[$timestamp_key]);
         }
         foreach (array(
             'candidate_attachments',
+            'verification_pass',
+            'queueable_variants',
+            'queue_enqueued_attachments',
+            'queue_processed_attachments',
+            'generated_units',
+            'attempted_units',
             'scanned_attachments',
             'eligible_attachments',
             'ready_attachments',
@@ -71,8 +100,24 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
             'pending_variants',
             'unsupported_variants',
             'candidate_count_at_finish',
+            'pass_queue_enqueued_start',
+            'pass_queue_processed_start',
+            'pass_generated_units_start',
+            'pass_attempted_units_start',
         ) as $count_key) {
             $state[$count_key] = max(0, (int) $state[$count_key]);
+        }
+
+        if ($stored_version < 3) {
+            $state['pass_blocker_signature'] = '';
+            $state['previous_blocker_signature'] = '';
+            $state['pass_queue_enqueued_start'] = (int) $state['queue_enqueued_attachments'];
+            $state['pass_queue_processed_start'] = (int) $state['queue_processed_attachments'];
+            $state['pass_generated_units_start'] = (int) $state['generated_units'];
+            $state['pass_attempted_units_start'] = (int) $state['attempted_units'];
+            $state['no_progress_detected'] = false;
+            $state['no_progress_reason'] = '';
+            $state['completion_reason'] = '';
         }
 
         $samples = array();
@@ -88,6 +133,15 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
                 'source'       => sanitize_text_field((string) ($sample['source'] ?? '')),
                 'reasonCode'   => sanitize_key((string) ($sample['reasonCode'] ?? '')),
                 'reason'       => sanitize_text_field((string) ($sample['reason'] ?? '')),
+                'unitId'       => absint($sample['unitId'] ?? 0),
+                'unitStatus'   => in_array((string) ($sample['unitStatus'] ?? ''), array('pending', 'processing', 'done', 'failed', 'skipped'), true) ? (string) $sample['unitStatus'] : '',
+                'unitAttempts' => max(0, (int) ($sample['unitAttempts'] ?? 0)),
+                'failureCode'  => sanitize_key((string) ($sample['failureCode'] ?? '')),
+                'failureStage' => sanitize_key((string) ($sample['failureStage'] ?? '')),
+                'failureDetail'=> sanitize_text_field((string) ($sample['failureDetail'] ?? '')),
+                'skippedReason'=> sanitize_key((string) ($sample['skippedReason'] ?? '')),
+                'skipDetail'   => sanitize_text_field((string) ($sample['skipDetail'] ?? '')),
+                'encoderAttempts' => array_slice(array_values(array_filter((array) ($sample['encoderAttempts'] ?? array()), 'is_array')), 0, 10),
             );
         }
         $state['blocker_samples'] = $samples;
@@ -97,23 +151,24 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
 
     private function get_media_replacement_readiness_state()
     {
-        return $this->normalize_media_replacement_readiness_state(get_option($this->get_media_replacement_readiness_option_name(), array()));
+        $workflow = $this->get_media_replacement_workflow_state();
+        return $this->normalize_media_replacement_readiness_state($workflow['readiness'] ?? array());
     }
 
     private function update_media_replacement_readiness_state(array $state)
     {
         $state = $this->normalize_media_replacement_readiness_state($state);
-        update_option($this->get_media_replacement_readiness_option_name(), $state, false);
+        $workflow = $this->get_media_replacement_workflow_state();
+        $workflow['readiness'] = $state;
+        $this->update_media_replacement_workflow_state($workflow);
         return $state;
     }
 
     private function reset_media_replacement_readiness_state($target_format, $fallback_format)
     {
-        $generation = sanitize_key('readiness-' . gmdate('Ymd-His') . '-' . strtolower((string) wp_generate_password(5, false, false)));
         return $this->update_media_replacement_readiness_state(array_merge(
             $this->get_media_replacement_readiness_defaults(),
             array(
-                'generation'            => $generation,
                 'status'                => 'scanning',
                 'target_format'         => $target_format,
                 'fallback_format'       => $fallback_format,
@@ -126,76 +181,17 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
 
     private function get_media_replacement_readiness_queue_status_map(array $attachment_ids, $target_format)
     {
-        global $wpdb;
-
         $attachment_ids = array_values(array_filter(array_unique(array_map('absint', $attachment_ids))));
-        if (empty($attachment_ids) || !($wpdb instanceof wpdb) || !method_exists($this, 'media_queue_table_exists') || !$this->media_queue_table_exists()) {
-            return array();
-        }
-
-        $table = method_exists($this, 'get_media_queue_table_name') ? $this->get_media_queue_table_name() : '';
-        if ('' === $table) {
+        if (empty($attachment_ids)) {
             return array();
         }
 
         $target_format = sanitize_key((string) $target_format);
-        $rows = array();
-        $attachment_id_chunks = array_chunk($attachment_ids, 20);
-        foreach ($attachment_id_chunks as $attachment_id_chunk) {
-            $last_attachment_id = (int) end($attachment_id_chunk);
-            while (count($attachment_id_chunk) < 20) {
-                $attachment_id_chunk[] = $last_attachment_id;
-            }
-
-            $chunk_rows = $wpdb->get_results(
-                $wpdb->prepare(
-                    'SELECT attachment_id, status FROM %i WHERE attachment_id IN (%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d) AND format IN (%s, %s, %s)',
-                    $table,
-                    $attachment_id_chunk[0],
-                    $attachment_id_chunk[1],
-                    $attachment_id_chunk[2],
-                    $attachment_id_chunk[3],
-                    $attachment_id_chunk[4],
-                    $attachment_id_chunk[5],
-                    $attachment_id_chunk[6],
-                    $attachment_id_chunk[7],
-                    $attachment_id_chunk[8],
-                    $attachment_id_chunk[9],
-                    $attachment_id_chunk[10],
-                    $attachment_id_chunk[11],
-                    $attachment_id_chunk[12],
-                    $attachment_id_chunk[13],
-                    $attachment_id_chunk[14],
-                    $attachment_id_chunk[15],
-                    $attachment_id_chunk[16],
-                    $attachment_id_chunk[17],
-                    $attachment_id_chunk[18],
-                    $attachment_id_chunk[19],
-                    $target_format,
-                    'best',
-                    'both'
-                ),
-                ARRAY_A
-            );
-            if (!empty($chunk_rows)) {
-                $rows = array_merge($rows, $chunk_rows);
-            }
+        foreach ($attachment_ids as $attachment_id) {
+            $this->reconcile_media_queue_units_for_attachment($attachment_id, $target_format, false);
         }
 
-        $priority = array('processing' => 5, 'pending' => 4, 'failed' => 3, 'done' => 2, 'skipped' => 1);
-        $map = array();
-        foreach ((array) $rows as $row) {
-            $attachment_id = absint($row['attachment_id'] ?? 0);
-            $status = sanitize_key((string) ($row['status'] ?? ''));
-            if ($attachment_id <= 0 || !isset($priority[$status])) {
-                continue;
-            }
-            $existing = isset($map[$attachment_id]) ? (string) $map[$attachment_id] : '';
-            if ('' === $existing || $priority[$status] > ($priority[$existing] ?? 0)) {
-                $map[$attachment_id] = $status;
-            }
-        }
-        return $map;
+        return $this->get_media_queue_readiness_diagnostics($attachment_ids, $target_format);
     }
 
     private function get_media_replacement_required_source_variants($attachment_id)
@@ -281,18 +277,83 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
         return $relative;
     }
 
-    private function inspect_media_replacement_readiness_variant($attachment_id, array $variant, $target_format, $queue_status)
+    private function get_media_replacement_readiness_unit_diagnostic(array $queue_context, $relative_path)
+    {
+        $relative_path = ltrim(str_replace('\\', '/', (string) $relative_path), '/');
+        if ('' === $relative_path) {
+            return array();
+        }
+        $units = isset($queue_context['units']) && is_array($queue_context['units']) ? $queue_context['units'] : array();
+        return isset($units[$relative_path]) && is_array($units[$relative_path]) ? $units[$relative_path] : array();
+    }
+
+    private function update_media_replacement_readiness_blocker_signature(array &$state, array $result)
+    {
+        if ('ready' === (string) ($result['status'] ?? '')) {
+            return;
+        }
+        $canonical = array(
+            'attachmentId' => absint($result['attachmentId'] ?? 0),
+            'scope'        => (string) ($result['scope'] ?? 'main'),
+            'sizeName'     => (string) ($result['sizeName'] ?? ''),
+            'source'       => (string) ($result['source'] ?? ''),
+            'status'       => (string) ($result['status'] ?? 'failed'),
+            'reasonCode'   => (string) ($result['reasonCode'] ?? ''),
+            'unitStatus'   => (string) ($result['unitStatus'] ?? ''),
+            'unitAttempts' => max(0, (int) ($result['unitAttempts'] ?? 0)),
+            'failureCode'  => (string) ($result['failureCode'] ?? ''),
+            'failureStage' => (string) ($result['failureStage'] ?? ''),
+            'failureDetail'=> (string) ($result['failureDetail'] ?? ''),
+            'skippedReason'=> (string) ($result['skippedReason'] ?? ''),
+            'skipDetail'   => (string) ($result['skipDetail'] ?? ''),
+        );
+        $encoded = wp_json_encode($canonical, JSON_UNESCAPED_SLASHES);
+        $state['pass_blocker_signature'] = hash('sha256', (string) $state['pass_blocker_signature'] . "\n" . (is_string($encoded) ? $encoded : ''));
+    }
+
+    private function get_media_replacement_readiness_pass_progress(array $state)
+    {
+        $enqueued = max(0, (int) $state['queue_enqueued_attachments'] - (int) $state['pass_queue_enqueued_start']);
+        $processed = max(0, (int) $state['queue_processed_attachments'] - (int) $state['pass_queue_processed_start']);
+        $attempted = max(0, (int) $state['attempted_units'] - (int) $state['pass_attempted_units_start']);
+        $generated = max(0, (int) $state['generated_units'] - (int) $state['pass_generated_units_start']);
+        $signature_changed = '' !== (string) $state['previous_blocker_signature']
+            && (string) $state['pass_blocker_signature'] !== (string) $state['previous_blocker_signature'];
+        return array(
+            'enqueued'         => $enqueued,
+            'processed'        => $processed,
+            'attempted'        => $attempted,
+            'generated'        => $generated,
+            'signatureChanged' => $signature_changed,
+            'madeProgress'     => $enqueued > 0 || $attempted > 0 || $generated > 0 || $signature_changed,
+        );
+    }
+
+    private function inspect_media_replacement_readiness_variant($attachment_id, array $variant, $target_format, array $queue_context = array())
     {
         $source_file = isset($variant['source_file']) ? wp_normalize_path((string) $variant['source_file']) : '';
         $scope = isset($variant['scope']) && 'intermediate' === (string) $variant['scope'] ? 'intermediate' : 'main';
         $size_name = 'intermediate' === $scope ? substr(sanitize_key((string) ($variant['size_name'] ?? '')), 0, 64) : '';
         $relative_path = '' !== $source_file ? $this->get_media_replacement_readiness_source_relative_path($source_file) : '';
         $source_label = '' !== (string) $relative_path ? (string) $relative_path : basename($source_file);
+        $unit_diagnostic = $this->get_media_replacement_readiness_unit_diagnostic($queue_context, $relative_path);
+        $queue_status = !empty($unit_diagnostic['status'])
+            ? (string) $unit_diagnostic['status']
+            : (string) ($queue_context['parentStatus'] ?? '');
         $base = array(
             'attachmentId' => absint($attachment_id),
             'scope'        => $scope,
             'sizeName'     => $size_name,
             'source'       => sanitize_text_field((string) $source_label),
+            'unitId'       => absint($unit_diagnostic['unitId'] ?? 0),
+            'unitStatus'   => sanitize_key((string) ($unit_diagnostic['status'] ?? '')),
+            'unitAttempts' => max(0, (int) ($unit_diagnostic['attempts'] ?? 0)),
+            'failureCode'  => sanitize_key((string) ($unit_diagnostic['failureCode'] ?? '')),
+            'failureStage' => sanitize_key((string) ($unit_diagnostic['failureStage'] ?? '')),
+            'failureDetail'=> sanitize_text_field((string) ($unit_diagnostic['failureDetail'] ?? '')),
+            'skippedReason'=> sanitize_key((string) ($unit_diagnostic['skippedReason'] ?? '')),
+            'skipDetail'   => sanitize_text_field((string) ($unit_diagnostic['skipDetail'] ?? '')),
+            'encoderAttempts' => array_slice(array_values(array_filter((array) ($unit_diagnostic['encoderAttempts'] ?? array()), 'is_array')), 0, 10),
         );
 
         if ('' === $source_file || !preg_match('/\.(?:jpe?g|png)$/i', $source_file) || '' === (string) $relative_path) {
@@ -311,13 +372,23 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
         $target_exists = $this->optimized_storage_path_exists($generated_path, true);
         $queue_pending = in_array((string) $queue_status, array('pending', 'processing'), true);
         $queue_failed = 'failed' === (string) $queue_status;
+        $queue_skipped = 'skipped' === (string) $queue_status;
 
         if (!$target_exists) {
             if ($queue_pending) {
                 return array_merge($base, array('status' => 'pending', 'reasonCode' => 'target_missing_queue_pending', 'sourceEligible' => true, 'reason' => __('The target replacement is still pending in the media conversion queue.', 'ultracache')));
             }
             if ($queue_failed) {
-                return array_merge($base, array('status' => 'failed', 'reasonCode' => 'target_missing_queue_failed', 'sourceEligible' => true, 'reason' => __('The target replacement is missing and the media conversion queue reports a failure.', 'ultracache')));
+                $failure_reason = '' !== (string) ($base['failureDetail'] ?? '')
+                    ? (string) $base['failureDetail']
+                    : __('The target replacement is missing and the media conversion queue reports a failure.', 'ultracache');
+                return array_merge($base, array('status' => 'failed', 'reasonCode' => 'target_missing_queue_failed', 'sourceEligible' => true, 'reason' => $failure_reason));
+            }
+            if ($queue_skipped) {
+                $skip_reason = '' !== (string) ($base['skipDetail'] ?? '')
+                    ? (string) $base['skipDetail']
+                    : __('The exact target queue row was skipped and no replacement file was generated.', 'ultracache');
+                return array_merge($base, array('status' => 'unsupported', 'reasonCode' => 'target_missing_queue_skipped', 'sourceEligible' => false, 'reason' => $skip_reason));
             }
             return array_merge($base, array('status' => 'missing', 'reasonCode' => 'target_missing', 'sourceEligible' => true, 'reason' => __('The target replacement file does not exist.', 'ultracache')));
         }
@@ -339,7 +410,10 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
                 return array_merge($base, array('status' => 'pending', 'reasonCode' => 'target_stale_queue_pending', 'sourceEligible' => true, 'reason' => __('The target replacement is stale and regeneration is pending.', 'ultracache')));
             }
             if ($queue_failed) {
-                return array_merge($base, array('status' => 'failed', 'reasonCode' => 'target_stale_queue_failed', 'sourceEligible' => true, 'reason' => __('The target replacement is stale and the media conversion queue reports a failure.', 'ultracache')));
+                $failure_reason = '' !== (string) ($base['failureDetail'] ?? '')
+                    ? (string) $base['failureDetail']
+                    : __('The target replacement is stale and the media conversion queue reports a failure.', 'ultracache');
+                return array_merge($base, array('status' => 'failed', 'reasonCode' => 'target_stale_queue_failed', 'sourceEligible' => true, 'reason' => $failure_reason));
             }
             return array_merge($base, array('status' => 'stale', 'reasonCode' => 'target_stale', 'sourceEligible' => true, 'reason' => __('The target replacement is older than its source variant.', 'ultracache')));
         }
@@ -347,15 +421,96 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
         return array_merge($base, array('status' => 'ready', 'reasonCode' => 'ready', 'sourceEligible' => true, 'reason' => ''));
     }
 
-    private function add_media_replacement_readiness_blocker_sample(array &$state, array $result)
+    private function get_media_replacement_readiness_blocker_priority(array $sample)
     {
-        if (count((array) $state['blocker_samples']) >= 25 || 'ready' === (string) ($result['status'] ?? '')) {
-            return;
+        if ('' !== (string) ($sample['failureCode'] ?? '') || '' !== (string) ($sample['failureDetail'] ?? '')) {
+            return 100;
         }
-        $state['blocker_samples'][] = $result;
+        $priority = array(
+            'failed'      => 90,
+            'unsupported' => 80,
+            'stale'       => 70,
+            'missing'     => 60,
+            'pending'     => 50,
+        );
+        return (int) ($priority[(string) ($sample['status'] ?? '')] ?? 0);
     }
 
-    private function build_media_replacement_readiness_response(array $state, $has_more = false, $batch_scanned = 0)
+    private function add_media_replacement_readiness_blocker_sample(array &$state, array $result)
+    {
+        if ('ready' === (string) ($result['status'] ?? '')) {
+            return;
+        }
+        $samples = array_values((array) $state['blocker_samples']);
+        $samples[] = $result;
+        usort(
+            $samples,
+            function ($left, $right) {
+                $left = is_array($left) ? $left : array();
+                $right = is_array($right) ? $right : array();
+                $priority_compare = $this->get_media_replacement_readiness_blocker_priority($right) <=> $this->get_media_replacement_readiness_blocker_priority($left);
+                if (0 !== $priority_compare) {
+                    return $priority_compare;
+                }
+                $left_key = sprintf(
+                    '%012d|%s|%s|%s',
+                    absint($left['attachmentId'] ?? 0),
+                    (string) ($left['scope'] ?? 'main'),
+                    (string) ($left['sizeName'] ?? ''),
+                    (string) ($left['source'] ?? '')
+                );
+                $right_key = sprintf(
+                    '%012d|%s|%s|%s',
+                    absint($right['attachmentId'] ?? 0),
+                    (string) ($right['scope'] ?? 'main'),
+                    (string) ($right['sizeName'] ?? ''),
+                    (string) ($right['source'] ?? '')
+                );
+                return strcmp($left_key, $right_key);
+            }
+        );
+        $state['blocker_samples'] = array_slice($samples, 0, 25);
+    }
+
+    private function get_media_replacement_readiness_primary_blocker_message(array $state)
+    {
+        $samples = array_values((array) ($state['blocker_samples'] ?? array()));
+        if (empty($samples) || !is_array($samples[0])) {
+            return '';
+        }
+        $sample = $samples[0];
+        $scope = 'intermediate' === (string) ($sample['scope'] ?? '')
+            ? sprintf(
+                /* translators: %s: registered intermediate image size name. */
+                __('intermediate size %s', 'ultracache'),
+                (string) ($sample['sizeName'] ?? '')
+            )
+            : __('main image', 'ultracache');
+        $reason = (string) ($sample['failureDetail'] ?? '');
+        if ('' === $reason) {
+            $reason = (string) ($sample['skipDetail'] ?? '');
+        }
+        if ('' === $reason) {
+            $reason = (string) ($sample['reason'] ?? '');
+        }
+        $reason_code = (string) ($sample['failureCode'] ?? '');
+        if ('' === $reason_code) {
+            $reason_code = (string) ($sample['skippedReason'] ?? '');
+        }
+        if ('' !== $reason_code && false === strpos($reason, $reason_code)) {
+            $reason = '' !== $reason ? $reason_code . ': ' . $reason : $reason_code;
+        }
+        return sprintf(
+            /* translators: 1: attachment ID, 2: main/intermediate scope, 3: source path, 4: exact failure reason. */
+            __('Attachment %1$d, %2$s, %3$s: %4$s', 'ultracache'),
+            absint($sample['attachmentId'] ?? 0),
+            $scope,
+            (string) ($sample['source'] ?? ''),
+            '' !== $reason ? $reason : __('The required target file is not ready.', 'ultracache')
+        );
+    }
+
+    private function build_media_replacement_readiness_response(array $state, $has_more = false, $batch_scanned = 0, array $queue_result = array())
     {
         $state = $this->normalize_media_replacement_readiness_state($state);
         $blocker_variants = (int) $state['missing_variants']
@@ -378,14 +533,27 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
         if ('failed' === $state['status']) {
             $message = $state['last_error'] ?: __('Replacement readiness inventory failed.', 'ultracache');
         } elseif ('paused' === $state['status']) {
-            $message = __('Replacement readiness inventory is paused and can be resumed.', 'ultracache');
+            $message = '' !== $state['last_queue_message']
+                ? $state['last_queue_message']
+                : __('Replacement readiness scan is paused and can be resumed.', 'ultracache');
         } elseif ($has_more || 'scanning' === $state['status']) {
-            $message = sprintf(
-                /* translators: 1: scanned attachments, 2: total candidate attachments. */
-                __('Replacement readiness inventory scanned %1$d of %2$d candidate attachments.', 'ultracache'),
-                (int) $state['scanned_attachments'],
-                (int) $state['candidate_attachments']
-            );
+            if ((int) $state['verification_pass'] > 0 || (int) $state['queue_processed_attachments'] > 0) {
+                $message = sprintf(
+                    /* translators: 1: target image format, 2: verification pass, 3: scanned attachments, 4: total candidate attachments. */
+                    __('Generating and verifying exact %1$s replacement files. Pass %2$d scanned %3$d of %4$d candidate attachments.', 'ultracache'),
+                    strtoupper((string) $state['target_format']),
+                    max(1, (int) $state['verification_pass']),
+                    (int) $state['scanned_attachments'],
+                    (int) $state['candidate_attachments']
+                );
+            } else {
+                $message = sprintf(
+                    /* translators: 1: scanned attachments, 2: total candidate attachments. */
+                    __('Replacement readiness inventory scanned %1$d of %2$d candidate attachments.', 'ultracache'),
+                    (int) $state['scanned_attachments'],
+                    (int) $state['candidate_attachments']
+                );
+            }
         } elseif ($ready) {
             $message = sprintf(
                 /* translators: 1: replacement variants, 2: target image format. */
@@ -394,18 +562,39 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
                 strtoupper((string) $state['target_format'])
             );
         } else {
-            $message = __('Replacement readiness complete, but blockers remain. Media Library replacement must stay locked.', 'ultracache');
+            $primary_blocker = $this->get_media_replacement_readiness_primary_blocker_message($state);
+            if (!empty($state['no_progress_detected'])) {
+                $message = sprintf(
+                    /* translators: 1: blocked target variants, 2: target image format, 3: exact first blocker. */
+                    __('Replacement readiness stopped after detecting no conversion progress. %1$d required %2$s variant(s) remain blocked. %3$s', 'ultracache'),
+                    $blocker_variants,
+                    strtoupper((string) $state['target_format']),
+                    $primary_blocker
+                );
+            } elseif ('' !== $primary_blocker) {
+                $message = sprintf(
+                    /* translators: %s: exact first blocker. */
+                    __('Replacement readiness complete, but blockers remain. %s', 'ultracache'),
+                    $primary_blocker
+                );
+            } else {
+                $message = __('Replacement readiness complete, but blockers remain. Media Library replacement must stay locked.', 'ultracache');
+            }
         }
 
         return array(
             'success'                 => 'failed' !== $state['status'],
             'status'                  => $state['status'],
             'message'                 => $message,
-            'generation'              => $state['generation'],
             'targetFormat'            => $state['target_format'],
             'fallbackFormat'          => $state['fallback_format'],
             'hasMore'                 => (bool) $has_more,
             'batchScanned'            => max(0, (int) $batch_scanned),
+            'batchProcessed'          => max(0, (int) ($queue_result['attachmentsTouchedThisRun'] ?? $queue_result['processed'] ?? 0)),
+            'batchGeneratedUnits'     => max(0, (int) ($queue_result['unitsGeneratedThisRun'] ?? 0)),
+            'batchAttemptedUnits'     => max(0, (int) ($queue_result['unitAttemptsThisRun'] ?? $queue_result['unitsProcessed'] ?? 0)),
+            'queuePaused'             => !empty($queue_result['paused']),
+            'queuePauseReason'        => sanitize_key((string) ($queue_result['pauseReason'] ?? $state['last_queue_pause_reason'])),
             'nextCursor'              => (int) $state['cursor_attachment_id'],
             'progressPercent'         => $progress,
             'inventoryComplete'       => $inventory_complete,
@@ -424,6 +613,19 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
             'failedVariants'          => (int) $state['failed_variants'],
             'pendingVariants'         => (int) $state['pending_variants'],
             'unsupportedVariants'     => (int) $state['unsupported_variants'],
+            'verificationPass'        => (int) $state['verification_pass'],
+            'queueableVariants'       => (int) $state['queueable_variants'],
+            'queueEnqueuedAttachments'=> (int) $state['queue_enqueued_attachments'],
+            'queueProcessedAttachments'=> (int) $state['queue_processed_attachments'],
+            'generatedUnits'          => (int) $state['generated_units'],
+            'attemptedUnits'          => (int) $state['attempted_units'],
+            'lastQueueMessage'        => $state['last_queue_message'],
+            'lastQueuePauseReason'    => $state['last_queue_pause_reason'],
+            'blockerSignature'        => $state['pass_blocker_signature'],
+            'previousBlockerSignature'=> $state['previous_blocker_signature'],
+            'noProgressDetected'      => (bool) $state['no_progress_detected'],
+            'noProgressReason'        => $state['no_progress_reason'],
+            'completionReason'        => $state['completion_reason'],
             'blockerVariants'         => $blocker_variants,
             'blockerSamples'          => array_values((array) $state['blocker_samples']),
             'createdAt'               => $state['created_at'],
@@ -456,7 +658,6 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
     public function get_media_library_replacement_start_guard($args = array())
     {
         $args = is_array($args) ? $args : array();
-        $requested_generation = sanitize_key((string) ($args['generation'] ?? $args['readiness_generation'] ?? ''));
         list($target_format, $fallback_format) = $this->get_media_replacement_current_output_policy();
         $state = $this->get_media_replacement_readiness_state();
         $readiness = $this->get_media_library_replacement_readiness_status();
@@ -466,7 +667,7 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
         $current_candidate_count = $inventory_complete
             ? $this->get_media_replacement_candidate_attachment_count()
             : (int) $state['candidate_attachments'];
-        if (empty($state['generation']) || 'idle' === $state['status']) {
+        if ('idle' === $state['status']) {
             $this->add_media_replacement_start_guard_blocker(
                 $blockers,
                 'readiness_not_scanned',
@@ -490,15 +691,7 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
             $this->add_media_replacement_start_guard_blocker(
                 $blockers,
                 'output_policy_changed',
-                __('The image output policy changed after the readiness inventory. Run the inventory again.', 'ultracache')
-            );
-        }
-
-        if ('' !== $requested_generation && $requested_generation !== $state['generation']) {
-            $this->add_media_replacement_start_guard_blocker(
-                $blockers,
-                'readiness_generation_mismatch',
-                __('The requested readiness generation is no longer current. Run the readiness inventory again.', 'ultracache')
+                __('The image replacement policy changed after the readiness inventory. Run the inventory again.', 'ultracache')
             );
         }
 
@@ -583,36 +776,115 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
 
         }
 
-        $allowed = empty($blockers);
-        $message = $allowed
-            ? sprintf(
-                /* translators: 1: ready target variants, 2: target image format. */
-                __('Replacement start guard passed. All %1$d required %2$s variants are valid and current.', 'ultracache'),
-                (int) $state['ready_variants'],
-                strtoupper($target_format)
-            )
-            : __('Media Library replacement cannot start until every required target-format file is ready.', 'ultracache');
+        $decision_codes = array(
+            'ineligible_attachments',
+            'missing_target_variants',
+            'stale_target_variants',
+            'failed_target_variants',
+            'pending_target_variants',
+            'unsupported_source_variants',
+            'variant_count_mismatch',
+            'blocked_attachments',
+        );
+        $hard_blockers = array();
+        $decision_blockers = array();
+        foreach ($blockers as $blocker) {
+            if (in_array((string) ($blocker['code'] ?? ''), $decision_codes, true)) {
+                $decision_blockers[] = $blocker;
+            } else {
+                $hard_blockers[] = $blocker;
+            }
+        }
+        $allowed = empty($hard_blockers);
+        $decisions_required = $allowed && !empty($decision_blockers);
+        $message = !$allowed
+            ? __('Media Library replacement Prepare cannot start until the readiness inventory is structurally current.', 'ultracache')
+            : ($decisions_required
+                ? __('Readiness inventory is complete. Prepare will freeze the blocker groups so they can be resolved with Decide Blockers.', 'ultracache')
+                : sprintf(
+                    /* translators: 1: ready target variants, 2: target image format. */
+                    __('Replacement start guard passed. All %1$d required %2$s variants are valid and current.', 'ultracache'),
+                    (int) $state['ready_variants'],
+                    strtoupper($target_format)
+                ));
 
         return array(
             'success'                     => true,
             'allowed'                     => $allowed,
             'blocked'                     => !$allowed,
-            'status'                      => $allowed ? 'replacement_start_ready' : 'replacement_start_blocked',
+            'decisionsRequired'           => $decisions_required,
+            'status'                      => !$allowed ? 'replacement_start_blocked' : ($decisions_required ? 'replacement_prepare_ready_with_blockers' : 'replacement_start_ready'),
             'message'                     => $message,
-            'generation'                  => $state['generation'],
-            'requestedGeneration'         => $requested_generation,
             'targetFormat'                => $target_format,
             'fallbackFormat'              => $fallback_format,
             'currentCandidateAttachments' => $current_candidate_count,
             'blockers'                    => $blockers,
+            'hardBlockers'                => $hard_blockers,
+            'decisionBlockers'            => $decision_blockers,
             'readiness'                   => $readiness,
         );
+    }
+
+    private function reset_media_replacement_readiness_verification_pass(array $state)
+    {
+        foreach (array(
+            'scanned_attachments',
+            'eligible_attachments',
+            'ready_attachments',
+            'blocked_attachments',
+            'required_variants',
+            'ready_variants',
+            'missing_variants',
+            'stale_variants',
+            'failed_variants',
+            'pending_variants',
+            'unsupported_variants',
+            'queueable_variants',
+        ) as $count_key) {
+            $state[$count_key] = 0;
+        }
+        $state['cursor_attachment_id'] = 0;
+        $state['previous_blocker_signature'] = (string) $state['pass_blocker_signature'];
+        $state['pass_blocker_signature'] = '';
+        $state['pass_queue_enqueued_start'] = (int) $state['queue_enqueued_attachments'];
+        $state['pass_queue_processed_start'] = (int) $state['queue_processed_attachments'];
+        $state['pass_generated_units_start'] = (int) $state['generated_units'];
+        $state['pass_attempted_units_start'] = (int) $state['attempted_units'];
+        $state['blocker_samples'] = array();
+        $state['verification_pass'] = max(0, (int) $state['verification_pass']) + 1;
+        $state['status'] = 'scanning';
+        $state['no_progress_detected'] = false;
+        $state['no_progress_reason'] = '';
+        $state['completion_reason'] = '';
+        $state['completed_at'] = '';
+        $state['last_error'] = '';
+        $state['updated_at'] = current_time('mysql', true);
+        return $this->update_media_replacement_readiness_state($state);
+    }
+
+    private function media_replacement_readiness_result_is_queueable(array $result, $queue_status)
+    {
+        $exact_queue_status = (string) ($result['unitStatus'] ?? '');
+        if ('' === $exact_queue_status) {
+            $exact_queue_status = (string) $queue_status;
+        }
+        if (empty($result['sourceEligible']) || in_array($exact_queue_status, array('failed', 'skipped'), true)) {
+            return false;
+        }
+
+        $status = (string) ($result['status'] ?? 'failed');
+        if (in_array($status, array('missing', 'stale', 'pending'), true)) {
+            return true;
+        }
+
+        return 'failed' === $status && 'target_invalid' === (string) ($result['reasonCode'] ?? '');
     }
 
     public function get_media_library_replacement_readiness_status()
     {
         $state = $this->get_media_replacement_readiness_state();
-        $has_more = in_array($state['status'], array('scanning', 'paused'), true) && !empty($this->get_media_replacement_candidate_attachment_ids_batch($state['cursor_attachment_id'], 1));
+        $has_more = in_array($state['status'], array('scanning', 'paused'), true)
+            && !empty($this->get_media_replacement_candidate_attachment_ids_batch($state['cursor_attachment_id'], 1));
         return $this->build_media_replacement_readiness_response($state, $has_more, 0);
     }
 
@@ -636,16 +908,18 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
 
         $state = $this->get_media_replacement_readiness_state();
         $batch_scanned = 0;
+        $queue_result = array();
         try {
             $reset = !empty($args['reset']);
             $policy_changed = $state['target_format'] !== $target_format || $state['fallback_format'] !== $fallback_format;
-            if ($reset || $policy_changed || 'idle' === $state['status'] || empty($state['generation'])) {
+            if ($reset || $policy_changed || 'idle' === $state['status']) {
                 $state = $this->reset_media_replacement_readiness_state($target_format, $fallback_format);
             } elseif ('completed' === $state['status']) {
                 return $this->build_media_replacement_readiness_response($state, false, 0);
             } else {
                 $state['status'] = 'scanning';
                 $state['last_error'] = '';
+                $state['last_queue_pause_reason'] = '';
                 $state['updated_at'] = current_time('mysql', true);
                 $state = $this->update_media_replacement_readiness_state($state);
             }
@@ -653,6 +927,8 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
             $deadline = microtime(true) + $time_budget;
             $attachment_ids = $this->get_media_replacement_candidate_attachment_ids_batch($state['cursor_attachment_id'], $limit);
             $queue_statuses = $this->get_media_replacement_readiness_queue_status_map($attachment_ids, $target_format);
+            $queue_attachment_ids = array();
+
             foreach ($attachment_ids as $attachment_id) {
                 if ($batch_scanned > 0 && microtime(true) >= $deadline) {
                     break;
@@ -661,9 +937,13 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
                 $variants = $this->get_media_replacement_required_source_variants($attachment_id);
                 $attachment_ready = true;
                 $attachment_eligible = false;
-                $queue_status = isset($queue_statuses[$attachment_id]) ? (string) $queue_statuses[$attachment_id] : '';
+                $attachment_queueable = false;
+                $force_pending = false;
+                $queue_context = isset($queue_statuses[$attachment_id]) && is_array($queue_statuses[$attachment_id]) ? $queue_statuses[$attachment_id] : array();
+                $queue_status = (string) ($queue_context['parentStatus'] ?? '');
+
                 foreach ($variants as $variant) {
-                    $result = $this->inspect_media_replacement_readiness_variant($attachment_id, $variant, $target_format, $queue_status);
+                    $result = $this->inspect_media_replacement_readiness_variant($attachment_id, $variant, $target_format, $queue_context);
                     $status = (string) ($result['status'] ?? 'failed');
                     $state['required_variants']++;
                     if ('ready' === $status) {
@@ -688,7 +968,25 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
                                 $attachment_eligible = true;
                             }
                         }
+
+                        if ($this->media_replacement_readiness_result_is_queueable($result, $queue_status)) {
+                            $state['queueable_variants']++;
+                            $attachment_queueable = true;
+                            if (in_array($status, array('stale', 'failed'), true) || in_array($queue_status, array('done', 'skipped'), true)) {
+                                $force_pending = true;
+                            }
+                        }
+                        $this->update_media_replacement_readiness_blocker_signature($state, $result);
                         $this->add_media_replacement_readiness_blocker_sample($state, $result);
+                    }
+                }
+
+                if ($attachment_queueable && 'failed' !== $queue_status) {
+                    if (in_array($queue_status, array('pending', 'processing'), true)) {
+                        $queue_attachment_ids[$attachment_id] = absint($attachment_id);
+                    } elseif (method_exists($this, 'upsert_media_queue_item') && $this->upsert_media_queue_item($attachment_id, $target_format, 'pending', '', 0, $force_pending)) {
+                        $queue_attachment_ids[$attachment_id] = absint($attachment_id);
+                        $state['queue_enqueued_attachments']++;
                     }
                 }
 
@@ -705,26 +1003,96 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
                 $batch_scanned++;
             }
 
-            $has_more = !empty($this->get_media_replacement_candidate_attachment_ids_batch($state['cursor_attachment_id'], 1));
-            $state['status'] = $has_more ? 'scanning' : 'completed';
-            $state['updated_at'] = current_time('mysql', true);
-            if (!$has_more) {
-                $state['candidate_count_at_finish'] = $this->get_media_replacement_candidate_attachment_count();
-                $state['library_changed'] = $state['candidate_count_at_finish'] !== $state['candidate_attachments'];
-                $state['completed_at'] = current_time('mysql', true);
+            if (!empty($queue_attachment_ids) && method_exists($this, 'process_media_queue_batch')) {
+                $remaining_budget = max(1, (int) floor($deadline - microtime(true)));
+                $queue_result = $this->process_media_queue_batch(array(
+                    'limit'          => min(count($queue_attachment_ids), max(1, $limit)),
+                    'format'         => $target_format,
+                    'only_missing'   => true,
+                    'time_budget'    => min(10, $remaining_budget),
+                    'auto_rebuild'   => false,
+                    'attachment_ids' => array_values($queue_attachment_ids),
+                ));
+                $state['queue_processed_attachments'] += max(0, (int) ($queue_result['attachmentsTouchedThisRun'] ?? $queue_result['processed'] ?? 0));
+                $state['attempted_units'] += max(0, (int) ($queue_result['unitAttemptsThisRun'] ?? $queue_result['unitsProcessed'] ?? 0));
+                $state['generated_units'] += max(0, (int) ($queue_result['unitsGeneratedThisRun'] ?? 0));
+                $state['last_queue_message'] = sanitize_text_field((string) ($queue_result['message'] ?? ''));
+                $state['last_queue_pause_reason'] = sanitize_key((string) ($queue_result['pauseReason'] ?? $queue_result['reason'] ?? ''));
             }
+
+            $has_more_candidates = !empty($this->get_media_replacement_candidate_attachment_ids_batch($state['cursor_attachment_id'], 1));
+            if ($has_more_candidates) {
+                $queue_pause_reason = sanitize_key((string) ($queue_result['pauseReason'] ?? $queue_result['reason'] ?? ''));
+                $hard_queue_pause = !empty($queue_result['paused']) && in_array($queue_pause_reason, array('background_paused', 'manual_session_active'), true);
+                $state['status'] = $hard_queue_pause ? 'paused' : 'scanning';
+                $state['updated_at'] = current_time('mysql', true);
+                $state = $this->update_media_replacement_readiness_state($state);
+                $response = $this->build_media_replacement_readiness_response($state, true, $batch_scanned, $queue_result);
+                if ($hard_queue_pause) {
+                    $response['success'] = false;
+                    $response['blocked'] = true;
+                }
+                return $response;
+            }
+
+            $state['candidate_count_at_finish'] = $this->get_media_replacement_candidate_attachment_count();
+            $state['library_changed'] = $state['candidate_count_at_finish'] !== $state['candidate_attachments'];
+            $needs_verification_pass = (int) $state['queueable_variants'] > 0 && !$state['library_changed'];
+            $queue_paused = !empty($queue_result['paused']);
+            $pass_progress = $this->get_media_replacement_readiness_pass_progress($state);
+            $no_progress = $needs_verification_pass && !$queue_paused && empty($pass_progress['madeProgress']);
+
+            if ($no_progress) {
+                $state['status'] = 'completed';
+                $state['no_progress_detected'] = true;
+                $state['no_progress_reason'] = 'queueable_variants_without_transition';
+                $state['completion_reason'] = 'completed_with_blockers_no_progress';
+                $state['last_error'] = '';
+                $state['updated_at'] = current_time('mysql', true);
+                $state['completed_at'] = current_time('mysql', true);
+                $state = $this->update_media_replacement_readiness_state($state);
+                return $this->build_media_replacement_readiness_response($state, false, $batch_scanned, $queue_result);
+            }
+
+            if ($needs_verification_pass) {
+                $state = $this->reset_media_replacement_readiness_verification_pass($state);
+                if (!empty($queue_result['paused'])) {
+                    $state['status'] = 'paused';
+                    $state['last_queue_message'] = sanitize_text_field((string) ($queue_result['message'] ?? __('Exact replacement conversion is paused.', 'ultracache')));
+                    $state['last_queue_pause_reason'] = sanitize_key((string) ($queue_result['pauseReason'] ?? $queue_result['reason'] ?? ''));
+                    $state = $this->update_media_replacement_readiness_state($state);
+                }
+                $response = $this->build_media_replacement_readiness_response($state, true, $batch_scanned, $queue_result);
+                if (!empty($queue_result['paused']) && in_array((string) ($state['last_queue_pause_reason'] ?? ''), array('background_paused', 'manual_session_active'), true)) {
+                    $response['success'] = false;
+                    $response['blocked'] = true;
+                }
+                return $response;
+            }
+
+            $state['status'] = 'completed';
+            $state['completion_reason'] = 0 === ((int) $state['missing_variants']
+                + (int) $state['stale_variants']
+                + (int) $state['failed_variants']
+                + (int) $state['pending_variants']
+                + (int) $state['unsupported_variants'])
+                ? 'ready'
+                : 'completed_with_blockers';
+            $state['updated_at'] = current_time('mysql', true);
+            $state['completed_at'] = current_time('mysql', true);
             $state = $this->update_media_replacement_readiness_state($state);
-            return $this->build_media_replacement_readiness_response($state, $has_more, $batch_scanned);
+            return $this->build_media_replacement_readiness_response($state, false, $batch_scanned, $queue_result);
         } catch (Throwable $error) {
             $state['status'] = 'failed';
             $state['last_error'] = sanitize_text_field((string) $error->getMessage());
             $state['updated_at'] = current_time('mysql', true);
             $state = $this->update_media_replacement_readiness_state($state);
-            return $this->build_media_replacement_readiness_response($state, true, $batch_scanned);
+            return $this->build_media_replacement_readiness_response($state, true, $batch_scanned, $queue_result);
         } finally {
             $this->release_media_replacement_readiness_lock($lock_token);
         }
     }
+
 
 
 }

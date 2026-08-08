@@ -5,12 +5,6 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Runtime_JS_Scanner_Trait
 {
-    private function get_runtime_js_scan_transient_key($scan_id)
-    {
-        $scan_id = sanitize_key((string) $scan_id);
-        return 'ultracache_runtime_js_scan_' . md5($scan_id);
-    }
-
     private function get_runtime_js_scan_current_setting_lines($key)
     {
         $values = array();
@@ -230,6 +224,13 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             }
             $type = isset($script['type']) ? sanitize_text_field(substr((string) $script['type'], 0, 120)) : '';
             $strategy = isset($script['strategy']) ? sanitize_text_field(substr((string) $script['strategy'], 0, 80)) : '';
+            $deps = array();
+            foreach ((array) ($script['deps'] ?? array()) as $dependency) {
+                $dependency = sanitize_key((string) $dependency);
+                if ('' !== $dependency) {
+                    $deps[$dependency] = true;
+                }
+            }
             $text = isset($script['text']) ? sanitize_textarea_field(substr((string) $script['text'], 0, 60000)) : '';
             if ('' === $id && '' !== $text) {
                 $source_url_id = $this->runtime_js_scan_source_url_id_from_inline_text($text);
@@ -251,6 +252,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                 'async'    => !empty($script['async']),
                 'strategy' => $strategy,
                 'delayed'  => !empty($script['delayed']),
+                'deps'     => array_keys($deps),
                 'text'     => $text,
             );
 
@@ -270,6 +272,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             'inline'     => 0,
             'delayed'    => 0,
             'sourceUrl'  => 0,
+            'declaredDependencyEdges' => 0,
         );
 
         foreach ($scripts as $script) {
@@ -284,6 +287,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             if (!empty($script['delayed'])) {
                 $summary['delayed']++;
             }
+            $summary['declaredDependencyEdges'] += count((array) ($script['deps'] ?? array()));
             $text = isset($script['text']) ? (string) $script['text'] : '';
             if ('' !== $text && '' !== $this->runtime_js_scan_source_url_id_from_inline_text($text)) {
                 $summary['sourceUrl']++;
@@ -449,6 +453,14 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
 
                 $type = $this->runtime_js_scan_processor_attribute($processor, 'type');
                 $handle = $this->runtime_js_scan_processor_attribute($processor, 'data-ultracache-handle');
+                $dependency_text = $this->runtime_js_scan_processor_attribute($processor, 'data-ultracache-deps');
+                $deps = array();
+                foreach (preg_split('/\s*,\s*/', $dependency_text) as $dependency) {
+                    $dependency = sanitize_key((string) $dependency);
+                    if ('' !== $dependency) {
+                        $deps[$dependency] = true;
+                    }
+                }
                 $strategy = $this->runtime_js_scan_processor_attribute($processor, 'data-wp-strategy');
                 $is_delayed = (null !== $processor->get_attribute('data-ultracache-src')
                     || null !== $processor->get_attribute('data-ultracache-inline')
@@ -464,6 +476,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                     'async'    => null !== $processor->get_attribute('async'),
                     'strategy' => $strategy,
                     'delayed'  => $is_delayed,
+                    'deps'     => array_keys($deps),
                     'text'     => '' === $src || $is_delayed ? sanitize_textarea_field(substr($body, 0, 60000)) : '',
                 );
 
@@ -1113,10 +1126,111 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
         return array_slice(array_values($sources), 0, 12);
     }
 
+    private function runtime_js_scan_console_input_max_bytes()
+    {
+        return 256 * 1024;
+    }
+
+    private function runtime_js_scan_console_input_max_lines()
+    {
+        return 2000;
+    }
+
+    private function runtime_js_scan_truncate_utf8_bytes($text, $max_bytes)
+    {
+        $text = (string) $text;
+        $max_bytes = max(0, (int) $max_bytes);
+        if (strlen($text) <= $max_bytes) {
+            return $text;
+        }
+        if (0 === $max_bytes) {
+            return '';
+        }
+
+        $truncated = substr($text, 0, $max_bytes);
+        for ($attempt = 0; $attempt < 4 && '' !== $truncated; ++$attempt) {
+            if (1 === preg_match('//u', $truncated)) {
+                return $truncated;
+            }
+            $truncated = substr($truncated, 0, -1);
+        }
+
+        if (function_exists('wp_check_invalid_utf8')) {
+            $checked = wp_check_invalid_utf8($truncated, true);
+            return is_string($checked) ? $checked : '';
+        }
+
+        return 1 === preg_match('//u', $truncated) ? $truncated : '';
+    }
+
+    private function runtime_js_scan_prepare_console_input($text)
+    {
+        $raw = (string) $text;
+        $max_bytes = $this->runtime_js_scan_console_input_max_bytes();
+        $max_lines = $this->runtime_js_scan_console_input_max_lines();
+        $original_byte_count = strlen($raw);
+        $normalized = str_replace(array("\r\n", "\r"), "\n", $raw);
+        $original_line_count = '' === $normalized ? 0 : substr_count($normalized, "\n") + 1;
+        $truncation_reasons = array();
+
+        if (strlen($normalized) > $max_bytes) {
+            $normalized = $this->runtime_js_scan_truncate_utf8_bytes($normalized, $max_bytes);
+            $last_newline = strrpos($normalized, "\n");
+            if (false !== $last_newline && 0 < $last_newline) {
+                $normalized = substr($normalized, 0, $last_newline);
+            }
+            $truncation_reasons[] = 'byte_limit';
+        }
+
+        if ('' !== $normalized) {
+            $lines = explode("\n", $normalized, $max_lines + 1);
+            if (count($lines) > $max_lines) {
+                $normalized = implode("\n", array_slice($lines, 0, $max_lines));
+                $truncation_reasons[] = 'line_limit';
+            }
+        }
+
+        $normalized = sanitize_textarea_field($normalized);
+        if (strlen($normalized) > $max_bytes) {
+            $normalized = $this->runtime_js_scan_truncate_utf8_bytes($normalized, $max_bytes);
+            $truncation_reasons[] = 'byte_limit';
+        }
+
+        $processed_line_count = '' === $normalized ? 0 : substr_count($normalized, "\n") + 1;
+
+        return array(
+            'text'                  => $normalized,
+            'consoleInputTruncated' => !empty($truncation_reasons),
+            'originalByteCount'     => $original_byte_count,
+            'processedByteCount'    => strlen($normalized),
+            'originalLineCount'     => $original_line_count,
+            'processedLineCount'    => $processed_line_count,
+            'truncationReasons'     => array_values(array_unique($truncation_reasons)),
+            'maxBytes'              => $max_bytes,
+            'maxLines'              => $max_lines,
+        );
+    }
+
+    private function runtime_js_scan_console_input_metadata(array $prepared)
+    {
+        return array(
+            'consoleInputTruncated'        => !empty($prepared['consoleInputTruncated']),
+            'originalByteCount'            => isset($prepared['originalByteCount']) ? (int) $prepared['originalByteCount'] : 0,
+            'processedByteCount'           => isset($prepared['processedByteCount']) ? (int) $prepared['processedByteCount'] : 0,
+            'originalLineCount'            => isset($prepared['originalLineCount']) ? (int) $prepared['originalLineCount'] : 0,
+            'processedLineCount'           => isset($prepared['processedLineCount']) ? (int) $prepared['processedLineCount'] : 0,
+            'consoleInputTruncationReasons' => isset($prepared['truncationReasons']) && is_array($prepared['truncationReasons']) ? array_values($prepared['truncationReasons']) : array(),
+            'consoleInputLimits'           => array(
+                'maxBytes' => isset($prepared['maxBytes']) ? (int) $prepared['maxBytes'] : $this->runtime_js_scan_console_input_max_bytes(),
+                'maxLines' => isset($prepared['maxLines']) ? (int) $prepared['maxLines'] : $this->runtime_js_scan_console_input_max_lines(),
+            ),
+        );
+    }
+
     private function runtime_js_scan_console_text_to_errors($text)
     {
-        $text = str_replace(array("\r\n", "\r"), "\n", (string) $text);
-        $text = substr($text, 0, 30000);
+        $prepared = $this->runtime_js_scan_prepare_console_input($text);
+        $text = (string) $prepared['text'];
         if ('' === trim($text)) {
             return array();
         }
@@ -1224,7 +1338,8 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
 
     public function parse_runtime_js_scan_console_errors(WP_REST_Request $request)
     {
-        $text = (string) $request->get_param('text');
+        $console_input = $this->runtime_js_scan_prepare_console_input($request->get_param('text'));
+        $text = (string) $console_input['text'];
         if ('' === trim($text)) {
             return new WP_REST_Response(array(
                 'success' => false,
@@ -1236,7 +1351,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
         $scripts = $this->runtime_js_scan_fetch_script_inventory_for_url($url);
         $errors = $this->runtime_js_scan_console_text_to_errors($text);
         $scan = $this->build_runtime_js_scan_suggestions($errors, $scripts);
-        $response = array(
+        $response = array_merge(array(
             'available'            => true,
             'source'               => 'console-paste-runtime-engine',
             'runtimeErrorCount'    => count($errors),
@@ -1244,6 +1359,8 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             'suggestionCount'      => isset($scan['suggestion_count']) ? (int) $scan['suggestion_count'] : 0,
             'missingCount'         => isset($scan['missing_count']) ? (int) $scan['missing_count'] : 0,
             'alreadyExcludedCount' => isset($scan['already_excluded_count']) ? (int) $scan['already_excluded_count'] : 0,
+            'persistentListedFailureCount' => isset($scan['persistent_listed_failure_count']) ? (int) $scan['persistent_listed_failure_count'] : 0,
+            'dependencyRiskCount' => isset($scan['dependency_risk_count']) ? (int) $scan['dependency_risk_count'] : 0,
             'suggestions'          => isset($scan['suggestions']) && is_array($scan['suggestions']) ? array_slice($scan['suggestions'], 0, 80) : array(),
             'errors'               => array_slice($errors, 0, 40),
             'resourceErrors'       => array(),
@@ -1252,9 +1369,56 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             'scriptInventorySummary' => $this->runtime_js_scan_inventory_summary($scripts),
             'scanContext'          => 'console-paste',
             'completed'            => true,
-        );
+        ), $this->runtime_js_scan_console_input_metadata($console_input));
 
         return new WP_REST_Response(array('success' => true, 'consoleErrorScan' => $response), 200);
+    }
+
+    private function runtime_js_scan_report_from_job($job)
+    {
+        if (!is_array($job) || empty($job['result']) || !is_array($job['result'])) {
+            return array();
+        }
+        $report = isset($job['result']['report']) && is_array($job['result']['report']) ? $job['result']['report'] : array();
+        return $report;
+    }
+
+    private function merge_runtime_js_scan_errors(array $existing_errors, array $incoming_errors)
+    {
+        $merged_errors = array();
+        foreach (array_merge($existing_errors, $incoming_errors) as $error) {
+            if (!is_array($error)) {
+                continue;
+            }
+            $dedupe_key = md5((string) ($error['kind'] ?? '') . '|' . (string) ($error['message'] ?? '') . '|' . (string) ($error['source'] ?? '') . '|' . (string) ($error['line'] ?? ''));
+            $merged_errors[$dedupe_key] = $error;
+        }
+        $errors = array_values($merged_errors);
+        return count($errors) > 80 ? array_slice($errors, -80) : $errors;
+    }
+
+    private function merge_runtime_js_scan_report(array $existing, array $payload)
+    {
+        $errors = $this->merge_runtime_js_scan_errors(
+            (array) ($existing['errors'] ?? array()),
+            (array) ($payload['errors'] ?? array())
+        );
+
+        $report = array(
+            'scanId'      => (string) $payload['scanId'],
+            'url'         => !empty($payload['url']) ? $payload['url'] : $this->runtime_js_scan_sanitize_display_url((string) ($existing['url'] ?? '')),
+            'startedAt'   => isset($existing['startedAt']) ? (int) $existing['startedAt'] : time(),
+            'updatedAt'   => time(),
+            'completed'   => !empty($payload['completed']) || !empty($existing['completed']),
+            'errors'      => $errors,
+            'scripts'     => !empty($payload['scripts']) ? $payload['scripts'] : (array) ($existing['scripts'] ?? array()),
+            'scanContext' => !empty($payload['scanContext']) ? (string) $payload['scanContext'] : (string) ($existing['scanContext'] ?? 'anonymous'),
+            'errorCount'  => count($errors),
+            'userAgent'   => !empty($payload['userAgent']) ? $payload['userAgent'] : (string) ($existing['userAgent'] ?? ''),
+            'elapsedMs'   => max((int) ($existing['elapsedMs'] ?? 0), (int) $payload['elapsedMs']),
+        );
+        $report['jsDelaySafetyScan'] = $this->summarize_runtime_js_scan_for_dashboard($report);
+        return $report;
     }
 
     public function save_runtime_js_scan_report(WP_REST_Request $request)
@@ -1265,56 +1429,79 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Missing runtime JS scan id.', 'ultracache')), 400);
         }
 
-        $existing = get_transient($this->get_runtime_js_scan_transient_key($scan_id));
-        $existing = is_array($existing) ? $existing : array();
-        $merged_errors = array();
-        foreach (array_merge((array) ($existing['errors'] ?? array()), (array) $payload['errors']) as $error) {
-            if (!is_array($error)) {
-                continue;
-            }
-            $dedupe_key = md5((string) ($error['kind'] ?? '') . '|' . (string) ($error['message'] ?? '') . '|' . (string) ($error['source'] ?? '') . '|' . (string) ($error['line'] ?? ''));
-            $merged_errors[$dedupe_key] = $error;
-        }
-        $errors = array_values($merged_errors);
-        if (count($errors) > 80) {
-            $errors = array_slice($errors, -80);
+        $lock_name = 'runtime-js-scan-merge:' . sha1($scan_id);
+        $lock_token = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : uniqid('runtime_js_scan_', true);
+        if (!function_exists('ultracache_acquire_lock') || !ultracache_acquire_lock($lock_name, $lock_token, 15, array('scanId' => $scan_id))) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Runtime JS scan report is being merged. Retry the request.', 'ultracache')), 409);
         }
 
-        $report = array(
-            'scanId'     => $scan_id,
-            'url'        => !empty($payload['url']) ? $payload['url'] : $this->runtime_js_scan_sanitize_display_url((string) ($existing['url'] ?? '')),
-            'startedAt'  => isset($existing['startedAt']) ? (int) $existing['startedAt'] : time(),
-            'updatedAt'  => time(),
-            'completed'  => !empty($payload['completed']) || !empty($existing['completed']),
-            'errors'     => $errors,
-            'scripts'    => !empty($payload['scripts']) ? $payload['scripts'] : (array) ($existing['scripts'] ?? array()),
-            'scanContext' => !empty($payload['scanContext']) ? (string) $payload['scanContext'] : (string) ($existing['scanContext'] ?? 'anonymous'),
-            'errorCount' => count($errors),
-            'userAgent'  => !empty($payload['userAgent']) ? $payload['userAgent'] : (string) ($existing['userAgent'] ?? ''),
-            'elapsedMs'  => max((int) ($existing['elapsedMs'] ?? 0), (int) $payload['elapsedMs']),
-        );
-        $report['jsDelaySafetyScan'] = $this->summarize_runtime_js_scan_for_dashboard($report);
-        set_transient($this->get_runtime_js_scan_transient_key($scan_id), $report, 10 * MINUTE_IN_SECONDS);
-
-        $queue_job = null;
-        if (!empty($payload['queueJobId'])) {
+        try {
+            $existing_job = $this->runtime_js_diagnostic_queue_get_job_by_scan_id($scan_id);
+            $existing_report = $this->runtime_js_scan_report_from_job($existing_job);
+            $report = $this->merge_runtime_js_scan_report($existing_report, $payload);
+            $dashboard_scan = $this->summarize_runtime_js_scan_for_dashboard($report);
+            $queue_result = $this->runtime_js_diagnostic_queue_result_from_scan($dashboard_scan, $report);
             $queue_status = !empty($report['completed']) ? 'done' : 'running';
             $queue_progress = !empty($report['completed']) ? 100 : 60;
-            $queue_result = $this->runtime_js_diagnostic_queue_result_from_scan($this->summarize_runtime_js_scan_for_dashboard($report), $report);
-            $queue_job = $this->runtime_js_diagnostic_queue_update_job($payload['queueJobId'], array(
-                'status' => $queue_status,
-                'message' => !empty($report['completed']) ? __('Browser runtime JS diagnostic queue completed.', 'ultracache') : __('Browser runtime JS diagnostic queue received an interim report.', 'ultracache'),
-                'progress_current' => $queue_progress,
-                'result' => $queue_result,
-                'finished_at' => !empty($report['completed']) ? time() : 0,
-            ));
-        }
+            $queue_job_id = sanitize_text_field((string) $payload['queueJobId']);
+            $queue_job = '' !== $queue_job_id ? $this->runtime_js_diagnostic_queue_get_job($queue_job_id) : null;
+            $target_job = null;
 
-        $response = array('success' => true, 'runtimeJsScan' => $report);
-        if (is_array($queue_job)) {
-            $response['jsDiagnosticQueue'] = $queue_job;
+            if (is_array($queue_job)) {
+                $target_job = $this->runtime_js_diagnostic_queue_update_job($queue_job_id, array(
+                    'scan_id' => $scan_id,
+                    'target_url' => (string) $report['url'],
+                    'scan_context' => (string) $report['scanContext'],
+                    'status' => $queue_status,
+                    'message' => !empty($report['completed']) ? __('Browser runtime JS diagnostic queue completed.', 'ultracache') : __('Browser runtime JS diagnostic queue received an interim report.', 'ultracache'),
+                    'progress_current' => $queue_progress,
+                    'result' => $queue_result,
+                    'finished_at' => !empty($report['completed']) ? time() : 0,
+                ));
+                if (is_array($existing_job) && !empty($existing_job['id']) && (string) $existing_job['id'] !== $queue_job_id && 0 === strpos((string) $existing_job['id'], 'jsdr_')) {
+                    $this->runtime_js_diagnostic_queue_delete_job((string) $existing_job['id']);
+                }
+            } elseif (is_array($existing_job)) {
+                $target_job = $this->runtime_js_diagnostic_queue_update_job((string) $existing_job['id'], array(
+                    'scan_id' => $scan_id,
+                    'target_url' => (string) $report['url'],
+                    'scan_context' => (string) $report['scanContext'],
+                    'status' => $queue_status,
+                    'message' => !empty($report['completed']) ? __('Browser runtime JS diagnostic report completed.', 'ultracache') : __('Browser runtime JS diagnostic report updated.', 'ultracache'),
+                    'progress_current' => $queue_progress,
+                    'result' => $queue_result,
+                    'finished_at' => !empty($report['completed']) ? time() : 0,
+                ));
+            } else {
+                $target_job = $this->runtime_js_diagnostic_queue_insert_job(array(
+                    'job_id' => $this->runtime_js_diagnostic_queue_report_job_id($scan_id),
+                    'scan_id' => $scan_id,
+                    'scan_type' => 'runtime',
+                    'status' => $queue_status,
+                    'target_url' => (string) $report['url'],
+                    'scan_context' => (string) $report['scanContext'],
+                    'message' => !empty($report['completed']) ? __('Browser runtime JS diagnostic report completed.', 'ultracache') : __('Browser runtime JS diagnostic report received.', 'ultracache'),
+                    'progress_current' => $queue_progress,
+                    'payload' => array('scanId' => $scan_id, 'url' => (string) $report['url'], 'scanContext' => (string) $report['scanContext']),
+                    'result' => $queue_result,
+                    'finished_at' => !empty($report['completed']) ? time() : 0,
+                ));
+            }
+
+            if (!is_array($target_job)) {
+                return new WP_REST_Response(array('success' => false, 'message' => __('Could not persist runtime JS diagnostic report.', 'ultracache')), 500);
+            }
+
+            $response = array('success' => true, 'runtimeJsScan' => $report);
+            if ('' !== $queue_job_id && (string) ($target_job['id'] ?? '') === $queue_job_id) {
+                $response['jsDiagnosticQueue'] = $target_job;
+            }
+            return new WP_REST_Response($response, 200);
+        } finally {
+            if (function_exists('ultracache_release_lock')) {
+                ultracache_release_lock($lock_name, $lock_token);
+            }
         }
-        return new WP_REST_Response($response, 200);
     }
 
     private function get_runtime_js_scan_resource_errors(array $errors)
@@ -1379,6 +1566,8 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             'suggestionCount'      => isset($scan['suggestion_count']) ? (int) $scan['suggestion_count'] : 0,
             'missingCount'         => isset($scan['missing_count']) ? (int) $scan['missing_count'] : 0,
             'alreadyExcludedCount' => isset($scan['already_excluded_count']) ? (int) $scan['already_excluded_count'] : 0,
+            'persistentListedFailureCount' => isset($scan['persistent_listed_failure_count']) ? (int) $scan['persistent_listed_failure_count'] : 0,
+            'dependencyRiskCount' => isset($scan['dependency_risk_count']) ? (int) $scan['dependency_risk_count'] : 0,
             'suggestions'          => isset($scan['suggestions']) && is_array($scan['suggestions']) ? array_slice($scan['suggestions'], 0, 80) : array(),
             'errors'               => array_slice($runtime_errors, 0, 40),
             'resourceErrors'       => array_slice($resource_errors, 0, 40),
@@ -1396,8 +1585,9 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Missing runtime JS scan id.', 'ultracache')), 400);
         }
 
-        $report = get_transient($this->get_runtime_js_scan_transient_key($scan_id));
-        if (!is_array($report)) {
+        $job = $this->runtime_js_diagnostic_queue_get_job_by_scan_id($scan_id);
+        $report = $this->runtime_js_scan_report_from_job($job);
+        if (empty($report)) {
             return new WP_REST_Response(array(
                 'success' => true,
                 'runtimeJsScan' => array(

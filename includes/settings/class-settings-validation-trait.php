@@ -772,7 +772,7 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
 
     private static function validate_varnish_settings(array $settings)
     {
-        if (empty($settings['varnishCliEnabled'])) {
+        if (!self::is_varnish_runtime_enabled($settings)) {
             return true;
         }
 
@@ -943,6 +943,38 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
     }
 
 
+    /**
+     * Keep the two server-level HTML delivery modes mutually exclusive.
+     *
+     * A patch that explicitly enables native LiteSpeed HTML Cache disables
+     * Apache Static HTML Delivery. A patch that enables Apache Static HTML
+     * Delivery disables native LiteSpeed HTML Cache. When both are explicitly
+     * enabled, native LiteSpeed takes precedence.
+     *
+     * @param array $settings Settings patch or complete settings payload.
+     * @return array
+     */
+    public static function normalize_page_delivery_mode_patch(array $settings)
+    {
+        $has_litespeed = array_key_exists('liteSpeedCacheEnabled', $settings);
+        $has_apache_static = array_key_exists('apacheStaticHtmlDeliveryEnabled', $settings);
+        $litespeed_enabled = $has_litespeed
+            && self::normalize_boolean_setting_value($settings['liteSpeedCacheEnabled'], false);
+        $apache_static_enabled = $has_apache_static
+            && self::normalize_boolean_setting_value($settings['apacheStaticHtmlDeliveryEnabled'], false);
+
+        if ($litespeed_enabled) {
+            $settings['liteSpeedCacheEnabled'] = true;
+            $settings['apacheStaticHtmlDeliveryEnabled'] = false;
+        } elseif ($apache_static_enabled) {
+            $settings['apacheStaticHtmlDeliveryEnabled'] = true;
+            $settings['liteSpeedCacheEnabled'] = false;
+        }
+
+        return $settings;
+    }
+
+
     private static function sanitize_local_url_textarea_setting($value, $limit = 25)
     {
         $limit = max(1, min(100, absint($limit)));
@@ -982,9 +1014,87 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
 
 
 
+    private static function migrate_legacy_cron_warm_master_setting(array $settings)
+    {
+        // The removed Cron Warm Up master switch is accepted only as a legacy
+        // migration input. Existing automatic triggers remain enabled only when
+        // both the old master and the corresponding trigger were enabled.
+        if (!array_key_exists('cronWarmEnabled', $settings)) {
+            return $settings;
+        }
+
+        $legacy_cron_warm_enabled = self::normalize_boolean_setting_value(
+            $settings['cronWarmEnabled'],
+            false
+        );
+        $settings['cronWarmStartAfterCleanup'] = $legacy_cron_warm_enabled
+            && self::normalize_boolean_setting_value($settings['cronWarmStartAfterCleanup'] ?? false, false);
+        $settings['cronWarmStartAfterManualPurge'] = $legacy_cron_warm_enabled
+            && self::normalize_boolean_setting_value($settings['cronWarmStartAfterManualPurge'] ?? false, false);
+        unset($settings['cronWarmEnabled']);
+
+        return $settings;
+    }
+
+
+    /**
+     * Initialize the new upload and replacement format contracts from the
+     * existing rewrite format when an installation has not saved them yet.
+     *
+     * @param array $settings Raw dashboard settings.
+     * @return array
+     */
+    private static function migrate_split_media_format_settings(array $settings)
+    {
+        $legacy_output_format = self::sanitize_media_output_mode($settings['mediaOutputMode'] ?? 'webp');
+
+        if (!array_key_exists('mediaUploadFormat', $settings)) {
+            $settings['mediaUploadFormat'] = $legacy_output_format;
+        }
+
+        if (!array_key_exists('mediaReplacementFormat', $settings)) {
+            $settings['mediaReplacementFormat'] = $legacy_output_format;
+        }
+
+        return $settings;
+    }
+
+
+    /**
+     * Restore the explicit Varnish enable switch without changing the behavior
+     * of installations that used the connection marker as the runtime gate.
+     *
+     * @param array $settings Raw dashboard settings.
+     * @return array
+     */
+    private static function migrate_legacy_varnish_enable_setting(array $settings)
+    {
+        $varnish_enabled_was_saved = array_key_exists('varnishCliEnabled', $settings);
+        $legacy_varnish_configured = self::normalize_boolean_setting_value(
+            $settings['varnishConnectionConfigured'] ?? false,
+            false
+        ) || self::normalize_boolean_setting_value(
+            $settings['sharedCacheDeliveryEnabled'] ?? false,
+            false
+        );
+
+        $settings['varnishCliEnabled'] = $varnish_enabled_was_saved
+            ? self::normalize_boolean_setting_value($settings['varnishCliEnabled'], false)
+            : $legacy_varnish_configured;
+        $settings['varnishConnectionConfigured'] = $legacy_varnish_configured;
+        unset($settings['sharedCacheDeliveryEnabled'], $settings['esiEnabled']);
+
+        return $settings;
+    }
+
+
     public static function sanitize_dashboard_settings(array $settings, $validate_support = true)
     {
         $raw_settings = $settings;
+        $settings = self::migrate_split_media_format_settings($settings);
+        $settings = self::migrate_legacy_cron_warm_master_setting($settings);
+
+        $settings = self::migrate_legacy_varnish_enable_setting($settings);
         $defaults = self::get_dashboard_defaults();
         $settings = wp_parse_args($settings, $defaults);
 
@@ -1001,6 +1111,10 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
             }
         }
 
+        // Native LiteSpeed page caching and Apache Static HTML Delivery are
+        // alternative server-level HTML delivery modes. Runtime consumers,
+        // imports, profiles, and legacy saved options must never see both on.
+        $settings = self::normalize_page_delivery_mode_patch($settings);
         // Broad icon-font auto-detection is no longer a hidden runtime rule.
         // The scanner can append discovered patterns to the visible font list.
         $settings['delayIconFontsAutoDetectEnabled'] = false;
@@ -1033,8 +1147,9 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
         $settings['warmFullSiteSources']       = implode(',', array_keys($warm_full_site_clean));
         $settings['scheduledWarmLimit']        = max(1, min(5000, absint($settings['scheduledWarmLimit'])));
         $settings['varnishCliTimeoutSeconds']  = max(1, min(15, absint($settings['varnishCliTimeoutSeconds'])));
-        $settings['cacheFreshTtlMinutes']      = self::sanitize_positive_integer_setting($settings['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1);
-        $settings['cacheMaxStaleMinutes']      = max((int) $settings['cacheFreshTtlMinutes'], self::sanitize_positive_integer_setting($settings['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], 1));
+        $settings['varnishInvalidationsPerMinute'] = max(1, min(600, absint($settings['varnishInvalidationsPerMinute'])));
+        $settings['cacheFreshTtlMinutes']      = self::sanitize_bounded_integer_setting($settings['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1, 525600);
+        $settings['cacheMaxStaleMinutes']      = max((int) $settings['cacheFreshTtlMinutes'], self::sanitize_bounded_integer_setting($settings['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], 1, 525600));
         $settings['cacheExceptionPaths']       = self::sanitize_excluded_paths_setting($settings['cacheExceptionPaths']);
         $settings['cacheExceptionQueryArgs']   = self::sanitize_setting_key_list($settings['cacheExceptionQueryArgs']);
         $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
@@ -1093,17 +1208,21 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
             1,
             8192
         );
+        $settings['mediaIgnoreColorProfilePreservation'] = !empty($settings['mediaIgnoreColorProfilePreservation']);
+        $settings['mediaUploadFormat']         = self::sanitize_media_output_mode($settings['mediaUploadFormat'] ?? $defaults['mediaUploadFormat']);
         $raw_media_output_mode = strtolower(trim((string) ($raw_settings['mediaOutputMode'] ?? $settings['mediaOutputMode'] ?? $defaults['mediaOutputMode'])));
         $settings['mediaOutputMode']           = self::sanitize_media_output_mode($settings['mediaOutputMode']);
         if (!array_key_exists('mediaFallbackFormat', $raw_settings) && 'avif' === $raw_media_output_mode) {
             $settings['mediaFallbackFormat'] = 'webp';
         }
         $settings['mediaFallbackFormat']       = self::sanitize_media_fallback_format($settings['mediaFallbackFormat'] ?? $defaults['mediaFallbackFormat'], $settings['mediaOutputMode']);
+        $settings['mediaReplacementFormat']    = self::sanitize_media_output_mode($settings['mediaReplacementFormat'] ?? $defaults['mediaReplacementFormat']);
         $settings['mediaQuality']              = self::sanitize_media_quality($settings['mediaQuality'] ?? $defaults['mediaQuality']);
         $settings['objectCacheBackend']        = self::sanitize_object_cache_backend($settings['objectCacheBackend']);
         if ('apcu' === $settings['objectCacheBackend']) {
             $settings['flushAllIncludeApcu'] = true;
         }
+        $settings['flushAllIncludeElementor'] = !empty($settings['flushAllIncludeElementor']);
         $settings['objectCacheFallbackBackend'] = self::sanitize_object_cache_fallback_backend($settings['objectCacheFallbackBackend'] ?? 'apcu');
         $settings['sqliteDatabaseSizeMb']       = self::sanitize_sqlite_database_size_mb($settings['sqliteDatabaseSizeMb'] ?? $defaults['sqliteDatabaseSizeMb'], $defaults['sqliteDatabaseSizeMb']);
         $settings['redisHost']                 = self::sanitize_redis_host($settings['redisHost']);
@@ -1116,6 +1235,15 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
         $settings['redisPersistent']           = !empty($settings['redisPersistent']);
         $settings['redisConnectTimeoutMs']     = self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], $defaults['redisConnectTimeoutMs'], 50, 15000);
         $settings['redisReadTimeoutMs']        = self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], $defaults['redisReadTimeoutMs'], 50, 15000);
+        $settings['liteSpeedRefillAfterTargetedInvalidation'] = !empty($settings['liteSpeedRefillAfterTargetedInvalidation']);
+        $settings['liteSpeedWarmDuringSiteWarmup'] = !empty($settings['liteSpeedWarmDuringSiteWarmup']);
+        $settings['liteSpeedStalePurgeEnabled'] = !empty($settings['liteSpeedStalePurgeEnabled']);
+        $settings['liteSpeedRefreshAheadEnabled'] = !empty($settings['liteSpeedRefreshAheadEnabled']);
+        $settings['liteSpeedRefreshAheadThresholdPercent'] = self::sanitize_bounded_integer_setting($settings['liteSpeedRefreshAheadThresholdPercent'] ?? $defaults['liteSpeedRefreshAheadThresholdPercent'], $defaults['liteSpeedRefreshAheadThresholdPercent'], 50, 95);
+        $settings['liteSpeedRefreshAheadMaxPages'] = self::sanitize_bounded_integer_setting($settings['liteSpeedRefreshAheadMaxPages'] ?? $defaults['liteSpeedRefreshAheadMaxPages'], $defaults['liteSpeedRefreshAheadMaxPages'], 1, 10);
+        $settings['liteSpeedRefreshAheadPinnedUrls'] = self::sanitize_local_url_textarea_setting($settings['liteSpeedRefreshAheadPinnedUrls'] ?? '', 25);
+        $settings['varnishCliEnabled']          = !empty($settings['varnishCliEnabled']);
+        $settings['varnishConnectionConfigured'] = self::is_varnish_connection_configured($settings);
         $settings['varnishCliMode']            = self::sanitize_varnish_mode($settings['varnishCliMode']);
         $settings['varnishCliServers']         = self::sanitize_varnish_servers_string($settings['varnishCliServers'], $settings['varnishCliMode']);
         $settings['varnishCliKey']             = '';
@@ -1126,14 +1254,6 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
             $settings['varnishInvalidationStrategy'] = self::sanitize_varnish_invalidation_strategy($settings['varnishInvalidationStrategy']);
         }
         $settings['varnishFlushScope']         = self::sanitize_varnish_flush_scope($settings['varnishFlushScope'] ?? $defaults['varnishFlushScope']);
-        $settings['varnishHtmlTtlMinutes']      = self::sanitize_bounded_integer_setting($settings['varnishHtmlTtlMinutes'] ?? $defaults['varnishHtmlTtlMinutes'], $defaults['varnishHtmlTtlMinutes'], 0, 525600);
-        $settings['varnishStaleWhileRevalidateSeconds'] = self::sanitize_bounded_integer_setting($settings['varnishStaleWhileRevalidateSeconds'] ?? $defaults['varnishStaleWhileRevalidateSeconds'], $defaults['varnishStaleWhileRevalidateSeconds'], 0, 86400);
-        $settings['varnishRefillAfterTargetedInvalidation'] = !empty($settings['varnishRefillAfterTargetedInvalidation']);
-        $settings['varnishWarmDuringManualWarmup'] = !empty($settings['varnishWarmDuringManualWarmup']);
-        $settings['varnishRefreshAheadEnabled'] = !empty($settings['varnishRefreshAheadEnabled']);
-        $settings['varnishRefreshAheadThresholdPercent'] = self::sanitize_bounded_integer_setting($settings['varnishRefreshAheadThresholdPercent'] ?? $defaults['varnishRefreshAheadThresholdPercent'], $defaults['varnishRefreshAheadThresholdPercent'], 50, 95);
-        $settings['varnishRefreshAheadMaxPages'] = self::sanitize_bounded_integer_setting($settings['varnishRefreshAheadMaxPages'] ?? $defaults['varnishRefreshAheadMaxPages'], $defaults['varnishRefreshAheadMaxPages'], 1, 10);
-        $settings['varnishRefreshAheadPinnedUrls'] = self::sanitize_local_url_textarea_setting($settings['varnishRefreshAheadPinnedUrls'] ?? '', 25);
 
         unset($settings['frontendSafeModeEnabled']);
 
@@ -1145,6 +1265,7 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
 
         $settings['cronWarmStartAfterCleanup'] = !empty($settings['cronWarmStartAfterCleanup']);
         $settings['cronWarmStartAfterManualPurge'] = !empty($settings['cronWarmStartAfterManualPurge']);
+        $settings['warmUncachedUrlsOnFirstVisit'] = !empty($settings['warmUncachedUrlsOnFirstVisit']);
         $settings['uninstallCleanupPolicy'] = self::sanitize_uninstall_cleanup_policy($settings['uninstallCleanupPolicy'] ?? $defaults['uninstallCleanupPolicy']);
 
         // Keep the public settings payload canonical. Stored options may still contain

@@ -11,19 +11,9 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
 {
     // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache uses private custom Media Library replacement registry tables with validated table identifiers.
 
-    private function get_media_replacement_theme_css_scan_option_name()
-    {
-        return 'ultracache_media_replacement_theme_css_scan_state';
-    }
-
-    private function get_media_replacement_theme_css_manifest_option_name()
-    {
-        return 'ultracache_media_replacement_theme_css_scan_manifest_v1';
-    }
-
     private function clear_media_replacement_theme_css_manifest()
     {
-        delete_option($this->get_media_replacement_theme_css_manifest_option_name());
+        $this->clear_media_replacement_workflow_section('theme_css_manifest');
     }
 
     private function normalize_media_replacement_theme_css_roots($roots)
@@ -74,7 +64,6 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         $state = is_array($state) ? $state : array();
         $defaults = array(
             'state_version'       => 2,
-            'job_id'              => '',
             'status'              => 'idle',
             'phase'               => 'idle',
             'roots'               => array(),
@@ -111,7 +100,6 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
 
         return array(
             'state_version'       => 2,
-            'job_id'              => isset($state['job_id']) ? sanitize_key((string) $state['job_id']) : '',
             'status'              => $status,
             'phase'               => $phase,
             'roots'               => $roots,
@@ -134,14 +122,14 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
 
     private function get_media_replacement_theme_css_scan_state()
     {
-        return $this->normalize_media_replacement_theme_css_scan_state(get_option($this->get_media_replacement_theme_css_scan_option_name(), array()));
+        return $this->normalize_media_replacement_theme_css_scan_state($this->get_media_replacement_workflow_section('theme_css_scan'));
     }
 
     private function update_media_replacement_theme_css_scan_state(array $state)
     {
-        $state['state_version'] = 2;
+        $state['updated_at'] = current_time('mysql', true);
         $state = $this->normalize_media_replacement_theme_css_scan_state($state);
-        update_option($this->get_media_replacement_theme_css_scan_option_name(), $state, false);
+        $this->update_media_replacement_workflow_section('theme_css_scan', $state);
         return $state;
     }
 
@@ -178,36 +166,27 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         return md5((string) wp_json_encode($facts));
     }
 
-    private function reset_media_replacement_theme_css_inventory($job_id)
+    private function reset_media_replacement_theme_css_inventory()
     {
         global $wpdb;
-
-        $job_id = sanitize_key((string) $job_id);
         $table = $this->get_media_replacement_theme_css_files_table_name();
-        if ('' === $job_id || '' === $table || !($wpdb instanceof wpdb)) {
+        if ('' === $table || !($wpdb instanceof wpdb)) {
             return false;
         }
-        $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE job_id = %s', $table, $job_id));
-        return true;
+        return false !== $wpdb->query($wpdb->prepare('DELETE FROM %i', $table));
     }
 
-    private function reset_media_replacement_theme_css_refs($job_id)
+    private function reset_media_replacement_theme_css_refs()
     {
         global $wpdb;
-
-        $job_id = sanitize_key((string) $job_id);
-        $table  = $this->get_media_replacement_file_refs_table_name();
-        if ('' === $job_id || '' === $table || !($wpdb instanceof wpdb)) {
+        $table = $this->get_media_replacement_file_refs_table_name();
+        if ('' === $table || !($wpdb instanceof wpdb)) {
             return false;
         }
-
-        $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE job_id = %s', $table, $job_id));
-        $this->reset_media_replacement_theme_css_inventory($job_id);
-        if (method_exists($this, 'clear_media_replacement_theme_css_stream_state')) {
-            $this->clear_media_replacement_theme_css_stream_state(true);
+        if (false === $wpdb->query($wpdb->prepare('DELETE FROM %i', $table))) {
+            return false;
         }
-        $this->clear_media_replacement_theme_css_manifest();
-        return true;
+        return $this->reset_media_replacement_theme_css_inventory();
     }
 
     private function initialize_media_replacement_theme_css_traversal(array $state, array $roots)
@@ -311,17 +290,15 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         }
     }
 
-    private function insert_media_replacement_theme_css_inventory_file($job_id, array $file)
+    private function insert_media_replacement_theme_css_inventory_file(array $file)
     {
         global $wpdb;
-
         $table = $this->get_media_replacement_theme_css_files_table_name();
-        $job_id = sanitize_key((string) $job_id);
         $path = isset($file['path']) ? wp_normalize_path((string) $file['path']) : '';
         $relative = isset($file['relative']) ? ltrim(str_replace('\\', '/', (string) $file['relative']), '/') : '';
-        $size = isset($file['size']) ? max(0, (int) $file['size']) : 0;
-        $mtime = isset($file['mtime']) ? max(0, (int) $file['mtime']) : 0;
-        if ('' === $table || '' === $job_id || '' === $path || '' === $relative || $size < 0 || !($wpdb instanceof wpdb)) {
+        $size = isset($file['size']) ? (int) $file['size'] : -1;
+        $mtime = isset($file['mtime']) ? (int) $file['mtime'] : -1;
+        if ('' === $table || '' === $path || '' === $relative || $size < 0 || $mtime < 0 || !($wpdb instanceof wpdb)) {
             return false;
         }
 
@@ -329,7 +306,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         $result = $wpdb->query($wpdb->prepare(
             'INSERT IGNORE INTO %i (job_id, path_hash, file_path, relative_file_path, file_size, file_mtime, scan_status, validation_status, created_at, updated_at) VALUES (%s, %s, %s, %s, %d, %d, %s, %s, %s, %s)',
             $table,
-            $job_id,
+            '',
             md5($path),
             $path,
             $relative,
@@ -340,34 +317,34 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             $now,
             $now
         ));
-        return false === $result ? false : ((int) $result > 0 ? 'inserted' : 'existing');
+        if (false === $result) {
+            return false;
+        }
+        return 1 === (int) $result ? 'inserted' : 'existing';
     }
 
-    private function get_media_replacement_theme_css_inventory_count($job_id)
+    private function get_media_replacement_theme_css_inventory_count()
     {
         global $wpdb;
         $table = $this->get_media_replacement_theme_css_files_table_name();
-        $job_id = sanitize_key((string) $job_id);
-        if ('' === $table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $table || !($wpdb instanceof wpdb)) {
             return 0;
         }
-        return max(0, (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i WHERE job_id = %s', $table, $job_id)));
+        return max(0, (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $table)));
     }
 
-    private function get_media_replacement_theme_css_inventory_rows($job_id, $after_id, $limit)
+    private function get_media_replacement_theme_css_inventory_rows($after_id, $limit)
     {
         global $wpdb;
         $table = $this->get_media_replacement_theme_css_files_table_name();
-        $job_id = sanitize_key((string) $job_id);
         $after_id = max(0, absint($after_id));
-        $limit = max(1, min(200, absint($limit)));
-        if ('' === $table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        $limit = max(1, min(100, absint($limit)));
+        if ('' === $table || !($wpdb instanceof wpdb)) {
             return array();
         }
         $rows = $wpdb->get_results($wpdb->prepare(
-            'SELECT id, path_hash, file_path, relative_file_path, file_size, file_mtime, checksum_before, scan_status, validation_status FROM %i WHERE job_id = %s AND id > %d ORDER BY id ASC LIMIT %d',
+            'SELECT id, path_hash, file_path, relative_file_path, file_size, file_mtime, checksum_before, scan_status, validation_status FROM %i WHERE id > %d ORDER BY id ASC LIMIT %d',
             $table,
-            $job_id,
             $after_id,
             $limit
         ), ARRAY_A);
@@ -398,138 +375,129 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         );
     }
 
-    private function reset_media_replacement_theme_css_inventory_validation($job_id)
+    private function reset_media_replacement_theme_css_inventory_validation()
     {
         global $wpdb;
         $table = $this->get_media_replacement_theme_css_files_table_name();
-        $job_id = sanitize_key((string) $job_id);
-        if ('' === $table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $table || !($wpdb instanceof wpdb)) {
             return false;
         }
         return false !== $wpdb->query($wpdb->prepare(
-            'UPDATE %i SET validation_status = %s, updated_at = %s WHERE job_id = %s',
+            'UPDATE %i SET validation_status = %s, updated_at = %s',
             $table,
             'pending',
-            current_time('mysql', true),
-            $job_id
+            current_time('mysql', true)
         ));
     }
 
-    private function validate_media_replacement_theme_css_inventory_file($job_id, array $file)
+    private function validate_media_replacement_theme_css_inventory_file(array $file)
     {
         global $wpdb;
         $table = $this->get_media_replacement_theme_css_files_table_name();
-        $job_id = sanitize_key((string) $job_id);
         $path = isset($file['path']) ? wp_normalize_path((string) $file['path']) : '';
-        if ('' === $table || '' === $job_id || '' === $path || !($wpdb instanceof wpdb)) {
-            return array('valid' => false, 'message' => __('Theme CSS inventory validation could not resolve the current file.', 'ultracache'));
+        if ('' === $table || '' === $path || !($wpdb instanceof wpdb)) {
+            return array('valid' => false, 'counted' => false, 'message' => __('Theme CSS validation input is invalid.', 'ultracache'));
         }
 
         $row = $wpdb->get_row($wpdb->prepare(
-            'SELECT id, file_size, file_mtime, checksum_before, validation_status FROM %i WHERE job_id = %s AND path_hash = %s LIMIT 1',
+            'SELECT id, file_size, file_mtime, checksum_before, validation_status FROM %i WHERE path_hash = %s LIMIT 1',
             $table,
-            $job_id,
             md5($path)
         ), ARRAY_A);
         if (!is_array($row)) {
-            return array('valid' => false, 'message' => __('A new Theme CSS file appeared during Prepare. Restart Prepare to build a consistent plan.', 'ultracache'));
+            return array('valid' => false, 'counted' => false, 'message' => __('A new Theme CSS file appeared during Prepare.', 'ultracache'));
         }
-        if ((int) ($row['file_size'] ?? 0) !== (int) ($file['size'] ?? 0) || (int) ($row['file_mtime'] ?? 0) !== (int) ($file['mtime'] ?? 0)) {
-            return array('valid' => false, 'message' => __('A Theme CSS file changed during Prepare. Restart Prepare to build a consistent plan.', 'ultracache'));
-        }
-
-        $expected_checksum = (string) ($row['checksum_before'] ?? '');
-        $current_content = function_exists('ultracache_safe_file_get_contents') ? ultracache_safe_file_get_contents($path, 'media_library_replacement_theme_css_validate') : false;
-        $current_checksum = is_string($current_content) ? md5($current_content) : '';
-        if (!preg_match('/^[a-f0-9]{32}$/', $expected_checksum) || '' === $current_checksum || !hash_equals($expected_checksum, $current_checksum)) {
-            return array('valid' => false, 'message' => __('A Theme CSS file changed during Prepare. Restart Prepare to build a consistent plan.', 'ultracache'));
+        if ('validated' === (string) ($row['validation_status'] ?? '')) {
+            return array('valid' => true, 'counted' => false, 'message' => '');
         }
 
-        $already_seen = 'seen' === sanitize_key((string) ($row['validation_status'] ?? ''));
-        if (!$already_seen) {
-            $wpdb->update(
-                $table,
-                array('validation_status' => 'seen', 'updated_at' => current_time('mysql', true)),
-                array('id' => absint($row['id'])),
-                array('%s', '%s'),
-                array('%d')
-            );
+        clearstatcache(true, $path);
+        $size = is_file($path) ? filesize($path) : false;
+        $mtime = is_file($path) ? filemtime($path) : false;
+        $content = is_file($path) && is_readable($path) && function_exists('ultracache_safe_file_get_contents')
+            ? ultracache_safe_file_get_contents($path, 'media_library_replacement_theme_css_validate')
+            : false;
+        if (!is_int($size) || !is_int($mtime) || !is_string($content)
+            || (int) $row['file_size'] !== $size
+            || (int) $row['file_mtime'] !== $mtime
+            || !hash_equals((string) $row['checksum_before'], md5($content))
+        ) {
+            return array('valid' => false, 'counted' => false, 'message' => __('A Theme CSS file changed during Prepare.', 'ultracache'));
         }
-        return array('valid' => true, 'counted' => !$already_seen, 'message' => '');
+
+        $updated = $wpdb->update(
+            $table,
+            array('validation_status' => 'validated', 'updated_at' => current_time('mysql', true)),
+            array('id' => absint($row['id'])),
+            array('%s', '%s'),
+            array('%d')
+        );
+        return array('valid' => false !== $updated, 'counted' => false !== $updated, 'message' => false === $updated ? __('Theme CSS validation progress could not be persisted.', 'ultracache') : '');
     }
 
-    private function get_media_replacement_theme_css_unseen_inventory_count($job_id)
+    private function get_media_replacement_theme_css_unseen_inventory_count()
     {
         global $wpdb;
         $table = $this->get_media_replacement_theme_css_files_table_name();
-        $job_id = sanitize_key((string) $job_id);
-        if ('' === $table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $table || !($wpdb instanceof wpdb)) {
             return 0;
         }
         return max(0, (int) $wpdb->get_var($wpdb->prepare(
-            'SELECT COUNT(*) FROM %i WHERE job_id = %s AND validation_status <> %s',
+            'SELECT COUNT(*) FROM %i WHERE validation_status <> %s',
             $table,
-            $job_id,
-            'seen'
+            'validated'
         )));
     }
 
-    private function find_media_replacement_item_for_reference_match($job_id, $match)
+    private function find_media_replacement_item_for_reference_match($match)
     {
         global $wpdb;
-
         $items_table = $this->get_media_replacement_items_table_name();
-        $job_id      = sanitize_key((string) $job_id);
-        $match       = ltrim(str_replace('\\', '/', (string) $match), '/');
-        if ('' === $items_table || '' === $job_id || '' === $match || !($wpdb instanceof wpdb)) {
+        $match = ltrim(str_replace('\\', '/', (string) $match), '/');
+        if ('' === $items_table || '' === $match || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT id AS item_id, attachment_id, old_relative_path, old_url, new_relative_path, new_url FROM %i WHERE job_id = %s AND old_path_hash = %s AND status IN (%s, %s, %s, %s, %s) ORDER BY id ASC LIMIT 1',
+                'SELECT id AS item_id, attachment_id, old_relative_path, old_url, new_relative_path, new_url FROM %i WHERE old_path_hash = %s AND status IN (%s, %s, %s, %s, %s) ORDER BY id ASC LIMIT 1',
                 $items_table,
-                $job_id,
                 md5($match),
                 'metadata_ready',
                 'metadata_updated',
                 'refs_scanned',
                 'cleanup_deleted',
-                'copied'
+                'cleanup_failed'
             ),
             ARRAY_A
         );
-
         return is_array($row) ? $row : array();
     }
 
-    private function insert_media_replacement_theme_css_ref_row($job_id, array $item_row, $file_path, $relative_file_path, $old_fragment, $new_fragment, $checksum_before)
+    private function insert_media_replacement_theme_css_ref_row(array $item_row, $file_path, $relative_file_path, $old_fragment, $new_fragment, $checksum_before)
     {
         global $wpdb;
-
-        $table  = $this->get_media_replacement_file_refs_table_name();
-        $job_id = sanitize_key((string) $job_id);
-        if ('' === $table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        $table = $this->get_media_replacement_file_refs_table_name();
+        if ('' === $table || !($wpdb instanceof wpdb)) {
             return false;
         }
 
-        $item_id = isset($item_row['item_id']) ? absint($item_row['item_id']) : 0;
+        $item_id = absint($item_row['item_id'] ?? 0);
         $file_path = wp_normalize_path((string) $file_path);
         $relative_file_path = ltrim(str_replace('\\', '/', (string) $relative_file_path), '/');
         $old_fragment = (string) $old_fragment;
         $new_fragment = (string) $new_fragment;
         $checksum_before = preg_match('/^[a-f0-9]{32}$/', (string) $checksum_before) ? (string) $checksum_before : '';
-        if ($item_id <= 0 || '' === $file_path || '' === $relative_file_path || '' === $old_fragment || '' === $new_fragment || $old_fragment === $new_fragment || '' === $checksum_before) {
+        if ($item_id <= 0 || '' === $file_path || '' === $relative_file_path || '' === $old_fragment || '' === $new_fragment || '' === $checksum_before) {
             return false;
         }
 
+        $ref_hash = md5($file_path . '|' . md5($old_fragment) . '|' . md5($new_fragment));
         $now = current_time('mysql', true);
-        $ref_hash = md5($job_id . '|' . $file_path . '|' . md5($old_fragment) . '|' . md5($new_fragment));
-
         $result = $wpdb->query($wpdb->prepare(
             'INSERT IGNORE INTO %i (job_id, item_id, ref_hash, file_path, relative_file_path, old_fragment, new_fragment, backup_file_path, checksum_before, checksum_after, status, error_message, created_at, updated_at) VALUES (%s, %d, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s, %s)',
             $table,
-            $job_id,
+            '',
             $item_id,
             $ref_hash,
             $file_path,
@@ -546,42 +514,57 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         if (false === $result) {
             return false;
         }
-        return (int) $result > 0 ? 'inserted' : 'existing';
+        return 1 === (int) $result ? 'inserted' : 'existing';
     }
 
-    private function get_media_replacement_theme_css_summary($job_id)
+    private function get_media_replacement_theme_css_summary()
     {
         global $wpdb;
-
         $table = $this->get_media_replacement_file_refs_table_name();
-        $job_id = sanitize_key((string) $job_id);
-        if ('' === $table || '' === $job_id || !($wpdb instanceof wpdb)) {
-            return array('total' => 0, 'pending' => 0, 'applied' => 0, 'verified' => 0, 'failed' => 0, 'verifyFailed' => 0, 'files' => 0);
+        if ('' === $table || !($wpdb instanceof wpdb)) {
+            return array();
         }
-
         $row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT COUNT(*) AS total_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS applied_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS verified_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS verify_failed_refs, COUNT(DISTINCT file_path) AS file_count FROM %i WHERE job_id = %s',
+                'SELECT COUNT(*) AS total_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS pending_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS applied_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS verified_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS failed_refs, SUM(CASE WHEN status = %s THEN 1 ELSE 0 END) AS verify_failed_refs, COUNT(DISTINCT file_path) AS file_count FROM %i',
                 'pending',
                 'applied',
                 'verified',
                 'failed',
                 'verify_failed',
-                $table,
-                $job_id
+                $table
             ),
             ARRAY_A
         );
-
+        $row = is_array($row) ? $row : array();
         return array(
-            'total'        => is_array($row) && isset($row['total_refs']) ? max(0, (int) $row['total_refs']) : 0,
-            'pending'      => is_array($row) && isset($row['pending_refs']) ? max(0, (int) $row['pending_refs']) : 0,
-            'applied'      => is_array($row) && isset($row['applied_refs']) ? max(0, (int) $row['applied_refs']) : 0,
-            'verified'     => is_array($row) && isset($row['verified_refs']) ? max(0, (int) $row['verified_refs']) : 0,
-            'failed'       => is_array($row) && isset($row['failed_refs']) ? max(0, (int) $row['failed_refs']) : 0,
-            'verifyFailed' => is_array($row) && isset($row['verify_failed_refs']) ? max(0, (int) $row['verify_failed_refs']) : 0,
-            'files'        => is_array($row) && isset($row['file_count']) ? max(0, (int) $row['file_count']) : 0,
+            'total'        => max(0, (int) ($row['total_refs'] ?? 0)),
+            'pending'      => max(0, (int) ($row['pending_refs'] ?? 0)),
+            'applied'      => max(0, (int) ($row['applied_refs'] ?? 0)),
+            'verified'     => max(0, (int) ($row['verified_refs'] ?? 0)),
+            'failed'       => max(0, (int) ($row['failed_refs'] ?? 0)),
+            'verifyFailed' => max(0, (int) ($row['verify_failed_refs'] ?? 0)),
+            'files'        => max(0, (int) ($row['file_count'] ?? 0)),
         );
+    }
+
+    private function retry_media_replacement_failed_theme_css_references()
+    {
+        global $wpdb;
+        $table = $this->get_media_replacement_file_refs_table_name();
+        if ('' === $table || !($wpdb instanceof wpdb)) {
+            return 0;
+        }
+        $updated = $wpdb->query(
+            $wpdb->prepare(
+                'UPDATE %i SET status = %s, error_message = NULL, updated_at = %s WHERE status = %s',
+                $table,
+                'pending',
+                current_time('mysql', true),
+                'failed'
+            )
+        );
+        return false === $updated ? 0 : max(0, (int) $updated);
     }
 
     private function fail_media_replacement_theme_css_scan(array $state, $status, $message)
@@ -594,7 +577,6 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             'blocked'    => true,
             'status'     => sanitize_key((string) $status),
             'message'    => wp_strip_all_tags((string) $message),
-            'jobId'      => $state['job_id'],
             'phase'      => $state['phase'],
             'hasMore'    => false,
             'themeCssFilesDiscovered' => (int) $state['discovered_files'],
@@ -610,7 +592,6 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         $response = array(
             'success' => true,
             'message' => (string) $message,
-            'jobId' => $state['job_id'],
             'status' => $has_more ? 'theme_css_scanning' : 'theme_css_scanned',
             'phase' => $phase,
             'hasMore' => (bool) $has_more,
@@ -649,12 +630,8 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array('success' => false, 'message' => __('Complete database replacement planning before scanning theme CSS references.', 'ultracache'));
-        }
-        if (!$this->media_replacement_job_has_registry_rows($job_id)) {
-            return $this->build_media_replacement_empty_registry_response($job_id, __('No Media Library replacement registry rows are available for theme CSS scanning.', 'ultracache'));
+        if (!$this->media_replacement_has_registry_rows()) {
+            return $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for theme CSS scanning.', 'ultracache'));
         }
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 20;
@@ -664,17 +641,16 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         $time_budget = max(1.0, min(30.0, $time_budget));
         $deadline = microtime(true) + $time_budget;
         $state = $this->get_media_replacement_theme_css_scan_state();
-        $start_new = '' === $state['job_id'] || $state['job_id'] !== $job_id || 'idle' === $state['phase'] || !empty($args['reset']) || !empty($args['start']);
+        $start_new = 'idle' === $state['phase'] || !empty($args['reset']) || !empty($args['start']);
 
         if ($start_new) {
-            if (!$this->reset_media_replacement_theme_css_refs($job_id)) {
-                return array('success' => false, 'message' => __('Theme CSS scan storage could not be reset for this job.', 'ultracache'));
+            if (!$this->reset_media_replacement_theme_css_refs()) {
+                return array('success' => false, 'message' => __('Theme CSS scan storage could not be reset for this workflow.', 'ultracache'));
             }
             $roots = $this->get_media_replacement_theme_css_roots();
             $now = current_time('mysql', true);
             $state = $this->initialize_media_replacement_theme_css_traversal(array(
                 'state_version' => 2,
-                'job_id' => $job_id,
                 'status' => 'scanning',
                 'phase' => 'discover',
                 'cursor_file_id' => 0,
@@ -692,7 +668,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         }
 
         if ('completed' === $state['status'] && 'complete' === $state['phase']) {
-            $summary = $this->get_media_replacement_theme_css_summary($job_id);
+            $summary = $this->get_media_replacement_theme_css_summary();
             return $this->build_media_replacement_theme_css_scan_response(
                 $state,
                 $summary,
@@ -730,7 +706,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
                     $work_units++;
                 }
                 if (!empty($entry['file'])) {
-                    $insert_result = $this->insert_media_replacement_theme_css_inventory_file($job_id, $entry['file']);
+                    $insert_result = $this->insert_media_replacement_theme_css_inventory_file($entry['file']);
                     if (false === $insert_result) {
                         return $this->fail_media_replacement_theme_css_scan($state, 'theme_css_inventory_write_failed', __('Theme CSS discovery could not persist its file inventory.', 'ultracache'));
                     }
@@ -742,7 +718,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             }
 
             if ($discovery_complete) {
-                $state['total_files'] = $this->get_media_replacement_theme_css_inventory_count($job_id);
+                $state['total_files'] = $this->get_media_replacement_theme_css_inventory_count();
                 $state['discovered_files'] = $state['total_files'];
                 $state['phase'] = 'scan';
                 $state['cursor_file_id'] = 0;
@@ -776,7 +752,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         }
 
         if ('scan' === $state['phase']) {
-            $rows = $this->get_media_replacement_theme_css_inventory_rows($job_id, $state['cursor_file_id'], $limit);
+            $rows = $this->get_media_replacement_theme_css_inventory_rows($state['cursor_file_id'], $limit);
             foreach ($rows as $row) {
                 if ($batch['scanned'] > 0 && microtime(true) >= $deadline) {
                     break;
@@ -810,13 +786,13 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
                 if ('' !== $content) {
                     foreach ($this->extract_media_replacement_image_references_from_value($content) as $reference) {
                         $match = isset($reference['match']) ? (string) $reference['match'] : '';
-                        $item = $this->find_media_replacement_item_for_reference_match($job_id, $match);
+                        $item = $this->find_media_replacement_item_for_reference_match($match);
                         if (empty($item)) {
                             continue;
                         }
                         $index_row = array('raw_fragment' => isset($reference['raw']) ? (string) $reference['raw'] : '');
                         $new_fragment = $this->build_media_replacement_new_fragment_for_index($index_row, $item);
-                        if ('' !== $new_fragment && 'inserted' === $this->insert_media_replacement_theme_css_ref_row($job_id, $item, $path, $relative, (string) $index_row['raw_fragment'], $new_fragment, $checksum)) {
+                        if ('' !== $new_fragment && 'inserted' === $this->insert_media_replacement_theme_css_ref_row($item, $path, $relative, (string) $index_row['raw_fragment'], $new_fragment, $checksum)) {
                             $batch['refs']++;
                             $file_refs++;
                         }
@@ -835,14 +811,14 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
                 $batch['scanned']++;
             }
 
-            $has_scan_rows = !empty($this->get_media_replacement_theme_css_inventory_rows($job_id, $state['cursor_file_id'], 1));
+            $has_scan_rows = !empty($this->get_media_replacement_theme_css_inventory_rows($state['cursor_file_id'], 1));
             if (!$has_scan_rows) {
                 $current_roots = $this->get_media_replacement_theme_css_roots();
                 $current_roots_hash = $this->get_media_replacement_theme_css_roots_hash($current_roots);
                 if ('' === $state['roots_hash'] || !hash_equals($state['roots_hash'], $current_roots_hash)) {
                     return $this->fail_media_replacement_theme_css_scan($state, 'theme_css_file_set_changed', __('The active Theme CSS roots changed during Prepare. Restart Prepare to rebuild a consistent plan.', 'ultracache'));
                 }
-                if (!$this->reset_media_replacement_theme_css_inventory_validation($job_id)) {
+                if (!$this->reset_media_replacement_theme_css_inventory_validation()) {
                     return $this->fail_media_replacement_theme_css_scan($state, 'theme_css_inventory_write_failed', __('Theme CSS validation state could not be initialized.', 'ultracache'));
                 }
                 $state = $this->initialize_media_replacement_theme_css_traversal($state, $current_roots);
@@ -897,7 +873,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
                     $work_units++;
                 }
                 if (!empty($entry['file'])) {
-                    $validation = $this->validate_media_replacement_theme_css_inventory_file($job_id, $entry['file']);
+                    $validation = $this->validate_media_replacement_theme_css_inventory_file($entry['file']);
                     if (empty($validation['valid'])) {
                         return $this->fail_media_replacement_theme_css_scan($state, 'theme_css_file_set_changed', (string) ($validation['message'] ?? __('The Theme CSS file set changed during Prepare.', 'ultracache')));
                     }
@@ -909,7 +885,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             }
 
             if ($validation_complete) {
-                $unseen = $this->get_media_replacement_theme_css_unseen_inventory_count($job_id);
+                $unseen = $this->get_media_replacement_theme_css_unseen_inventory_count();
                 if ($unseen > 0) {
                     return $this->fail_media_replacement_theme_css_scan($state, 'theme_css_file_set_changed', __('One or more Theme CSS files disappeared during Prepare. Restart Prepare to rebuild a consistent plan.', 'ultracache'));
                 }
@@ -925,7 +901,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             $state['updated_at'] = current_time('mysql', true);
             $state = $this->update_media_replacement_theme_css_scan_state($state);
             $summary = $validation_complete
-                ? $this->get_media_replacement_theme_css_summary($job_id)
+                ? $this->get_media_replacement_theme_css_summary()
                 : array(
                     'total' => (int) $state['matched_refs'],
                     'pending' => (int) $state['matched_refs'],
@@ -961,38 +937,20 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         return $this->fail_media_replacement_theme_css_scan($state, 'theme_css_scan_failed', __('The Theme CSS scan reached an unsupported phase. Restart Prepare.', 'ultracache'));
     }
 
-    private function get_media_replacement_theme_css_preview_rows($job_id, $limit = 50, $offset = 0)
+    private function get_media_replacement_theme_css_preview_rows($limit = 50, $offset = 0)
     {
         global $wpdb;
-
         $table = $this->get_media_replacement_file_refs_table_name();
-        $job_id = sanitize_key((string) $job_id);
-        $limit = max(1, min(200, absint($limit)));
+        $limit = max(1, min(250, absint($limit)));
         $offset = max(0, absint($offset));
-        if ('' === $table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        if ('' === $table || !($wpdb instanceof wpdb)) {
             return array();
         }
-
         $rows = $wpdb->get_results(
-            $wpdb->prepare('SELECT id, item_id, relative_file_path, old_fragment, new_fragment, status, error_message FROM %i WHERE job_id = %s ORDER BY id ASC LIMIT %d OFFSET %d', $table, $job_id, $limit, $offset),
+            $wpdb->prepare('SELECT id, item_id, relative_file_path, old_fragment, new_fragment, status, error_message FROM %i ORDER BY id ASC LIMIT %d OFFSET %d', $table, $limit, $offset),
             ARRAY_A
         );
-
-        $items = array();
-        foreach ((array) $rows as $row) {
-            $item_id = isset($row['item_id']) ? absint($row['item_id']) : 0;
-            $items[] = array(
-                'id' => isset($row['id']) ? absint($row['id']) : 0,
-                'itemId' => $item_id,
-                'file' => isset($row['relative_file_path']) ? wp_strip_all_tags((string) $row['relative_file_path']) : '',
-                'oldFragment' => isset($row['old_fragment']) ? wp_strip_all_tags((string) $row['old_fragment']) : '',
-                'newFragment' => isset($row['new_fragment']) ? wp_strip_all_tags((string) $row['new_fragment']) : '',
-                'status' => isset($row['status']) ? sanitize_key((string) $row['status']) : 'pending',
-                'errorMessage' => isset($row['error_message']) ? wp_strip_all_tags((string) $row['error_message']) : '',
-            );
-        }
-
-        return $items;
+        return is_array($rows) ? $rows : array();
     }
 
     public function get_media_library_replacement_theme_css_replacement_preview($args = array())
@@ -1002,24 +960,20 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
+        $issue_confirmation_token = !array_key_exists('issue_confirmation_token', $args) || !empty($args['issue_confirmation_token']);
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $offset = isset($args['offset']) ? absint($args['offset']) : 0;
-        if ('' === $job_id) {
-            return array('success' => false, 'message' => __('Run Scan Theme CSS References before previewing theme CSS replacements.', 'ultracache'));
-        }
 
-        $summary = $this->get_media_replacement_theme_css_summary($job_id);
+        $summary = $this->get_media_replacement_theme_css_summary();
         $total = (int) $summary['total'];
-        $items = $total > 0 ? $this->get_media_replacement_theme_css_preview_rows($job_id, $limit, $offset) : array();
+        $items = $total > 0 ? $this->get_media_replacement_theme_css_preview_rows($limit, $offset) : array();
 
         $response = array(
             'success' => true,
             'message' => $total > 0
                 /* translators: %1$d: planned replacement count; %2$d: affected file count. */
                 ? sprintf(__('Theme CSS replacement preview is ready with %1$d planned replacements across %2$d files. No theme files were changed by this preview.', 'ultracache'), $total, (int) $summary['files'])
-                : __('Theme CSS replacement preview found no JPG/PNG references matched to this Media Library replacement job.', 'ultracache'),
-            'jobId' => $job_id,
+                : __('Theme CSS replacement preview found no JPG/PNG references matched to the current Media Library replacement workflow.', 'ultracache'),
             'status' => 'theme_css_preview',
             'hasMore' => false,
             'themeCssRefs' => $total,
@@ -1035,66 +989,47 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
                 : __('No theme CSS replacements are pending.', 'ultracache'),
         );
 
-        return $this->add_media_replacement_confirmation_token_to_response($response, $job_id, 'theme_css_apply', $total > 0 && (int) $summary['pending'] > 0);
+        return $this->add_media_replacement_confirmation_token_to_response($response, 'theme_css_apply', $issue_confirmation_token && $total > 0 && (int) $summary['pending'] > 0);
     }
 
-    private function get_media_replacement_theme_css_pending_rows($job_id, $limit = 25, $statuses = array('pending'))
+    private function get_media_replacement_theme_css_pending_rows($limit = 25, $statuses = array('pending'))
     {
         global $wpdb;
-
         $table = $this->get_media_replacement_file_refs_table_name();
-        $job_id = sanitize_key((string) $job_id);
         $limit = max(1, min(100, absint($limit)));
-        $statuses = array_values(array_filter(array_map('sanitize_key', (array) $statuses)));
-        if (empty($statuses)) {
-            $statuses = array('pending');
-        }
-        if ('' === $table || '' === $job_id || !($wpdb instanceof wpdb)) {
+        $statuses = array_values(array_intersect(array_map('sanitize_key', (array) $statuses), array('pending', 'applied', 'verified', 'failed', 'verify_failed')));
+        if ('' === $table || !($wpdb instanceof wpdb) || empty($statuses)) {
             return array();
         }
 
-        $allowed_statuses = array('pending', 'failed', 'applied', 'verify_failed');
-        $statuses = array_values(array_intersect($statuses, $allowed_statuses));
-        if (empty($statuses)) {
-            $statuses = array('pending');
-        }
-
         if (1 === count($statuses)) {
-            return $wpdb->get_results(
-                $wpdb->prepare(
-                    'SELECT * FROM %i WHERE job_id = %s AND status = %s ORDER BY id ASC LIMIT %d',
-                    $table,
-                    $job_id,
-                    $statuses[0],
-                    $limit
-                ),
-                ARRAY_A
-            );
-        }
-
-        return $wpdb->get_results(
-            $wpdb->prepare(
-                'SELECT * FROM %i WHERE job_id = %s AND (status = %s OR status = %s) ORDER BY id ASC LIMIT %d',
+            $rows = $wpdb->get_results($wpdb->prepare(
+                'SELECT * FROM %i WHERE status = %s ORDER BY id ASC LIMIT %d',
                 $table,
-                $job_id,
+                $statuses[0],
+                $limit
+            ), ARRAY_A);
+        } else {
+            $rows = $wpdb->get_results($wpdb->prepare(
+                'SELECT * FROM %i WHERE (status = %s OR status = %s) ORDER BY id ASC LIMIT %d',
+                $table,
                 $statuses[0],
                 $statuses[1],
                 $limit
-            ),
-            ARRAY_A
-        );
+            ), ARRAY_A);
+        }
+        return is_array($rows) ? $rows : array();
     }
 
-    private function build_media_replacement_theme_css_backup_path($job_id, $file_path)
+    private function build_media_replacement_theme_css_backup_path($file_path)
     {
         $uploads = function_exists('ultracache_uploads_base_info') ? ultracache_uploads_base_info() : wp_upload_dir(null, false);
-        if (empty($uploads['basedir']) || !function_exists('ultracache_storage_join_path')) {
-            return '';
-        }
-
         $file_path = wp_normalize_path((string) $file_path);
         $relative = md5($file_path) . '-' . sanitize_file_name(basename($file_path)) . '.bak';
-        return ultracache_storage_join_path((string) $uploads['basedir'], 'ultracache/theme-css-backups/' . sanitize_key((string) $job_id) . '/' . $relative);
+        if (empty($uploads['basedir']) || '' === $file_path || '' === $relative) {
+            return '';
+        }
+        return ultracache_storage_join_path((string) $uploads['basedir'], 'ultracache/theme-css-backups/current/' . $relative);
     }
 
     private function update_media_replacement_theme_css_ref_status($row_id, $status, $message = '', $extra = array())
@@ -1130,20 +1065,16 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array('success' => false, 'message' => __('Run Scan Theme CSS References before applying theme CSS replacements.', 'ultracache'));
-        }
-        $confirmation = $this->validate_media_replacement_confirmation_token($job_id, 'theme_css_apply', $args);
-        if (empty($confirmation['success'])) {
-            return $confirmation;
+        $authorization = $this->authorize_media_replacement_destructive_action('theme_css_apply', $args);
+        if (empty($authorization['success'])) {
+            return $authorization;
         }
         $limit = isset($args['limit']) ? absint($args['limit']) : 25;
         $limit = max(1, min(100, $limit));
         $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
         $time_budget = max(1.0, min(30.0, $time_budget));
         $deadline = microtime(true) + $time_budget;
-        $rows = $this->get_media_replacement_theme_css_pending_rows($job_id, $limit, array('pending', 'failed'));
+        $rows = $this->get_media_replacement_theme_css_pending_rows($limit, array('pending', 'failed'));
 
         $processed = 0;
         $applied = 0;
@@ -1175,7 +1106,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             $current_checksum = md5($content);
             $backup = isset($row['backup_file_path']) ? wp_normalize_path((string) $row['backup_file_path']) : '';
             if ('' === $backup) {
-                $backup = $this->build_media_replacement_theme_css_backup_path($job_id, $path);
+                $backup = $this->build_media_replacement_theme_css_backup_path($path);
             }
             $backup_exists = false;
             $backup_matches_baseline = false;
@@ -1246,7 +1177,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             }
         }
 
-        $summary = $this->get_media_replacement_theme_css_summary($job_id);
+        $summary = $this->get_media_replacement_theme_css_summary();
         $remaining = (int) $summary['pending'];
         $has_more = $remaining > 0;
         $total = (int) $summary['total'];
@@ -1258,7 +1189,6 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
                 'blocked'            => true,
                 'retryRequired'      => true,
                 'message'            => __('Theme CSS files were processed, but one or more replacement registry rows could not be persisted. Resume Do to reconcile the current file contents.', 'ultracache'),
-                'jobId'              => $job_id,
                 'status'             => 'theme_css_reconcile_required',
                 'hasMore'            => true,
                 'batchProcessedThemeCssRefs' => $processed,
@@ -1268,6 +1198,10 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             );
         }
 
+        if (!$has_more) {
+            $this->clear_media_replacement_destructive_authorization('theme_css_apply');
+        }
+
         return array(
             'success' => true,
             'message' => $has_more
@@ -1275,7 +1209,6 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
                 ? sprintf(__('Theme CSS replacement apply is in progress: %1$d of %2$d replacements processed.', 'ultracache'), $done, $total)
                 /* translators: %1$d: processed replacement count; %2$d: failed replacement count. */
                 : sprintf(__('Theme CSS replacement apply processed %1$d replacements. Failed: %2$d.', 'ultracache'), $total, (int) $summary['failed']),
-            'jobId' => $job_id,
             'status' => $has_more ? 'theme_css_applying' : 'theme_css_applied',
             'hasMore' => $has_more,
             'batchProcessedThemeCssRefs' => $processed,
@@ -1301,12 +1234,8 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
         }
 
         $args = is_array($args) ? $args : array();
-        $job_id = $this->get_media_replacement_preview_job_id(isset($args['job_id']) ? (string) $args['job_id'] : '');
-        if ('' === $job_id) {
-            return array('success' => false, 'message' => __('Run Apply Theme CSS Replacements before verifying theme CSS replacements.', 'ultracache'));
-        }
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
-        $rows = $this->get_media_replacement_theme_css_pending_rows($job_id, $limit, array('applied', 'verify_failed'));
+        $rows = $this->get_media_replacement_theme_css_pending_rows($limit, array('applied', 'verify_failed'));
         $processed = 0;
         $verified = 0;
         $failed = 0;
@@ -1331,7 +1260,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             }
         }
 
-        $summary = $this->get_media_replacement_theme_css_summary($job_id);
+        $summary = $this->get_media_replacement_theme_css_summary();
         $remaining = (int) $summary['applied'] + (int) $summary['verifyFailed'];
         $has_more = $remaining > 0;
         $total = (int) $summary['total'];
@@ -1343,7 +1272,6 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
                 ? sprintf(__('Theme CSS replacement verification is in progress: %1$d verified, %2$d still pending.', 'ultracache'), (int) $summary['verified'], $remaining)
                 /* translators: %1$d: verified reference count; %2$d: failed verification count. */
                 : sprintf(__('Theme CSS replacement verification complete. Verified: %1$d. Failed: %2$d.', 'ultracache'), (int) $summary['verified'], (int) $summary['verifyFailed']),
-            'jobId' => $job_id,
             'status' => $has_more ? 'theme_css_verifying' : 'theme_css_verified',
             'hasMore' => $has_more,
             'batchProcessedThemeCssRefs' => $processed,
@@ -1359,7 +1287,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Trait
             'progressPercent' => $total > 0 ? min(100, round(((int) $summary['verified'] / $total) * 100, 1)) : 100,
             'nextStep' => $has_more
                 ? __('Continue verifying Theme CSS replacements.', 'ultracache')
-                : __('Theme CSS replacements are verified. Next step: Cleanup Preview, then Cleanup Apply only after reviewing candidates.', 'ultracache'),
+                : __('Theme CSS replacements are verified. Next step: run Cleanup Preview, then use Delete Originals only after reviewing candidates.', 'ultracache'),
         );
     }
 

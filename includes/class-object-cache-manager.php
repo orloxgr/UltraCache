@@ -127,7 +127,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 			'fallbackMessage' => '',
 			'apcu' => array(
 				'enabled' => false,
-				'available' => function_exists('apcu_fetch') && function_exists('apcu_store') && (!function_exists('apcu_enabled') || apcu_enabled()),
+				'available' => self::apcu_supported(),
 			),
 			'sqlite' => array(
 				'enabled' => false,
@@ -365,7 +365,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 		}
 
 		$placeholders = array(
-			'__ULTRACACHE_OBJECT_CACHE_BACKEND_CLASSES__' => $backend_classes_source,
+			'/*__ULTRACACHE_OBJECT_CACHE_BACKEND_CLASSES__*/' => $backend_classes_source,
 			'__ULTRACACHE_DROPIN_BUILD__' => ULTRACACHE_VERSION,
 			'__ULTRACACHE_OBJECT_CACHE_DIR__' => ultracache_php_string_literal(ULTRACACHE_OBJECT_CACHE_DIR),
 			'__ULTRACACHE_SQLITE_PATH__' => ultracache_php_string_literal(self::get_sqlite_path()),
@@ -385,7 +385,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 			'__ULTRACACHE_REDIS_READ_TIMEOUT__'    => ultracache_php_float_literal(max(0.05, ((int) ($settings['redis_read_timeout_ms'] ?? 200)) / 1000)),
 		);
 
-		$template = ultracache_plugin_dir('templates/object-cache.php.tpl');
+		$template = ultracache_plugin_dir('templates/object-cache-template.php');
 		if (!file_exists($template) || !is_readable($template)) {
 			return false;
 		}
@@ -579,7 +579,7 @@ final class Ultra_Cache_Object_Cache_Manager {
 		$result = array(
 			'success' => false,
 			'backend' => 'apcu',
-			'available' => function_exists('apcu_store') && function_exists('apcu_fetch') && function_exists('apcu_delete') && (!function_exists('apcu_enabled') || apcu_enabled()),
+			'available' => self::apcu_supported(),
 			'message' => '',
 		);
 		if (!$result['available']) {
@@ -587,14 +587,16 @@ final class Ultra_Cache_Object_Cache_Manager {
 			return $result;
 		}
 		$key = self::get_apcu_prefix() . 'probe:' . md5(uniqid('ultracache-apcu', true));
-		$value = 'ultracache:' . md5($key . microtime(true));
 		$success = false;
 		try {
-			$stored = @apcu_store($key, $value, 30);
+			$value = function_exists('wp_rand') ? wp_rand(1, 2147483646) : random_int(1, 2147483646);
+			$added = @apcu_add($key, $value, 30);
+			$duplicate_rejected = !@apcu_add($key, $value + 1, 30);
+			$swapped = @apcu_cas($key, $value, $value + 1);
 			$fetched = @apcu_fetch($key, $success);
 			@apcu_delete($key);
-			$result['success'] = (bool) $stored && (bool) $success && (string) $fetched === (string) $value;
-			$result['message'] = $result['success'] ? 'APCu read/write probe passed.' : 'APCu is available, but the read/write probe failed.';
+			$result['success'] = (bool) $added && (bool) $duplicate_rejected && (bool) $swapped && (bool) $success && (int) $fetched === ($value + 1);
+			$result['message'] = $result['success'] ? 'APCu read/write and atomic-operation probe passed.' : 'APCu is available, but the atomic-operation probe failed.';
 		} catch (Throwable $e) {
 			$result['message'] = $e->getMessage();
 		}
@@ -784,26 +786,80 @@ final class Ultra_Cache_Object_Cache_Manager {
 			'success' => false,
 			'backend' => 'disk',
 			'available' => false,
+			'checks' => array(
+				'lock' => false,
+				'write' => false,
+				'rename' => false,
+				'read' => false,
+				'delete' => false,
+			),
 			'message' => '',
 		);
 		self::ensure_cache_directory();
-		$result['available'] = is_dir(ULTRACACHE_OBJECT_CACHE_DIR) && function_exists('ultracache_path_is_writable') && ultracache_path_is_writable(ULTRACACHE_OBJECT_CACHE_DIR);
+		$result['available'] = is_dir(ULTRACACHE_OBJECT_CACHE_DIR)
+			&& function_exists('ultracache_path_is_writable')
+			&& ultracache_path_is_writable(ULTRACACHE_OBJECT_CACHE_DIR)
+			&& function_exists('flock');
 		if (!$result['available']) {
-			$result['message'] = 'Disk object cache directory is not writable.';
+			$result['message'] = 'Disk object cache directory or file locking is unavailable.';
 			return $result;
 		}
-		$file = trailingslashit(ULTRACACHE_OBJECT_CACHE_DIR) . 'disk-probe-' . md5(uniqid('ultracache-disk', true)) . '.tmp';
-		$value = 'ultracache:' . md5($file . microtime(true));
+
+		$base = trailingslashit(ULTRACACHE_OBJECT_CACHE_DIR) . 'disk-probe-' . md5(uniqid('ultracache-disk', true));
+		$tmp_file = $base . '.tmp';
+		$final_file = $base . '.cache';
+		$lock_file = $base . '.lock';
+		$value = 'ultracache:' . md5($base . microtime(true));
+		$lock_handle = false;
 		try {
-			$written = ultracache_safe_file_put_contents($file, $value, LOCK_EX, 'object_cache_disk_probe');
-			$read = is_readable($file) ? ultracache_safe_file_get_contents($file, 'object_cache_disk_probe_read') : false;
-			ultracache_safe_unlink($file, 'object_cache_disk_probe_delete');
-			$result['success'] = false !== $written && (string) $read === (string) $value;
-			$result['message'] = $result['success'] ? 'Disk object cache read/write probe passed.' : 'Disk object cache read/write probe failed.';
+			if (!function_exists('ultracache_is_allowed_writable_path') || !ultracache_is_allowed_writable_path($lock_file, 'object_cache_disk_probe_lock')) {
+				throw new RuntimeException('Disk object cache lock path is blocked.');
+			}
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- A native handle is required for flock(); the lock path is validated by ultracache_is_allowed_writable_path() immediately above.
+			$lock_handle = @fopen($lock_file, 'c+b');
+			$result['checks']['lock'] = is_resource($lock_handle) && @flock($lock_handle, LOCK_EX | LOCK_NB);
+			if (!$result['checks']['lock']) {
+				throw new RuntimeException('Disk object cache lock probe failed.');
+			}
+
+			$written = ultracache_safe_file_put_contents($tmp_file, $value, LOCK_EX, 'object_cache_disk_probe_write');
+			$result['checks']['write'] = false !== $written;
+			$result['checks']['rename'] = $result['checks']['write']
+				&& function_exists('ultracache_safe_rename')
+				&& ultracache_safe_rename($tmp_file, $final_file, 'object_cache_disk_probe_rename');
+			$read = $result['checks']['rename'] && is_readable($final_file)
+				? ultracache_safe_file_get_contents($final_file, 'object_cache_disk_probe_read')
+				: false;
+			$result['checks']['read'] = (string) $read === (string) $value;
+
+			@flock($lock_handle, LOCK_UN);
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Releases the validated native flock() probe handle.
+			@fclose($lock_handle);
+			$lock_handle = false;
+			$deleted_final = ultracache_safe_unlink($final_file, 'object_cache_disk_probe_delete');
+			$deleted_tmp = ultracache_safe_unlink($tmp_file, 'object_cache_disk_probe_temp_cleanup');
+			$deleted_lock = ultracache_safe_unlink($lock_file, 'object_cache_disk_probe_lock_cleanup');
+			$result['checks']['delete'] = $deleted_final && $deleted_tmp && $deleted_lock;
+			$result['success'] = !in_array(false, $result['checks'], true);
+			$result['message'] = $result['success']
+				? 'Disk object cache lock/write/rename/read/delete probe passed.'
+				: 'Disk object cache functional probe failed.';
 		} catch (Throwable $e) {
 			$result['message'] = $e->getMessage();
-			if (file_exists($file)) {
-				ultracache_safe_unlink($file, 'object_cache_disk_probe_cleanup');
+		} finally {
+			if (is_resource($lock_handle)) {
+				@flock($lock_handle, LOCK_UN);
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Releases the validated native flock() probe handle during cleanup.
+				@fclose($lock_handle);
+			}
+			if (file_exists($final_file)) {
+				ultracache_safe_unlink($final_file, 'object_cache_disk_probe_final_cleanup');
+			}
+			if (file_exists($tmp_file)) {
+				ultracache_safe_unlink($tmp_file, 'object_cache_disk_probe_temp_cleanup');
+			}
+			if (file_exists($lock_file)) {
+				ultracache_safe_unlink($lock_file, 'object_cache_disk_probe_lock_cleanup');
 			}
 		}
 		return $result;
@@ -1193,6 +1249,39 @@ final class Ultra_Cache_Object_Cache_Manager {
 			return;
 		}
 		update_option('ultracache_object_cache_last_flush_report', $report, false);
+	}
+
+	public static function get_lightweight_stats() {
+		$backend_status = self::get_backend_status();
+		$selected_backend = isset($backend_status['selected']) ? (string) $backend_status['selected'] : self::get_selected_backend();
+		$active_backend = isset($backend_status['active']) ? (string) $backend_status['active'] : $selected_backend;
+		$fallback_active = !empty($backend_status['fallbackActive']);
+		$fallback_backend = isset($backend_status['fallback']) ? strtolower(trim((string) $backend_status['fallback'])) : '';
+		if (!in_array($fallback_backend, array('redis', 'apcu', 'sqlite', 'disk', 'runtime'), true)) {
+			$fallback_backend = $fallback_active ? $active_backend : (!empty($backend_status['apcu']['available']) ? 'apcu' : 'runtime');
+		}
+
+		$metrics = self::read_metrics_snapshot();
+		$hits = max(0, (int) ($metrics['hits'] ?? 0));
+		$misses = max(0, (int) ($metrics['misses'] ?? 0));
+		$ratio = ($hits + $misses) > 0 ? round(($hits / ($hits + $misses)) * 100, 1) : 0.0;
+
+		return array(
+			'objectCacheBackend' => $active_backend,
+			'objectCacheSelectedBackend' => $selected_backend,
+			'objectCacheActiveBackend' => $active_backend,
+			'objectCacheFallbackBackend' => $fallback_backend,
+			'objectCacheFallbackActive' => (bool) $fallback_active,
+			'objectCacheFallbackReason' => (string) ($backend_status['fallbackReason'] ?? ''),
+			'objectCacheFallbackMessage' => (string) ($backend_status['fallbackMessage'] ?? ''),
+			'objectCacheBackendStatus' => $backend_status,
+			'objectCacheStatsSource' => $active_backend,
+			'objectCacheStatsBackendLabel' => strtoupper((string) $active_backend),
+			'objectCacheHits' => $hits,
+			'objectCacheMisses' => $misses,
+			'objectCacheHitRatio' => $ratio,
+			'objectCacheRuntimeMetricsOnly' => true,
+		);
 	}
 
 	public static function get_stats($full_count = false) {
@@ -1843,6 +1932,15 @@ final class Ultra_Cache_Object_Cache_Manager {
 			wp_cache_delete('alloptions', 'site-options');
 			wp_cache_delete('notoptions', 'site-options');
 		}
+	}
+
+	private static function apcu_supported() {
+		return function_exists('apcu_fetch')
+			&& function_exists('apcu_store')
+			&& function_exists('apcu_delete')
+			&& function_exists('apcu_add')
+			&& function_exists('apcu_cas')
+			&& (!function_exists('apcu_enabled') || apcu_enabled());
 	}
 
 	private static function redis_supported() {

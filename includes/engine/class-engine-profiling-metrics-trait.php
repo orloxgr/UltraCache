@@ -376,29 +376,6 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         return esc_url_raw($url);
     }
 
-    private function get_css_rewrite_source_url_from_transient_map($generated_url)
-    {
-        $generated_url = $this->normalize_css_rewrite_map_lookup_url($generated_url);
-        if ('' === $generated_url) {
-            return '';
-        }
-
-        $map = get_transient('ultracache_runtime_font_css_url_map_v3');
-        if (!is_array($map)) {
-            return '';
-        }
-
-        foreach ($map as $source_url => $mapped_url) {
-            $source_url = $this->normalize_css_rewrite_map_lookup_url((string) $source_url);
-            $mapped_url = $this->normalize_css_rewrite_map_lookup_url((string) $mapped_url);
-            if ('' !== $source_url && '' !== $mapped_url && $mapped_url === $generated_url) {
-                return $source_url;
-            }
-        }
-
-        return '';
-    }
-
     private function map_generated_css_detail_to_original_source(array $detail)
     {
         $url = isset($detail['url']) ? $this->normalize_css_rewrite_map_lookup_url((string) $detail['url']) : '';
@@ -419,14 +396,6 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
                 $source_url = $this->normalize_css_rewrite_map_lookup_url((string) $row['source_url']);
                 $source_path = isset($row['source_path']) ? wp_normalize_path((string) $row['source_path']) : '';
                 $optimization_type = isset($row['optimization_type']) ? sanitize_key((string) $row['optimization_type']) : $optimization_type;
-            }
-        }
-
-        if ('' === $source_url) {
-            $source_url = $this->get_css_rewrite_source_url_from_transient_map($generated_url);
-            if ('' !== $source_url) {
-                $source_path = $this->resolve_local_path_from_public_url($source_url);
-                $optimization_type = 'css-font-mix';
             }
         }
 
@@ -1148,6 +1117,77 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
         );
     }
 
+    /**
+     * Merge a real frontend cache result into the canonical warm queue.
+     *
+     * Authenticated warm loopbacks already own their queue row and must not be
+     * reclassified as visitor work. Stale revalidation requests are allowed to
+     * satisfy the HTML stage because they are the visit-triggered rebuild path.
+     *
+     * @param string $url    Local public URL.
+     * @param string $source Visit source label.
+     * @return array
+     */
+    private function record_frontend_visit_queue_satisfaction($url, $source = 'visit-store')
+    {
+        $url = esc_url_raw((string) $url);
+        if ('' === $url) {
+            return array('matched' => false, 'updated' => false, 'completed' => false);
+        }
+
+        if (
+            method_exists($this, 'is_authenticated_ultracache_internal_warm_request')
+            && $this->is_authenticated_ultracache_internal_warm_request()
+        ) {
+            return array('matched' => false, 'updated' => false, 'completed' => false, 'skipped' => 'internal-warm');
+        }
+
+        if (
+            !method_exists($this, 'get_frontend_visit_cache_satisfaction')
+            || !class_exists('Ultra_Cache_WP')
+            || !method_exists('Ultra_Cache_WP', 'record_frontend_visit_cache_satisfaction')
+        ) {
+            return array('matched' => false, 'updated' => false, 'completed' => false);
+        }
+
+        $cache = $this->get_frontend_visit_cache_satisfaction($url);
+        if (empty($cache['htmlComplete'])) {
+            return array(
+                'matched' => false,
+                'updated' => false,
+                'completed' => false,
+                'requiredBuckets' => (array) ($cache['requiredBuckets'] ?? array()),
+                'cachedBuckets' => (array) ($cache['cachedBuckets'] ?? array()),
+            );
+        }
+
+        return Ultra_Cache_WP::record_frontend_visit_cache_satisfaction(
+            $url,
+            array('html'),
+            sanitize_key((string) $source)
+        );
+    }
+
+    private function maybe_enqueue_first_visit_warm($url)
+    {
+        $settings = $this->get_settings();
+        if (empty($settings['warm_uncached_urls_on_first_visit'])) {
+            return false;
+        }
+        if (method_exists($this, 'is_internal_revalidate_request') && $this->is_internal_revalidate_request()) {
+            return false;
+        }
+        if (method_exists($this, 'is_authenticated_ultracache_internal_warm_request') && $this->is_authenticated_ultracache_internal_warm_request()) {
+            return false;
+        }
+        $url = esc_url_raw((string) $url);
+        if ('' === $url || !class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'enqueue_targeted_warm_pipeline_urls')) {
+            return false;
+        }
+        $result = Ultra_Cache_WP::enqueue_targeted_warm_pipeline_urls(array($url), false, 'first-visit');
+        return is_array($result) && !empty($result['queued']);
+    }
+
     public function run_deferred_store_post_response_actions()
     {
         if (empty($this->deferred_store_post_response_actions)) {
@@ -1171,7 +1211,18 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
 
                 $this->record_analytics_store();
                 $this->record_cache_event('store', array('url' => $url, 'file' => $file_path));
+                $this->maybe_enqueue_first_visit_warm($url);
+                $this->record_frontend_visit_queue_satisfaction(
+                    $url,
+                    method_exists($this, 'is_internal_revalidate_request') && $this->is_internal_revalidate_request()
+                        ? 'visit-revalidate'
+                        : 'visit-store'
+                );
                 $this->finalize_store_profile('STORE', '', $file_path);
+            } elseif ('visit_cache_satisfaction' === $type) {
+                $url = isset($payload['url']) ? (string) $payload['url'] : '';
+                $source = isset($payload['source']) ? (string) $payload['source'] : 'visit-hit';
+                $this->record_frontend_visit_queue_satisfaction($url, $source);
             }
         }
     }
@@ -1270,7 +1321,20 @@ trait Ultra_Cache_Engine_Profiling_Metrics_Trait
             $critical_request_html = ultracache_safe_file_get_contents((string) $file_path);
         }
         $this->store_profile['critical_request_chain'] = $this->collect_store_profile_critical_request_chain(is_string($critical_request_html) ? $critical_request_html : '');
-        $this->store_profile['js_delay_safety_scan'] = $this->collect_store_profile_js_delay_safety_scan(is_string($critical_request_html) ? $critical_request_html : '');
+        $profile_run_id = sanitize_key((string) ($this->store_profile['profile_run_id'] ?? ''));
+        if (0 === strpos($profile_run_id, 'jsdep_')) {
+            $this->store_profile['js_delay_safety_scan'] = array(
+                'available' => false,
+                'skipped' => true,
+                'reason' => 'resumable-strong-scan',
+                'suggestion_count' => 0,
+                'missing_count' => 0,
+                'already_excluded_count' => 0,
+                'suggestions' => array(),
+            );
+        } else {
+            $this->store_profile['js_delay_safety_scan'] = $this->collect_store_profile_js_delay_safety_scan(is_string($critical_request_html) ? $critical_request_html : '');
+        }
 
         $largest_delta = array('stage' => '', 'delta_bytes' => 0);
         $slowest = array('stage' => '', 'duration_ms' => 0);

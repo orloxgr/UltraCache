@@ -12,19 +12,25 @@ final class Ultra_Cache_Media_Replacement_Manager {
 	use Ultra_Cache_Media_Replacement_Trait;
 
 	/** Persistent Media Library replacement table version. */
-	const MEDIA_REPLACEMENT_DB_VERSION = '10';
+	const MEDIA_REPLACEMENT_DB_VERSION = '15';
 
-	/** Media Library replacement orchestration generation. Legacy jobs are intentionally not migrated. */
-	const MEDIA_REPLACEMENT_ORCHESTRATION_VERSION = 6;
+	/** Media Library replacement orchestration contract version. */
+	const MEDIA_REPLACEMENT_ORCHESTRATION_VERSION = 8;
 
 	/** Short-lived lock protecting readiness inventory cursor and counters from concurrent chunks. */
 	const MEDIA_REPLACEMENT_READINESS_LOCK = 'ultracache_media_replacement_readiness_lock_v1';
 
-	/** Token-owned dashboard lease for resumable Media Library replacement jobs. */
+	/** Lifetime of a destructive Media Replacement start-confirmation token. */
+	const MEDIA_REPLACEMENT_CONFIRMATION_TTL = 600;
+
+	/** Token-owned dashboard lease for the resumable Media Library replacement workflow. */
 	const MEDIA_REPLACEMENT_MANUAL_SESSION_LOCK = 'ultracache_media_replacement_manual_session_v1';
 
 	/** Dashboard replacement lease lifetime. Each successful chunk renews it. */
 	const MEDIA_REPLACEMENT_MANUAL_SESSION_TTL = 120;
+
+	/** Backward-compatible name for the shared destructive confirmation TTL. */
+	const MEDIA_REPLACEMENT_DELETE_CONFIRMATION_TTL = self::MEDIA_REPLACEMENT_CONFIRMATION_TTL;
 
 	/** Persistent Media Library replacement database version option. */
 	const MEDIA_REPLACEMENT_DB_VERSION_OPTION = 'ultracache_media_replacement_db_version';
@@ -49,8 +55,7 @@ final class Ultra_Cache_Media_Replacement_Manager {
 	 */
 	private const REQUIRED_DEPENDENCIES = array(
 		'get_avif_path_from_source',
-		'get_media_fallback_format',
-		'get_media_output_mode',
+		'get_media_replacement_format',
 		'get_media_queue_table_name',
 		'get_uploads_relative_path_from_source',
 		'get_webp_path_from_source',
@@ -63,6 +68,8 @@ final class Ultra_Cache_Media_Replacement_Manager {
 		'optimized_storage_path_exists',
 		'optimized_storage_readable_source_exists',
 		'path_is_within_root',
+		'reconcile_media_queue_units_for_attachment',
+		'get_media_queue_readiness_diagnostics',
 	);
 
 	/**
@@ -91,17 +98,10 @@ final class Ultra_Cache_Media_Replacement_Manager {
 	}
 
 	/**
-	 * Read the configured fallback format through the media converter.
+	 * Read the configured Media Library replacement format through the media converter.
 	 */
-	private function get_media_fallback_format() {
-		return ($this->dependencies['get_media_fallback_format'])();
-	}
-
-	/**
-	 * Read the configured output mode through the media converter.
-	 */
-	private function get_media_output_mode() {
-		return ($this->dependencies['get_media_output_mode'])();
+	private function get_media_replacement_format() {
+		return ($this->dependencies['get_media_replacement_format'])();
 	}
 
 	/**
@@ -186,5 +186,23 @@ final class Ultra_Cache_Media_Replacement_Manager {
 	 */
 	private function path_is_within_root($path, $root) {
 		return ($this->dependencies['path_is_within_root'])($path, $root);
+	}
+
+	/**
+	 * Materialize and reconcile an existing attachment queue parent through the media converter.
+	 */
+	private function reconcile_media_queue_units_for_attachment($attachment_id, $format, $create_parent = false) {
+		return ($this->dependencies['reconcile_media_queue_units_for_attachment'])($attachment_id, $format, $create_parent);
+	}
+
+	/**
+	 * Read exact per-file queue diagnostics for readiness blockers.
+	 *
+	 * @param int[]  $attachment_ids Attachment IDs.
+	 * @param string $format         Concrete output format.
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function get_media_queue_readiness_diagnostics(array $attachment_ids, $format) {
+		return ($this->dependencies['get_media_queue_readiness_diagnostics'])($attachment_ids, $format);
 	}
 }

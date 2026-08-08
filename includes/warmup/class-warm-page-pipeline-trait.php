@@ -12,158 +12,6 @@ if (!defined('ABSPATH')) {
 trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
 {
     /**
-     * Execute one manual warm stage while preventing another source from
-     * processing the same URL at the same time.
-     *
-     * @param string $url   Local public URL.
-     * @param string $stage Stage name.
-     * @param array  $args  Stage arguments.
-     * @return array
-     */
-    public function warm_page_pipeline_stage($url, $stage, array $args = array())
-    {
-        $lock = $this->acquire_warm_pipeline_url_lock($url, 'manual-stage-' . sanitize_key((string) $stage));
-        if (empty($lock['acquired'])) {
-            return $this->get_coalesced_warm_pipeline_result($url, sanitize_key((string) $stage));
-        }
-
-        $heartbeat = function ($heartbeat_stage = '') use (&$lock) {
-            return $this->renew_warm_pipeline_url_lock($lock, $heartbeat_stage);
-        };
-
-        try {
-            if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'manual-stage-start')) {
-                return $this->get_warm_pipeline_ownership_lost_result($url, sanitize_key((string) $stage));
-            }
-            $args['_warm_pipeline_heartbeat'] = $heartbeat;
-            return $this->run_warm_page_pipeline_stage($url, $stage, $args);
-        } finally {
-            $this->release_warm_pipeline_url_lock($lock);
-        }
-    }
-
-    /**
-     * Execute one resumable manual warm stage for a local page.
-     *
-     * @param string $url   Local public URL.
-     * @param string $stage Stage name: html or css.
-     * @param array  $args  Stage arguments.
-     * @return array
-     */
-    private function run_warm_page_pipeline_stage($url, $stage, array $args = array())
-    {
-        $url = esc_url_raw((string) $url);
-        $stage = sanitize_key((string) $stage);
-        $args = is_array($args) ? $args : array();
-        $heartbeat = isset($args['_warm_pipeline_heartbeat']) && is_callable($args['_warm_pipeline_heartbeat'])
-            ? $args['_warm_pipeline_heartbeat']
-            : null;
-        unset($args['_warm_pipeline_heartbeat']);
-        if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'manual-preflight')) {
-            return $this->get_warm_pipeline_ownership_lost_result($url, $stage);
-        }
-        $preflight = $this->get_warm_pipeline_preflight($url);
-
-        if (empty($preflight['eligible'])) {
-            return array(
-                'success' => false,
-                'skipped' => true,
-                'stage' => $stage,
-                'stageStatus' => 'skipped',
-                'url' => $url,
-                'message' => (string) ($preflight['message'] ?? __('URL is not eligible for HTML warm-up.', 'ultracache')),
-                'reason' => (string) ($preflight['reason'] ?? 'ineligible'),
-            );
-        }
-
-        if ('html' === $stage) {
-            $warm_args = array(
-                'force_refresh' => !empty($args['force_refresh']),
-                'ignore_runtime_bypass' => !empty($args['ignore_runtime_bypass']),
-                'skip_css_bundle' => true,
-                '_warm_pipeline_heartbeat' => $heartbeat,
-            );
-            $warm_result = $this->warm_url($url, $warm_args);
-            $success = !empty($warm_result['success']);
-            $skipped = !empty($warm_result['skipped']);
-
-            return array(
-                'success' => $success,
-                'skipped' => $skipped,
-                'stage' => 'html',
-                'stageStatus' => $success ? 'completed' : ($skipped ? 'skipped' : 'failed'),
-                'url' => $url,
-                'message' => (string) ($warm_result['message'] ?? ''),
-                'cached' => !empty($warm_result['cached']),
-                'files' => isset($warm_result['files']) && is_array($warm_result['files']) ? array_values($warm_result['files']) : array(),
-                'buckets' => isset($warm_result['buckets']) && is_array($warm_result['buckets']) ? array_values($warm_result['buckets']) : array('orig'),
-                'forceRefreshRequested' => !empty($warm_result['forceRefreshRequested']),
-                'forceRefreshReachedOrigin' => !empty($warm_result['forceRefreshReachedOrigin']),
-                'forceRefreshReachedBucketCount' => absint($warm_result['forceRefreshReachedBucketCount'] ?? 0),
-                'forceRefreshExpectedBucketCount' => absint($warm_result['forceRefreshExpectedBucketCount'] ?? 0),
-                'warmResult' => $warm_result,
-            );
-        }
-
-        if ('css' === $stage) {
-            if (empty($args['build_css_bundle'])) {
-                return array(
-                    'success' => true,
-                    'skipped' => true,
-                    'stage' => 'css',
-                    'stageStatus' => 'disabled',
-                    'url' => $url,
-                    'message' => __('CSS bundle warm-up is not selected for this job.', 'ultracache'),
-                );
-            }
-
-            if (!method_exists($this, 'build_frontpage_css_bundle')) {
-                return array(
-                    'success' => false,
-                    'skipped' => false,
-                    'stage' => 'css',
-                    'stageStatus' => 'failed',
-                    'url' => $url,
-                    'message' => __('CSS bundle integration is unavailable.', 'ultracache'),
-                );
-            }
-
-            if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'manual-css-before')) {
-                return $this->get_warm_pipeline_ownership_lost_result($url, 'css');
-            }
-            $css_result = $this->build_frontpage_css_bundle($url, array(
-                'skip_final_warm' => true,
-                'ignore_runtime_bypass' => !empty($args['ignore_runtime_bypass']),
-            ));
-            if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'manual-css-after')) {
-                return $this->get_warm_pipeline_ownership_lost_result($url, 'css');
-            }
-            $success = !empty($css_result['success']);
-            $skipped = !empty($css_result['skipped']);
-
-            return array(
-                'success' => $success,
-                'skipped' => $skipped,
-                'stage' => 'css',
-                'stageStatus' => $success ? 'completed' : ($skipped ? 'skipped' : 'failed'),
-                'url' => $url,
-                'message' => (string) ($css_result['message'] ?? ''),
-                'bundleCount' => absint($css_result['bundleCount'] ?? 0),
-                'bundleFile' => sanitize_text_field((string) ($css_result['bundleFile'] ?? '')),
-                'cssResult' => $css_result,
-            );
-        }
-
-        return array(
-            'success' => false,
-            'skipped' => false,
-            'stage' => $stage,
-            'stageStatus' => 'failed',
-            'url' => $url,
-            'message' => __('Unknown manual warm-up stage.', 'ultracache'),
-        );
-    }
-    /**
      * Run the complete page pipeline under a URL-scoped lock shared by manual,
      * cron, warm-after-flush, and targeted-purge sources.
      *
@@ -174,10 +22,29 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
     public function warm_page_pipeline($url, array $args = array())
     {
         $context = sanitize_key((string) ($args['warm_context'] ?? 'warm'));
+        $execution_profile = $this->get_warm_pipeline_execution_profile($context);
+        $args['execution_profile'] = (string) $execution_profile['key'];
+        if (!isset($args['time_budget'])) {
+            $args['time_budget'] = (int) $execution_profile['pageTimeBudget'];
+        }
         $queue_heartbeat = isset($args['_queue_lease_heartbeat']) && is_callable($args['_queue_lease_heartbeat'])
             ? $args['_queue_lease_heartbeat']
             : null;
         unset($args['_queue_lease_heartbeat']);
+
+        // A global UI/WP-CLI/cron owner must still hold its exact committed
+        // token/generation before it may acquire a per-URL lock. Frontend visits
+        // do not provide this callback and continue to use URL-only coordination.
+        if (is_callable($queue_heartbeat)) {
+            try {
+                if (false === call_user_func($queue_heartbeat, 'url-claim-before')) {
+                    return $this->get_warm_pipeline_ownership_lost_result($url, 'pipeline');
+                }
+            } catch (Throwable $error) {
+                unset($error);
+                return $this->get_warm_pipeline_ownership_lost_result($url, 'pipeline');
+            }
+        }
 
         $lock = $this->acquire_warm_pipeline_url_lock($url, $context);
         if (empty($lock['acquired'])) {
@@ -206,7 +73,7 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
      * Run every selected warm stage for one local page before reporting completion.
      *
      * Dashboard, cron, and warm-after-flush paths use this same per-page
-     * contract so selected HTML, CSS, and Varnish work completes
+     * contract so selected HTML, CSS, Varnish, and LiteSpeed work completes
      * before the page is reported as finished.
      *
      * @param string $url  Local public URL.
@@ -224,18 +91,42 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
         $url = esc_url_raw((string) $url);
         $build_css_bundle = !empty($args['build_css_bundle']);
         $include_varnish = !empty($args['include_varnish']);
+        $include_litespeed = !empty($args['include_litespeed']);
         $warm_context = sanitize_key((string) ($args['warm_context'] ?? 'manual'));
+        $execution_profile = sanitize_key((string) ($args['execution_profile'] ?? ''));
+        if ('' === $execution_profile) {
+            $execution_profile = (string) $this->get_warm_pipeline_execution_profile($warm_context)['key'];
+        }
         $requires_verified_origin = !empty($args['requires_verified_origin']);
+        $allowed_stage_names = array('html', 'css_bundle', 'lcp_refresh', 'varnish', 'litespeed');
+        $required_stages = isset($args['required_stages']) && is_array($args['required_stages'])
+            ? array_values(array_unique(array_intersect($allowed_stage_names, array_map('sanitize_key', $args['required_stages']))))
+            : array('html');
+        $completed_stages = isset($args['completed_stages']) && is_array($args['completed_stages'])
+            ? array_values(array_unique(array_intersect($allowed_stage_names, array_map('sanitize_key', $args['completed_stages']))))
+            : array();
+        $html_precompleted = in_array('html', $completed_stages, true);
+        $css_precompleted = in_array('css_bundle', $completed_stages, true);
+        $lcp_precompleted = in_array('lcp_refresh', $completed_stages, true);
+        $varnish_precompleted = in_array('varnish', $completed_stages, true);
+        $litespeed_precompleted = in_array('litespeed', $completed_stages, true);
+        $lcp_refresh_pending = in_array('lcp_refresh', $required_stages, true)
+            && !$lcp_precompleted;
+        $css_stage_pending = $build_css_bundle && !$css_precompleted;
+
         $stages = array(
-            'html' => $this->get_warm_pipeline_stage('planned', true),
-            'css' => $this->get_warm_pipeline_stage($build_css_bundle ? 'planned' : 'disabled', $build_css_bundle),
-            'varnish' => $this->get_warm_pipeline_stage($include_varnish ? 'planned' : 'disabled', $include_varnish),
+            'html' => $this->get_warm_pipeline_stage($html_precompleted ? 'completed' : 'planned', true, $html_precompleted ? __('HTML cache was already satisfied by a frontend visit.', 'ultracache') : '', array('source' => $html_precompleted ? 'frontend-visit' : '')),
+            'css' => $this->get_warm_pipeline_stage($css_precompleted ? 'completed' : ($build_css_bundle ? 'planned' : 'disabled'), $build_css_bundle, $css_precompleted ? __('CSS bundle stage was already completed.', 'ultracache') : ''),
+            'lcp' => $this->get_warm_pipeline_stage($lcp_precompleted ? 'completed' : ($lcp_refresh_pending ? 'planned' : 'disabled'), $lcp_precompleted || $lcp_refresh_pending, $lcp_precompleted ? __('LCP refresh stage was already completed.', 'ultracache') : ''),
+            'varnish' => $this->get_warm_pipeline_stage($varnish_precompleted ? 'completed' : ($include_varnish ? 'planned' : 'disabled'), $include_varnish || $varnish_precompleted, $varnish_precompleted ? __('Varnish stage was already completed.', 'ultracache') : ''),
+            'litespeed' => $this->get_warm_pipeline_stage($litespeed_precompleted ? 'completed' : ($include_litespeed ? 'planned' : 'disabled'), $include_litespeed || $litespeed_precompleted, $litespeed_precompleted ? __('LiteSpeed stage was already completed.', 'ultracache') : ''),
         );
 
         if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'preflight-before')) {
             return $this->get_warm_pipeline_ownership_lost_result($url, 'pipeline', $stages);
         }
         $preflight = $this->get_warm_pipeline_preflight($url);
+        $preflight['executionProfile'] = $execution_profile;
         if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'preflight-after')) {
             return $this->get_warm_pipeline_ownership_lost_result($url, 'pipeline', $stages, $preflight);
         }
@@ -269,15 +160,38 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
         }
 
         $warm_args = $args;
-        unset($warm_args['include_varnish'], $warm_args['warm_context'], $warm_args['requires_verified_origin']);
+        unset($warm_args['include_varnish'], $warm_args['include_litespeed'], $warm_args['warm_context'], $warm_args['requires_verified_origin'], $warm_args['required_stages'], $warm_args['completed_stages']);
         $warm_args['_warm_pipeline_heartbeat'] = $heartbeat;
-        $warm_result = $this->warm_url($url, $warm_args);
-        $result = is_array($warm_result) ? $warm_result : array();
-        if (!empty($result['ownershipLost'])) {
-            return $this->get_warm_pipeline_ownership_lost_result($url, 'html', $stages, $preflight);
+
+        $reuse_frontend_html = false;
+        $frontend_cache = array();
+        if ($html_precompleted && !$css_stage_pending && !$lcp_refresh_pending && method_exists($this, 'get_frontend_visit_cache_satisfaction')) {
+            $frontend_cache = $this->get_frontend_visit_cache_satisfaction($url);
+            $reuse_frontend_html = !empty($frontend_cache['htmlComplete']);
         }
-        if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'html-after')) {
-            return $this->get_warm_pipeline_ownership_lost_result($url, 'html', $stages, $preflight);
+
+        if ($reuse_frontend_html) {
+            $result = array(
+                'success' => true,
+                'cached' => true,
+                'skipped' => false,
+                'retryable' => false,
+                'terminal' => false,
+                'url' => $url,
+                'message' => __('HTML cache already exists from a frontend visit; continuing with the remaining pipeline stages.', 'ultracache'),
+                'files' => array_values((array) ($frontend_cache['files'] ?? array())),
+                'buckets' => array_values((array) ($frontend_cache['cachedBuckets'] ?? array())),
+                'visitSatisfied' => true,
+            );
+        } else {
+            $warm_result = $this->warm_url($url, $warm_args);
+            $result = is_array($warm_result) ? $warm_result : array();
+            if (!empty($result['ownershipLost'])) {
+                return $this->get_warm_pipeline_ownership_lost_result($url, 'html', $stages, $preflight);
+            }
+            if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'html-after')) {
+                return $this->get_warm_pipeline_ownership_lost_result($url, 'html', $stages, $preflight);
+            }
         }
 
         $html_status = !empty($result['success']) ? 'completed' : (!empty($result['skipped']) ? 'skipped' : 'failed');
@@ -290,13 +204,16 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
                 'cached' => !empty($result['cached']),
                 'fileCount' => isset($result['files']) && is_array($result['files']) ? count($result['files']) : 0,
                 'bucketCount' => isset($result['buckets']) && is_array($result['buckets']) ? count($result['buckets']) : 0,
+                'cachedBuckets' => array_values(array_map('strval', (array) ($result['cachedBuckets'] ?? array()))),
+                'failedBuckets' => array_values(array_map('strval', (array) ($result['failedBuckets'] ?? array()))),
+                'bucketErrors' => is_array($result['bucketErrors'] ?? null) ? $result['bucketErrors'] : array(),
                 'retryable' => $html_retryable,
                 'failureClass' => sanitize_key((string) ($result['failureClass'] ?? '')),
             )
         );
 
         $css_retryable = false;
-        if ($build_css_bundle) {
+        if ($build_css_bundle && !$css_precompleted) {
             $css_result = isset($result['cssBundle']) && is_array($result['cssBundle']) ? $result['cssBundle'] : array();
             $css_status = !empty($css_result['success']) ? 'completed' : (!empty($css_result['skipped']) ? 'skipped' : 'failed');
             $css_retryable = 'failed' === $css_status && !empty($css_result['retryable']);
@@ -315,11 +232,38 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
 
         $html_completed = 'completed' === $html_status;
         $css_completed = !$build_css_bundle || in_array((string) $stages['css']['status'], array('completed', 'skipped'), true);
-        $varnish_required = false;
+        $lcp_required = $lcp_precompleted || $lcp_refresh_pending;
+        $lcp_completed = !$lcp_required || $lcp_precompleted;
+        if ($lcp_refresh_pending) {
+            if ($html_completed) {
+                $lcp_completed = true;
+                $stages['lcp'] = $this->get_warm_pipeline_stage(
+                    'completed',
+                    true,
+                    __('The page-specific LCP refresh completed with the HTML regeneration.', 'ultracache')
+                );
+            } elseif ('skipped' === $html_status) {
+                $lcp_completed = true;
+                $stages['lcp'] = $this->get_warm_pipeline_stage(
+                    'skipped',
+                    true,
+                    __('The LCP refresh was skipped with the ineligible HTML page.', 'ultracache'),
+                    array('reason' => 'dependency')
+                );
+            } else {
+                $stages['lcp'] = $this->get_warm_pipeline_stage(
+                    'skipped',
+                    false,
+                    __('The LCP refresh is waiting for the HTML stage to complete.', 'ultracache'),
+                    array('reason' => 'dependency')
+                );
+            }
+        }
+        $varnish_required = $varnish_precompleted;
         $varnish_completed = true;
         $varnish_retryable = false;
 
-        if ($include_varnish) {
+        if ($include_varnish && !$varnish_precompleted) {
             if (!$html_completed || !$css_completed) {
                 $blocked_message = __('Varnish warm-up skipped because an earlier page stage did not complete.', 'ultracache');
                 $stages['varnish'] = $this->get_warm_pipeline_stage('skipped', false, $blocked_message, array('reason' => 'dependency'));
@@ -360,21 +304,97 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
                     array(
                         'variantCount' => absint($varnish_result['variantCount'] ?? 0),
                         'refilledCount' => absint($varnish_result['refilledCount'] ?? 0),
+                        'invalidationCompleted' => !empty($varnish_result['invalidationCompleted']),
                         'originRevalidationRequired' => !empty($varnish_result['originRevalidationRequired']),
                         'fallbackBlocked' => !empty($varnish_result['fallbackBlocked']),
+                        'esiParentVariantCount' => absint($varnish_result['esiParentVariantCount'] ?? 0),
+                        'esiFragmentReferenceCount' => absint($varnish_result['esiFragmentReferenceCount'] ?? 0),
+                        'esiUniqueFragmentReferenceCount' => absint($varnish_result['esiUniqueFragmentReferenceCount'] ?? 0),
+                        'esiMinTtl' => absint($varnish_result['esiMinTtl'] ?? 0),
+                        'esiMaxTtl' => absint($varnish_result['esiMaxTtl'] ?? 0),
                         'retryable' => $varnish_retryable,
                         'failureClass' => sanitize_key((string) ($varnish_result['failureClass'] ?? '')),
+                        'refillDetails' => is_array($varnish_result['details'] ?? null)
+                            ? array_slice($varnish_result['details'], 0, 3)
+                            : array(),
                     )
                 );
 
             }
         }
 
-        $pipeline_success = $html_completed && $css_completed && $varnish_completed;
-        $pipeline_retryable = !$pipeline_success && ($html_retryable || $css_retryable || $varnish_retryable);
+        $litespeed_required = $litespeed_precompleted;
+        $litespeed_completed = true;
+        $litespeed_retryable = false;
+
+        if ($include_litespeed && !$litespeed_precompleted) {
+            if (!$html_completed || !$css_completed) {
+                $blocked_message = __('LiteSpeed warm-up skipped because an earlier page stage did not complete.', 'ultracache');
+                $stages['litespeed'] = $this->get_warm_pipeline_stage('skipped', false, $blocked_message, array('reason' => 'dependency'));
+            } elseif (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'refill_litespeed_after_site_warm')) {
+                $litespeed_required = true;
+                $litespeed_completed = false;
+                $unavailable_message = __('LiteSpeed warm-up integration is unavailable.', 'ultracache');
+                $stages['litespeed'] = $this->get_warm_pipeline_stage('failed', true, $unavailable_message, array(
+                    'retryable' => false,
+                    'failureClass' => 'integration-unavailable',
+                ));
+            } else {
+                if (!$this->invoke_warm_pipeline_heartbeat($heartbeat, 'litespeed-before')) {
+                    return $this->get_warm_pipeline_ownership_lost_result($url, 'litespeed', $stages, $preflight);
+                }
+                $litespeed_result = Ultra_Cache_WP::refill_litespeed_after_site_warm(
+                    $url,
+                    $result,
+                    $warm_context,
+                    false,
+                    $heartbeat
+                );
+                $result['liteSpeedRefill'] = is_array($litespeed_result) ? $litespeed_result : array();
+                unset($result['forceRefreshDetails']);
+                if (!empty($litespeed_result['ownershipLost']) || !$this->invoke_warm_pipeline_heartbeat($heartbeat, 'litespeed-after')) {
+                    return $this->get_warm_pipeline_ownership_lost_result($url, 'litespeed', $stages, $preflight);
+                }
+
+                $litespeed_skipped = !empty($litespeed_result['skipped']);
+                $litespeed_required = !$litespeed_skipped;
+                $litespeed_status = $litespeed_skipped ? 'disabled' : (!empty($litespeed_result['success']) ? 'completed' : 'failed');
+                $litespeed_retryable = 'failed' === $litespeed_status && !empty($litespeed_result['retryable']);
+                $litespeed_completed = !$litespeed_required || 'completed' === $litespeed_status;
+                $stages['litespeed'] = $this->get_warm_pipeline_stage(
+                    $litespeed_status,
+                    $litespeed_required,
+                    (string) ($litespeed_result['message'] ?? ''),
+                    array(
+                        'variantCount' => absint($litespeed_result['variantCount'] ?? 0),
+                        'refilledCount' => absint($litespeed_result['refilledCount'] ?? 0),
+                        'invalidationCompleted' => !empty($litespeed_result['invalidationCompleted']),
+                        'retryable' => $litespeed_retryable,
+                        'failureClass' => sanitize_key((string) ($litespeed_result['failureClass'] ?? '')),
+                    )
+                );
+            }
+        }
+
+        $pipeline_success = $html_completed && $css_completed && $lcp_completed && $varnish_completed && $litespeed_completed;
+        $pipeline_retryable = !$pipeline_success && ($html_retryable || $css_retryable || $varnish_retryable || $litespeed_retryable);
+        $pipeline_has_completed_stage = false;
+        $pipeline_has_failed_stage = false;
+        foreach ($stages as $stage_result) {
+            if (empty($stage_result['required'])) {
+                continue;
+            }
+            $stage_status = sanitize_key((string) ($stage_result['status'] ?? ''));
+            if ('completed' === $stage_status) {
+                $pipeline_has_completed_stage = true;
+            } elseif ('failed' === $stage_status) {
+                $pipeline_has_failed_stage = true;
+            }
+        }
+        $pipeline_partial = !$pipeline_success && $pipeline_has_completed_stage && $pipeline_has_failed_stage;
         $pipeline_status = $pipeline_success
             ? 'completed'
-            : (!empty($result['skipped']) ? 'skipped' : 'failed');
+            : (!empty($result['skipped']) ? 'skipped' : ($pipeline_partial ? 'partial' : 'failed'));
         $pipeline_message = $pipeline_success
             ? __('All selected warm-up stages completed for this page.', 'ultracache')
             : (string) ($result['message'] ?? __('One or more selected warm-up stages did not complete.', 'ultracache'));
@@ -382,10 +402,36 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
         $result['success'] = $pipeline_success;
         $result['retryable'] = $pipeline_retryable;
         $result['terminal'] = !$pipeline_success && !$pipeline_retryable;
-        $result['warning'] = false;
-        if (!$pipeline_success && 'completed' === $html_status && $varnish_required && !$varnish_completed) {
-            $result['message'] = __('The page cache warmed, but the selected Varnish refill did not complete.', 'ultracache');
+        $result['partial'] = $pipeline_partial;
+        $result['warning'] = $pipeline_partial;
+        if (!$pipeline_success && 'completed' === $html_status) {
+            if ($varnish_required && !$varnish_completed && $litespeed_required && !$litespeed_completed) {
+                $result['message'] = __('The page cache warmed, but the selected Varnish and LiteSpeed refills did not complete.', 'ultracache');
+            } elseif ($varnish_required && !$varnish_completed) {
+                $result['message'] = __('The page cache warmed, but the selected Varnish refill did not complete.', 'ultracache');
+            } elseif ($litespeed_required && !$litespeed_completed) {
+                $result['message'] = __('The page cache warmed, but the selected LiteSpeed refill did not complete.', 'ultracache');
+            }
         }
+        if (!$pipeline_success) {
+            foreach ($stages as $stage_name => $stage_result) {
+                if (empty($stage_result['required']) || 'failed' !== sanitize_key((string) ($stage_result['status'] ?? ''))) {
+                    continue;
+                }
+
+                $stage_details = is_array($stage_result['details'] ?? null) ? $stage_result['details'] : array();
+                $stage_failure_class = sanitize_key((string) ($stage_details['failureClass'] ?? ''));
+                $result['failedStage'] = sanitize_key((string) $stage_name);
+                $result['failureClass'] = '' !== $stage_failure_class ? $stage_failure_class : sanitize_key((string) $stage_name . '-failed');
+                $result['failureMessage'] = sanitize_text_field((string) ($stage_result['message'] ?? ''));
+                $result['failureDetails'] = $stage_details;
+                break;
+            }
+        } else {
+            $result['failureClass'] = '';
+            unset($result['failedStage'], $result['failureMessage'], $result['failureDetails']);
+        }
+
         $result['pipeline'] = $this->build_warm_pipeline_summary($url, $stages, $pipeline_status, $pipeline_message, $preflight);
 
         return $result;
@@ -566,7 +612,7 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
     }
 
     /**
-     * Return a successful coalesced result when another source already owns the URL.
+     * Return a retryable coalesced result when another source already owns the URL.
      *
      * @param string $url   Local page URL.
      * @param string $stage Requested stage.
@@ -577,14 +623,42 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
         $url = esc_url_raw((string) $url);
         $stage = sanitize_key((string) $stage);
         return array(
-            'success' => true,
-            'skipped' => true,
+            'success' => false,
+            'skipped' => false,
+            'retryable' => true,
+            'terminal' => false,
+            'deferred' => true,
             'coalesced' => true,
+            'failureClass' => 'url-lock-busy',
             'url' => $url,
             'stage' => $stage,
             'stageStatus' => 'coalesced',
-            'message' => __('Another warm-up source is already processing this URL; duplicate work was coalesced.', 'ultracache'),
+            'message' => __('Another warm-up source is already processing this URL; the requested pipeline stages remain pending.', 'ultracache'),
         );
+    }
+
+    /**
+     * Resolve the execution profile without changing the common page pipeline.
+     *
+     * The profile controls only bounded per-page work budgets. URL discovery,
+     * stage ordering, locking, eligibility, and completion remain identical.
+     *
+     * @param string $context Warm source context.
+     * @return array{key:string,pageTimeBudget:int,hardCap:int}
+     */
+    private function get_warm_pipeline_execution_profile($context)
+    {
+        $context = sanitize_key((string) $context);
+        if ('cli' === $context) {
+            return array('key' => 'cli', 'pageTimeBudget' => 180, 'hardCap' => 300);
+        }
+        if (in_array($context, array('manual', 'ui', 'dashboard', 'diagnostic'), true)) {
+            return array('key' => 'ui', 'pageTimeBudget' => 60, 'hardCap' => 75);
+        }
+        if (in_array($context, array('visit', 'frontend', 'revalidate'), true)) {
+            return array('key' => 'visit', 'pageTimeBudget' => 15, 'hardCap' => 20);
+        }
+        return array('key' => 'cron', 'pageTimeBudget' => 20, 'hardCap' => 25);
     }
 
     /**
@@ -738,6 +812,7 @@ trait Ultra_Cache_Engine_Warm_Page_Pipeline_Trait
             'hasWarnings' => $counts['warning'] > 0,
             'retryable' => $counts['failed'] > 0 && $this->warm_pipeline_stages_have_retryable_failure($stages),
             'message' => sanitize_text_field((string) $message),
+            'executionProfile' => sanitize_key((string) ($preflight['executionProfile'] ?? '')),
             'preflight' => array(
                 'eligible' => !empty($preflight['eligible']),
                 'reason' => sanitize_key((string) ($preflight['reason'] ?? '')),

@@ -22,12 +22,13 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
     private static function get_varnish_capability_contract_versions()
     {
         return array(
-            'schema'            => 2,
-            'transport'         => 1,
-            'html-invalidation' => 1,
-            'variant'           => 1,
-            'soft-purge'        => 1,
+            'schema'            => 6,
+            'transport'         => 3,
+            'html-invalidation' => 2,
+            'variant'           => 3,
+            'soft-purge'        => 2,
             'refill'            => 2,
+            'esi'               => 8,
         );
     }
 
@@ -61,7 +62,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
      */
     private static function normalize_varnish_capability_contracts($contracts)
     {
-        $allowed = array('transport', 'html-invalidation', 'variant', 'soft-purge', 'refill');
+        $allowed = array('transport', 'html-invalidation', 'variant', 'soft-purge', 'refill', 'esi');
         $normalized = array();
         foreach ((array) $contracts as $contract) {
             $contract = sanitize_key((string) $contract);
@@ -108,16 +109,32 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
         $invalidation_strategy = self::sanitize_varnish_invalidation_strategy(
             $settings['invalidationStrategy'] ?? ($dashboard_settings['varnishInvalidationStrategy'] ?? strtolower($method))
         );
+        $automation = self::get_varnish_automation_policy($dashboard_settings);
         $stale_seconds = max(
             0,
             min(
                 86400,
-                absint($settings['staleWhileRevalidateSeconds'] ?? ($dashboard_settings['varnishStaleWhileRevalidateSeconds'] ?? 0))
+                absint($settings['staleWhileRevalidateSeconds'] ?? ($automation['staleWhileRevalidateSeconds'] ?? 0))
             )
         );
+        $html_ttl_minutes = max(
+            1,
+            min(
+                525600,
+                absint($settings['htmlTtlMinutes'] ?? ($dashboard_settings['cacheFreshTtlMinutes'] ?? 1440))
+            )
+        );
+        $secret_value = function_exists('ultracache_get_varnish_password')
+            ? (string) ultracache_get_varnish_password()
+            : '';
         $secret_configured = isset($settings['secretConfigured'])
             ? !empty($settings['secretConfigured'])
-            : ('' !== (function_exists('ultracache_get_varnish_password') ? (string) ultracache_get_varnish_password() : ''));
+            : ('' !== $secret_value);
+        $secret_fingerprint = '';
+        if ('' !== $secret_value) {
+            $fingerprint_key = function_exists('wp_salt') ? (string) wp_salt('auth') : 'ultracache-varnish-capability';
+            $secret_fingerprint = hash_hmac('sha256', $secret_value, $fingerprint_key);
+        }
 
         $variant_policy = function_exists('ultracache_get_html_variant_policy')
             ? ultracache_get_html_variant_policy($dashboard_settings)
@@ -138,7 +155,9 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
             'method' => $method,
             'invalidationStrategy' => $invalidation_strategy,
             'staleWhileRevalidateSeconds' => $stale_seconds,
+            'htmlTtlMinutes' => $html_ttl_minutes,
             'secretConfigured' => $secret_configured,
+            'secretFingerprint' => $secret_fingerprint,
             'variantPolicy' => $variant_policy,
             'activeBuckets' => $active_buckets,
         );
@@ -163,6 +182,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
             'endpoints' => $context['servers'],
             'method' => $context['method'],
             'secretConfigured' => !empty($context['secretConfigured']),
+            'secretFingerprint' => (string) ($context['secretFingerprint'] ?? ''),
         );
         $transport_fingerprint = hash('sha256', (string) wp_json_encode($transport_payload));
 
@@ -205,24 +225,42 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
 
         if ('soft-purge' === $contract) {
             return array(
-                'version' => (int) ($versions['soft-purge'] ?? 1),
+                'version' => (int) ($versions['soft-purge'] ?? 2),
                 'transportFingerprint' => $transport_fingerprint,
                 'httpMode' => 'http' === $context['mode'],
                 'strategy' => $context['invalidationStrategy'],
                 'staleWhileRevalidateSeconds' => (int) $context['staleWhileRevalidateSeconds'],
-                'softPurgeContract' => 2,
+                'htmlTtlMinutes' => (int) $context['htmlTtlMinutes'],
+                'softPurgeContract' => 3,
             );
         }
 
         if ('refill' === $contract) {
             $dashboard_settings = is_array($context['dashboardSettings']) ? $context['dashboardSettings'] : array();
+            $automation = self::get_varnish_automation_policy($dashboard_settings);
             return array(
                 'version' => (int) ($versions['refill'] ?? 1),
                 'publicRefillPolicy' => array(
-                    'afterTargetedInvalidation' => !empty($dashboard_settings['varnishRefillAfterTargetedInvalidation']),
-                    'withSiteWarmup' => !empty($dashboard_settings['varnishWarmDuringManualWarmup']),
+                    'afterTargetedInvalidation' => !empty($automation['refillAfterTargetedInvalidation']),
+                    'withSiteWarmup' => !empty($automation['warmWithSiteWarmup']),
                 ),
                 'canonicalUrl' => (string) home_url('/'),
+            );
+        }
+
+        if ('esi' === $contract) {
+            return array(
+                'version' => (int) ($versions['esi'] ?? 1),
+                'surrogateProtocol' => 'ESI/1.0',
+                'probeContract' => 6,
+                'parentContract' => 6,
+                'fragmentContract' => 4,
+                'privateTransportContract' => 4,
+                'browserOptInContract' => 1,
+                'woocommerceParentMetadataContract' => 1,
+                'homeUrl' => (string) home_url('/'),
+                'siteUrl' => (string) site_url('/'),
+                'blogId' => function_exists('get_current_blog_id') ? (int) get_current_blog_id() : 0,
             );
         }
 
@@ -338,7 +376,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
     public static function get_varnish_capability_fingerprint_status()
     {
         $contracts = array();
-        foreach (array('transport', 'html-invalidation', 'variant', 'soft-purge', 'refill') as $contract) {
+        foreach (array('transport', 'html-invalidation', 'variant', 'soft-purge', 'refill', 'esi') as $contract) {
             $contracts[$contract] = array(
                 'fingerprint' => self::get_varnish_capability_contract_fingerprint($contract),
                 'configuration' => self::get_varnish_capability_contract_payload($contract),
@@ -346,7 +384,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
         }
 
         return array(
-            'schema' => (int) (self::get_varnish_capability_contract_versions()['schema'] ?? 2),
+            'schema' => (int) (self::get_varnish_capability_contract_versions()['schema'] ?? 4),
             'contractVersions' => self::get_varnish_capability_contract_versions(),
             'contracts' => $contracts,
         );

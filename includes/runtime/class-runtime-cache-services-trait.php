@@ -234,7 +234,20 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
     {
         if (!$force) {
             $saved = get_option(self::get_external_cache_detection_option_key(), array());
-            if (is_array($saved) && !empty($saved['layers']) && !empty($saved['detectedAt']) && !empty($saved['schemaVersion']) && (int) $saved['schemaVersion'] >= 3) {
+            if (is_array($saved) && !empty($saved['layers']) && !empty($saved['detectedAt']) && !empty($saved['schemaVersion']) && (int) $saved['schemaVersion'] >= 7) {
+                if (isset($saved['layers']['litespeed']) && is_array($saved['layers']['litespeed'])) {
+                    if (method_exists(__CLASS__, 'get_litespeed_metrics_status')) {
+                        $saved['layers']['litespeed']['metrics'] = self::get_litespeed_metrics_status();
+                    }
+                    if (method_exists(__CLASS__, 'get_litespeed_behavior_test_result')) {
+                        $saved['layers']['litespeed']['behaviorTest'] = self::get_litespeed_behavior_test_result();
+                    }
+                    $litespeed_settings = self::get_dashboard_settings();
+                    $saved['layers']['litespeed']['stalePurgeEnabled'] = !empty($litespeed_settings['liteSpeedStalePurgeEnabled']);
+                    if (method_exists(__CLASS__, 'get_litespeed_refresh_ahead_status')) {
+                        $saved['layers']['litespeed']['refreshAhead'] = self::get_litespeed_refresh_ahead_status($litespeed_settings);
+                    }
+                }
                 return $saved;
             }
         }
@@ -251,37 +264,9 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             $server_software = sanitize_text_field(wp_unslash($_SERVER['SERVER_SOFTWARE']));
         }
         $reverse_proxy = method_exists(__CLASS__, 'get_reverse_proxy_status') ? self::get_reverse_proxy_status() : array();
-        $reverse_server = isset($reverse_proxy['server']) ? (string) $reverse_proxy['server'] : '';
-        $reverse_x_litespeed_cache = isset($reverse_proxy['x_litespeed_cache']) ? (string) $reverse_proxy['x_litespeed_cache'] : '';
-        $reverse_x_qc_cache = isset($reverse_proxy['x_qc_cache']) ? (string) $reverse_proxy['x_qc_cache'] : '';
-
-        $litespeed_class = class_exists('LiteSpeed_Cache_API');
-        $litespeed_class_purge = $litespeed_class && method_exists('LiteSpeed_Cache_API', 'purge_all');
-        $litespeed_namespaced_purge = class_exists('\LiteSpeed\Purge') && method_exists('\LiteSpeed\Purge', 'purge_all');
-        $litespeed_action = function_exists('has_action') && has_action('litespeed_purge_all');
-        $litespeed_function = function_exists('litespeed_purge_all');
-        $litespeed_defined = defined('LSCWP_V') || defined('LITESPEED_STATIC_DIR');
-        $litespeed_server = false !== stripos($server_software, 'LiteSpeed')
-            || false !== stripos($server_software, 'OpenLiteSpeed')
-            || false !== stripos($reverse_server, 'LiteSpeed')
-            || false !== stripos($reverse_server, 'OpenLiteSpeed');
-        $litespeed_cache_header = '' !== trim($reverse_x_litespeed_cache) || '' !== trim($reverse_x_qc_cache) || (!empty($reverse_proxy['litespeed_cache']));
-        $litespeed_server_purge = $litespeed_server || $litespeed_cache_header;
-        $litespeed_detected = $litespeed_class || $litespeed_namespaced_purge || $litespeed_action || $litespeed_function || $litespeed_defined || $litespeed_server_purge;
-        $litespeed_flushable = $litespeed_class_purge || $litespeed_namespaced_purge || $litespeed_action || $litespeed_function || $litespeed_server_purge;
-        if ($litespeed_class_purge) {
-            $litespeed_method = 'LiteSpeed_Cache_API::purge_all';
-        } elseif ($litespeed_namespaced_purge) {
-            $litespeed_method = '\LiteSpeed\Purge::purge_all';
-        } elseif ($litespeed_action) {
-            $litespeed_method = 'do_action(litespeed_purge_all)';
-        } elseif ($litespeed_function) {
-            $litespeed_method = 'litespeed_purge_all';
-        } elseif ($litespeed_server_purge) {
-            $litespeed_method = 'X-LiteSpeed-Purge response header';
-        } else {
-            $litespeed_method = 'not_detected';
-        }
+        $litespeed = method_exists(__CLASS__, 'get_litespeed_diagnostics_status')
+            ? self::get_litespeed_diagnostics_status()
+            : self::get_litespeed_transport_status($server_software, $reverse_proxy);
 
         $nginx_action = function_exists('has_action') && has_action('rt_nginx_helper_purge_all');
         $nginx_class = class_exists('Nginx_Helper') || class_exists('Nginx_Helper_Admin');
@@ -295,10 +280,20 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         $varnish_detected = !empty($varnish_settings['enabled']) && !empty($varnish_settings['endpointCount']);
         $varnish_flushable = $varnish_detected;
         $varnish_method = !empty($varnish_settings['effectiveMethod']) ? (string) $varnish_settings['effectiveMethod'] : 'configured_ultracache_varnish';
+        $elementor = method_exists(__CLASS__, 'get_elementor_cache_status')
+            ? self::get_elementor_cache_status()
+            : array(
+                'label' => __('Elementor Cache', 'ultracache'),
+                'detected' => false,
+                'flushable' => false,
+                'enabled' => false,
+                'method' => 'unavailable',
+                'message' => __('Elementor was not detected.', 'ultracache'),
+            );
 
         $detection = array(
             'success'    => true,
-            'schemaVersion' => 3,
+            'schemaVersion' => 7,
             'detectedAt' => time(),
             'detectedAtHuman' => gmdate('Y-m-d H:i:s') . ' UTC',
             'serverSoftware' => $server_software,
@@ -319,20 +314,9 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
                     'method' => function_exists('apcu_clear_cache') ? 'apcu_clear_cache' : 'unavailable',
                     'message' => isset($apcu['message']) ? (string) $apcu['message'] : '',
                 ),
-                'litespeed' => array(
-                    'label' => __('LiteSpeed Cache', 'ultracache'),
-                    'detected' => (bool) $litespeed_detected,
-                    'flushable' => (bool) $litespeed_flushable,
-                    'enabled' => (bool) $litespeed_detected,
-                    'method' => $litespeed_method,
-                    'serverDetected' => (bool) $litespeed_server,
-                    'cacheHeaderDetected' => (bool) $litespeed_cache_header,
-                    'pluginDetected' => (bool) ($litespeed_class || $litespeed_namespaced_purge || $litespeed_action || $litespeed_function || $litespeed_defined),
-                    'message' => $litespeed_flushable
-                        ? ($litespeed_server_purge && !$litespeed_class_purge && !$litespeed_namespaced_purge && !$litespeed_action && !$litespeed_function
-                            ? 'LiteSpeed/OpenLiteSpeed detected. UltraCache can request a server-level purge with the X-LiteSpeed-Purge response header; effect depends on LSCache being enabled for this vhost.'
-                            : 'LiteSpeed WordPress purge integration detected.')
-                        : ($litespeed_detected ? 'LiteSpeed was detected, but no safe purge method is available.' : 'LiteSpeed Cache was not detected.'),
+                'litespeed' => array_merge(
+                    array('label' => __('LiteSpeed Cache', 'ultracache')),
+                    $litespeed
                 ),
                 'nginx' => array(
                     'label' => __('Nginx Cache', 'ultracache'),
@@ -350,6 +334,7 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
                     'method' => $varnish_method,
                     'message' => $varnish_flushable ? __('UltraCache Varnish endpoint is configured.', 'ultracache') : ($varnish_detected ? __('Varnish settings exist, but flushing is not enabled/configured.', 'ultracache') : __('Varnish Cache was not detected.', 'ultracache')),
                 ),
+                'elementor' => $elementor,
             ),
         );
 
@@ -357,98 +342,34 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         return $detection;
     }
 
-    private static function send_litespeed_purge_header($value = '*')
-    {
-        $value = is_string($value) ? trim($value) : '*';
-        if ('' === $value) {
-            $value = '*';
-        }
-
-        // Keep the public helper intentionally narrow. UltraCache currently issues full public-cache purge only.
-        if ('*' !== $value && !preg_match('/^(?:url|tag|private|public)=[A-Za-z0-9_:\/.,?&=%+~#@!$;*()\[\]\-]+$/', $value)) {
-            return array(
-                'success' => false,
-                'message' => __('Invalid LiteSpeed purge header value.', 'ultracache'),
-                'method' => 'X-LiteSpeed-Purge response header',
-            );
-        }
-
-        if (PHP_SAPI === 'cli') {
-            return array(
-                'success' => false,
-                'message' => __('LiteSpeed server-level purge needs an HTTP response; it cannot be sent from WP-CLI.', 'ultracache'),
-                'method' => 'X-LiteSpeed-Purge response header',
-            );
-        }
-
-        if (headers_sent($file, $line)) {
-            return array(
-                'success' => false,
-                'message' => sprintf(
-                    /* translators: 1: PHP file path where headers were sent, 2: line number. */
-                    __('LiteSpeed purge header could not be sent because headers were already sent at %1$s:%2$s.', 'ultracache'),
-                    (string) $file,
-                    (string) $line
-                ),
-                'method' => 'X-LiteSpeed-Purge response header',
-            );
-        }
-
-        header('X-LiteSpeed-Purge: ' . $value, false);
-        header('X-UltraCache-LiteSpeed-Purge: requested', false);
-
-        return array(
-            'success' => true,
-            'message' => __('LiteSpeed server-level purge header queued on this HTTP response.', 'ultracache'),
-            'method' => 'X-LiteSpeed-Purge response header',
-        );
-    }
-
     public static function flush_litespeed_cache()
     {
-        $detection = self::get_external_cache_detection(false);
-        $layer = isset($detection['layers']['litespeed']) && is_array($detection['layers']['litespeed']) ? $detection['layers']['litespeed'] : array();
-        if (empty($layer['flushable'])) {
-            return array('success' => false, 'message' => __('LiteSpeed Cache purge is not available.', 'ultracache'), 'externalCaches' => $detection);
+        $server_software = '';
+        if (isset($_SERVER['SERVER_SOFTWARE'])) {
+            $server_software = sanitize_text_field(wp_unslash($_SERVER['SERVER_SOFTWARE']));
+        }
+        $reverse_proxy = method_exists(__CLASS__, 'get_reverse_proxy_status') ? self::get_reverse_proxy_status() : array();
+        $status = self::get_litespeed_transport_status($server_software, $reverse_proxy);
+
+        $native_enabled = method_exists(__CLASS__, 'is_native_litespeed_html_cache_enabled')
+            && self::is_native_litespeed_html_cache_enabled();
+        if (!$native_enabled && empty($status['flushable'])) {
+            return array(
+                'success' => false,
+                'message' => __('LiteSpeed Cache purge is not available.', 'ultracache'),
+                'externalCaches' => self::get_external_cache_detection(true),
+            );
         }
 
-        $success = false;
-        $method = 'unknown';
-        $message = 'LiteSpeed Cache flush failed.';
-        if (class_exists('LiteSpeed_Cache_API') && method_exists('LiteSpeed_Cache_API', 'purge_all')) {
-            $method = 'LiteSpeed_Cache_API::purge_all';
-            $result = @LiteSpeed_Cache_API::purge_all();
-            $success = (false !== $result);
-            $message = $success ? 'LiteSpeed Cache purge triggered through LiteSpeed_Cache_API.' : 'LiteSpeed_Cache_API purge failed.';
-        } elseif (class_exists('\LiteSpeed\Purge') && method_exists('\LiteSpeed\Purge', 'purge_all')) {
-            $method = '\LiteSpeed\Purge::purge_all';
-            $result = @call_user_func(array('\LiteSpeed\Purge', 'purge_all'));
-            $success = (false !== $result);
-            $message = $success ? 'LiteSpeed Cache purge triggered through \LiteSpeed\Purge.' : '\LiteSpeed\Purge purge failed.';
-        } elseif (function_exists('has_action') && has_action('litespeed_purge_all')) {
-            $method = 'do_action(litespeed_purge_all)';
-            // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- External LiteSpeed Cache hook intentionally invoked for interoperability.
-            do_action('litespeed_purge_all');
-            $success = true;
-            $message = 'LiteSpeed Cache purge hook triggered.';
-        } elseif (function_exists('litespeed_purge_all')) {
-            $method = 'litespeed_purge_all';
-            $result = @litespeed_purge_all();
-            $success = (false !== $result);
-            $message = $success ? 'LiteSpeed Cache purge function triggered.' : 'LiteSpeed purge function failed.';
-        } elseif (!empty($layer['method']) && 'X-LiteSpeed-Purge response header' === (string) $layer['method']) {
-            $header_result = self::send_litespeed_purge_header('*');
-            $success = !empty($header_result['success']);
-            $method = isset($header_result['method']) ? (string) $header_result['method'] : 'X-LiteSpeed-Purge response header';
-            $message = isset($header_result['message']) ? (string) $header_result['message'] : ($success ? 'LiteSpeed server-level purge header queued.' : 'LiteSpeed server-level purge header failed.');
+        $result = $native_enabled && method_exists(__CLASS__, 'dispatch_litespeed_site_purge')
+            ? self::dispatch_litespeed_site_purge($status)
+            : self::dispatch_litespeed_purge_all($status);
+        if (method_exists(static::class, 'record_litespeed_purge_result')) {
+            self::record_litespeed_purge_result('site', $result, 1, $native_enabled ? 'manual-native-flush' : 'manual-integration-flush');
         }
+        $result['externalCaches'] = self::get_external_cache_detection(true);
 
-        return array(
-            'success' => (bool) $success,
-            'message' => $message,
-            'method' => $method,
-            'externalCaches' => self::get_external_cache_detection(true),
-        );
+        return $result;
     }
 
     public static function flush_nginx_cache()
@@ -495,7 +416,15 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             $results['apcu'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeApcu']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'));
         }
 
-        if (!empty($settings['flushAllIncludeLiteSpeed']) && !empty($layers['litespeed']['flushable'])) {
+        $native_litespeed_enabled = method_exists(__CLASS__, 'is_native_litespeed_html_cache_enabled')
+            && self::is_native_litespeed_html_cache_enabled();
+        if ($native_litespeed_enabled) {
+            $results['litespeed'] = array(
+                'success' => true,
+                'handled' => true,
+                'message' => __('Handled by the native LiteSpeed site-tag purge hook.', 'ultracache'),
+            );
+        } elseif (!empty($settings['flushAllIncludeLiteSpeed']) && !empty($layers['litespeed']['flushable'])) {
             $results['litespeed'] = self::flush_litespeed_cache();
         } else {
             $results['litespeed'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeLiteSpeed']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'));
@@ -511,6 +440,19 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             $results['varnish'] = array('success' => true, 'handled' => true, 'message' => __('Handled by the Flush All Cache purge hook.', 'ultracache'));
         } else {
             $results['varnish'] = array('success' => true, 'skipped' => true, 'message' => empty($settings['flushAllIncludeVarnish']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'));
+        }
+
+        $elementor_result = method_exists(__CLASS__, 'get_elementor_flush_all_result')
+            ? self::get_elementor_flush_all_result()
+            : null;
+        if (is_array($elementor_result)) {
+            $results['elementor'] = $elementor_result;
+        } else {
+            $results['elementor'] = array(
+                'success' => true,
+                'skipped' => true,
+                'message' => empty($settings['flushAllIncludeElementor']) ? __('Skipped by setting.', 'ultracache') : __('Not detected/flushable.', 'ultracache'),
+            );
         }
 
         return array(
@@ -585,9 +527,29 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         );
     }
 
-    private static function get_frontend_compression_probe_status($allow_live_probe = false)
+    private static function get_frontend_compression_probe_state_name()
     {
-        $status = array(
+        return 'ultracache_state:runtime.frontend_compression_probe';
+    }
+
+    private static function get_frontend_compression_probe_fingerprint()
+    {
+        $payload = array(
+            'schema' => 1,
+            'homeUrl' => esc_url_raw(home_url('/')),
+            'siteUrl' => esc_url_raw(site_url('/')),
+            'phpVersion' => PHP_VERSION,
+            'brotliExtension' => function_exists('brotli_compress') ? (string) phpversion('brotli') : '',
+            'zlibExtension' => function_exists('gzencode') ? (string) phpversion('zlib') : '',
+            'contractVersion' => 1,
+        );
+
+        return substr(hash('sha256', (string) wp_json_encode($payload)), 0, 24);
+    }
+
+    private static function get_default_frontend_compression_probe_status()
+    {
+        return array(
             'detected'      => false,
             'gzip'          => false,
             'brotli'        => false,
@@ -596,24 +558,155 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             'message'       => '',
             'cachedOnly'    => false,
             'liveProbe'     => false,
+            'testedAt'      => 0,
+            'fingerprint'   => self::get_frontend_compression_probe_fingerprint(),
+            'diagnosticStatus' => 'not-tested',
+            'configurationChanged' => false,
+            'stale' => false,
+            'ageSeconds' => 0,
+        );
+    }
+
+    private static function read_frontend_compression_probe_status()
+    {
+        $default = self::get_default_frontend_compression_probe_status();
+        if (!function_exists('ultracache_get_state_record_read_only')) {
+            return $default;
+        }
+
+        $record = ultracache_get_state_record_read_only(self::get_frontend_compression_probe_state_name());
+        $payload = is_array($record['payload'] ?? null) ? $record['payload'] : array();
+        $stored = is_array($payload['status'] ?? null) ? $payload['status'] : array();
+        if (empty($stored)) {
+            return $default;
+        }
+
+        $status = array_merge($default, $stored);
+        $status['testedAt'] = max(0, (int) ($status['testedAt'] ?? ($payload['recordedAt'] ?? 0)));
+        $status['fingerprint'] = sanitize_text_field((string) ($status['fingerprint'] ?? ($payload['fingerprint'] ?? '')));
+        $status['ageSeconds'] = $status['testedAt'] > 0 ? max(0, time() - $status['testedAt']) : 0;
+        $status['configurationChanged'] = !hash_equals(
+            (string) self::get_frontend_compression_probe_fingerprint(),
+            (string) $status['fingerprint']
+        );
+        $status['stale'] = $status['testedAt'] > 0 && $status['ageSeconds'] > DAY_IN_SECONDS;
+        $status['diagnosticStatus'] = $status['configurationChanged']
+            ? 'configuration-changed'
+            : ($status['stale'] ? 'stale' : 'current');
+        $status['cachedOnly'] = true;
+        $status['liveProbe'] = false;
+
+        return $status;
+    }
+
+    private static function persist_frontend_compression_probe_status(array $status)
+    {
+        if (!function_exists('ultracache_mutate_state_record')) {
+            return false;
+        }
+
+        $status = array_merge(self::get_default_frontend_compression_probe_status(), $status);
+        $status['testedAt'] = max(0, (int) ($status['testedAt'] ?? time()));
+        $status['fingerprint'] = self::get_frontend_compression_probe_fingerprint();
+        $status['diagnosticStatus'] = 'current';
+        $status['configurationChanged'] = false;
+        $status['stale'] = false;
+        $status['ageSeconds'] = 0;
+        $status['cachedOnly'] = false;
+        $status['liveProbe'] = true;
+
+        $mutation = ultracache_mutate_state_record(
+            self::get_frontend_compression_probe_state_name(),
+            static function () use ($status) {
+                return array(
+                    'schemaVersion' => 1,
+                    'recordedAt' => (int) $status['testedAt'],
+                    'fingerprint' => (string) $status['fingerprint'],
+                    'status' => $status,
+                );
+            },
+            5,
+            array()
         );
 
-        $cached = get_transient('ultracache_frontend_compression_probe_v1');
-        if (is_array($cached)) {
-            return array_merge($status, $cached, array('cachedOnly' => true));
+        return !empty($mutation['success']);
+    }
+
+    private static function get_compression_probe_signing_key()
+    {
+        return hash('sha256', (string) wp_salt('nonce') . '|' . esc_url_raw(home_url('/')) . '|ultracache-compression-probe-v1');
+    }
+
+    private static function create_compression_probe_token()
+    {
+        try {
+            $nonce = bin2hex(random_bytes(16));
+        } catch (Throwable $error) {
+            unset($error);
+            $nonce = substr(hash('sha256', wp_generate_uuid4() . '|' . microtime(true)), 0, 32);
+        }
+
+        $payload = time() . '.' . $nonce;
+        return $payload . '.' . hash_hmac('sha256', $payload, self::get_compression_probe_signing_key());
+    }
+
+    private static function claim_compression_probe_token($token)
+    {
+        $token = trim((string) $token);
+        if (1 !== preg_match('/\A([0-9]{10})\.([a-f0-9]{32})\.([a-f0-9]{64})\z/', $token, $matches)) {
+            return false;
+        }
+
+        $issued_at = (int) $matches[1];
+        $now = time();
+        if ($issued_at > ($now + 5) || ($now - $issued_at) > 120) {
+            return false;
+        }
+
+        $payload = $matches[1] . '.' . $matches[2];
+        $expected = hash_hmac('sha256', $payload, self::get_compression_probe_signing_key());
+        if (!hash_equals($expected, (string) $matches[3]) || !function_exists('ultracache_acquire_lock')) {
+            return false;
+        }
+
+        $token_hash = hash('sha256', $token);
+        return ultracache_acquire_lock(
+            'ultracache_compression_probe_replay_' . substr($token_hash, 0, 40),
+            $token_hash,
+            180,
+            array(
+                'issuedAt' => $issued_at,
+                'claimedAt' => $now,
+                'purpose' => 'frontend-compression-probe',
+            )
+        );
+    }
+
+    private static function get_frontend_compression_probe_status($allow_live_probe = false, $force_refresh = false)
+    {
+        $stored = self::read_frontend_compression_probe_status();
+        $current_reusable = 'current' === (string) ($stored['diagnosticStatus'] ?? '')
+            && max(0, (int) ($stored['ageSeconds'] ?? 0)) <= 5 * MINUTE_IN_SECONDS;
+
+        if (!$force_refresh && $current_reusable) {
+            return $stored;
         }
 
         if (!$allow_live_probe) {
-            $status['cachedOnly'] = true;
-            $status['message'] = 'Frontend compression probe has not run yet. Live loopback probing is skipped during normal settings sanitization.';
-            return $status;
+            if ('not-tested' === (string) ($stored['diagnosticStatus'] ?? 'not-tested')) {
+                $stored['message'] = 'Frontend compression probe has not run yet. Live loopback probing is skipped during normal settings sanitization.';
+            }
+            $stored['cachedOnly'] = true;
+            return $stored;
         }
 
+        $status = self::get_default_frontend_compression_probe_status();
         $status['liveProbe'] = true;
+        $status['testedAt'] = time();
 
         $probe_base = home_url('/');
         if ('' === (string) $probe_base) {
-            set_transient('ultracache_frontend_compression_probe_v1', $status, 5 * MINUTE_IN_SECONDS);
+            self::persist_frontend_compression_probe_status($status);
             return $status;
         }
 
@@ -622,9 +715,7 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             'gzip'   => 'gzip',
         );
         foreach ($encodings as $bucket => $accept_encoding) {
-            $probe_token = wp_generate_password(48, false, false);
-            $probe_transient = 'ultracache_compression_probe_' . hash('sha256', $probe_token);
-            set_transient($probe_transient, $probe_token, 2 * MINUTE_IN_SECONDS);
+            $probe_token = self::create_compression_probe_token();
             $probe_url = add_query_arg('ultracache_probe_compression', $probe_token, $probe_base);
 
             $response = ultracache_safe_loopback_remote_request($probe_url, array(
@@ -639,8 +730,6 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
                     'Accept-Encoding' => $accept_encoding,
                 ),
             ), 'frontend_compression_probe');
-
-            delete_transient($probe_transient);
 
             if (is_wp_error($response) || 200 !== (int) wp_remote_retrieve_response_code($response)) {
                 continue;
@@ -684,18 +773,14 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             $status['message'] = 'Your server is already using gzip compression by default.';
         }
 
-        set_transient('ultracache_frontend_compression_probe_v1', $status, 5 * MINUTE_IN_SECONDS);
+        self::persist_frontend_compression_probe_status($status);
         return $status;
     }
 
     public static function get_html_compression_capability_probe($force_refresh = false)
     {
-        if ($force_refresh) {
-            delete_transient('ultracache_frontend_compression_probe_v1');
-        }
-
         $support = self::get_compression_support_status();
-        $frontend = self::get_frontend_compression_probe_status(true);
+        $frontend = self::get_frontend_compression_probe_status(true, (bool) $force_refresh);
         $server_managed = !empty($frontend['gzip']) || !empty($frontend['brotli']);
         $blocked = $server_managed || !empty($frontend['brokenGzip']);
 
@@ -885,19 +970,11 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
 
     public function maybe_serve_html_compression_probe()
     {
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- One-time read-only capability token; no state is changed from user input.
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Signed, short-lived, one-time capability challenge validated before output.
         $token = isset($_GET['ultracache_probe_compression']) ? sanitize_text_field(wp_unslash($_GET['ultracache_probe_compression'])) : '';
-        if ('' === $token || 1 !== preg_match('/\A[A-Za-z0-9]{48}\z/', $token)) {
+        if ('' === $token || !self::claim_compression_probe_token($token)) {
             return;
         }
-
-        $transient_key = 'ultracache_compression_probe_' . hash('sha256', $token);
-        $expected = get_transient($transient_key);
-        if (!is_string($expected) || !hash_equals($expected, $token)) {
-            return;
-        }
-
-        delete_transient($transient_key);
 
         if (!headers_sent()) {
             status_header(200);

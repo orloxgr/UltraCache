@@ -14,6 +14,9 @@
 	const ultracacheI18n = (window.wp && window.wp.i18n) ? window.wp.i18n : {};
 	const __ = typeof ultracacheI18n.__ === 'function' ? ultracacheI18n.__ : function (value) { return value; };
 	const sprintf = typeof ultracacheI18n.sprintf === 'function' ? ultracacheI18n.sprintf : function (value) { return value; };
+	const ADMIN_ERROR_HISTORY_LIMIT = 50;
+	const ADMIN_ERROR_DEDUPE_WINDOW_MS = 5000;
+	const nonFatalAdminErrorHistory = [];
 
 	const normalizePublicPath = (value) => String(value || '').replace(/\\/g, '/');
 	const joinPublicPath = (base, relative) => {
@@ -34,12 +37,98 @@
 		return normalizeContentEncoding(headerValue).split(',').map((part) => part.trim()).includes(String(token || '').toLowerCase());
 	}
 
+	function ignoreExpectedAdminFailure(error) {
+		void error;
+	}
+
+	function normalizeAdminError(error) {
+		if (error instanceof Error) {
+			return { name: String(error.name || 'Error'), message: String(error.message || 'Unknown error') };
+		}
+		if (error && typeof error === 'object') {
+			return {
+				name: String(error.name || 'Error'),
+				message: String(error.message || error.code || 'Unknown error'),
+			};
+		}
+		return { name: 'Error', message: String(error || 'Unknown error') };
+	}
+
+	function isAdminDebugLoggingEnabled() {
+		const runtime = window && window.ultracacheData && typeof window.ultracacheData === 'object' ? window.ultracacheData : {};
+		const settings = runtime.settings && typeof runtime.settings === 'object' ? runtime.settings : {};
+		return !!settings.debugHeadersEnabled;
+	}
+
+	function reportNonFatalAdminError(context, error, options) {
+		const config = options && typeof options === 'object' ? options : {};
+		const normalized = normalizeAdminError(error);
+		const now = Date.now();
+		const normalizedContext = String(context || 'admin.unknown').slice(0, 160);
+		const severity = ['debug', 'info', 'warning', 'error'].indexOf(config.severity) !== -1 ? config.severity : 'warning';
+		const dedupeKey = String(config.dedupeKey || (normalizedContext + '|' + normalized.name + '|' + normalized.message)).slice(0, 320);
+		const dedupeWindowMs = Math.max(0, Number(typeof config.dedupeWindowMs === 'undefined' ? ADMIN_ERROR_DEDUPE_WINDOW_MS : config.dedupeWindowMs));
+		let entry = null;
+		for (let index = nonFatalAdminErrorHistory.length - 1; index >= 0; index -= 1) {
+			const candidate = nonFatalAdminErrorHistory[index];
+			if (candidate.dedupeKey === dedupeKey && now - Number(candidate.lastAt || 0) <= dedupeWindowMs) {
+				entry = candidate;
+				break;
+			}
+		}
+
+		if (entry) {
+			entry.lastAt = now;
+			entry.count = Math.max(1, Number(entry.count || 1)) + 1;
+		} else {
+			entry = {
+				context: normalizedContext,
+				name: normalized.name.slice(0, 80),
+				message: normalized.message.slice(0, 500),
+				severity,
+				firstAt: now,
+				lastAt: now,
+				count: 1,
+				dedupeKey,
+			};
+			nonFatalAdminErrorHistory.push(entry);
+			if (nonFatalAdminErrorHistory.length > ADMIN_ERROR_HISTORY_LIMIT) {
+				nonFatalAdminErrorHistory.splice(0, nonFatalAdminErrorHistory.length - ADMIN_ERROR_HISTORY_LIMIT);
+			}
+		}
+
+		if ((config.console === true || isAdminDebugLoggingEnabled()) && window.console && typeof window.console.warn === 'function') {
+			window.console.warn('[UltraCache admin][' + normalizedContext + ']', error);
+		}
+
+		if (config.userVisible && typeof config.pushToast === 'function') {
+			config.pushToast({
+				type: config.toastType || ('error' === severity ? 'error' : 'warning'),
+				text: String(config.toastText || normalized.message),
+			});
+		}
+
+		return Object.assign({}, entry);
+	}
+
+	function getNonFatalAdminErrorHistory() {
+		return nonFatalAdminErrorHistory.map(function (entry) {
+			return Object.assign({}, entry);
+		});
+	}
+
+	function clearNonFatalAdminErrorHistory() {
+		nonFatalAdminErrorHistory.splice(0, nonFatalAdminErrorHistory.length);
+	}
+
 	function getLocalStorageSafe() {
 		try {
 			if (typeof window !== 'undefined' && window.localStorage) {
 				return window.localStorage;
 			}
-		} catch (error) {}
+		} catch (error) {
+			ignoreExpectedAdminFailure(error);
+		}
 		return null;
 	}
 
@@ -161,6 +250,10 @@
 		normalizeContentEncoding,
 		responseHasEncoding,
 		getLocalStorageSafe,
+		ignoreExpectedAdminFailure,
+		reportNonFatalAdminError,
+		getNonFatalAdminErrorHistory,
+		clearNonFatalAdminErrorHistory,
 		isMobileViewport,
 		formatNumber,
 		formatCount,

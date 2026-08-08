@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.59.09.114
+ * Version: 2.59.13.15
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('ULTRACACHE_VERSION')) {
-    define('ULTRACACHE_VERSION', '2.59.09.114');
+    define('ULTRACACHE_VERSION', '2.59.13.15');
 }
 if (!defined('ULTRACACHE_FILE')) {
     define('ULTRACACHE_FILE', __FILE__);
@@ -35,6 +35,9 @@ if (!defined('ULTRACACHE_URL')) {
 
 require_once ULTRACACHE_PATH . 'includes/core/functions.php';
 require_once ULTRACACHE_PATH . 'includes/core/html-variant-functions.php';
+require_once ULTRACACHE_PATH . 'includes/core/srcset-functions.php';
+require_once ULTRACACHE_PATH . 'includes/esi/functions.php';
+require_once ULTRACACHE_PATH . 'includes/integrations/woocommerce/functions.php';
 require_once ULTRACACHE_PATH . 'includes/bootstrap/class-class-loader.php';
 Ultra_Cache_Class_Loader::register();
 if (!defined('ULTRACACHE_SETTINGS_KEY')) {
@@ -86,11 +89,26 @@ require_once ultracache_plugin_dir('includes/settings/class-settings-trait.php')
 require_once ultracache_plugin_dir('includes/settings/class-settings-persistence-trait.php');
 require_once ultracache_plugin_dir('includes/admin/class-admin-trait.php');
 require_once ultracache_plugin_dir('includes/integrations/class-varnish-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/elementor/class-elementor-cache-coherency-trait.php');
+require_once ultracache_plugin_dir('includes/esi/class-esi-endpoint-trait.php');
+require_once ultracache_plugin_dir('includes/esi/class-esi-lifecycle-trait.php');
 require_once ultracache_plugin_dir('includes/diagnostics/class-diagnostics-trait.php');
 require_once ultracache_plugin_dir('includes/bootstrap/class-bootstrap-trait.php');
 require_once ultracache_plugin_dir('includes/cache/class-dropin-reconciliation-trait.php');
 require_once ultracache_plugin_dir('includes/runtime/class-runtime-config-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-metrics-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-transport-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-control-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-refill-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-refresh-candidates-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-refresh-ahead-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-diagnostics-trait.php');
 require_once ultracache_plugin_dir('includes/runtime/class-runtime-cache-services-trait.php');
+require_once ultracache_plugin_dir('includes/warmup/class-warm-plan-trait.php');
+require_once ultracache_plugin_dir('includes/warmup/class-warm-rate-trait.php');
+require_once ultracache_plugin_dir('includes/warmup/class-warm-coordination-access-trait.php');
+require_once ultracache_plugin_dir('includes/warmup/class-warm-decision-trait.php');
+require_once ultracache_plugin_dir('includes/warmup/class-warm-status-trait.php');
 require_once ultracache_plugin_dir('includes/warmup/class-cron-warm-orchestrator-trait.php');
 require_once ultracache_plugin_dir('includes/warmup/class-targeted-warm-pipeline-trait.php');
 require_once ultracache_plugin_dir('includes/maintenance/class-scheduled-maintenance-trait.php');
@@ -105,7 +123,19 @@ class Ultra_Cache_WP
     use Ultra_Cache_WP_Bootstrap_Trait;
     use Ultra_Cache_WP_Dropin_Reconciliation_Trait;
     use Ultra_Cache_WP_Runtime_Config_Trait;
+    use Ultra_Cache_WP_LiteSpeed_Metrics_Trait;
+    use Ultra_Cache_WP_LiteSpeed_Transport_Trait;
+    use Ultra_Cache_WP_LiteSpeed_Control_Trait;
+    use Ultra_Cache_WP_LiteSpeed_Refill_Trait;
+    use Ultra_Cache_WP_LiteSpeed_Refresh_Candidates_Trait;
+    use Ultra_Cache_WP_LiteSpeed_Refresh_Ahead_Trait;
+    use Ultra_Cache_WP_LiteSpeed_Diagnostics_Trait;
     use Ultra_Cache_WP_Runtime_Cache_Services_Trait;
+    use Ultra_Cache_WP_Warm_Plan_Trait;
+    use Ultra_Cache_WP_Warm_Rate_Trait;
+    use Ultra_Cache_WP_Warm_Coordination_Access_Trait;
+    use Ultra_Cache_WP_Warm_Decision_Trait;
+    use Ultra_Cache_WP_Warm_Status_Trait;
     use Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait;
     use Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait;
     use Ultra_Cache_WP_Scheduled_Maintenance_Trait;
@@ -118,6 +148,9 @@ class Ultra_Cache_WP
     use Ultra_Cache_WP_Settings_Persistence_Trait;
     use Ultra_Cache_WP_Admin_Trait;
     use Ultra_Cache_WP_Varnish_Trait;
+    use Ultra_Cache_WP_Elementor_Cache_Coherency_Trait;
+    use Ultra_Cache_WP_ESI_Endpoint_Trait;
+    use Ultra_Cache_WP_ESI_Lifecycle_Trait;
     use Ultra_Cache_WP_Diagnostics_Trait;
 
     /** @var Ultra_Cache_WP|null */
@@ -130,6 +163,9 @@ class Ultra_Cache_WP
     private static $settings_cache = null;
     /** @var bool Temporarily suppress automatic cron warm starts while scheduled cleanup purges cache. */
     private static $suppress_after_purge_warm = false;
+
+    /** @var bool Current request owns the disposable warm-runtime upgrade reset. */
+    private static $public_warm_runtime_reset_active = false;
 }
 
 function ultracache_ultracache()

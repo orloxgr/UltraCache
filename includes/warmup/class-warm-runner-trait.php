@@ -11,6 +11,78 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Engine_Warm_Runner_Trait
 {
+        private function queue_affected_url_plan_rebuild(array $affected_plan, $reason)
+        {
+            $settings = $this->get_settings();
+            if (empty($settings['preload_on_save'])) {
+                return array(
+                    'success' => true,
+                    'queued' => false,
+                    'queuedUrlCount' => 0,
+                    'message' => __('Warm affected pages after save is disabled.', 'ultracache'),
+                );
+            }
+
+            $warm_urls = isset($affected_plan['warmUrls']) && is_array($affected_plan['warmUrls'])
+                ? array_values($affected_plan['warmUrls'])
+                : array();
+            if (empty($warm_urls)) {
+                return array(
+                    'success' => true,
+                    'queued' => false,
+                    'queuedUrlCount' => 0,
+                    'message' => __('No cacheable affected HTML URLs require rebuilding.', 'ultracache'),
+                );
+            }
+
+            if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'enqueue_targeted_warm_pipeline_urls')) {
+                return array(
+                    'success' => false,
+                    'queued' => false,
+                    'queuedUrlCount' => 0,
+                    'message' => __('The shared affected-page warm pipeline is unavailable.', 'ultracache'),
+                );
+            }
+
+            $reason = sanitize_key((string) $reason);
+            if (0 !== strpos($reason, 'affected-')) {
+                $reason = 'affected-' . $reason;
+            }
+
+            return Ultra_Cache_WP::enqueue_targeted_warm_pipeline_urls(
+                $warm_urls,
+                false,
+                substr($reason, 0, 32)
+            );
+        }
+        private function exclude_post_permalink_from_affected_url_plan(array $affected_plan, $post_id)
+        {
+            $post_id = (int) $post_id;
+            if ($post_id <= 0) {
+                return $affected_plan;
+            }
+
+            $front_page_id = (int) get_option('page_on_front');
+            $posts_page_id = (int) get_option('page_for_posts');
+            if ($post_id === $front_page_id || $post_id === $posts_page_id) {
+                return $affected_plan;
+            }
+
+            $permalink = get_permalink($post_id);
+            $permalink = is_string($permalink) ? $this->normalize_url($permalink) : '';
+            if ('' === $permalink) {
+                return $affected_plan;
+            }
+
+            $affected_plan['warmUrls'] = array_values(array_filter(
+                (array) ($affected_plan['warmUrls'] ?? array()),
+                function ($url) use ($permalink) {
+                    return $this->normalize_url($url) !== $permalink;
+                }
+            ));
+
+            return $affected_plan;
+        }
         public function handle_woocommerce_object_update($object)
         {
             $post_id = 0;
@@ -50,25 +122,39 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 return;
             }
 
-            $this->purge_related_post_urls($post_id);
+            if (method_exists($this, 'ultracache_reset_lcp_observation_lifecycle_for_post')) {
+                $this->ultracache_reset_lcp_observation_lifecycle_for_post($post_id);
+            }
 
             $settings = $this->get_settings();
-            if (!empty($settings['preload_on_save']) && 'publish' === $post->post_status && $this->acquire_post_save_warm_cooldown($post_id)) {
-                foreach ($this->get_urls_to_warm_for_post($post_id) as $url) {
-                    $this->warm_url(
-                        $url,
-                        array(
-                            'skip_css_bundle' => true,
-                            'buckets'         => array('orig'),
-                            'source'          => 'post-save',
-                        )
-                    );
-                }
-            }
+            $warm = !empty($settings['preload_on_save'])
+                && $this->acquire_post_save_warm_cooldown($post_id);
+            $this->record_affected_post_change(
+                $post_id,
+                'publish' === $post->post_status ? 'post-save' : 'post-status',
+                $warm
+            );
         }
         public function handle_post_deletion($post_id)
         {
-            $this->purge_related_post_urls((int) $post_id);
+            $post_id = (int) $post_id;
+            if ($post_id <= 0 || wp_is_post_revision($post_id)) {
+                return;
+            }
+
+            $affected_plan = $this->exclude_post_permalink_from_affected_url_plan(
+                $this->get_affected_url_plan_for_post($post_id),
+                $post_id
+            );
+            $this->purge_urls(
+                $affected_plan['purgeUrls'],
+                'related-post-delete',
+                array(
+                    'post_id' => $post_id,
+                    'warm_url_count' => count($affected_plan['warmUrls']),
+                )
+            );
+            $this->queue_affected_url_plan_rebuild($affected_plan, 'post-delete');
         }
         public function handle_term_update($term_id, $tt_id = 0, $taxonomy = '')
         {
@@ -78,14 +164,7 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 return;
             }
 
-            $this->purge_urls(
-                $this->get_related_urls_for_term($term_id, $taxonomy),
-                'related-term',
-                array(
-                    'term_id'  => $term_id,
-                    'taxonomy' => $taxonomy,
-                )
-            );
+            $this->record_affected_term_change($term_id, $taxonomy, 'term-update', true);
         }
         public function handle_object_terms_set($object_id, $terms, $tt_ids, $taxonomy, $append, $old_tt_ids = array())
         {
@@ -105,28 +184,13 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 return;
             }
 
-            $urls = $this->get_related_urls_for_post($object_id);
-            $term_ids = array_map('intval', (array) $terms);
-
-            foreach ((array) $old_tt_ids as $old_tt_id) {
-                $old_term = get_term_by('term_taxonomy_id', (int) $old_tt_id, $taxonomy);
-                if ($old_term && !is_wp_error($old_term)) {
-                    $term_ids[] = (int) $old_term->term_id;
-                }
-            }
-
-            $term_ids = array_values(array_unique(array_filter($term_ids)));
-            foreach ($term_ids as $term_id) {
-                $urls = array_merge($urls, $this->get_related_urls_for_term($term_id, $taxonomy));
-            }
-
-            $this->purge_urls(
-                $urls,
-                'term-assignment',
-                array(
-                    'post_id'  => $object_id,
-                    'taxonomy' => $taxonomy,
-                )
+            $this->record_affected_term_assignment_change(
+                $object_id,
+                $taxonomy,
+                (array) $terms,
+                (array) $tt_ids,
+                (array) $old_tt_ids,
+                'publish' === $post->post_status
             );
         }
         public function handle_navigation_update($menu_id = 0, $menu_data = array())
@@ -158,6 +222,7 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
         public function handle_global_frontend_change()
         {
             $this->clear_runtime_font_css_map_cache();
+            $this->delete_frontpage_css_bundle();
             $this->purge_urls($this->get_site_front_urls(true), 'global-front');
         }
         public function pre_render_page($post_id)
@@ -311,10 +376,82 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
 
             return true;
         }
+        private function is_runtime_lock_active($name)
+        {
+            $name = (string) $name;
+            if ('' === $name) {
+                return false;
+            }
+
+            $file = $this->get_runtime_lock_file($name);
+            if (!file_exists($file)) {
+                return false;
+            }
+
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native flock probing is required for UltraCache runtime lock ownership.
+            $handle = @fopen($file, 'c+');
+            if (!$handle) {
+                return true;
+            }
+
+            $active = !@flock($handle, LOCK_EX | LOCK_NB);
+            if (!$active) {
+                @flock($handle, LOCK_UN);
+            }
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native flock probe handle.
+            @fclose($handle);
+            return $active;
+        }
+
+        /**
+         * Wait until cache mutation locks owned before Flush All have drained.
+         *
+         * The active purge-all lock prevents new mutation locks from being
+         * acquired while this method waits for existing page/CSS owners.
+         *
+         * @return bool
+         */
+        private function wait_for_cache_mutation_locks_to_drain()
+        {
+            $dir = $this->get_runtime_locks_dir();
+            if (!is_dir($dir)) {
+                return true;
+            }
+
+            $files = (array) glob(trailingslashit($dir) . '*.lock');
+            foreach ($files as $file) {
+                $file = wp_normalize_path((string) $file);
+                $base = basename($file);
+                if (!preg_match('/^(?:page-cache-write-[a-f0-9]{32}|page-cache-build-(?:[a-f0-9]{32}|slot-[0-9]+)|css-(?:bundle|entry)-[a-f0-9]{32})\.lock$/i', $base)) {
+                    continue;
+                }
+
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Blocking flock is required to establish the Flush All cache-mutation barrier.
+                $handle = @fopen($file, 'c+');
+                if (!$handle) {
+                    return false;
+                }
+                if (!@flock($handle, LOCK_EX)) {
+                    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock handle after failed barrier acquisition.
+                    @fclose($handle);
+                    return false;
+                }
+                @flock($handle, LOCK_UN);
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Closing native lock barrier handle.
+                @fclose($handle);
+            }
+
+            return true;
+        }
+
         private function acquire_runtime_lock($name, $ttl = 180)
         {
             $name = (string) $name;
             if ('' === $name) {
+                return false;
+            }
+
+            if ('purge-all' !== $name && $this->is_runtime_lock_active('purge-all')) {
                 return false;
             }
 
@@ -529,8 +666,25 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
             };
             $ignore_runtime_bypass = !empty($args['ignore_runtime_bypass']);
             $force_refresh = !empty($args['force_refresh']);
+            $execution_profile = sanitize_key((string) ($args['execution_profile'] ?? 'default'));
+            $profile_hard_caps = array(
+                'cron' => 25,
+                'ui' => 75,
+                'cli' => 300,
+                'visit' => 20,
+                'default' => 45,
+            );
+            if (!isset($profile_hard_caps[$execution_profile])) {
+                $execution_profile = 'default';
+            }
             $settings_for_warm = $this->get_settings();
-            $operation_budget = function_exists('ultracache_get_safe_operation_budget') ? ultracache_get_safe_operation_budget('warm_url', $args['time_budget'] ?? null, 45) : array();
+            $operation_budget = function_exists('ultracache_get_safe_operation_budget')
+                ? ultracache_get_safe_operation_budget(
+                    'warm_url_' . $execution_profile,
+                    $args['time_budget'] ?? null,
+                    $profile_hard_caps[$execution_profile]
+                )
+                : array();
             $url = esc_url_raw((string) $url);
             if (!$this->is_cacheable_local_url($url)) {
                 $result = array(
@@ -579,7 +733,11 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
             $css_bundle_build_required = $css_bundle_requested || $css_bundle_auto_warm;
 
             $cached_files = array();
+            $cached_buckets = array();
+            $failed_buckets = array();
+            $bucket_errors = array();
             $last_error = '';
+            $operation_pause_reason = '';
             $retryable_failure = false;
             $terminal_failure = false;
             $internal_request_token = function_exists('ultracache_create_runtime_control_token')
@@ -621,14 +779,16 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 }
                 $pause_reason = function_exists('ultracache_operation_pause_reason') ? ultracache_operation_pause_reason($operation_budget) : '';
                 if ('' !== $pause_reason) {
-                    $last_error = 'Warm paused by ' . $pause_reason . '.';
+                    $operation_pause_reason = sanitize_key((string) $pause_reason);
+                    $last_error = 'Warm paused by ' . $operation_pause_reason . '.';
                     $retryable_failure = true;
                     break;
                 }
                 $accept_header = $this->get_accept_header_for_bucket($bucket);
+                $request_timeout = in_array($execution_profile, array('ui', 'cli'), true) ? 60 : 10;
                 $request_args = array(
                     'method'      => 'GET',
-                    'timeout'     => 10,
+                    'timeout'     => $request_timeout,
                     'redirection' => 0,
                     'sslverify'   => $this->should_verify_loopback_ssl($url),
                     'user-agent'  => 'Mozilla/5.0 (compatible; UltraCache-Warm/' . ULTRACACHE_VERSION . '; +https://wordpress.org)',
@@ -663,6 +823,9 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                     continue;
                 }
 
+                if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-network-after')) {
+                    return $ownership_lost_result($url, $buckets, $cached_files);
+                }
                 $code = (int) wp_remote_retrieve_response_code($response);
                 $html = wp_remote_retrieve_body($response);
                 if ($force_refresh) {
@@ -732,7 +895,7 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                         'httpCode' => $code,
                     );
                     if ($css_bundle_requested) {
-                        $result['cssBundle'] = array('success' => false, 'skipped' => true, 'message' => __('CSS bundle skipped because the page was not eligible for HTML cache warm-up.', 'ultracache'));
+                        $result['cssBundle'] = array('success' => false, 'skipped' => true, 'outcome' => 'dependency-skipped', 'message' => __('CSS bundle skipped because the page was not eligible for HTML cache warm-up.', 'ultracache'));
                     }
                     $this->record_analytics_warm($url, $result);
                     return $result;
@@ -753,7 +916,7 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                         'buckets' => $buckets,
                     );
                     if ($css_bundle_requested) {
-                        $result['cssBundle'] = array('success' => false, 'skipped' => true, 'message' => __('CSS bundle skipped because the remote response was not HTML.', 'ultracache'));
+                        $result['cssBundle'] = array('success' => false, 'skipped' => true, 'outcome' => 'dependency-skipped', 'message' => __('CSS bundle skipped because the remote response was not HTML.', 'ultracache'));
                     }
                     $this->record_analytics_warm($url, $result);
                     return $result;
@@ -775,7 +938,7 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                         'buckets' => $buckets,
                     );
                     if ($css_bundle_requested) {
-                        $result['cssBundle'] = array('success' => false, 'skipped' => true, 'message' => __('CSS bundle skipped because the page rejected cache storage.', 'ultracache'));
+                        $result['cssBundle'] = array('success' => false, 'skipped' => true, 'outcome' => 'dependency-skipped', 'message' => __('CSS bundle skipped because the page rejected cache storage.', 'ultracache'));
                     }
                     $this->record_analytics_warm($url, $result);
                     return $result;
@@ -784,7 +947,7 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 if ($css_bundle_build_required && !$css_bundle_build_attempted) {
                     $css_bundle_build_attempted = true;
                     $bundle_scope = $this->get_css_bundle_scope($settings_for_warm);
-                    $css_bundle_result = array('success' => false, 'skipped' => true, 'message' => __('CSS bundle skipped for this URL by the selected CSS Bundling Scope.', 'ultracache'));
+                    $css_bundle_result = array('success' => false, 'skipped' => true, 'outcome' => 'scope-skipped', 'message' => __('CSS bundle skipped for this URL by the selected CSS Bundling Scope.', 'ultracache'));
                     $should_build_bundle_for_url = ('per-page' === $bundle_scope || $this->is_frontpage_request_url($url));
                     if ($should_build_bundle_for_url && empty($this->get_frontpage_css_manifest_entry($url))) {
                         if (!$run_heartbeat('css-before')) {
@@ -793,12 +956,24 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                         // Build the CSS bundle only after the warm loopback proved that the
                         // public page returns cacheable HTML. This keeps manual warm-up progress
                         // aligned with the actual work and prevents CSS scans for 404/feed/non-HTML URLs.
-                        $css_bundle_result = $this->build_frontpage_css_bundle($url, array('skip_final_warm' => true));
+                        $css_bundle_result = $this->build_frontpage_css_bundle($url, array(
+                            'skip_final_warm' => true,
+                            'request_timeout' => $request_timeout,
+                            '_warm_pipeline_heartbeat' => $heartbeat,
+                        ));
+                        if (!isset($css_bundle_result['outcome'])) {
+                            $css_bundle_result['outcome'] = !empty($css_bundle_result['success'])
+                                ? 'built'
+                                : (!empty($css_bundle_result['skipped']) ? 'skipped' : 'failed');
+                        }
+                        if (!empty($css_bundle_result['ownershipLost'])) {
+                            return $ownership_lost_result($url, $buckets, $cached_files);
+                        }
                         if (!$run_heartbeat('css-after')) {
                             return $ownership_lost_result($url, $buckets, $cached_files);
                         }
                     } elseif ($should_build_bundle_for_url) {
-                        $css_bundle_result = array('success' => true, 'skipped' => true, 'message' => __('Existing CSS bundle manifest entry found for this URL.', 'ultracache'));
+                        $css_bundle_result = array('success' => true, 'skipped' => true, 'outcome' => 'reused', 'message' => __('Existing CSS bundle manifest entry found for this URL.', 'ultracache'));
                     }
                 }
 
@@ -815,6 +990,26 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                     }
                 }
 
+                $elementor_dependency_error = method_exists($this, 'get_elementor_page_css_dependency_error')
+                    ? (string) $this->get_elementor_page_css_dependency_error()
+                    : '';
+                if ('' !== $elementor_dependency_error) {
+                    $last_error = $elementor_dependency_error;
+                    $failed_buckets[] = (string) $bucket;
+                    $bucket_errors[(string) $bucket] = array(
+                        'bucket' => (string) $bucket,
+                        'code' => 'elementor-css-dependency-unresolved',
+                        'message' => $elementor_dependency_error,
+                        'file' => '',
+                        'rotationFailedHash' => '',
+                    );
+                    $terminal_failure = true;
+                    if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-after')) {
+                        return $ownership_lost_result($url, $buckets, $cached_files);
+                    }
+                    continue;
+                }
+
                 $file_path = $this->get_cache_path($url, $bucket);
                 if (empty($file_path)) {
                     $last_error = 'Could not determine cache path.';
@@ -827,9 +1022,25 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
 
                 $wrote = $this->write_cache_file($file_path, $html, $url);
                 if (!$wrote || !file_exists($file_path)) {
+                    $write_error_details = method_exists($this, 'get_last_cache_write_error')
+                        ? $this->get_last_cache_write_error()
+                        : array();
                     $write_error = method_exists($this, 'get_last_cache_write_error_message') ? $this->get_last_cache_write_error_message() : '';
+                    $write_error_code = sanitize_key((string) ($write_error_details['code'] ?? 'cache-write-failed'));
                     $last_error = '' !== (string) $write_error ? 'Failed to write cache file: ' . (string) $write_error : 'Failed to write cache file.';
-                    $retryable_failure = true;
+                    $failed_buckets[] = (string) $bucket;
+                    $bucket_errors[(string) $bucket] = array(
+                        'bucket' => (string) $bucket,
+                        'code' => $write_error_code,
+                        'message' => (string) ($write_error_details['message'] ?? $last_error),
+                        'file' => basename((string) ($write_error_details['file'] ?? $file_path)),
+                        'rotationFailedHash' => (string) ($write_error_details['rotationFailedHash'] ?? ''),
+                    );
+                    if ('variant_cap_reached' === $write_error_code) {
+                        $terminal_failure = true;
+                    } else {
+                        $retryable_failure = true;
+                    }
                     if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-after')) {
                         return $ownership_lost_result($url, $buckets, $cached_files);
                     }
@@ -837,6 +1048,7 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 }
 
                 $cached_files[] = $file_path;
+                $cached_buckets[] = (string) $bucket;
                 if (!$run_heartbeat('html-bucket-' . sanitize_key((string) $bucket) . '-after')) {
                     return $ownership_lost_result($url, $buckets, $cached_files);
                 }
@@ -844,8 +1056,35 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
 
             $success = !empty($buckets) && count($cached_files) === count($buckets);
             $partial = !empty($cached_files) && count($cached_files) < count($buckets);
+            $failed_buckets = array_values(array_unique(array_map('strval', $failed_buckets)));
+            $cached_buckets = array_values(array_unique(array_map('strval', $cached_buckets)));
+            $partial_message = __('Only some requested HTML variants were cached.', 'ultracache');
+            if ($partial && !empty($failed_buckets)) {
+                $failed_labels = array();
+                foreach ($failed_buckets as $failed_bucket) {
+                    $failed_code = sanitize_key((string) ($bucket_errors[$failed_bucket]['code'] ?? ''));
+                    $failed_labels[] = '' !== $failed_code
+                        ? $failed_bucket . ' [' . $failed_code . ']'
+                        : $failed_bucket;
+                }
+                $partial_message .= ' Failed buckets: ' . implode(', ', $failed_labels) . '.';
+            }
             if ($success) {
-                $this->record_cache_event('warm', array('url' => $url, 'files' => $cached_files));
+                $this->record_cache_event('warm', array('url' => $url, 'files' => $cached_files, 'cached_buckets' => $cached_buckets));
+            }
+
+            $html_failure_class = '';
+            if (!$success) {
+                $html_failure_class = $terminal_failure ? 'html-terminal' : ($retryable_failure ? 'html-transient' : 'cache-write-failed');
+            }
+            if ($partial) {
+                $html_failure_class = 'partial-html-variants';
+                foreach ($bucket_errors as $bucket_error) {
+                    if ('variant_cap_reached' === sanitize_key((string) ($bucket_error['code'] ?? ''))) {
+                        $html_failure_class = 'variant-cap-reached';
+                        break;
+                    }
+                }
             }
 
             $result = array(
@@ -854,12 +1093,19 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 'url'     => $url,
                 'message' => $success
                     ? ($css_bundle_requested ? __('Cached + CSS.', 'ultracache') : __('Cached.', 'ultracache'))
-                    : ($partial ? __('Only some requested HTML variants were cached.', 'ultracache') : ('' !== $last_error ? $last_error : __('Cache write failed.', 'ultracache'))),
+                    : ($partial ? $partial_message : ('' !== $last_error ? $last_error : __('Cache write failed.', 'ultracache'))),
                 'files'   => $cached_files,
                 'buckets' => $buckets,
+                'cachedBuckets' => $cached_buckets,
+                'failedBuckets' => $failed_buckets,
+                'bucketErrors' => $bucket_errors,
                 'retryable' => !$success && $retryable_failure && !$terminal_failure,
                 'terminal' => !$success && (!$retryable_failure || $terminal_failure),
-                'failureClass' => $partial ? 'partial-html-variants' : ($terminal_failure ? 'html-terminal' : ($retryable_failure ? 'html-transient' : 'cache-write-failed')),
+                'deferred' => !$success && '' !== $operation_pause_reason,
+                'pauseReason' => $operation_pause_reason,
+                'failureClass' => '' !== $operation_pause_reason
+                    ? 'operation-budget'
+                    : $html_failure_class,
             );
 
             if ($force_refresh) {
@@ -903,12 +1149,21 @@ trait Ultra_Cache_Engine_Warm_Runner_Trait
                 return true;
             }
 
-            $transient_key = 'ultracache_post_save_warm_' . md5((string) $post_id);
-            if (get_transient($transient_key)) {
+            if (!function_exists('ultracache_acquire_lock')) {
                 return false;
             }
 
-            set_transient($transient_key, (string) time(), $cooldown);
-            return true;
+            $lock_name = 'ultracache_post_save_warm_cooldown_' . $post_id;
+            $lock_token = 'post-save-warm-' . $post_id . '-' . wp_generate_password(20, false, false);
+            return ultracache_acquire_lock(
+                $lock_name,
+                $lock_token,
+                $cooldown,
+                array(
+                    'postId' => $post_id,
+                    'acquiredAt' => time(),
+                    'cooldownSeconds' => $cooldown,
+                )
+            );
         }
 }

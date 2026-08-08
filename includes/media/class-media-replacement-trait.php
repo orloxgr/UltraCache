@@ -10,6 +10,7 @@ if (!defined('ABSPATH')) {
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-schema-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-session-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-readiness-trait.php');
+require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-blockers-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-registry-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-files-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-metadata-trait.php');
@@ -24,6 +25,7 @@ trait Ultra_Cache_Media_Replacement_Trait
     use Ultra_Cache_Media_Replacement_Schema_Trait;
     use Ultra_Cache_Media_Replacement_Session_Trait;
     use Ultra_Cache_Media_Replacement_Readiness_Trait;
+    use Ultra_Cache_Media_Replacement_Blockers_Trait;
     use Ultra_Cache_Media_Replacement_Registry_Trait;
     use Ultra_Cache_Media_Replacement_Files_Trait;
     use Ultra_Cache_Media_Replacement_Metadata_Trait;

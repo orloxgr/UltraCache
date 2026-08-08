@@ -77,9 +77,9 @@
 			'Watch for: pages with carts, accounts, checkout, previews, sessions, or unsafe cookies must stay out of public cache because their HTML can be personal.',
 		]],
 		['Warm affected pages after save', [
-			'What it does: when a real content save happens, UltraCache can warm only the affected public pages after purging their old cache files.',
-			'Why it helps: the next visitor is less likely to wait for a cold cache on the changed page or its directly related archive pages.',
-			'Watch for: keep this off on worker-limited hosting unless you specifically want post-save warming. Manual and scheduled warm-up are separate controls.',
+			'What it does: after a real content change, UltraCache purges the canonical affected URL plan and queues every cacheable HTML page for a complete rebuild.',
+			'Why it helps: active HTML variants, configured CSS bundles, and enabled Varnish or LiteSpeed objects are rebuilt for the changed post, homepage, archives, taxonomies, and other related public surfaces.',
+			'Watch for: the persistent queue coalesces duplicate save, taxonomy, and WooCommerce hooks. A running manual warm-up keeps priority and affected pages resume afterward.',
 		]],
 		['Browser Cache Headers', [
 			'What it does: writes Apache .htaccess rules that tell browsers how long static files can be reused.',
@@ -90,6 +90,15 @@
 			'What it does: lets Apache hand out the saved HTML file before PHP and WordPress wake up. Think of it like taking a ready page from a shelf.',
 			'Why it helps: it can remove WordPress startup time for safe anonymous, queryless GET requests.',
 			'Watch for: the rules deliberately skip query strings, unsafe cookies, login/admin/REST/AJAX paths, WooCommerce dynamic paths, cart, checkout, account, and session-like visits. PHP debug headers and PHP hit counters do not run for those server-level hits.',
+		]],
+		['LiteSpeed HTML Cache', [
+			'What it does: writes a managed LiteSpeed cache lookup and image-variant contract, labels eligible UltraCache HTML with TTL and tags, and can populate LSCache through the existing page-warm pipeline.',
+			'Why it helps: a confirmed LiteSpeed cache engine can serve the saved public page before WordPress and PHP start while keeping orig, WebP, and AVIF HTML separate. Full purges use the site tag; affected URLs can be rebuilt and exact-purged again immediately before refill.',
+			'Stale regeneration: the optional stale-purge switch marks affected exact URL tags stale before regeneration. The shared page pipeline then rebuilds UltraCache HTML, performs a final hard exact purge, and refills every active LiteSpeed bucket.',
+			'Refresh ahead: the bounded scanner collects pinned, home, posts, shop, menu, analytics, and sitemap candidates. It uses the actual UltraCache .fresh markers and Fresh TTL rather than an uncertain LiteSpeed Age header, then queues only pages that reach the selected threshold.',
+			'Behavior test: sends two public requests for every active HTML bucket, performs one shared blocking exact purge, and sends two more requests per bucket. PASS requires an observable MISS followed by HIT after purge; hidden cache headers produce INCONCLUSIVE instead of a false PASS.',
+			'Production telemetry: bounded counters and the latest 30 site-purge, exact-URL purge, stale exact-URL purge, and refill operations are stored separately from behavior-test traffic. URLs are reduced to local paths and response bodies are never stored.',
+			'Watch for: Targeted refill, site warm-up, stale purge, and refresh ahead are independent controls. Native purge uses a short-lived signed same-site control response, and explicit LiteSpeed bypass responses are reported as failed refills instead of successful warm requests.',
 		]],
 		['HTML Compression', [
 			'What it does: chooses whether UltraCache writes cached HTML using server-managed output, gzip, or Brotli where the server supports it.',
@@ -111,18 +120,23 @@
 			'Why it helps: smaller image files can improve transfer time and LCP, especially for large product or hero images.',
 			'Watch for: this does not convert images inside the visitor request. Upload conversion, batch conversion, or on-demand queueing must create the files first.',
 		]],
-		['Image Output Format', [
+		['Image Rewrite Format', [
 			'What it does: chooses the primary optimized image format UltraCache prefers: AVIF or WebP.',
 			'Why it helps: AVIF is often smaller, while WebP is broadly compatible and remains the migrated default for older Automatic settings.',
 			'Watch for: changing this affects which generated files are used and which formats the best queue policy creates.',
 		]],
-		['Fallback Format', [
-			'What it does: chooses whether AVIF output falls back to WebP or to the original JPEG/PNG file. WebP output always falls back to the original JPEG/PNG file.',
-			'Why it helps: WebP fallback keeps an optimized path for browsers that cannot use AVIF; JPEG/PNG fallback avoids generating an extra WebP layer.',
-			'Watch for: WebP fallback is available only when Image Output Format is AVIF.',
+		['Image Rewrite Fallback Format', [
+			'What it does: chooses whether AVIF output falls back to WebP or to the original attachment file. WebP output always falls back to the original attachment file.',
+			'Why it helps: WebP fallback keeps an optimized path for browsers that cannot use AVIF; Original file fallback avoids generating an extra WebP layer.',
+			'Watch for: WebP fallback is available only when Image Rewrite Format is AVIF. The original attachment may itself be AVIF or WebP after upload conversion or Media Library Replacement.',
+		]],
+		['Upload image format', [
+			'What it does: chooses whether Convert new uploads stores the actual uploaded attachment as AVIF or WebP.',
+			'Why it helps: upload storage can be selected independently from frontend rewrite and Media Library Replacement formats.',
+			'Watch for: this changes the uploaded attachment file itself and applies only to future uploads processed while Convert new uploads is enabled.',
 		]],
 		['Image compression level', [
-			'What it does: chooses the encoder quality used for generated AVIF/WebP variants and Convert new uploads.',
+			'What it does: chooses the shared encoder quality used for generated AVIF/WebP variants, Convert new uploads, and Media Library Replacement files.',
 			'Why it helps: higher levels preserve more visual detail; lower levels reduce transfer size more aggressively.',
 			'Watch for: existing generated files keep their current quality until they are regenerated.',
 		]],
@@ -132,7 +146,7 @@
 			'Watch for: uploads may create background conversion work. Original images stay untouched.',
 		]],
 		['Convert new uploads', [
-			'What it does: converts the actual uploaded image file to the selected Image Output Format during the WordPress upload flow.',
+			'What it does: converts the actual uploaded image file to the selected Upload image format during the WordPress upload flow.',
 			'Why it helps: newly added media can start as WebP or AVIF immediately instead of waiting for batch conversion.',
 			'Watch for: this changes the uploaded attachment file itself. If the selected encoder cannot produce the requested format, the upload fails with a visible diagnostic error.',
 		]],
@@ -160,6 +174,11 @@
 			'What it does: adds native lazy loading and async decoding to eligible images.',
 			'Why it helps: below-the-fold images wait their turn, so the browser can focus on the first view.',
 			'Watch for: when LCP Image Priority is enabled, UltraCache tries to lazy-load only images after the detected LCP image so the hero is not delayed.',
+		]],
+		['Lazy load third-party iframes', [
+			'What it does: keeps eligible offscreen third-party iframes inert until they are within 400 pixels of the viewport.',
+			'Why it helps: maps, videos, and other visual embeds do not start their own JavaScript, images, and network requests during the first view.',
+			'Watch for: payment, authentication, CAPTCHA, hidden functional frames, and critical checkout/account pages are excluded automatically. Developers can add data-ultracache-no-lazy-iframe to opt out one embed.',
 		]],
 		['JavaScript Strategy', [
 			'What it does: chooses the base JavaScript mode. Off leaves scripts alone, Defer lets the browser run eligible scripts after parsing, and Delay holds eligible scripts until the delayed queue releases.',
@@ -511,10 +530,10 @@
 			'Why it helps: admin-secret mode can purge Varnish without needing an HTTP purge listener.',
 			'Watch for: admin mode is safest on local or private endpoints protected by firewall and secret.',
 		]],
-		['HTTP token / control key', [
-			'What it does: stores the token used by the Varnish HTTP purge endpoint when your setup requires one.',
-			'Why it helps: the purge endpoint can reject random visitors but allow UltraCache.',
-			'Watch for: the saved secret is not displayed. Keep this aligned with your server config.',
+		['HTTP token / VCL contract key', [
+			'What it does: stores the token used by a Varnish HTTP purge endpoint or the optional UltraCache CWP VCL v2 contract.',
+			'Why it helps: the advanced contract can authenticate structured exact PURGE and object-side BAN operations while generic hosts continue using their own interface.',
+			'Watch for: the saved secret is not displayed. Enable the bundled template contract explicitly and configure the same random 32-128 character [A-Za-z0-9_-] token in both places.',
 		]],
 		['Admin secret', [
 			'What it does: stores the shared secret for Varnish admin-secret mode.',
@@ -549,7 +568,7 @@
 		['Also flush LiteSpeed Cache', [
 			'What it does: also asks LiteSpeed/OpenLiteSpeed cache to purge when Flush All Cache runs.',
 			'Why it helps: the server cache and UltraCache do not disagree about old pages.',
-			'Watch for: UltraCache uses the LiteSpeed plugin API when present, otherwise the server-level purge header.',
+			'Watch for: with native LiteSpeed HTML Cache enabled, this purges only UltraCache-tagged pages for the current site through the signed control response. Otherwise the existing confirmed LiteSpeed WordPress purge integration is used.',
 		]],
 		['Also flush Nginx Cache', [
 			'What it does: also calls the detected Nginx helper purge hook when Flush All Cache runs.',
@@ -560,6 +579,11 @@
 			'What it does: also flushes the configured UltraCache Varnish endpoint when Flush All Cache runs.',
 			'Why it helps: Varnish and UltraCache clear together instead of leaving stale outer-cache pages.',
 			'Watch for: enable and test Varnish integration first. If Varnish is detected but not flushable, fix that before including it.',
+		]],
+		['Also flush Elementor Cache', [
+			"What it does: calls Elementor's native cache clear before UltraCache removes its own page cache.",
+			"Why it helps: Elementor cached element output and generated files are invalidated with UltraCache HTML, while each page\'s referenced Elementor CSS is regenerated as needed before that page is cached again.",
+			"Watch for: leave this off unless you want every Flush All Cache operation to clear Elementor\'s native cache and generated files. UltraCache does not run a global Elementor CSS regeneration; regeneration is per page as that page is stored or warmed.",
 		]],
 		['Menu warm-up', [
 			'What it does: chooses a saved WordPress menu as the URL source for menu warm-up.',
@@ -579,20 +603,15 @@
 		['Scheduled Cache Cleanup', [
 			'What it does: runs an automatic full cache purge on the interval you set.',
 			'Why it helps: old generated files and stale cache are cleaned without manual work.',
-			'Watch for: a purge creates cold cache until warm-up rebuilds it. Pair with cron warm-up when possible.',
+			'Watch for: a purge creates cold cache until warm-up rebuilds it. Pair with full-site background warm-up when appropriate.',
 		]],
-		['Cron Warm Up', [
-			'What it does: runs a minute-by-minute background queue that warms HTML and, when configured, missing CSS bundles.',
-			'Why it helps: cache is rebuilt gradually instead of making visitors wait after a purge.',
-			'Watch for: lower pages-per-minute values are safer on slower servers.',
-		]],
-		['Start Cron Warm Up after Scheduled Cleanup', [
-			'What it does: starts the cron warm queue after scheduled cleanup purges cache.',
+		['Warm full site after Scheduled Cleanup', [
+			'What it does: creates a background full-site warm plan after scheduled cleanup purges cache.',
 			'Why it helps: the site refills cache automatically after the scheduled emptying.',
-			'Watch for: requires both scheduled cleanup and cron warm-up to be enabled.',
+			'Watch for: Scheduled Cache Cleanup must be enabled. The selected Full-site warm-up sources and scheduled limit define the plan.',
 		]],
-		['Start Cron Warm Up after Flush All Cache', [
-			'What it does: starts the cron warm queue after a manual full cache purge.',
+		['Warm full site after Flush All Cache', [
+			'What it does: creates a background full-site warm plan after Flush All Cache completes.',
 			'Why it helps: the site begins rebuilding cache right after you clear it.',
 			'Watch for: this can create immediate background traffic after pressing Flush All Cache.',
 		]],
@@ -601,15 +620,15 @@
 			'Why it helps: you control how often old generated output is cleared.',
 			'Watch for: shorter intervals mean more purges and more warm-up work. Longer intervals keep cache around longer.',
 		]],
-		['Cron warm pages per minute', [
-			'What it does: sets how many URLs the cron warm queue processes each minute.',
-			'Why it helps: it throttles background warming so the server is not hit too hard.',
+		['Background warm pages per minute', [
+			'What it does: sets how many URLs the shared background automation worker processes each minute.',
+			'Why it helps: it throttles scheduled and targeted background warming so the server is not hit too hard.',
 			'Watch for: set 0 to pause processing. Higher numbers warm faster but use more CPU and network.',
 		]],
 		['Scheduled / Cron warm limit', [
-			'What it does: caps how many URLs scheduled or cron warm-up may process.',
+			'What it does: caps how many URLs are selected for each scheduled full-site warm plan.',
 			'Why it helps: very large sites do not accidentally warm thousands of pages at once.',
-			'Watch for: if the limit is lower than your important URL count, some pages stay cold until visited.',
+			'Watch for: targeted work from updates, imports, LCP, or media discovery is not cut by this full-site selection limit.',
 		]],
 		['Stale While Revalidate', [
 			'What it does: serves stale HTML inside the allowed window while UltraCache refreshes it in the background.',
@@ -617,12 +636,12 @@
 			'Watch for: stale means old. Use sensible Fresh TTL and Max stale values for stores or frequently changing pages.',
 		]],
 		['Fresh TTL (minutes)', [
-			'What it does: sets how long a cached page counts as fresh.',
-			'Why it helps: fresh hits are simple and fast because no background refresh is needed.',
-			'Watch for: shorter freshness means more refresh work. Longer freshness keeps old HTML longer.',
+			'What it does: sets how long cached HTML counts as fresh. When Varnish is enabled, the same value is used as its HTML TTL.',
+			'Why it helps: UltraCache and the optional Varnish layer follow one freshness policy.',
+			'Watch for: content changes still use targeted invalidation; shorter freshness creates more expiry-driven rebuild work.',
 		]],
 		['Max stale window (minutes)', [
-			'What it does: sets how long UltraCache may still serve stale HTML while refreshing in the background.',
+			'What it does: sets the maximum total age at which UltraCache may still serve stale HTML while refreshing in the background.',
 			'Why it helps: stale cache can protect visitors from slow rebuilds after freshness expires.',
 			'Watch for: do not make this longer than the site content can tolerate.',
 		]],

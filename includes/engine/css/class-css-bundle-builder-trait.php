@@ -57,8 +57,24 @@ public function warm_frontpage_html_with_css(array $args = array())
 public function build_frontpage_css_bundle($url = '', array $args = array())
     {
         $args = is_array($args) ? $args : array();
+        $heartbeat = isset($args['_warm_pipeline_heartbeat']) && is_callable($args['_warm_pipeline_heartbeat'])
+            ? $args['_warm_pipeline_heartbeat']
+            : null;
+        unset($args['_warm_pipeline_heartbeat']);
+        $run_heartbeat = static function ($stage) use ($heartbeat) {
+            if (!is_callable($heartbeat)) {
+                return true;
+            }
+            try {
+                return false !== call_user_func($heartbeat, sanitize_key((string) $stage));
+            } catch (Throwable $error) {
+                unset($error);
+                return false;
+            }
+        };
         $skip_final_warm = !empty($args['skip_final_warm']);
         $ignore_runtime_bypass = !empty($args['ignore_runtime_bypass']);
+        $request_timeout = isset($args['request_timeout']) ? max(5, min(120, (int) $args['request_timeout'])) : 10;
         $frontpage_url = '' !== (string) $url ? esc_url_raw((string) $url) : home_url('/');
         $result = array(
             'success' => false,
@@ -88,7 +104,7 @@ public function build_frontpage_css_bundle($url = '', array $args = array())
         }
 
         try {
-            $scan = $this->fetch_frontpage_css_source_html($frontpage_url);
+            $scan = $this->fetch_frontpage_css_source_html($frontpage_url, $request_timeout);
             if (empty($scan['success']) || empty($scan['html'])) {
                 $result['message'] = !empty($scan['message']) ? (string) $scan['message'] : 'Could not fetch page HTML.';
                 $result['retryable'] = !empty($scan['retryable']);
@@ -98,20 +114,44 @@ public function build_frontpage_css_bundle($url = '', array $args = array())
                 return $result;
             }
 
-            $prepared = $this->build_frontpage_css_bundle_from_html((string) $scan['html'], $frontpage_url);
+            if (!$run_heartbeat('css-source-after')) {
+                $result['ownershipLost'] = true;
+                $result['retryable'] = true;
+                $result['terminal'] = false;
+                $result['failureClass'] = 'ownership-lost';
+                $result['message'] = __('Warm-up ownership changed after CSS source discovery.', 'ultracache');
+                return $result;
+            }
+
+            $prepared = $this->build_frontpage_css_bundle_from_html((string) $scan['html'], $frontpage_url, '', $run_heartbeat);
             if (!empty($prepared['stats']) && is_array($prepared['stats'])) {
                 $result['stats'] = $prepared['stats'];
             }
 
             if (empty($prepared['success'])) {
                 $result['skipped'] = !empty($prepared['skipped']);
+                $result['ownershipLost'] = !empty($prepared['ownershipLost']);
+                $result['retryable'] = !empty($prepared['retryable']);
+                $result['terminal'] = array_key_exists('terminal', $prepared) ? !empty($prepared['terminal']) : empty($result['retryable']);
+                $result['failureClass'] = sanitize_key((string) ($prepared['failureClass'] ?? ''));
                 $result['message'] = !empty($prepared['message']) ? (string) $prepared['message'] : 'Could not build CSS bundle.';
-                $this->record_analytics_frontpage_css_warm($result);
+                if (empty($result['ownershipLost'])) {
+                    $this->record_analytics_frontpage_css_warm($result);
+                }
+                return $result;
+            }
+
+            if (!$run_heartbeat('css-manifest-before')) {
+                $result['ownershipLost'] = true;
+                $result['retryable'] = true;
+                $result['terminal'] = false;
+                $result['failureClass'] = 'ownership-lost';
+                $result['message'] = __('Warm-up ownership changed before the CSS manifest could be committed.', 'ultracache');
                 return $result;
             }
 
             $manifest = $this->read_frontpage_css_manifest();
-            $manifest['version'] = 3;
+            $manifest['version'] = 4;
             $manifest['updatedAt'] = current_time('timestamp');
             $manifest['updatedAtMysql'] = current_time('mysql');
             if (!isset($manifest['entries']) || !is_array($manifest['entries'])) {
@@ -392,8 +432,9 @@ private function collect_css_bundle_link_tags_from_html($html, $head_only = true
         return $result;
     }
 
-private function fetch_frontpage_css_source_html($url)
+private function fetch_frontpage_css_source_html($url, $request_timeout = 10)
     {
+        $request_timeout = max(5, min(120, (int) $request_timeout));
         $scan_url = add_query_arg(
             array(
                 'ultracache_frontpage_css_scan' => 1,
@@ -419,7 +460,7 @@ private function fetch_frontpage_css_source_html($url)
             $scan_url,
             array(
                 'method' => 'GET',
-                'timeout' => 10,
+                'timeout' => $request_timeout,
                 'redirection' => 0,
                 'sslverify' => $this->should_verify_loopback_ssl($scan_url),
                 'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-CSSBundle/' . ULTRACACHE_VERSION . '; +https://wordpress.org)',
@@ -475,7 +516,7 @@ private function fetch_frontpage_css_source_html($url)
         return array('success' => true, 'message' => '', 'html' => $html);
     }
 
-private function build_frontpage_css_bundle_from_html($html, $page_url, $mode = '')
+private function build_frontpage_css_bundle_from_html($html, $page_url, $mode = '', $heartbeat = null)
     {
         $settings = $this->get_settings();
         $mode = in_array((string) $mode, array('safe', 'aggressive', 'full'), true) ? (string) $mode : (string) ($settings['homepage_css_bundle_mode'] ?? 'safe');
@@ -520,7 +561,7 @@ private function build_frontpage_css_bundle_from_html($html, $page_url, $mode = 
             return array('success' => false, 'skipped' => true, 'message' => __('Not enough eligible local stylesheets were found for CSS bundling.', 'ultracache'), 'stats' => $stats);
         }
 
-        $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, $mode);
+        $bundle = $this->build_frontpage_css_bundle_file($page_url, $assets, $mode, $heartbeat);
         if (!empty($bundle['stats']) && is_array($bundle['stats'])) {
             $stats['bundled'] += max(0, (int) ($bundle['stats']['bundled'] ?? 0));
             $stats['skipped'] += max(0, (int) ($bundle['stats']['skipped'] ?? 0));
@@ -533,7 +574,16 @@ private function build_frontpage_css_bundle_from_html($html, $page_url, $mode = 
             }
         }
         if (empty($bundle['success'])) {
-            return array('success' => false, 'skipped' => !empty($bundle['skipped']), 'message' => !empty($bundle['message']) ? (string) $bundle['message'] : 'Could not write the CSS bundle.', 'stats' => $stats);
+            return array(
+                'success' => false,
+                'skipped' => !empty($bundle['skipped']),
+                'ownershipLost' => !empty($bundle['ownershipLost']),
+                'retryable' => !empty($bundle['retryable']),
+                'terminal' => array_key_exists('terminal', $bundle) ? !empty($bundle['terminal']) : empty($bundle['retryable']),
+                'failureClass' => sanitize_key((string) ($bundle['failureClass'] ?? '')),
+                'message' => !empty($bundle['message']) ? (string) $bundle['message'] : 'Could not write the CSS bundle.',
+                'stats' => $stats,
+            );
         }
 
         return array(
@@ -710,12 +760,7 @@ private function icon_font_text_matches_patterns($text, array $patterns, &$match
 
 private function extract_font_family_from_font_face_block($block)
     {
-        $block = (string) $block;
-        if (preg_match('/font-family\s*:\s*([^;]+);/i', $block, $matches)) {
-            return trim(trim((string) $matches[1]), "\"' \t\r\n");
-        }
-
-        return '';
+        return trim(trim(ultracache_font_css_extract_declaration((string) $block, 'font-family')), "\"' \t\r\n");
     }
 
 private function should_delay_css_font_face_block($block, $css_context, array $settings, &$meta = array())
@@ -779,8 +824,8 @@ private function split_delayed_icon_font_faces_from_css($css, $source_url, array
         }
 
         $delayed_blocks = array();
-        $result['body'] = (string) preg_replace_callback('/@font-face\s*\{[^{}]*\}/is', function ($matches) use (&$delayed_blocks, &$result, $css, $source_url, $settings) {
-            $block = (string) ($matches[0] ?? '');
+        $result['body'] = ultracache_css_rewrite_font_face_blocks($css, function ($block) use (&$delayed_blocks, &$result, $css, $source_url, $settings) {
+            $block = (string) $block;
             $meta = array();
             if (!$this->should_delay_css_font_face_block($block, $css, $settings, $meta)) {
                 return $block;
@@ -822,7 +867,7 @@ private function split_delayed_icon_font_faces_from_css($css, $source_url, array
             $delayed_blocks[] = "/* UltraCache Delayed Font Source: " . (string) $source_url . ('' !== $family ? ' | ' . $family : '') . " */\n" . $delayed_block;
             $result['delayedCount']++;
             return "\n/* UltraCache delayed icon font-face removed: " . ('' !== $family ? $family : 'matched font') . " */\n";
-        }, $css);
+        });
 
         if (!is_string($result['body'])) {
             $result['body'] = $css;
@@ -842,8 +887,31 @@ private function split_delayed_icon_font_faces_from_css($css, $source_url, array
         return $result;
     }
 
-private function build_frontpage_css_bundle_file($page_url, array $assets, $mode = 'safe')
+private function build_frontpage_css_bundle_file($page_url, array $assets, $mode = 'safe', $heartbeat = null)
     {
+        $run_heartbeat = static function ($stage) use ($heartbeat) {
+            if (!is_callable($heartbeat)) {
+                return true;
+            }
+            try {
+                return false !== call_user_func($heartbeat, sanitize_key((string) $stage));
+            } catch (Throwable $error) {
+                unset($error);
+                return false;
+            }
+        };
+        $ownership_lost = static function (array $stats) {
+            return array(
+                'success' => false,
+                'skipped' => false,
+                'ownershipLost' => true,
+                'retryable' => true,
+                'terminal' => false,
+                'failureClass' => 'ownership-lost',
+                'message' => __('Warm-up ownership changed before the CSS bundle result could be committed.', 'ultracache'),
+                'stats' => $stats,
+            );
+        };
         $dir = $this->get_frontpage_css_dir();
         if (!is_dir($dir)) {
             wp_mkdir_p($dir);
@@ -898,7 +966,19 @@ private function build_frontpage_css_bundle_file($page_url, array $assets, $mode
 
             $original_bytes = strlen($css);
             $signature_parts[] = $url . '|' . (string) ultracache_safe_filemtime($path, 'frontpage_css_bundle_signature') . '|' . $original_bytes;
-            $prepared_css = $this->prepare_css_asset_for_bundle($css, $url);
+            $prepared_css = $this->prepare_css_asset_for_bundle($css, $url, $media);
+            if (empty($prepared_css['eligible'])) {
+                $failure_reason = isset($prepared_css['failureReason']) ? sanitize_key((string) $prepared_css['failureReason']) : 'unsupported-css-semantics';
+                return array(
+                    'success' => false,
+                    'skipped' => true,
+                    'semanticRejected' => true,
+                    'failureClass' => $failure_reason,
+                    'message' => __('A stylesheet was excluded because its media, import, or charset semantics could not be preserved in a bundle.', 'ultracache'),
+                    'stats' => $stats,
+                    'sourceUrls' => array_values(array_unique(array_map('strval', array_merge($used_urls, array($url))))),
+                );
+            }
             $prepared_body = isset($prepared_css['body']) ? (string) $prepared_css['body'] : '';
             $css_image_stats = array();
             $prepared_body = $this->rewrite_stylesheet_css_image_urls_for_media_optimization($prepared_body, $url, $css_image_stats);
@@ -1002,6 +1082,9 @@ private function build_frontpage_css_bundle_file($page_url, array $assets, $mode
         clearstatcache(true, $file);
         $existing_hash = (is_readable($file) && filesize($file) > 0) ? md5_file($file) : '';
         if ($existing_hash !== $content_hash) {
+            if (!$run_heartbeat('css-bundle-file-commit-before')) {
+                return $ownership_lost($stats);
+            }
             if (!$this->write_cache_variant_atomically($file, $bundle_content)) {
                 return array(
                     'success' => false,
@@ -1046,6 +1129,9 @@ private function build_frontpage_css_bundle_file($page_url, array $assets, $mode
             clearstatcache(true, $delayed_font_file);
             $existing_delayed_hash = (is_readable($delayed_font_file) && filesize($delayed_font_file) > 0) ? md5_file($delayed_font_file) : '';
             if ($existing_delayed_hash !== $delayed_font_hash) {
+                if (!$run_heartbeat('css-delayed-font-file-commit-before')) {
+                    return $ownership_lost($stats);
+                }
                 if (!$this->write_cache_variant_atomically($delayed_font_file, $delayed_font_content)) {
                     return array(
                         'success' => false,
@@ -1143,11 +1229,26 @@ private function rewrite_stylesheet_css_image_urls_for_media_optimization($css, 
         return is_string($rewritten) && '' !== $rewritten ? $rewritten : $css;
     }
 
-private function prepare_css_asset_for_bundle($css, $source_url)
+private function prepare_css_asset_for_bundle($css, $source_url, $link_media = '', $normalize_font_display = true)
     {
         $css = (string) $css;
+        $link_media = trim((string) $link_media);
+        $result = array(
+            'body' => '',
+            'imports' => array(),
+            'charset' => '',
+            'charsetName' => '',
+            'eligible' => true,
+            'failureReason' => '',
+        );
         if ('' === $css) {
-            return array('body' => '', 'imports' => array(), 'charset' => '');
+            return $result;
+        }
+
+        if ('' !== $link_media && 'all' !== strtolower($link_media) && !$this->is_css_bundle_media_wrapper_safe($link_media)) {
+            $result['eligible'] = false;
+            $result['failureReason'] = 'unsupported-link-media';
+            return $result;
         }
 
         $css = preg_replace('/^\xEF\xBB\xBF/', '', $css);
@@ -1158,16 +1259,30 @@ private function prepare_css_asset_for_bundle($css, $source_url)
             return $key;
         }, $css);
 
-        $charset = '';
-        $masked_css = (string) preg_replace_callback('/@charset\s+(["\'])([^"\']+)\1\s*;/i', function ($matches) use (&$charset) {
-            if ('' === $charset) {
-                $charset = '@charset "' . addcslashes((string) $matches[2], "\\\"") . '";';
+        $charset_names = array();
+        $masked_css = (string) preg_replace_callback('/@charset\s+(["\'])([^"\']+)\1\s*;/i', function ($matches) use (&$charset_names) {
+            $normalized = $this->normalize_css_bundle_charset_name((string) ($matches[2] ?? ''));
+            if ('' !== $normalized) {
+                $charset_names[$normalized] = true;
             }
             return "\n";
         }, $masked_css);
 
+        if (!empty($charset_names)) {
+            $declared_charsets = array_keys($charset_names);
+            if (1 !== count($declared_charsets) || 'utf-8' !== (string) $declared_charsets[0]) {
+                $result['eligible'] = false;
+                $result['failureReason'] = 'unsupported-charset';
+                return $result;
+            }
+            $result['charsetName'] = 'utf-8';
+            $result['charset'] = '@charset "UTF-8";';
+        }
+
         $imports = array();
-        $masked_css = (string) preg_replace_callback('/@import\s+(?:url\(\s*"([^"]+)"\s*\)|url\(\s*\'([^\']+)\'\s*\)|url\(\s*([^)]+?)\s*\)|"([^"]+)"|\'([^\']+)\')([^;]*);/i', function ($matches) use (&$imports, $source_url) {
+        $eligible = true;
+        $failure_reason = '';
+        $masked_css = (string) preg_replace_callback('/@import\s+(?:url\(\s*"([^"]+)"\s*\)|url\(\s*\'([^\']+)\'\s*\)|url\(\s*([^)]+?)\s*\)|"([^"]+)"|\'([^\']+)\')([^;]*);/i', function ($matches) use (&$imports, &$eligible, &$failure_reason, $source_url, $link_media) {
             $import_url = '';
             for ($i = 1; $i <= 5; $i++) {
                 if (isset($matches[$i]) && '' !== trim((string) $matches[$i])) {
@@ -1176,57 +1291,205 @@ private function prepare_css_asset_for_bundle($css, $source_url)
                 }
             }
             $suffix = isset($matches[6]) ? trim((string) $matches[6]) : '';
-            $rewritten = $this->rewrite_css_import_rule_for_bundle($import_url, $suffix, (string) $matches[0], $source_url);
+            $prepared_import = $this->prepare_css_import_rule_for_bundle($import_url, $suffix, (string) $matches[0], $source_url, $link_media);
+            if (empty($prepared_import['eligible'])) {
+                $eligible = false;
+                if ('' === $failure_reason) {
+                    $failure_reason = isset($prepared_import['failureReason']) ? (string) $prepared_import['failureReason'] : 'unsupported-import';
+                }
+                return "\n";
+            }
+            $rewritten = isset($prepared_import['rule']) ? trim((string) $prepared_import['rule']) : '';
             if ('' !== $rewritten) {
                 $imports[] = $rewritten;
             }
             return "\n";
         }, $masked_css);
 
+        if (!$eligible) {
+            $result['eligible'] = false;
+            $result['failureReason'] = '' !== $failure_reason ? $failure_reason : 'unsupported-import';
+            return $result;
+        }
+
         if (!empty($comments)) {
             $masked_css = strtr($masked_css, $comments);
         }
 
+        $result['body'] = $this->rewrite_frontpage_css_urls_for_bundle($masked_css, $source_url, $normalize_font_display);
+        $result['imports'] = $imports;
+        return $result;
+    }
+
+private function normalize_css_bundle_charset_name($charset)
+    {
+        $charset = strtolower(trim((string) $charset));
+        $charset = str_replace('_', '-', $charset);
+        $charset = preg_replace('/\s+/', '', $charset);
+        if (!is_string($charset) || '' === $charset) {
+            return '';
+        }
+
+        if (in_array($charset, array('utf8', 'utf-8', 'unicode-1-1-utf-8'), true)) {
+            return 'utf-8';
+        }
+
+        return $charset;
+    }
+
+private function normalize_css_bundle_media_condition($media)
+    {
+        $media = strtolower(trim((string) $media));
+        $media = preg_replace('/\s+/', ' ', $media);
+        return is_string($media) ? $media : '';
+    }
+
+private function consume_css_import_function_qualifier($suffix, $keyword)
+    {
+        $suffix = ltrim((string) $suffix);
+        $keyword = strtolower(trim((string) $keyword));
+        if ('' === $suffix || '' === $keyword || 0 !== stripos($suffix, $keyword)) {
+            return array('matched' => false, 'token' => '', 'remainder' => $suffix);
+        }
+
+        $length = strlen($keyword);
+        $next = substr($suffix, $length, 1);
+        if ('' !== $next && !preg_match('/[\s(]/', $next)) {
+            return array('matched' => false, 'token' => '', 'remainder' => $suffix);
+        }
+
+        $cursor = $length;
+        while (isset($suffix[$cursor]) && preg_match('/\s/', $suffix[$cursor])) {
+            $cursor++;
+        }
+
+        if (!isset($suffix[$cursor]) || '(' !== $suffix[$cursor]) {
+            if ('layer' === $keyword) {
+                return array(
+                    'matched' => true,
+                    'token' => trim(substr($suffix, 0, $length)),
+                    'remainder' => ltrim(substr($suffix, $length)),
+                );
+            }
+            return array('matched' => false, 'token' => '', 'remainder' => $suffix);
+        }
+
+        $depth = 0;
+        $quote = '';
+        $escaped = false;
+        $total = strlen($suffix);
+        for ($i = $cursor; $i < $total; $i++) {
+            $char = $suffix[$i];
+            if ($escaped) {
+                $escaped = false;
+                continue;
+            }
+            if ('\\' === $char) {
+                $escaped = true;
+                continue;
+            }
+            if ('' !== $quote) {
+                if ($char === $quote) {
+                    $quote = '';
+                }
+                continue;
+            }
+            if ('"' === $char || "'" === $char) {
+                $quote = $char;
+                continue;
+            }
+            if ('(' === $char) {
+                $depth++;
+            } elseif (')' === $char) {
+                $depth--;
+                if (0 === $depth) {
+                    return array(
+                        'matched' => true,
+                        'token' => trim(substr($suffix, 0, $i + 1)),
+                        'remainder' => ltrim(substr($suffix, $i + 1)),
+                    );
+                }
+            }
+        }
+
+        return array('matched' => false, 'token' => '', 'remainder' => $suffix);
+    }
+
+private function split_css_import_suffix_for_bundle($suffix)
+    {
+        $remaining = trim((string) $suffix);
+        $qualifiers = array();
+        foreach (array('layer', 'supports') as $keyword) {
+            $consumed = $this->consume_css_import_function_qualifier($remaining, $keyword);
+            if (!empty($consumed['matched'])) {
+                $qualifiers[] = trim((string) ($consumed['token'] ?? ''));
+                $remaining = trim((string) ($consumed['remainder'] ?? ''));
+            }
+        }
+
         return array(
-            'body' => $this->rewrite_frontpage_css_urls_for_bundle($masked_css, $source_url),
-            'imports' => $imports,
-            'charset' => $charset,
+            'qualifiers' => array_values(array_filter($qualifiers, static function ($value) {
+                return '' !== trim((string) $value);
+            })),
+            'media' => $remaining,
         );
     }
 
-private function rewrite_css_import_rule_for_bundle($import_url, $suffix, $fallback_rule, $source_url)
+private function prepare_css_import_rule_for_bundle($import_url, $suffix, $fallback_rule, $source_url, $link_media = '')
     {
         $import_url = trim((string) $import_url);
         $suffix = trim((string) $suffix);
-        if ('' === $import_url) {
-            return trim((string) $fallback_rule);
+        $link_media = trim((string) $link_media);
+        if ('all' === strtolower($link_media)) {
+            $link_media = '';
         }
+        if ('' === $import_url) {
+            return array('eligible' => false, 'rule' => '', 'failureReason' => 'invalid-import-url');
+        }
+
+        $parts = $this->split_css_import_suffix_for_bundle($suffix);
+        $qualifiers = isset($parts['qualifiers']) && is_array($parts['qualifiers']) ? $parts['qualifiers'] : array();
+        $import_media = isset($parts['media']) ? trim((string) $parts['media']) : '';
+        if ('' !== $link_media && '' !== $import_media
+            && $this->normalize_css_bundle_media_condition($link_media) !== $this->normalize_css_bundle_media_condition($import_media)) {
+            return array('eligible' => false, 'rule' => '', 'failureReason' => 'import-media-intersection-unsupported');
+        }
+
+        $effective_media = '' !== $import_media ? $import_media : $link_media;
+        $effective_suffix_parts = $qualifiers;
+        if ('' !== $effective_media) {
+            $effective_suffix_parts[] = $effective_media;
+        }
+        $effective_suffix = trim(implode(' ', $effective_suffix_parts));
 
         $lower = strtolower($import_url);
         foreach (array('data:', 'blob:', 'about:', 'javascript:', '#') as $prefix) {
             if (0 === strpos($lower, $prefix)) {
-                return trim((string) $fallback_rule);
+                if ('' === $link_media && $effective_suffix === $suffix) {
+                    return array('eligible' => true, 'rule' => trim((string) $fallback_rule), 'failureReason' => '');
+                }
+                return array('eligible' => false, 'rule' => '', 'failureReason' => 'unsupported-import-url');
             }
         }
 
         $absolute = $this->absolutize_public_resource_url($import_url, $source_url);
         if ('' === $absolute) {
-            return trim((string) $fallback_rule);
+            return array('eligible' => false, 'rule' => '', 'failureReason' => 'unresolved-import-url');
         }
 
-        $rule = '@import url("' . esc_url_raw($absolute) . '")' . ('' !== $suffix ? ' ' . $suffix : '') . ';';
+        $rule = '@import url("' . esc_url_raw($absolute) . '")' . ('' !== $effective_suffix ? ' ' . $effective_suffix : '') . ';';
         if (false !== stripos($absolute, 'fonts.googleapis.com') && method_exists($this, 'rewrite_google_fonts_imports_in_css')) {
             $google_import_stats = array();
             $rewritten_rule = $this->rewrite_google_fonts_imports_in_css($rule, $source_url, $google_import_stats);
             if (is_string($rewritten_rule) && '' !== $rewritten_rule) {
-                return trim($rewritten_rule);
+                $rule = trim($rewritten_rule);
             }
         }
 
-        return $rule;
+        return array('eligible' => true, 'rule' => $rule, 'failureReason' => '');
     }
 
-private function rewrite_frontpage_css_urls_for_bundle($css, $source_url)
+private function rewrite_frontpage_css_urls_for_bundle($css, $source_url, $normalize_font_display = true)
     {
         $css = (string) $css;
         if ('' === $css) {
@@ -1263,7 +1526,7 @@ private function rewrite_frontpage_css_urls_for_bundle($css, $source_url)
         $css = $this->normalize_google_fonts_cache_urls_in_css($css);
         $policy = $this->get_font_optimization_policy();
 
-        return !empty($policy['bundle_font_display']) ? $this->normalize_font_face_display_in_css($css) : $css;
+        return $normalize_font_display && !empty($policy['bundle_font_display']) ? $this->normalize_font_face_display_in_css($css) : $css;
     }
 
 private function get_leftover_css_bundle_default_stats()
@@ -1272,6 +1535,7 @@ private function get_leftover_css_bundle_default_stats()
             'enabled' => true,
             'success' => false,
             'candidate_count' => 0,
+            'run_count' => 0,
             'replaced_link_count' => 0,
             'skipped_protected_count' => 0,
             'skipped_nonlocal_count' => 0,
@@ -1282,6 +1546,8 @@ private function get_leftover_css_bundle_default_stats()
             'skipped_reason' => '',
             'bundle_url' => '',
             'bundle_file' => '',
+            'bundle_urls' => array(),
+            'bundle_files' => array(),
             'bundle_bytes' => 0,
             'source_bytes_total' => 0,
             'source_urls' => array(),
@@ -1451,6 +1717,7 @@ private function get_leftover_css_bundle_candidate_from_link_processor($processo
             'asset' => array(
                 'url' => $absolute_url,
                 'path' => $local_path,
+                'media' => $media,
             ),
             'skip' => '',
         );
@@ -1479,6 +1746,7 @@ private function get_font_mix_css_bundle_default_stats()
             'enabled' => true,
             'success' => false,
             'candidate_count' => 0,
+            'run_count' => 0,
             'replaced_link_count' => 0,
             'skipped_nonlocal_count' => 0,
             'skipped_unreadable_count' => 0,
@@ -1488,6 +1756,14 @@ private function get_font_mix_css_bundle_default_stats()
             'skipped_reason' => '',
             'bundle_url' => '',
             'bundle_file' => '',
+            'bundle_urls' => array(),
+            'bundle_files' => array(),
+            'delayed_font_url' => '',
+            'delayed_font_file' => '',
+            'delayed_font_urls' => array(),
+            'delayed_font_files' => array(),
+            'delayed_font_bytes' => 0,
+            'delayed_font_face_blocks' => 0,
             'bundle_bytes' => 0,
             'source_bytes_total' => 0,
             'source_urls' => array(),
@@ -1620,7 +1896,18 @@ private function build_font_mix_css_bundle_file(array $assets)
 
             $original_bytes = strlen($css);
             $signature_parts[] = $url . '|' . (string) ultracache_safe_filemtime($path, 'font_mix_css_bundle_signature') . '|' . $original_bytes;
-            $prepared_css = $this->prepare_css_asset_for_bundle($css, $url);
+            $prepared_css = $this->prepare_css_asset_for_bundle($css, $url, $media);
+            if (empty($prepared_css['eligible'])) {
+                $failure_reason = isset($prepared_css['failureReason']) ? sanitize_key((string) $prepared_css['failureReason']) : 'unsupported-css-semantics';
+                return array(
+                    'success' => false,
+                    'skipped' => true,
+                    'semanticRejected' => true,
+                    'failureClass' => $failure_reason,
+                    'message' => __('A generated font-mix stylesheet was excluded because its media, import, or charset semantics could not be preserved in a bundle.', 'ultracache'),
+                    'sourceUrls' => array_values(array_unique(array_map('strval', array_merge($used_urls, array($url))))),
+                );
+            }
             $prepared_body = isset($prepared_css['body']) ? (string) $prepared_css['body'] : '';
             $font_split = !empty($font_policy['delay_icon_fonts']) ? $this->split_delayed_icon_font_faces_from_css($prepared_body, $url, $settings) : array('body' => $prepared_body, 'delayedCss' => '', 'delayedCount' => 0, 'families' => array(), 'patterns' => array());
             if (!empty($font_split['delayedCount'])) {

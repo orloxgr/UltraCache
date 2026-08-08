@@ -655,20 +655,33 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				$this->manual_media_conversion_active_for_request = null;
 				wp_clear_scheduled_hook(self::BACKGROUND_QUEUE_HOOK);
 			}
+			$resumed_background_work = false;
 			if ($released && !$this->is_media_background_work_paused()) {
 				if (method_exists($this, 'reset_stale_media_queue_items')) {
 					$this->recover_abandoned_media_queue_claims();
 				}
-				if ($this->is_background_media_queue_enabled() && $this->get_media_queue_pending_count('best') > 0) {
+				$queue_status = $this->get_media_queue_status('best');
+				$queue_available = !array_key_exists('enabled', $queue_status) || !empty($queue_status['enabled']);
+				$resumable_work = $queue_available && (!empty($queue_status['attachmentPending'])
+					|| !empty($queue_status['localAssetPending'])
+					|| !empty($queue_status['unitPending'])
+					|| !empty($queue_status['unitProcessing'])
+					|| !empty($queue_status['unitUnmaterializedParents'])
+					|| empty($queue_status['buildComplete'])
+					|| empty($queue_status['unitInventoryComplete']));
+				if ($this->is_background_media_queue_enabled() && $resumable_work) {
 					$this->queue_background_generation_dispatch('manual_dashboard_complete');
+					$this->schedule_background_generation_queue(15);
+					$resumed_background_work = true;
 				}
 			}
 
 			return array_merge(
 				array(
-					'success'  => $released,
-					'released' => $released,
-					'reason'   => $released ? '' : 'manual_session_lost',
+					'success'               => $released,
+					'released'              => $released,
+					'resumedBackgroundWork' => $resumed_background_work,
+					'reason'                => $released ? '' : 'manual_session_lost',
 				),
 				$this->get_manual_media_conversion_state()
 			);
@@ -1088,12 +1101,17 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 			}
 
 			$maintenance_key = 'ultracache_media_queue_init_maintenance_v1';
-			if (get_transient($maintenance_key)) {
+			$maintenance_token = 'media-queue-maintenance-' . wp_generate_uuid4();
+			if (!function_exists('ultracache_acquire_lock') || !ultracache_acquire_lock(
+				$maintenance_key,
+				$maintenance_token,
+				10 * MINUTE_IN_SECONDS,
+				array('type' => 'media_queue_init_maintenance', 'startedAt' => time())
+			)) {
 				return;
 			}
 
-			set_transient($maintenance_key, 1, 10 * MINUTE_IN_SECONDS);
-
+			$this->run_media_queue_units_migration_maintenance(25, 2.0);
 			$this->recover_abandoned_media_queue_claims();
 			if ($this->is_media_background_work_paused()) {
 				return;
@@ -1106,7 +1124,8 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				$this->schedule_background_generation_queue(60);
 				return;
 			}
-			if ($this->get_media_queue_pending_count('best') <= 0) {
+			$queue_status = $this->get_media_queue_status('best');
+			if ($this->get_media_queue_pending_count('best') <= 0 && !empty($queue_status['unitInventoryComplete'])) {
 				return;
 			}
 
@@ -1170,13 +1189,21 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 					'reason'  => 'processing_active',
 				);
 			}
-			if ($this->get_media_queue_pending_count('best') <= 0) {
+			$pre_status = $this->get_media_queue_status('best');
+			if ($this->get_media_queue_pending_count('best') <= 0 && !empty($pre_status['unitInventoryComplete'])) {
 				$this->release_background_generation_dispatch_lock($dispatch_token);
 				wp_clear_scheduled_hook(self::BACKGROUND_QUEUE_HOOK);
-				return array(
-					'success'   => true,
-					'complete'  => true,
-					'remaining' => 0,
+				$failed = max(0, (int) ($pre_status['failed'] ?? 0));
+				$unit_failed = max(0, (int) ($pre_status['unitFailed'] ?? 0));
+				$complete = $failed <= 0 && $unit_failed <= 0 && !empty($pre_status['isComplete']);
+				return array_merge(
+					$pre_status,
+					array(
+						'success'   => $complete,
+						'complete'  => $complete,
+						'remaining' => 0,
+						'reason'    => $complete ? '' : 'failed',
+					)
 				);
 			}
 
@@ -1210,9 +1237,20 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 			}
 
 			$remaining = max(0, (int) ($result['remaining'] ?? 0));
-			if ($remaining <= 0) {
+			if (!empty($result['isComplete']) && !empty($result['unitIsComplete'])) {
 				$this->release_background_generation_dispatch_lock($dispatch_token);
 				wp_clear_scheduled_hook(self::BACKGROUND_QUEUE_HOOK);
+				return $result;
+			}
+			if ($remaining <= 0 && !empty($result['unitInventoryComplete'])) {
+				$this->release_background_generation_dispatch_lock($dispatch_token);
+				wp_clear_scheduled_hook(self::BACKGROUND_QUEUE_HOOK);
+				return $result;
+			}
+			if ($remaining <= 0 && empty($result['unitInventoryComplete'])) {
+				$this->release_background_generation_dispatch_lock($dispatch_token);
+				$this->schedule_background_generation_queue(30);
+				$result['reason'] = 'unit_inventory_materializing';
 				return $result;
 			}
 
@@ -1271,7 +1309,8 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				$this->schedule_background_generation_queue(60);
 				return;
 			}
-			if ($this->get_media_queue_pending_count('best') <= 0) {
+			$queue_status = $this->get_media_queue_status('best');
+			if ($this->get_media_queue_pending_count('best') <= 0 && !empty($queue_status['unitInventoryComplete'])) {
 				return;
 			}
 

@@ -42,12 +42,13 @@ trait Ultra_Cache_WP_Varnish_Origin_Revalidation_Trait
      * Run an authenticated force-refresh and prove that every active HTML
      * bucket reached the WordPress engine rather than being served by Varnish.
      *
-     * @param string $url Local public URL.
+     * @param string $url                    Local public URL.
+     * @param bool   $capability_probe_only Whether an explicit capability probe may run independently of the active runtime strategy.
      * @return array
      */
-    protected static function run_varnish_origin_revalidation_contract_test($url)
+    protected static function run_varnish_origin_revalidation_contract_test($url, $capability_probe_only = false)
     {
-        if (!self::is_varnish_origin_revalidation_applicable()) {
+        if (!$capability_probe_only && !self::is_varnish_origin_revalidation_applicable()) {
             return self::get_varnish_origin_revalidation_status();
         }
 
@@ -56,6 +57,9 @@ trait Ultra_Cache_WP_Varnish_Origin_Revalidation_Trait
         self::set_varnish_two_stage_refill_status($status);
 
         $contract = self::get_varnish_origin_revalidation_status();
+        if ($capability_probe_only) {
+            $contract['applicable'] = true;
+        }
         $contract['verified'] = !empty($status['available']);
         $contract['status'] = !empty($status['available']) ? 'verified' : sanitize_key((string) ($status['status'] ?? 'inconclusive'));
         $contract['testedAt'] = absint($status['testedAt'] ?? time());

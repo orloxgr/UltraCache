@@ -17,8 +17,10 @@ private function apply_lcp_priority_pipeline($html, array $settings, $slider_saf
             return $html;
         }
 
-        $html = $this->apply_html_rewrite_safely($html, 'browser-observed-lcp-preloads', function ($html) {
-            return $this->inject_observed_lcp_priority_preloads($html);
+        $require_browser_observed_credentials = !empty($slider_safe_mode)
+            && $this->is_lcp_request_credentials_preload_contract_enabled($settings);
+        $html = $this->apply_html_rewrite_safely($html, 'browser-observed-lcp-preloads', function ($html) use ($require_browser_observed_credentials) {
+            return $this->inject_observed_lcp_priority_preloads($html, $require_browser_observed_credentials);
         });
 
         if ($this->has_confirmed_lcp_observation_for_current_request()) {
@@ -31,8 +33,8 @@ private function apply_lcp_priority_pipeline($html, array $settings, $slider_saf
             $html = $this->apply_html_rewrite_safely($html, 'sr7-first-slide-lcp-priority', function ($html) {
                 return $this->apply_sr7_first_slide_lcp_priority_markup($html);
             });
-            $html = $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) {
-                return $this->inject_safe_lcp_priority_preloads($html);
+            $html = $this->apply_html_rewrite_safely($html, 'safe-lcp-priority-preloads', function ($html) use ($require_browser_observed_credentials) {
+                return $this->inject_safe_lcp_priority_preloads($html, $require_browser_observed_credentials);
             });
             return $this->apply_html_rewrite_safely($html, 'lcp-preload-guard-cleanup', function ($html) {
                 return $this->cleanup_ambiguous_sr7_generated_lcp_preloads($html);
@@ -55,7 +57,8 @@ private function apply_lcp_boundary_defer_to_html($html, array $settings = array
             return $html;
         }
 
-        if (!preg_match_all('/<script\b[^>]*\bsrc\s*=\s*(["\'])(.*?)\1[^>]*>\s*<\/script>/is', $html, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        $script_tags = $this->get_lcp_boundary_external_script_tags($html);
+        if (empty($script_tags)) {
             return $html;
         }
 
@@ -68,9 +71,9 @@ private function apply_lcp_boundary_defer_to_html($html, array $settings = array
         $last = 0;
         $changed = false;
 
-        foreach ($matches as $match) {
-            $tag = isset($match[0][0]) ? (string) $match[0][0] : '';
-            $offset = isset($match[0][1]) ? (int) $match[0][1] : -1;
+        foreach ($script_tags as $record) {
+            $tag = isset($record['tag']) ? (string) $record['tag'] : '';
+            $offset = isset($record['offset']) ? (int) $record['offset'] : -1;
             if ('' === $tag || $offset < $boundary) {
                 continue;
             }
@@ -90,6 +93,48 @@ private function apply_lcp_boundary_defer_to_html($html, array $settings = array
         }
 
         return $out . substr($html, $last);
+    }
+
+private function get_lcp_boundary_external_script_tags($html)
+    {
+        if (!is_string($html) || '' === $html || false === stripos($html, '<script')) {
+            return array();
+        }
+
+        $script_opening_tags = ultracache_scan_raw_html_tags($html, array('script'));
+        if (empty($script_opening_tags)) {
+            return array();
+        }
+
+        $script_tags = array();
+        foreach ($script_opening_tags as $record) {
+            if (!empty($record['closing']) || !empty($record['self_closing'])) {
+                continue;
+            }
+
+            $opening_tag = isset($record['raw']) ? (string) $record['raw'] : '';
+            $offset = isset($record['offset']) ? (int) $record['offset'] : -1;
+            $end = isset($record['end']) ? (int) $record['end'] : -1;
+            if ('' === $opening_tag || $offset < 0 || $end <= $offset || '' === $this->extract_attribute_from_html_tag($opening_tag, 'src')) {
+                continue;
+            }
+
+            if (!preg_match('/\G\s*<\/script\s*>/i', $html, $closing_match, PREG_OFFSET_CAPTURE, $end)) {
+                continue;
+            }
+
+            $closing_tag = isset($closing_match[0][0]) ? (string) $closing_match[0][0] : '';
+            if ('' === $closing_tag) {
+                continue;
+            }
+
+            $script_tags[] = array(
+                'tag' => $opening_tag . $closing_tag,
+                'offset' => $offset,
+            );
+        }
+
+        return $script_tags;
     }
 
 private function apply_lazy_load_images_to_html($html, array $settings = array())
@@ -570,7 +615,8 @@ private function optimize_lcp_image_markup($html)
 
         $has_standard_images = false !== stripos($html, '<img');
         $has_sr7_markup = false !== stripos($html, '<sr7-') || false !== stripos($html, 'sr7-module') || false !== stripos($html, $this->get_revslider_uploads_public_path_marker());
-        $has_manual_lcp_override = !empty($this->get_settings()['lcp_image_priority_override_list']);
+        $manual_configuration = $this->get_effective_manual_lcp_configuration();
+        $has_manual_lcp_override = !empty($manual_configuration['images']);
         if (!$has_standard_images && !$has_sr7_markup && !$has_manual_lcp_override) {
             return $html;
         }
@@ -608,7 +654,7 @@ private function optimize_lcp_image_markup_with_tag_processor($html)
                 continue;
             }
 
-            if (null === $best || $candidate['score'] > $best['score']) {
+            if (null === $best || $this->compare_lcp_candidates_by_score_then_area($candidate, $best) < 0) {
                 $best = $candidate;
             }
         }

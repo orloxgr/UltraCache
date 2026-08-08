@@ -322,6 +322,7 @@ trait Ultra_Cache_Profiler_Runner_Trait
     private function run_performance_profile_job(array $params)
     {
         $mode = $this->normalize_performance_profile_mode($params['mode'] ?? 'compact');
+        $include_strong_scan = !array_key_exists('include_strong_scan', $params) || !empty($params['include_strong_scan']);
         $engine = $this->get_engine();
         if (!$engine || !method_exists($engine, 'get_last_store_profile')) {
             return array('success' => false, 'message' => __('Speed diagnostics helper is not available.', 'ultracache'));
@@ -331,7 +332,7 @@ trait Ultra_Cache_Profiler_Runner_Trait
             $engine->clear_last_store_profile();
         }
 
-        $run_id = substr(md5((string) microtime(true) . wp_rand()), 0, 12);
+        $run_id = ($include_strong_scan ? '' : 'jsdep_') . substr(md5((string) microtime(true) . wp_rand()), 0, 12);
         $headers = array(
             'X-UltraCache-Store-Profile'  => '1',
             'X-UltraCache-Debug'          => '1',
@@ -436,6 +437,23 @@ trait Ultra_Cache_Profiler_Runner_Trait
         }
 
         $summary = $this->summarize_performance_profile($profile);
+
+        if ($include_strong_scan) {
+            // Generic performance-profile callers retain the 2.59.13.05 result
+            // contract. The dedicated HTML dependency action disables this
+            // monolithic pass and performs the same strong analysis in bounded
+            // resumable batches after the profile/inventory preparation phase.
+            $strong_scripts = $this->runtime_js_scan_fetch_script_inventory_for_url($url);
+            $strong_scan = $this->build_runtime_js_strong_silent_dependency_suggestions($strong_scripts);
+            if (!isset($summary['jsDelaySafetyScan']) || !is_array($summary['jsDelaySafetyScan'])) {
+                $summary['jsDelaySafetyScan'] = array();
+            }
+            $summary['jsDelaySafetyScan']['strongSuggestionCount'] = isset($strong_scan['suggestion_count']) ? (int) $strong_scan['suggestion_count'] : 0;
+            $summary['jsDelaySafetyScan']['strongMissingCount'] = isset($strong_scan['missing_count']) ? (int) $strong_scan['missing_count'] : 0;
+            $summary['jsDelaySafetyScan']['strongAlreadySafeguardedCount'] = isset($strong_scan['already_safeguarded_count']) ? (int) $strong_scan['already_safeguarded_count'] : 0;
+            $summary['jsDelaySafetyScan']['strongSuggestions'] = isset($strong_scan['suggestions']) && is_array($strong_scan['suggestions']) ? array_slice($strong_scan['suggestions'], 0, 12) : array();
+        }
+
         $summary['mode'] = $mode;
         $summary['profileUrl'] = $url;
         $summary['scannedAt'] = function_exists('current_time') ? current_time('mysql') : gmdate('c');
@@ -468,6 +486,349 @@ trait Ultra_Cache_Profiler_Runner_Trait
                 strtoupper($mode)
             ),
             'performanceProfile' => $summary,
+        );
+    }
+
+    private function get_js_dependency_scan_settings_fingerprint()
+    {
+        $settings = array();
+        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
+            $runtime_settings = Ultra_Cache_WP::get_settings();
+            $settings = is_array($runtime_settings) ? $runtime_settings : array();
+        }
+        $keys = array(
+            'defer_js',
+            'defer_all_js',
+            'delay_all_js',
+            'delayed_local_js_auto_start',
+            'delayed_local_js_auto_start_seconds',
+            'delayed_js_autostart_after_load',
+            'delayed_js_autostart_mousemove',
+            'delayed_js_autostart_scroll',
+            'delayed_js_autostart_click',
+            'delayed_js_autostart_touch_pointer',
+            'delayed_js_autostart_keyboard',
+            'first_party_js_parallel_execution',
+            'third_party_js_parallel_execution',
+            'defer_stage_safe',
+            'defer_stage_balanced',
+            'defer_stage_aggressive',
+            'defer_js_force_list',
+            'defer_js_exclude_list',
+            'delay_safe_third_party_js',
+            'delay_all_third_party_js',
+            'delay_safe_third_party_js_patterns',
+            'delay_functional_third_party_js',
+            'delay_functional_third_party_js_patterns',
+            'async_external_scripts',
+            'delay_non_critical_js',
+            'delay_non_critical_js_aggressive',
+            'delay_non_critical_js_exclude_list',
+            'lcp_boundary_defer',
+            'main_thread_relief',
+            'critical_request_chain_relief',
+            'critical_request_chain_delay_list',
+            'woocommerce_cart_fragments_delay',
+            'woocommerce_cart_fragments_delay_timing',
+        );
+        $snapshot = array();
+        foreach ($keys as $key) {
+            $value = array_key_exists($key, $settings) ? $settings[$key] : null;
+            if (is_array($value)) {
+                $value = array_values(array_map(static function ($item) {
+                    return is_scalar($item) || null === $item ? (string) $item : wp_json_encode($item);
+                }, $value));
+            } elseif (is_bool($value)) {
+                $value = $value ? 1 : 0;
+            } elseif (is_scalar($value) || null === $value) {
+                $value = (string) $value;
+            } else {
+                $value = wp_json_encode($value);
+            }
+            $snapshot[$key] = $value;
+        }
+
+        return hash('sha256', (string) wp_json_encode($snapshot));
+    }
+
+    private function js_dependency_scan_integrity_failure($message, $reason = 'settings_changed')
+    {
+        $reason = sanitize_key((string) $reason);
+        return array(
+            'done' => true,
+            'success' => false,
+            'message' => (string) $message,
+            'state' => array(),
+            'result' => array(
+                'success' => false,
+                'message' => (string) $message,
+                'reason' => $reason,
+                'configurationChanged' => 'settings_changed' === $reason,
+                'restartRequired' => true,
+            ),
+        );
+    }
+
+    private function validate_js_dependency_scan_settings_integrity(array $state)
+    {
+        $expected = trim((string) ($state['settingsFingerprint'] ?? ''));
+        if ('' === $expected) {
+            return $this->js_dependency_scan_integrity_failure(
+                __('This HTML JS dependency scan started before settings-integrity tracking was available. Start a fresh scan so its findings can be tied to the current JavaScript optimization configuration.', 'ultracache'),
+                'integrity_snapshot_missing'
+            );
+        }
+
+        $current = $this->get_js_dependency_scan_settings_fingerprint();
+        if (!hash_equals($expected, $current)) {
+            return $this->js_dependency_scan_integrity_failure(
+                __('JavaScript optimization settings changed while HTML JS dependency analysis was running. The saved scan was stopped so stale suggestions are not shown. Run Analyze HTML JS Dependencies again.', 'ultracache'),
+                'settings_changed'
+            );
+        }
+
+        return null;
+    }
+
+    private function merge_runtime_js_static_evidence_registry(array $existing, array $incoming)
+    {
+        foreach ($incoming as $script_identity => $evidence) {
+            $script_identity = sanitize_text_field((string) $script_identity);
+            if ('' === $script_identity || !is_array($evidence)) {
+                continue;
+            }
+            if (!isset($existing[$script_identity]) || !is_array($existing[$script_identity])) {
+                $existing[$script_identity] = array(
+                    'listeners' => array(),
+                    'emitters' => array(),
+                    'emitterTimings' => array(),
+                    'source' => '',
+                );
+            }
+            foreach (array('listeners', 'emitters') as $field) {
+                $seen = array();
+                foreach ((array) ($existing[$script_identity][$field] ?? array()) as $value) {
+                    $value = trim(sanitize_text_field((string) $value));
+                    if ('' !== $value) {
+                        $seen[$value] = true;
+                    }
+                }
+                foreach ((array) ($evidence[$field] ?? array()) as $value) {
+                    $value = trim(sanitize_text_field((string) $value));
+                    if ('' !== $value) {
+                        $seen[$value] = true;
+                    }
+                }
+                $existing[$script_identity][$field] = array_slice(array_keys($seen), 0, 96);
+            }
+            $allowed_timings = array('immediate', 'dom_ready', 'window_load', 'callback', 'unknown', 'mixed');
+            foreach ((array) ($evidence['emitterTimings'] ?? array()) as $event => $timing) {
+                $event = trim(sanitize_text_field((string) $event));
+                $timing = strtolower(trim(sanitize_text_field((string) $timing)));
+                if ('' === $event || !in_array($event, (array) ($existing[$script_identity]['emitters'] ?? array()), true)) {
+                    continue;
+                }
+                if (!in_array($timing, $allowed_timings, true)) {
+                    $timing = 'unknown';
+                }
+                $existing_timing = strtolower(trim((string) ($existing[$script_identity]['emitterTimings'][$event] ?? '')));
+                if ('' === $existing_timing) {
+                    $existing[$script_identity]['emitterTimings'][$event] = $timing;
+                } elseif ($existing_timing !== $timing) {
+                    $existing[$script_identity]['emitterTimings'][$event] = 'mixed';
+                }
+            }
+            $source = sanitize_key((string) ($evidence['source'] ?? ''));
+            if ('' !== $source) {
+                $existing[$script_identity]['source'] = $source;
+            }
+        }
+        ksort($existing, SORT_STRING);
+        return $existing;
+    }
+
+    private function run_resumable_js_dependency_scan_batch(array $job)
+    {
+        $params = is_array($job['params'] ?? null) ? $job['params'] : array();
+        $url = $this->normalize_performance_profile_url($params['url'] ?? home_url('/'));
+        if (is_wp_error($url)) {
+            return array(
+                'done' => true,
+                'success' => false,
+                'message' => $url->get_error_message(),
+                'state' => array(),
+                'result' => array('success' => false, 'message' => $url->get_error_message()),
+            );
+        }
+
+        $state = isset($job['scanState']) && is_array($job['scanState']) ? $job['scanState'] : array();
+        $phase = sanitize_key((string) ($state['phase'] ?? 'prepare'));
+
+        if ('prepare' === $phase) {
+            $settings_fingerprint_before = $this->get_js_dependency_scan_settings_fingerprint();
+            $profile_result = $this->run_performance_profile_job(array(
+                'mode' => 'compact',
+                'url' => $url,
+                'include_strong_scan' => false,
+            ));
+            if (empty($profile_result['success']) || empty($profile_result['performanceProfile']) || !is_array($profile_result['performanceProfile'])) {
+                $message = (string) ($profile_result['message'] ?? __('HTML JS dependency profile failed.', 'ultracache'));
+                return array(
+                    'done' => true,
+                    'success' => false,
+                    'message' => $message,
+                    'state' => array(),
+                    'result' => $profile_result,
+                );
+            }
+
+            $scripts = $this->runtime_js_scan_fetch_script_inventory_for_url($url);
+            $scripts = $this->runtime_js_scan_normalize_script_inventory($scripts);
+            foreach ($scripts as &$script_for_state) {
+                if (is_array($script_for_state)) {
+                    unset($script_for_state['text']);
+                }
+            }
+            unset($script_for_state);
+            $settings_fingerprint_after = $this->get_js_dependency_scan_settings_fingerprint();
+            if (!hash_equals($settings_fingerprint_before, $settings_fingerprint_after)) {
+                return $this->js_dependency_scan_integrity_failure(
+                    __('JavaScript optimization settings changed while HTML JS dependency analysis was preparing the page. Run the scan again so its inventory and findings use one configuration.', 'ultracache'),
+                    'settings_changed'
+                );
+            }
+            $analysis_indexes = $this->runtime_js_scan_local_lifecycle_analysis_indexes($scripts);
+            $state = array(
+                'phase' => empty($analysis_indexes) ? 'correlate' : 'analyze',
+                'url' => $url,
+                'profile' => $profile_result['performanceProfile'],
+                'scripts' => $scripts,
+                'settingsFingerprint' => $settings_fingerprint_before,
+                'totalScripts' => count($scripts),
+                'preparedAt' => time(),
+                'analysisIndexes' => $analysis_indexes,
+                'cursor' => 0,
+                'analyzedFiles' => 0,
+                'contentScanned' => 0,
+                'cacheHits' => 0,
+                'cacheMisses' => 0,
+                'cacheWrites' => 0,
+                'evidenceIdentityVersion' => 2,
+                'evidenceRegistry' => array(),
+            );
+
+            return array(
+                'done' => false,
+                'success' => true,
+                'message' => sprintf(
+                    /* translators: %d: number of readable local JavaScript files prepared for analysis. */
+                    __('Prepared HTML dependency analysis for %d local JavaScript files.', 'ultracache'),
+                    count($analysis_indexes)
+                ),
+                'state' => $state,
+                'result' => array(),
+            );
+        }
+
+        if ('analyze' === $phase) {
+            if (2 !== (int) ($state['evidenceIdentityVersion'] ?? 0)) {
+                return $this->js_dependency_scan_integrity_failure(
+                    __('This HTML JS dependency scan was created with an older evidence schema. Run Analyze HTML JS Dependencies again so findings use current lifecycle timing evidence.', 'ultracache'),
+                    'evidence_identity_upgrade_required'
+                );
+            }
+            $integrity_failure = $this->validate_js_dependency_scan_settings_integrity($state);
+            if (is_array($integrity_failure)) {
+                return $integrity_failure;
+            }
+            $scripts = isset($state['scripts']) && is_array($state['scripts']) ? $state['scripts'] : array();
+            $analysis_indexes = isset($state['analysisIndexes']) && is_array($state['analysisIndexes']) ? $state['analysisIndexes'] : array();
+            $cursor = max(0, (int) ($state['cursor'] ?? 0));
+            $content_scanned_total = max(0, (int) ($state['contentScanned'] ?? 0));
+
+            if ($cursor >= count($analysis_indexes)) {
+                $state['phase'] = 'correlate';
+                return array('done' => false, 'success' => true, 'message' => __('JavaScript file analysis complete; correlating dependency evidence.', 'ultracache'), 'state' => $state, 'result' => array());
+            }
+
+            $batch = $this->runtime_js_scan_analyze_lifecycle_batch($scripts, $analysis_indexes, $cursor, 10, 1.8);
+            $state['cursor'] = max($cursor, (int) ($batch['next_cursor'] ?? $cursor));
+            $state['analyzedFiles'] = max(0, (int) ($state['analyzedFiles'] ?? 0)) + max(0, (int) ($batch['processed'] ?? 0));
+            $state['contentScanned'] = $content_scanned_total + max(0, (int) ($batch['content_scanned'] ?? 0));
+            $state['cacheHits'] = max(0, (int) ($state['cacheHits'] ?? 0)) + max(0, (int) ($batch['cache_hits'] ?? 0));
+            $state['cacheMisses'] = max(0, (int) ($state['cacheMisses'] ?? 0)) + max(0, (int) ($batch['cache_misses'] ?? 0));
+            $state['cacheWrites'] = max(0, (int) ($state['cacheWrites'] ?? 0)) + max(0, (int) ($batch['cache_writes'] ?? 0));
+            $state['evidenceRegistry'] = $this->merge_runtime_js_static_evidence_registry(
+                isset($state['evidenceRegistry']) && is_array($state['evidenceRegistry']) ? $state['evidenceRegistry'] : array(),
+                isset($batch['evidence']) && is_array($batch['evidence']) ? $batch['evidence'] : array()
+            );
+
+            if (!empty($batch['done']) || $state['cursor'] >= count($analysis_indexes)) {
+                $state['phase'] = 'correlate';
+            }
+
+            return array(
+                'done' => false,
+                'success' => true,
+                'message' => sprintf(
+                    /* translators: 1: processed files, 2: total local files. */
+                    __('Analyzed JavaScript dependency files %1$d of %2$d.', 'ultracache'),
+                    min((int) $state['cursor'], count($analysis_indexes)),
+                    count($analysis_indexes)
+                ),
+                'state' => $state,
+                'result' => array(),
+            );
+        }
+
+        if (2 !== (int) ($state['evidenceIdentityVersion'] ?? 0)) {
+            return $this->js_dependency_scan_integrity_failure(
+                __('This HTML JS dependency scan was created with an older evidence schema. Run Analyze HTML JS Dependencies again so findings use current lifecycle timing evidence.', 'ultracache'),
+                'evidence_identity_upgrade_required'
+            );
+        }
+        $integrity_failure = $this->validate_js_dependency_scan_settings_integrity($state);
+        if (is_array($integrity_failure)) {
+            return $integrity_failure;
+        }
+
+        $scripts = isset($state['scripts']) && is_array($state['scripts']) ? $state['scripts'] : array();
+        $registry = isset($state['evidenceRegistry']) && is_array($state['evidenceRegistry']) ? $state['evidenceRegistry'] : array();
+        $strong_scan = $this->build_runtime_js_strong_silent_dependency_suggestions_from_registry($scripts, $registry);
+        $summary = isset($state['profile']) && is_array($state['profile']) ? $state['profile'] : array();
+        if (!isset($summary['jsDelaySafetyScan']) || !is_array($summary['jsDelaySafetyScan'])) {
+            $summary['jsDelaySafetyScan'] = array();
+        }
+        $summary['jsDelaySafetyScan']['available'] = true;
+        $summary['jsDelaySafetyScan']['strongSuggestionCount'] = (int) ($strong_scan['suggestion_count'] ?? 0);
+        $summary['jsDelaySafetyScan']['strongMissingCount'] = (int) ($strong_scan['missing_count'] ?? 0);
+        $summary['jsDelaySafetyScan']['strongAlreadySafeguardedCount'] = (int) ($strong_scan['already_safeguarded_count'] ?? 0);
+        $summary['jsDelaySafetyScan']['strongSuggestions'] = isset($strong_scan['suggestions']) && is_array($strong_scan['suggestions']) ? array_slice($strong_scan['suggestions'], 0, 12) : array();
+        $summary['jsDelaySafetyScan']['resumable'] = true;
+        $summary['jsDelaySafetyScan']['analyzedLocalFiles'] = max(0, (int) ($state['analyzedFiles'] ?? 0));
+        $summary['jsDelaySafetyScan']['readableLocalFiles'] = count((array) ($state['analysisIndexes'] ?? array()));
+        $summary['jsDelaySafetyScan']['analysisCacheHits'] = max(0, (int) ($state['cacheHits'] ?? 0));
+        $summary['jsDelaySafetyScan']['analysisCacheMisses'] = max(0, (int) ($state['cacheMisses'] ?? 0));
+        $summary['jsDelaySafetyScan']['analysisCacheWrites'] = max(0, (int) ($state['cacheWrites'] ?? 0));
+        $summary['jsDelaySafetyScan']['evidenceRegistryScripts'] = count($registry);
+        $summary['jsDelaySafetyScan']['singlePassEvidence'] = true;
+        $summary['jsDelaySafetyScan']['settingsIntegrityVerified'] = true;
+
+        $integrity_failure = $this->validate_js_dependency_scan_settings_integrity($state);
+        if (is_array($integrity_failure)) {
+            return $integrity_failure;
+        }
+
+        return array(
+            'done' => true,
+            'success' => true,
+            'message' => __('HTML JS dependency analysis completed.', 'ultracache'),
+            'state' => array(),
+            'result' => array(
+                'success' => true,
+                'message' => __('HTML JS dependency analysis completed.', 'ultracache'),
+                'performanceProfile' => $summary,
+            ),
         );
     }
 

@@ -119,11 +119,22 @@ trait Ultra_Cache_Engine_JS_HTML_Rewrite_Trait
             unset($preserved['src']);
         }
 
+        $diagnostic_dependency_metadata = '';
+        if ('1' === sanitize_text_field(ultracache_query_value('ultracache_js_inventory')) && isset($attrs['data-ultracache-deps'])) {
+            $diagnostic_dependency_metadata = preg_replace('/[^a-z0-9_,-]+/i', '', (string) $attrs['data-ultracache-deps']);
+            if (!is_string($diagnostic_dependency_metadata)) {
+                $diagnostic_dependency_metadata = '';
+            }
+        }
+
         unset($preserved['type'], $preserved['async'], $preserved['defer'], $preserved['data-wp-strategy']);
         foreach (array_keys($preserved) as $name) {
             if (0 === strpos(strtolower((string) $name), 'data-ultracache-')) {
                 unset($preserved[$name]);
             }
+        }
+        if ('' !== $diagnostic_dependency_metadata) {
+            $preserved['data-ultracache-deps'] = $diagnostic_dependency_metadata;
         }
 
         $script_attributes = array();
@@ -375,6 +386,13 @@ trait Ultra_Cache_Engine_JS_HTML_Rewrite_Trait
             'data-ultracache-handle'       => (string) $handle,
         );
 
+        if ('1' === sanitize_text_field(ultracache_query_value('ultracache_js_inventory')) && isset($original_attributes['data-ultracache-deps'])) {
+            $dependency_metadata = preg_replace('/[^a-z0-9_,-]+/i', '', (string) $original_attributes['data-ultracache-deps']);
+            if ('' !== $dependency_metadata) {
+                $attributes['data-ultracache-deps'] = $dependency_metadata;
+            }
+        }
+
         $reason = sanitize_key((string) $reason);
         if ('' !== $reason) {
             $attributes['data-ultracache-delay-reason'] = $reason;
@@ -445,7 +463,27 @@ trait Ultra_Cache_Engine_JS_HTML_Rewrite_Trait
             return false;
         }
 
+        if ($this->ultracache_inline_script_uses_document_stream_write($code)) {
+            return false;
+        }
+
         return true;
+    }
+
+
+
+    private function ultracache_inline_script_uses_document_stream_write($code)
+    {
+        $code = (string) $code;
+        if ('' === $code || false === stripos($code, 'document')) {
+            return false;
+        }
+
+        if (1 === preg_match('/(?:^|[^a-z0-9_$])document\s*(?:\?\.|\.)\s*write(?:ln)?\s*\(/i', $code)) {
+            return true;
+        }
+
+        return 1 === preg_match('/(?:^|[^a-z0-9_$])document\s*(?:\?\.\s*)?\[\s*(["\'])write(?:ln)?\1\s*\]\s*\(/i', $code);
     }
 
 

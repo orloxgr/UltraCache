@@ -12,6 +12,45 @@ if (!defined('ABSPATH')) {
 trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
 {
     /**
+     * Resolve external-cache stages that must remain pending after HTML is
+     * satisfied. The returned list is merged into the one canonical URL row.
+     *
+     * @param string $source_context Targeted source label.
+     * @return array
+     */
+    private static function get_targeted_warm_additional_required_stages($source_context)
+    {
+        $source_context = sanitize_key((string) $source_context);
+        if ('first-visit' === $source_context) {
+            return method_exists(static::class, 'get_cron_warm_site_required_stages')
+                ? self::get_cron_warm_site_required_stages()
+                : array();
+        }
+        if ('refresh-ahead' === $source_context) {
+            return array('varnish');
+        }
+        if ('litespeed-refresh-ahead' === $source_context) {
+            return array('litespeed');
+        }
+
+        $stages = array();
+        if (
+            method_exists(static::class, 'should_refill_after_targeted_varnish_invalidation')
+            && self::should_refill_after_targeted_varnish_invalidation()
+        ) {
+            $stages[] = 'varnish';
+        }
+        if (
+            method_exists(static::class, 'should_refill_after_targeted_litespeed_invalidation')
+            && self::should_refill_after_targeted_litespeed_invalidation()
+        ) {
+            $stages[] = 'litespeed';
+        }
+
+        return $stages;
+    }
+
+    /**
      * Queue targeted purge URLs into the shared per-page warm pipeline.
      *
      * @param array  $urls                     Local URLs invalidated in Varnish.
@@ -82,7 +121,8 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
         if ('' === $source_context) {
             $source_context = 'targeted-purge';
         }
-        $pending_before = self::count_pending_targeted_page_warm_queue_rows();
+        $additional_required_stages = self::get_targeted_warm_additional_required_stages($source_context);
+
         $accepted_queue_urls = array();
         $enqueue_summary = array();
         $accepted = self::insert_cron_warm_queue_urls(
@@ -92,7 +132,8 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
             $source_context,
             (bool) $requires_verified_origin,
             $accepted_queue_urls,
-            $enqueue_summary
+            $enqueue_summary,
+            $additional_required_stages
         );
         $pending_after = self::count_pending_targeted_page_warm_queue_rows();
         if ($accepted < 1 || empty($accepted_queue_urls)) {
@@ -118,10 +159,11 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
 
         $now = time();
         $manual_blocked = self::is_manual_warmup_blocking_cron();
+        $pages_per_tick = self::get_shared_automation_pages_per_minute();
+        $paused_by_work_limit = $pages_per_tick < 1;
         $state = self::get_cron_warm_state();
-        if (!$manual_blocked) {
+        if (!$manual_blocked && !$paused_by_work_limit) {
             if (empty($state['active'])) {
-                $pages_per_tick = max(1, min(100, (int) apply_filters('ultracache_targeted_warm_pages_per_tick', 5)));
                 $state = self::save_cron_warm_state(array(
                     'active' => true,
                     'reason' => 'targeted_purge_async',
@@ -151,17 +193,22 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
                     'warmupGeneration' => self::get_warmup_generation(),
                 ));
             } else {
-                $new_rows = max(0, $pending_after - $pending_before);
+                $full_site_plan = 'full_site' === (string) ($state['workloadType'] ?? '');
                 $state['active'] = true;
                 $state['completed'] = false;
                 $state['stopped'] = false;
+                $state['pagesPerMinute'] = $pages_per_tick;
                 $state['updatedAt'] = $now;
-                $state['total'] = max((int) ($state['total'] ?? 0), (int) ($state['processed'] ?? 0) + $pending_after);
-                if (!empty($state['totalLimit'])) {
-                    $state['totalLimit'] = max((int) $state['totalLimit'], (int) ($state['processed'] ?? 0) + $new_rows);
+                if (!$full_site_plan) {
+                    $state['total'] = max((int) ($state['total'] ?? 0), (int) ($state['processed'] ?? 0) + $pending_after);
+                }
+                // Targeted URLs share execution with an active full-site plan, but
+                // they must never expand or replace its discovery-only limit or
+                // provenance. Their own source contexts live on canonical rows.
+                if (!$full_site_plan) {
+                    $state['invokedBy'] = sanitize_key((string) $reason);
                 }
                 $state['lastMessage'] = self::maybe_translate('Targeted purge URLs joined the active shared warm pipeline.');
-                $state['invokedBy'] = sanitize_key((string) $reason);
                 self::save_cron_warm_state($state);
             }
             self::ensure_cron_warm_events_scheduled(1);
@@ -174,6 +221,7 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
             'warning' => $queue_failed > 0,
             'queued' => true,
             'deferredByManualWarm' => $manual_blocked,
+            'pausedByWorkLimit' => $paused_by_work_limit,
             'queuedUrlCount' => count($accepted_queue_urls),
             'acceptedUrlCount' => count($accepted_queue_urls),
             'insertedUrlCount' => max(0, (int) ($enqueue_summary['inserted'] ?? 0)),
@@ -191,7 +239,9 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
                 ? self::maybe_translate_sprintf('%1$d targeted URL(s) were accepted: %2$d inserted, %3$d coalesced, %4$d upgraded, and %5$d could not be persisted.', count($accepted_queue_urls), max(0, (int) ($enqueue_summary['inserted'] ?? 0)), max(0, (int) ($enqueue_summary['coalesced'] ?? 0)), max(0, (int) ($enqueue_summary['upgraded'] ?? 0)), $queue_failed)
                 : ($manual_blocked
                     ? self::maybe_translate_sprintf('%1$d targeted URL(s) were accepted: %2$d inserted, %3$d coalesced, and %4$d upgraded. Processing will resume after the manual warm-up.', count($accepted_queue_urls), max(0, (int) ($enqueue_summary['inserted'] ?? 0)), max(0, (int) ($enqueue_summary['coalesced'] ?? 0)), max(0, (int) ($enqueue_summary['upgraded'] ?? 0)))
-                    : self::maybe_translate_sprintf('%1$d targeted URL(s) were accepted: %2$d inserted, %3$d coalesced, and %4$d upgraded.', count($accepted_queue_urls), max(0, (int) ($enqueue_summary['inserted'] ?? 0)), max(0, (int) ($enqueue_summary['coalesced'] ?? 0)), max(0, (int) ($enqueue_summary['upgraded'] ?? 0)))),
+                    : ($paused_by_work_limit
+                        ? self::maybe_translate_sprintf('%1$d targeted URL(s) were accepted: %2$d inserted, %3$d coalesced, and %4$d upgraded. Processing is paused by the central Automation & Scheduling work limit.', count($accepted_queue_urls), max(0, (int) ($enqueue_summary['inserted'] ?? 0)), max(0, (int) ($enqueue_summary['coalesced'] ?? 0)), max(0, (int) ($enqueue_summary['upgraded'] ?? 0)))
+                        : self::maybe_translate_sprintf('%1$d targeted URL(s) were accepted: %2$d inserted, %3$d coalesced, and %4$d upgraded.', count($accepted_queue_urls), max(0, (int) ($enqueue_summary['inserted'] ?? 0)), max(0, (int) ($enqueue_summary['coalesced'] ?? 0)), max(0, (int) ($enqueue_summary['upgraded'] ?? 0))))),
         );
         if (method_exists(static::class, 'record_varnish_queue_enqueue_metrics')) {
             self::record_varnish_queue_enqueue_metrics($queue_result);
@@ -229,25 +279,51 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
      * Read the targeted page-warm worker state without scheduling or recovering
      * anything. Dashboard status uses this method exclusively.
      *
-     * @param int|null $pending   Optional already-read pending row count.
-     * @param bool     $recovered Whether the current lifecycle call recovered it.
+     * @param int|null            $pending        Optional already-read pending row count.
+     * @param bool                $recovered      Whether the current lifecycle call recovered it.
+     * @param array<string,mixed> $status_context Optional read-only status inputs.
      * @return array<string,mixed>
      */
-    private static function get_targeted_page_warm_worker_status($pending = null, $recovered = false)
+    private static function get_targeted_page_warm_worker_status($pending = null, $recovered = false, array $status_context = array())
     {
         $pending = null === $pending
             ? self::count_pending_targeted_page_warm_queue_rows(false)
             : max(0, (int) $pending);
-        $blocked = self::is_manual_warmup_blocking_cron(false);
-        $state = self::get_cron_warm_state();
-        $next_scheduled = self::get_next_cron_warm_scheduled_at();
+        $decision = isset($status_context['warmDecision']) && is_array($status_context['warmDecision'])
+            ? $status_context['warmDecision']
+            : self::get_warm_decision_status(false);
+        $foreground = isset($decision['foreground']) && is_array($decision['foreground'])
+            ? $decision['foreground']
+            : array();
+        $blocked = array_key_exists('blockedByManualWarm', $status_context)
+            ? !empty($status_context['blockedByManualWarm'])
+            : !empty($foreground['active']);
+        $pages_per_minute = array_key_exists('pagesPerMinute', $status_context)
+            ? max(0, (int) $status_context['pagesPerMinute'])
+            : max(0, (int) (self::get_warm_rate_state(true)['configuredLimit'] ?? 0));
+        $state = isset($status_context['state']) && is_array($status_context['state'])
+            ? $status_context['state']
+            : (method_exists(static::class, 'get_read_only_legacy_cron_warm_status_state')
+                ? self::get_read_only_legacy_cron_warm_status_state()
+                : self::get_cron_warm_state());
+        $next_scheduled = array_key_exists('nextScheduledAt', $status_context)
+            ? max(0, (int) $status_context['nextScheduledAt'])
+            : self::get_next_cron_warm_scheduled_at();
 
         if ($pending < 1) {
             $status = 'idle';
             $message = self::maybe_translate('No targeted page-warm rows are waiting.');
         } elseif ($blocked) {
-            $status = 'blocked-manual';
-            $message = self::maybe_translate('Targeted page-warm rows are waiting for the manual warm-up owner to finish.');
+            $foreground = isset($status_context['manualWarm']) && is_array($status_context['manualWarm'])
+                ? $status_context['manualWarm']
+                : self::get_manual_warm_status();
+            $status = 'cli' === (string) ($foreground['source'] ?? '') ? 'yielding-cli' : 'yielding-ui';
+            $message = 'cli' === (string) ($foreground['source'] ?? '')
+                ? self::maybe_translate('Targeted page-warm rows are yielding to the active WP-CLI warm-up.')
+                : self::maybe_translate('Targeted page-warm rows are yielding to the active dashboard warm-up.');
+        } elseif ($pages_per_minute < 1) {
+            $status = 'paused';
+            $message = self::maybe_translate('Targeted page-warm rows are paused by the central Automation & Scheduling work limit.');
         } elseif ($recovered) {
             $status = 'recovered';
             $message = self::maybe_translate('The orphaned targeted page-warm queue was reattached to the shared worker.');
@@ -264,6 +340,7 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
             'pending' => $pending,
             'active' => !empty($state['active']),
             'blockedByManualWarm' => $blocked,
+            'pausedByWorkLimit' => $pages_per_minute < 1,
             'recovered' => (bool) $recovered,
             'nextScheduledAt' => max(0, (int) $next_scheduled),
             'message' => $message,
@@ -282,9 +359,10 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
     {
         $pending = self::count_pending_targeted_page_warm_queue_rows();
         $blocked = self::is_manual_warmup_blocking_cron();
+        $pages_per_minute = self::get_shared_automation_pages_per_minute();
         $resumed = false;
 
-        if ($pending > 0 && !$blocked) {
+        if ($pending > 0 && !$blocked && $pages_per_minute > 0) {
             $state = self::get_cron_warm_state();
             if (empty($state['active'])) {
                 $resumed = self::resume_deferred_targeted_page_warm_queue();
@@ -308,14 +386,14 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
         }
 
         $pending = self::count_pending_targeted_page_warm_queue_rows();
-        if ($pending < 1) {
+        $pages_per_tick = self::get_shared_automation_pages_per_minute();
+        if ($pending < 1 || $pages_per_tick < 1) {
             return false;
         }
 
         $state = self::get_cron_warm_state();
         if (empty($state['active'])) {
             $now = time();
-            $pages_per_tick = max(1, min(100, (int) apply_filters('ultracache_targeted_warm_pages_per_tick', 5)));
             self::save_cron_warm_state(array(
                 'active' => true,
                 'reason' => 'targeted_purge_async',

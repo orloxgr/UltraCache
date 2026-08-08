@@ -2,16 +2,16 @@
 # This file is distributed under the GPL-2.0-or-later.
 msgid ""
 msgstr ""
-"Project-Id-Version: UltraCache 2.59.09.55\n"
+"Project-Id-Version: UltraCache 2.59.13.15\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/UltraCache\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-07-19 03:00+0000\n"
+"POT-Creation-Date: 2026-08-07 01:30+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"X-Generator: WP-CLI 2.10.0\n"
+"X-Generator: UltraCache build pipeline\n"
 "X-Domain: ultracache\n"
 
 #. Plugin Name of the plugin
@@ -619,6 +619,10 @@ msgstr ""
 msgid "Not enough non-empty stylesheets were eligible for bundling."
 msgstr ""
 
+#: includes/engine/css/class-css-bundle-builder-trait.php:982
+msgid "A stylesheet was excluded because its media, import, or charset semantics could not be preserved in a bundle."
+msgstr ""
+
 #: includes/engine/class-engine-css-bundle-trait.php:1640
 msgid "Could not write the generated CSS bundle file."
 msgstr ""
@@ -648,6 +652,10 @@ msgstr ""
 
 #: includes/engine/class-engine-css-bundle-trait.php:3233
 msgid "A generated font-mix stylesheet could not be read."
+msgstr ""
+
+#: includes/engine/css/class-css-bundle-builder-trait.php:1912
+msgid "A generated font-mix stylesheet was excluded because its media, import, or charset semantics could not be preserved in a bundle."
 msgstr ""
 
 #: includes/engine/class-engine-css-bundle-trait.php:3311
@@ -1183,11 +1191,11 @@ msgstr ""
 msgid "Missing runtime JS scan id."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:4787
+#: includes/rest/class-rest-profiler-trait.php:4867
 msgid "Browser runtime JS diagnostic queue completed."
 msgstr ""
 
-#: includes/rest/class-rest-profiler-trait.php:4787
+#: includes/rest/class-rest-profiler-trait.php:4867
 msgid "Browser runtime JS diagnostic queue received an interim report."
 msgstr ""
 
@@ -1630,17 +1638,9 @@ msgstr ""
 msgid "Invalid LiteSpeed purge header value."
 msgstr ""
 
-#: ultracache.php:5002
-msgid "LiteSpeed server-level purge needs an HTTP response; it cannot be sent from WP-CLI."
-msgstr ""
-
 #. translators: 1: PHP file path where headers were sent, 2: line number.
 #: ultracache.php:5012
 msgid "LiteSpeed purge header could not be sent because headers were already sent at %1$s:%2$s."
-msgstr ""
-
-#: ultracache.php:5025
-msgid "LiteSpeed server-level purge header queued on this HTTP response."
 msgstr ""
 
 #: ultracache.php:5035
@@ -1732,7 +1732,7 @@ msgid "Aggressive"
 msgstr ""
 
 #: includes/admin-dashboard.js:495
-msgid "Aggressive profile enables Balanced JavaScript with native Defer as the base strategy, targeted delay modules, aggressive CSS bundling, Warm affected pages after save, Apache Static HTML Delivery, and the unified 0.05 second fallback. Scan Browser Runtime Errors is recommended to build speed-first Defer Instead fixes before compatibility exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved."
+msgid "Aggressive profile enables Balanced JavaScript with native Defer as the base strategy, targeted delay modules, aggressive CSS bundling, Warm affected pages after save, Apache Static HTML Delivery, Mouse move and Scroll delayed-JS triggers, a 2 second fallback, and Ignore color profile preservation for broader AVIF/WebP conversion coverage. Disable that media option when strict embedded-profile color fidelity is required. Scan Browser Runtime Errors is recommended to build speed-first Defer Instead fixes before compatibility exclusions. Object Cache is auto-detected. User-maintained exclusions and visible lists are preserved."
 msgstr ""
 
 #: includes/admin-dashboard.js:661
@@ -2677,6 +2677,14 @@ msgstr ""
 msgid "Timeout (seconds)"
 msgstr ""
 
+#: includes/admin/js/varnish.js
+msgid "Varnish invalidations per minute"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Limits background PURGE and BAN operations sent to configured Varnish endpoints. This is independent from page warm-up speed."
+msgstr ""
+
 #: includes/admin-dashboard.js:5641
 #: includes/admin-dashboard.js:5718
 #: includes/admin-dashboard.js:5822
@@ -2744,10 +2752,6 @@ msgstr ""
 
 #: includes/admin-dashboard.js:5887
 msgid "Also clear the APCu user cache when Flush All Cache runs. This is always on if APCu cache is used."
-msgstr ""
-
-#: includes/admin-dashboard.js:5888
-msgid "Also purge LiteSpeed Cache when Flush All Cache runs. Uses the LiteSpeed plugin API when present, otherwise the server-level X-LiteSpeed-Purge response header."
 msgstr ""
 
 #: includes/admin-dashboard.js:5889
@@ -3234,6 +3238,14 @@ msgstr ""
 msgid "Crawl public URLs and prebuild static cache files."
 msgstr ""
 
+#: includes/admin/js/dashboard-application.js
+msgid "Warm uncached URLs after first visit"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "When an uncached public URL is first visited, UltraCache queues that URL for background warming through the shared warm pipeline. Processing follows the Background warm pages per minute limit."
+msgstr ""
+
 #: includes/admin-dashboard.js:9679
 msgid "Menu warm-up"
 msgstr ""
@@ -3331,7 +3343,7 @@ msgid "Warm affected pages after save"
 msgstr ""
 
 #: includes/admin-dashboard.js:9881
-msgid "Automatically warm only affected public pages after a real content save. Autosaves, revisions, admin AJAX, and feeds are skipped; non-200 responses are not cached or retried."
+msgid "Automatically rebuild affected public HTML pages after real content changes. The shared queue warms active HTML variants and configured CSS bundles; when Varnish is enabled, it also invalidates and refills the same URLs. Autosaves, revisions, and feeds are excluded from warm processing."
 msgstr ""
 
 #: includes/admin-dashboard.js:9888
@@ -3347,7 +3359,7 @@ msgid "Apache Static HTML Delivery"
 msgstr ""
 
 #: includes/admin-dashboard.js:9897
-msgid "Serve already-built anonymous HTML cache aliases directly through Apache for safe queryless GET requests before WordPress/PHP starts."
+msgid "Serve already-built anonymous HTML cache aliases directly through Apache for safe queryless GET requests before WordPress/PHP starts. Enabling this turns off native LiteSpeed HTML Cache because both modes serve the same page-delivery layer."
 msgstr ""
 
 #: includes/admin-dashboard.js:9901
@@ -3404,7 +3416,7 @@ msgid "Enable AVIF/WebP media URL rewriting according to the selected output pol
 msgstr ""
 
 #: includes/admin-dashboard.js:9955
-msgid "Image Output Format"
+msgid "Image Rewrite Format"
 msgstr ""
 
 #: includes/admin-dashboard.js:9956
@@ -4122,28 +4134,20 @@ msgstr ""
 msgid "Run an automatic full cache purge using the interval below."
 msgstr ""
 
-#: includes/admin-dashboard.js:10710
-msgid "Cron Warm Up"
-msgstr ""
-
-#: includes/admin-dashboard.js:10711
-msgid "Enable the minute-by-minute background warm queue. Homepage is warmed first. If CSS Bundling and bundle-on-entry/warm are enabled, missing CSS bundles may be prepared before HTML is cached; otherwise the queue warms HTML only."
-msgstr ""
-
 #: includes/admin-dashboard.js:10718
-msgid "Start Cron Warm Up after Scheduled Cleanup"
+msgid "Warm full site after Scheduled Cleanup"
 msgstr ""
 
 #: includes/admin-dashboard.js:10719
-msgid "Start the cron warm queue after the scheduled cleanup purge completes."
+msgid "Start the background full-site warm-up after the scheduled cleanup purge completes."
 msgstr ""
 
 #: includes/admin-dashboard.js:10726
-msgid "Start Cron Warm Up after Flush All Cache"
+msgid "Warm full site after Flush All Cache"
 msgstr ""
 
 #: includes/admin-dashboard.js:10727
-msgid "Start the cron warm queue after a manual full cache purge."
+msgid "Start the background full-site warm-up after Flush All Cache completes."
 msgstr ""
 
 #: includes/admin-dashboard.js:10734
@@ -4155,11 +4159,11 @@ msgid "Use 24 for daily, 168 for weekly, or any custom number of hours."
 msgstr ""
 
 #: includes/admin-dashboard.js:10743
-msgid "Cron warm pages per minute"
+msgid "Background warm pages per minute"
 msgstr ""
 
 #: includes/admin-dashboard.js:10744
-msgid "How many HTML URLs to warm per minute in the cron warm-up queue. Homepage is always warmed first. If CSS Bundling is enabled, missing bundles may be prepared before HTML is cached. Lower values are safer on slower servers. Set 0 to pause queue processing."
+msgid "How many HTML URLs the shared background automation worker may process per minute. This rate applies to scheduled full-site warm-up and targeted work from updates, imports, LCP refreshes, media discovery, and external-cache refill. Lower values are gentler on the server. Set 0 to pause background page processing."
 msgstr ""
 
 #: includes/admin-dashboard.js:10752
@@ -4179,7 +4183,7 @@ msgid "Fresh TTL (minutes)"
 msgstr ""
 
 #: includes/admin-dashboard.js:10770
-msgid "Serve a normal cache hit while the file age stays within this freshness window. Default: 15 minutes."
+msgid "How long cached HTML remains fresh. When Varnish is enabled, this value is also used as the Varnish HTML TTL. Default: 1440 minutes (24 hours)."
 msgstr ""
 
 #: includes/admin-dashboard.js:10778
@@ -4187,7 +4191,7 @@ msgid "Max stale window (minutes)"
 msgstr ""
 
 #: includes/admin-dashboard.js:10779
-msgid "After freshness expires, UltraCache may still serve the stale file until this limit while it refreshes in the background. Default: 720 minutes (12 hours)."
+msgid "Maximum total age at which expired HTML may still be served while UltraCache refreshes it. Stale serving starts after Fresh TTL expires. Default: 2880 minutes (48 hours)."
 msgstr ""
 
 #: includes/admin-dashboard.js:10787
@@ -4204,10 +4208,6 @@ msgstr ""
 
 #: includes/admin-dashboard.js:10799
 msgid "Maximum orphan-like CSS bundle files to delete per cleanup run. Lower values are safer on shared hosting; higher values clear test/build leftovers faster. Default: 60. Range: 5–500."
-msgstr ""
-
-#: includes/admin-dashboard.js:10819
-msgid "Detected LiteSpeed/OpenLiteSpeed cache integration. UltraCache uses the LiteSpeed plugin API when present, otherwise it requests server-level purge with the X-LiteSpeed-Purge response header."
 msgstr ""
 
 #: includes/admin-dashboard.js:10820
@@ -5192,7 +5192,7 @@ msgid "Image compression level"
 msgstr ""
 
 #: includes/admin/js/app.js
-msgid "Choose the quality/file-size target used for generated AVIF/WebP variants and converted uploads."
+msgid "Choose the shared quality/file-size target used for generated AVIF/WebP variants, converted uploads, and Media Library Replacement files."
 msgstr ""
 
 #: includes/admin/js/app.js
@@ -5299,31 +5299,31 @@ msgstr ""
 msgid "Close image preview"
 msgstr ""
 
-msgid "Fallback Format"
+msgid "Image Rewrite Fallback Format"
 msgstr ""
 
-msgid "Choose the primary format used for generated media and frontend rewrites. Older Automatic settings are migrated to WebP."
+msgid "Choose the primary format used for generated variants and frontend rewrites. Older Automatic settings are migrated to WebP."
 msgstr ""
 
 msgid "Choose what UltraCache should use when AVIF is unavailable or not accepted by the browser."
 msgstr ""
 
-msgid "WebP output falls back to the original JPEG/PNG file."
+msgid "WebP output falls back to the original attachment file."
 msgstr ""
 
 msgid "WebP fallback"
 msgstr ""
 
-msgid "JPEG/PNG fallback"
+msgid "Original file fallback"
 msgstr ""
 
 msgid "Generate and prefer AVIF variants, with WebP as the optimized fallback."
 msgstr ""
 
-msgid "Generate and prefer AVIF variants, with the original JPEG/PNG file as fallback."
+msgid "Generate and prefer AVIF variants, with the original attachment file as fallback."
 msgstr ""
 
-msgid "Generate and prefer WebP variants, with the original JPEG/PNG file as fallback."
+msgid "Generate and prefer WebP variants, with the original attachment file as fallback."
 msgstr ""
 
 #: includes/media/class-media-replacement-trait.php
@@ -6283,10 +6283,6 @@ msgid "Manual warm-up ownership released. Pending Varnish jobs resumed."
 msgstr ""
 
 #: includes/admin/js/varnish.js
-msgid "Default: 1440 minutes (24 hours). The value is sent as s-maxage for public UltraCache HTML cache responses; 0 leaves the lifetime to Varnish."
-msgstr ""
-
-#: includes/admin/js/varnish.js
 msgid "Varnish Status & Test Results"
 msgstr ""
 
@@ -6294,3 +6290,3390 @@ msgstr ""
 msgid "Connection, cache behavior, invalidation, refill, variants, and endpoint metrics."
 msgstr ""
 
+
+#: includes/admin/js/ui.js:492
+msgid "I have SSH access, but no root access or WP-CLI. How can I run the image conversion?"
+msgstr ""
+
+#: includes/admin/js/ui.js:494
+msgid "You can download and run WP-CLI inside your own hosting account. Root access is not required."
+msgstr ""
+
+#: includes/admin/js/ui.js:495
+msgid "A. Download WP-CLI"
+msgstr ""
+
+#: includes/admin/js/ui.js:496
+msgid "It is usually best to keep the WP-CLI executable outside the WordPress installation directory."
+msgstr ""
+
+#: includes/admin/js/ui.js:509
+msgid "Run the following command and note the returned directory:"
+msgstr ""
+
+#: includes/admin/js/ui.js:511
+msgid "Your WP-CLI executable will be located at:"
+msgstr ""
+
+#: includes/admin/js/ui.js:513
+msgid "B. Find the correct PHP executable"
+msgstr ""
+
+#: includes/admin/js/ui.js:514
+msgid "Run:"
+msgstr ""
+
+#: includes/admin/js/ui.js:523
+msgid "The server may return several PHP executables. Select the same PHP version that your WordPress website uses. You can find the website’s current PHP version in UltraCache → Advanced Diagnostics → PHP Version."
+msgstr ""
+
+#: includes/admin/js/ui.js:524
+msgid "C. Find the WordPress installation path"
+msgstr ""
+
+#: includes/admin/js/ui.js:525
+msgid "Go to the directory containing wp-config.php and run:"
+msgstr ""
+
+#: includes/admin/js/ui.js:527
+msgid "Note the full path returned by the command."
+msgstr ""
+
+#: includes/admin/js/ui.js:528
+msgid "D. Run the image conversion"
+msgstr ""
+
+#: includes/admin/js/ui.js:529
+msgid "Replace the example paths below with the PHP, WP-CLI, and WordPress paths you found above:"
+msgstr ""
+
+#: includes/admin/js/ui.js:541
+msgid "The command processes the media queue using the website’s configured UltraCache image format and quality settings."
+msgstr ""
+
+#: includes/admin/js/ui.js:773
+msgid "How to Improve Performance and PageSpeed Scores"
+msgstr ""
+
+#: includes/admin/js/ui.js:775
+msgid "Review the largest CSS bundle sources."
+msgstr ""
+
+#: includes/admin/js/ui.js:775
+msgid "Open CSS Bundle Exclusions & Diagnostics, then click Run CSS Diagnostics. Under Top CSS bundle sources by bytes, you will see which CSS files contribute the most to the generated bundle. Excluding one or two of the largest files—especially large theme stylesheets—can often provide a significant performance improvement. Add exclusions one at a time and run another performance test after each change, as the best configuration depends on the theme and page structure."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Enable Delay non-critical/local JS."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "This can provide a significant PageSpeed/Lighthouse boost, but it can break JavaScript without visible errors, making problems difficult to find and fix."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Cache query-string URLs."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Open Query-string args caching and enable it. Under Query-string args whitelist, click Populate, then click Save Query-string Whitelist. UltraCache can then cache eligible query URLs such as /YourProductURL?color=red."
+msgstr ""
+
+#: includes/admin/js/ui.js:776
+msgid "Do not enable options blindly."
+msgstr ""
+
+#: includes/admin/js/ui.js:776
+msgid "The Aggressive profile usually provides the best starting point for higher performance scores. Some options are intended only for specific themes, plugins, or compatibility cases. Enabling options that your website does not need may reduce performance or cause visual or functional problems."
+msgstr ""
+
+msgid "Per-URL Manual LCP selector is unavailable."
+msgstr ""
+
+msgid "Manual LCP selector cleared for this URL."
+msgstr ""
+
+msgid "Manual LCP selector saved for this URL."
+msgstr ""
+
+msgid "Manual LCP selector updated."
+msgstr ""
+
+msgid "The Manual LCP selector could not be saved."
+msgstr ""
+
+msgid "Saving…"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:79
+msgid "LiteSpeed Cache WordPress purge integration detected."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:81
+msgid "An active LiteSpeed cache response header was observed. Native LiteSpeed purge headers are available."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:83
+msgid "A QUIC.cloud cache response header was observed, but a LiteSpeed origin purge transport or WordPress purge hook has not been confirmed."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:85
+msgid "A legacy LiteSpeed purge API is available as a compatibility fallback."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:87
+msgid "LiteSpeed Cache plugin markers were detected, but no registered purge hook or compatibility transport is available."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:89
+msgid "LiteSpeed/OpenLiteSpeed server detected, but active LSCache or a WordPress purge integration has not been confirmed."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:91
+msgid "LiteSpeed was detected, but no supported purge transport is currently available."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:93
+msgid "LiteSpeed Cache was not detected."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:135
+msgid "LiteSpeed native purge headers require an HTTP response and cannot be sent from WP-CLI."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:160
+msgid "LiteSpeed native purge header queued on this HTTP response."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:177
+msgid "LiteSpeed Cache purge request dispatched through the official WordPress hook."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:186
+msgid "LiteSpeed Cache purge hook failed: %s"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:207
+msgid "LiteSpeed Cache purge request dispatched through the legacy class API."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:208
+msgid "The legacy LiteSpeed class API rejected the purge request."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:230
+msgid "LiteSpeed Cache purge request dispatched through the legacy namespaced API."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:231
+msgid "The legacy LiteSpeed namespaced API rejected the purge request."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:253
+msgid "LiteSpeed Cache purge request dispatched through the legacy function API."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:254
+msgid "The legacy LiteSpeed function API rejected the purge request."
+msgstr ""
+
+#: includes/admin/js/cache.js:246
+msgid "Also purge LiteSpeed Cache when Flush All Cache runs. Uses the official LiteSpeed WordPress hook when available, or a native purge response header only after active LSCache headers have been observed."
+msgstr ""
+
+#: includes/admin/js/cache.js:287
+msgid "No external/server cache layer with a confirmed flush mechanism is detected. Use Redetect Caches after enabling OPcache/APCu, Varnish settings, Nginx Helper, or an active LiteSpeed cache integration."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:4507
+msgid "LiteSpeed/OpenLiteSpeed detection and purge transport. Native UltraCache HTML caching uses a signed same-site control response for site-tag and exact URL-tag invalidation; external LiteSpeed integrations retain their confirmed WordPress purge transport."
+msgstr ""
+
+#: includes/admin/js/help.js:552
+msgid "Watch for: with native LiteSpeed HTML Cache enabled, this purges only UltraCache-tagged pages for the current site through the signed control response. Otherwise the existing confirmed LiteSpeed WordPress purge integration is used."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3176
+msgid "LiteSpeed HTML Cache"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3177
+msgid "Publish UltraCache HTML to native LSCache with the same Fresh TTL, conservative anonymous-page bypass rules, site/URL tags, and separate orig/WebP/AVIF cache keys."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3181
+msgid "What it does: enables native LiteSpeed public cache lookup and lets UltraCache decide which anonymous HTML responses may be stored.\n\nWhy it helps: LiteSpeed can serve an UltraCache-generated page before PHP starts while keeping the UltraCache Fresh TTL and image-format bucket.\n\nWatch for: the LiteSpeed cache engine must already be enabled by the host. Query strings, authorization, unsafe cookies, dynamic paths, non-HTML files, and non-GET/HEAD requests bypass LSCache."
+msgstr ""
+
+#: includes/lifecycle/class-plugin-data-cleanup-trait.php:390
+msgid "UltraCache: LiteSpeed HTML Cache is enabled, but .htaccess could not be updated during activation. Check file permissions or disable LiteSpeed HTML Cache."
+msgstr ""
+
+#: includes/settings/class-settings-persistence-trait.php:329
+msgid "LiteSpeed HTML Cache rules could not be written to .htaccess. Check file permissions or disable LiteSpeed HTML Cache."
+msgstr ""
+
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:424
+msgid "A LiteSpeed origin or active LiteSpeed cache response has not been confirmed for exact URL invalidation."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:388
+msgid "A LiteSpeed origin or active LiteSpeed cache response has not been confirmed for native site-tag purge."
+msgstr ""
+
+
+#: includes/runtime/class-runtime-cache-services-trait.php:396
+msgid "Handled by the native LiteSpeed site-tag purge hook."
+msgstr ""
+
+#: includes/rest/class-rest-litespeed-trait.php:46
+msgid "Invalid, expired, or replayed LiteSpeed control request."
+msgstr ""
+
+#: includes/rest/class-rest-litespeed-trait.php:25
+#: includes/rest/class-rest-litespeed-trait.php:62
+msgid "LiteSpeed control endpoint is unavailable."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:447
+msgid "LiteSpeed exact URL invalidation headers were dispatched through signed internal control responses."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:288
+msgid "LiteSpeed exact URL-tag purge response prepared."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:367
+msgid "LiteSpeed purge header dispatched through the signed internal control response."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:349
+msgid "LiteSpeed signed control request failed: %s"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:368
+msgid "LiteSpeed signed control response did not acknowledge the purge."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:287
+msgid "LiteSpeed site-tag purge response prepared."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:468
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:493
+msgid "Native LiteSpeed HTML Cache is disabled."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:410
+msgid "No eligible LiteSpeed URLs required invalidation."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:277
+msgid "No valid LiteSpeed purge tags were resolved."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:260
+msgid "No valid LiteSpeed purge targets were resolved."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:312
+msgid "No valid LiteSpeed purge targets were supplied."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:448
+msgid "One or more LiteSpeed exact URL invalidation requests failed."
+msgstr ""
+
+#: includes/admin/js/help.js:97
+msgid "Watch for: native purge runs through a short-lived signed same-site control response, so the purge header completes before later refill work begins. The host must enable the LiteSpeed cache engine."
+msgstr ""
+
+#: includes/admin/js/help.js:96
+msgid "Why it helps: a confirmed LiteSpeed cache engine can serve the saved public page before WordPress and PHP start while keeping orig, WebP, and AVIF HTML separate. Full purges use the site tag, while content changes invalidate only the affected URL tags."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-transport-trait.php:92
+msgid "Native LiteSpeed HTML Cache is enabled on a confirmed LiteSpeed origin. The signed internal purge control is available."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:567
+msgid "Affected-page LiteSpeed refill is disabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3193
+msgid "After an exact affected-URL purge, add the same eligible pages to the existing shared warm queue, rebuild UltraCache HTML/CSS, purge LiteSpeed again immediately before refill, and populate every active HTML bucket."
+msgstr ""
+
+#: includes/settings/class-settings-persistence-trait.php:164
+msgid "Configuring or validating Redis, LiteSpeed, or Varnish requires manage_options plus plugin activation or network plugin management permission."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:218
+msgid "Configuring, testing, or flushing Redis, LiteSpeed, or Varnish requires manage_options plus plugin activation or network plugin management permission."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:212
+msgid "Exact LiteSpeed URL invalidation completed before refill."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:512
+msgid "Exact LiteSpeed invalidation failed before refill."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:198
+msgid "Exact LiteSpeed invalidation is unavailable before refill."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:498
+msgid "Exact LiteSpeed invalidation was already completed for this page warm."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:887
+msgid "External cache integration is unavailable."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:338
+#, php-format
+msgid "HTTP %d redirect refused; the exact queued URL was not warmed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3201
+msgid "Include LiteSpeed in homepage, menu, full-site, cron, CLI, and warm-after-flush page pipelines. Each page is rebuilt in UltraCache first, then exact-purged and refilled in LSCache for orig/WebP/AVIF as configured."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:384
+msgid "Invalid LiteSpeed refill URL."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:491
+msgid "Invalid manual LiteSpeed refill bucket."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:534
+#, php-format
+msgid "LiteSpeed %s bucket refill failed."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:533
+#, php-format
+msgid "LiteSpeed %s bucket refilled."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:340
+msgid "LiteSpeed explicitly bypassed this refill request."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:457
+#, php-format
+msgid "LiteSpeed public refill completed for %d HTML variant(s)."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:458
+msgid "LiteSpeed public refill failed for one or more HTML variants."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:213
+msgid "LiteSpeed refill stopped because exact URL invalidation failed."
+msgstr ""
+
+#: includes/warmup/class-warm-page-pipeline-trait.php:387
+msgid "LiteSpeed warm-up integration is unavailable."
+msgstr ""
+
+#: includes/warmup/class-warm-page-pipeline-trait.php:382
+msgid "LiteSpeed warm-up skipped because an earlier page stage did not complete."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:81
+msgid "LiteSpeed warm-up with site warm-up is disabled."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:578
+msgid "Native LiteSpeed HTML Cache is not enabled for refill."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3192
+msgid "Refill LiteSpeed after targeted invalidation"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:91
+#, php-format
+msgid "Site warm-up will populate %d LiteSpeed HTML variant(s)."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:262
+msgid "The LiteSpeed refill URL is not an exact trusted frontend URL for this site."
+msgstr ""
+
+#: includes/warmup/class-warm-page-pipeline-trait.php:448
+msgid "The page cache warmed, but the selected LiteSpeed refill did not complete."
+msgstr ""
+
+#: includes/warmup/class-warm-page-pipeline-trait.php:444
+msgid "The page cache warmed, but the selected Varnish and LiteSpeed refills did not complete."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3200
+msgid "Warm LiteSpeed with site warm-up"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:617
+msgid "Warm-up ownership expired after exact LiteSpeed invalidation."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:440
+msgid "Warm-up ownership expired after the LiteSpeed refill request completed."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:589
+msgid "Warm-up ownership expired before exact LiteSpeed invalidation."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-refill-trait.php:404
+msgid "Warm-up ownership expired before the LiteSpeed refill request completed."
+msgstr ""
+
+#: includes/admin/js/help.js:97
+msgid "Watch for: Targeted refill and site warm-up are independent switches. Native purge uses a short-lived signed same-site control response, and explicit LiteSpeed bypass responses are reported as failed refills instead of successful warm requests."
+msgstr ""
+
+#: includes/admin/js/help.js:95
+msgid "What it does: writes a managed LiteSpeed cache lookup and image-variant contract, labels eligible UltraCache HTML with TTL and tags, and can populate LSCache through the existing page-warm pipeline."
+msgstr ""
+
+#: includes/admin/js/help.js:96
+msgid "Why it helps: a confirmed LiteSpeed cache engine can serve the saved public page before WordPress and PHP start while keeping orig, WebP, and AVIF HTML separate. Full purges use the site tag; affected URLs can be rebuilt and exact-purged again immediately before refill."
+msgstr ""
+
+#: includes/admin/js/help.js:81
+msgid "Why it helps: active HTML variants, configured CSS bundles, and enabled Varnish or LiteSpeed objects are rebuilt for the changed post, homepage, archives, taxonomies, and other related public surfaces."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:292
+msgid "A LiteSpeed origin or active LiteSpeed cache response has not been confirmed."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:186
+msgid "A public LiteSpeed behavior-test request failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:416
+msgid "Active buckets"
+msgstr ""
+
+#: includes/admin/js/cache.js:287
+#: includes/admin/js/dashboard-diagnostics-ui.js:417
+msgid "Behavior test"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:418
+msgid "Behavior test message"
+msgstr ""
+
+#: includes/admin/js/help.js:97
+msgid "Behavior test: sends two public requests for every active HTML bucket, performs one shared blocking exact purge, and sends two more requests per bucket. PASS requires an observable MISS followed by HIT after purge; hidden cache headers produce INCONCLUSIVE instead of a false PASS."
+msgstr ""
+
+#: includes/admin/js/cache.js:278
+msgid "Detection and transport"
+msgstr ""
+
+#: includes/admin/js/cache.js:276
+msgid "Enable native LiteSpeed HTML Cache on a confirmed LiteSpeed origin before running the behavior test."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:275
+msgid "Enable Page Cache and LiteSpeed HTML Cache before running the behavior test."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:218
+msgid "Exact purge was followed by an observable LiteSpeed MISS and HIT."
+msgstr ""
+
+#: includes/admin/js/cache.js:274
+msgid "Flush LiteSpeed Cache"
+msgstr ""
+
+#: includes/admin/js/cache.js:291
+msgid "Last test: "
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:353
+msgid "LiteSpeed behavior test failed for one or more active HTML buckets."
+msgstr ""
+
+#: includes/rest/class-rest-litespeed-trait.php:96
+msgid "LiteSpeed behavior test helper is unavailable."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:361
+msgid "LiteSpeed behavior test passed for every active HTML bucket."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:411
+msgid "LiteSpeed diagnostics"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:198
+msgid "LiteSpeed exact URL invalidation failed during the behavior test."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:229
+msgid "LiteSpeed explicitly bypassed the tested public page."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:261
+msgid "LiteSpeed headers were visible, but the post-purge MISS-to-HIT sequence was not completed."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:357
+msgid "LiteSpeed purge and public requests completed, but one or more HIT/MISS sequences could not be observed."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:414
+msgid "Managed rules"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:413
+msgid "Native HTML cache"
+msgstr ""
+
+#: includes/admin/js/cache.js:270
+msgid "Native LSCache detection, exact invalidation, refill telemetry, and a canonical public behavior test for every active UltraCache HTML bucket."
+msgstr ""
+
+#: includes/admin/js/cache.js:290
+msgid "No LiteSpeed behavior test has been run yet."
+msgstr ""
+
+#: includes/admin/js/cache.js:304
+msgid "Production counters"
+msgstr ""
+
+#: includes/admin/js/help.js:98
+msgid "Production telemetry: bounded counters and the latest 30 site-purge, exact-URL purge, and refill operations are stored separately from behavior-test traffic. URLs are reduced to local paths and response bodies are never stored."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:251
+msgid "Purge and public requests completed, but LiteSpeed HIT/MISS headers were hidden."
+msgstr ""
+
+#: includes/admin/js/cache.js:312
+msgid "Recent operations"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:419
+msgid "Refill requests"
+msgstr ""
+
+#: includes/admin/js/cache.js:316
+msgid "Success"
+msgstr ""
+
+#: includes/admin/js/cache.js:273
+msgid "Test LiteSpeed Behavior"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:305
+msgid "The canonical front-page URL is not eligible for the LiteSpeed behavior test."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:240
+msgid "The first request after exact purge remained a LiteSpeed HIT."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:415
+msgid "Transport"
+msgstr ""
+
+#: includes/admin/js/cache.js:309
+msgid "Updated: "
+msgstr ""
+
+#: includes/admin/js/cache.js:273
+#: includes/admin/js/cache.js:274
+msgid "Working…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:2404
+msgid "An interrupted regeneration job is saved. Resume will continue overwriting existing AVIF/WebP files for that job."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3835
+msgid "Applies parallel execution to eligible same-origin frontend JavaScript in Defer and Delay modes."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3843
+msgid "Applies parallel execution to eligible third-party frontend JavaScript in Defer and Delay modes."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3544
+msgid "Automatic action"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:885
+msgid "Automatic browser LCP"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3697
+msgid "Automatic media work is temporarily waiting for the worker safety cooldown."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3239
+msgid "Bound the number of due candidates checked and possibly queued by one refresh-ahead scan."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1015
+msgid "Cancel"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:968
+msgid "Clear"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3137
+msgid "Clear page cache and generated frontend assets after a successful WordPress version update. Object cache and optimized images are not cleared."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3145
+msgid "Clear page cache and generated frontend assets once after successful updates that include an active or network-active plugin. Inactive plugin updates are ignored."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3153
+msgid "Clear page cache and generated frontend assets once after successful updates to the active child theme or its active parent theme. Inactive theme updates are ignored."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1007
+msgid "Close confirmation"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:948
+msgid "Confirmed mappings"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3724
+msgid "Convert new uploads"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3725
+msgid "Convert the actual uploaded image file to the selected Upload image format during WordPress upload."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3536
+msgid "Cooldown"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:887
+msgid "Element"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:951
+msgid "Failed refreshes"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3834
+msgid "First-party parallel execution"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1016 includes/admin/js/dashboard-diagnostics-ui.js:901
+msgid "Forget mapping"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1009
+msgid "Forget this LCP mapping?"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3540
+msgid "Last quarantine"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:419
+msgid "Last refresh-ahead scan"
+msgstr ""
+
+#: includes/admin/js/cache.js:291
+msgid "Last refresh-ahead scan: "
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:893 includes/admin/js/dashboard-diagnostics-ui.js:986
+msgid "Last seen"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:955
+msgid "Last successful LCP refresh"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:930
+msgid "LCP diagnostics updated."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1008
+msgid "LCP observations"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:947
+msgid "Learned pages"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3227
+msgid "LiteSpeed refresh threshold (% of Fresh TTL)"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:467
+msgid "LiteSpeed stale exact URL invalidation headers were dispatched through signed internal control responses."
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-control-trait.php:292
+msgid "LiteSpeed stale exact URL-tag purge response prepared."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:885
+msgid "Manual selector"
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:872
+msgid "Manual warm-up stage engine is unavailable."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3238
+msgid "Maximum LiteSpeed pages per scan"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3732
+msgid "Maximum upload image side"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3733
+msgid "Maximum width or height for newly converted uploads. Smaller images keep their original dimensions and are only converted to the selected upload format."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3610
+msgid "Media status"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3528
+msgid "Media worker safety"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1002
+msgid "Next"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:625
+msgid "No queued refresh"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:878
+msgid "No resource URL recorded"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:889
+msgid "Observations"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3251
+msgid "Optional local URLs or paths, one per line. Pinned pages receive the highest candidate priority; the list is limited to 25 entries."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:950
+msgid "Pending refreshes"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3250
+msgid "Pinned LiteSpeed refresh URLs"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1001
+msgid "Previous"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3144
+msgid "Purge after active plugin updates"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3152
+msgid "Purge after active theme updates"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3136
+msgid "Purge after WordPress core updates"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3228
+msgid "Queue a candidate when the oldest active UltraCache HTML bucket reaches this percentage of Fresh TTL, or when any required bucket is missing."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3532
+msgid "Recent stale workers"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:418
+msgid "Refresh ahead"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:899
+msgid "Refresh cache"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:623
+msgid "Refresh complete"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:624
+msgid "Refresh failed"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3218
+msgid "Refresh hot LiteSpeed pages before expiry"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3667
+msgid "Refresh Optimized File Counts"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:622
+msgid "Refresh pending"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3631
+msgid "Regen. existing"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1016 includes/admin/js/dashboard-diagnostics-ui.js:900
+msgid "Relearn"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1009
+msgid "Relearn this LCP mapping?"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3684
+msgid "Removes completed queue history only. It does not delete AVIF/WebP files."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:888
+msgid "Resource"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:870
+msgid "Save"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3256
+msgid "Save LiteSpeed Pinned URLs"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:967
+msgid "Search"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:886
+msgid "Selector"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3210
+msgid "Serve stale LiteSpeed HTML during regeneration"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:885
+msgid "Source"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:610
+msgid "Stale"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:417
+msgid "Stale exact purge"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:952
+msgid "Stale mappings"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:422
+msgid "Stale URL purges"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:2407
+msgid "Start will requeue completed media and overwrite existing AVIF/WebP files. Original uploads are not changed."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:878
+msgid "Text LCP: no image resource"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:933
+msgid "The LCP diagnostics action failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:873
+msgid "The LCP observations could not be loaded."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:1011
+msgid "The stored mapping will be deleted and the affected page cache will be refreshed without it."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3842
+msgid "Third-party parallel execution"
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:913
+msgid "Unknown manual warm-up stage."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3211
+msgid "Use LiteSpeed stale exact-tag purge for affected-page invalidation. Existing LSCache HTML may remain available while the shared UltraCache page pipeline rebuilds the page; the controlled final purge and refill remain hard to verify the new object."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3219
+msgid "Use the bounded hot-page candidate registry and UltraCache HTML freshness markers to queue pages near Fresh TTL. The existing worker stale-purges LiteSpeed, rebuilds UltraCache HTML, then hard-purges and refills every active bucket."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:517
+msgid "Varnish entire-host flush helper not available."
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:898
+msgid "View page"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:895
+msgid "Warm refresh"
+msgstr ""
+
+#: includes/admin/js/cache.js:286
+msgid "Enable UltraCache Page Cache first, then enable native LiteSpeed HTML Cache in this card."
+msgstr ""
+
+#: includes/admin/js/cache.js:288
+msgid "Enable native LiteSpeed HTML Cache above before running the behavior test."
+msgstr ""
+
+#: includes/admin/js/cache.js:290
+msgid "Native LiteSpeed HTML Cache is configured, but the LiteSpeed origin or managed cache rules are not yet confirmed. Review the status below and reload or redetect after the server begins returning LiteSpeed cache signals."
+msgstr ""
+
+#: includes/admin/js/cache.js:295
+msgid "Configure, test, purge, refill, monitor, and diagnose the complete native LiteSpeed integration from this card."
+msgstr ""
+
+#: includes/admin/js/cache.js:298
+msgid "LiteSpeed settings"
+msgstr ""
+
+#: includes/admin/js/cache.js:300
+msgid "Enable native LiteSpeed HTML Cache"
+msgstr ""
+
+#: includes/admin/js/cache.js:301
+msgid "Publish eligible UltraCache HTML to native LSCache with the existing Fresh TTL, conservative anonymous-page bypass rules, site/URL tags, and separate orig/WebP/AVIF cache keys. Enabling this turns off Apache Static HTML Delivery because both modes serve the same page-delivery layer."
+msgstr ""
+
+#: includes/admin/js/cache.js:309
+msgid "After an exact affected-URL purge, use the existing shared warm queue to rebuild UltraCache HTML/CSS, hard-purge LiteSpeed immediately before refill, and populate every active HTML bucket."
+msgstr ""
+
+#: includes/admin/js/cache.js:317
+msgid "Include LiteSpeed in homepage, menu, full-site, cron, CLI, and warm-after-flush page pipelines after UltraCache HTML and CSS work completes."
+msgstr ""
+
+#: includes/admin/js/cache.js:325
+msgid "Use stale exact-tag purge for affected-page invalidation while retaining a final hard purge immediately before controlled refill."
+msgstr ""
+
+#: includes/admin/js/cache.js:333
+msgid "Use UltraCache HTML freshness markers and the bounded candidate registry to queue hot pages near Fresh TTL through the existing warm worker."
+msgstr ""
+
+#: includes/admin/js/cache.js:341
+msgid "Refresh threshold (% of Fresh TTL)"
+msgstr ""
+
+#: includes/admin/js/cache.js:342
+msgid "Queue a candidate when the oldest active UltraCache HTML bucket reaches this percentage of Fresh TTL, or when a required bucket is missing."
+msgstr ""
+
+#: includes/admin/js/cache.js:352
+msgid "Maximum pages per scan"
+msgstr ""
+
+#: includes/admin/js/cache.js:353
+msgid "Bound the number of due candidates checked and possibly queued by one LiteSpeed refresh-ahead scan."
+msgstr ""
+
+#: includes/admin/js/cache.js:374
+msgid "Include LiteSpeed in Flush All Cache"
+msgstr ""
+
+#: includes/admin/js/cache.js:375
+msgid "Also purge LiteSpeed when the main Flush All Cache action runs. Native mode purges the UltraCache site tag; otherwise a confirmed LiteSpeed WordPress purge transport is used."
+msgstr ""
+
+#: includes/admin/js/cache.js:385
+msgid "Redetect LiteSpeed"
+msgstr ""
+
+#: includes/admin/js/cache.js:501
+msgid "No external/server cache layer with a confirmed flush mechanism is detected. Use Redetect Caches after enabling OPcache/APCu, Varnish settings, or Nginx Helper."
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Varnish infrastructure controls require plugin activation or network plugin management permission."
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Varnish is unavailable on this server."
+msgstr ""
+
+#: includes/admin/js/cache.js
+msgid "Publish eligible UltraCache HTML to native LSCache with the existing Fresh TTL, conservative anonymous-page bypass rules, site/URL tags, and separate orig/WebP/AVIF cache keys."
+msgstr ""
+
+#: includes/admin/js/cache.js
+msgid "Enable UltraCache Page Cache first."
+msgstr ""
+
+#: includes/admin/js/cache.js
+msgid "Native LiteSpeed HTML Cache cannot be enabled while Apache Static HTML Delivery is active. Disable Apache Static HTML Delivery first."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Serve already-built anonymous HTML cache aliases directly through Apache for safe queryless GET requests before WordPress/PHP starts."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Apache Static HTML Delivery cannot be enabled while Native LiteSpeed HTML Cache is active. Disable Native LiteSpeed HTML Cache first."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:48
+msgid "The ESI fragment ID is invalid."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:51
+msgid "The ESI fragment ID is already registered."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:53
+msgid "The ESI fragment renderer must be callable."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:58
+msgid "This UltraCache version supports public ESI fragments only."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:75
+msgid "The ESI fragment fallback must be callable or a string."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:90
+msgid "The filtered ESI fragment definition is invalid."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:103
+msgid "The filtered ESI fragment fallback is invalid."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:136
+msgid "This ESI fragment does not accept context values."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:143
+msgid "The ESI fragment context contains an unsupported key."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:161
+msgid "An ESI fragment context value is too long."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:167
+msgid "ESI fragment context values must be scalar."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:185
+msgid "The ESI fragment is not registered."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:200
+msgid "The ESI fragment context could not be encoded."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:219
+msgid "The ESI fragment token is invalid."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:226
+msgid "The ESI fragment signature is invalid."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:232
+msgid "The ESI fragment payload is invalid."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:264
+msgid "Nested ESI fragment rendering is not supported in this version."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:272
+msgid "The ESI fragment renderer is not callable."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:288
+msgid "The ESI fragment renderer failed."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:328
+msgid "The ESI fragment output exceeds its configured limit."
+msgstr ""
+
+#: includes/admin/js/varnish.js:346
+msgid "Enable ESI fragment framework"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:105
+msgid "Run Test Varnish to verify end-to-end ESI processing."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:114
+msgid "The ESI capability contract changed. Run Test Varnish again."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:128
+msgid "ESI is configured, but Varnish integration is disabled."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:193
+msgid "The ESI probe token is invalid."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:199
+msgid "The ESI probe signature is invalid."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:217
+msgid "The ESI probe payload is invalid or expired."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:421
+msgid "The signed ESI probe URL could not be created."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:483
+msgid "Varnish ESI is verified across identity, gzip, and Brotli-client requests, including independently cached fragment output and a composed cache HIT."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:486
+msgid "End-to-end ESI composition and independent fragment caching are verified across identity, gzip, and Brotli-client requests, but Varnish or cache HIT headers are hidden."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:492
+msgid "Varnish did not complete the end-to-end ESI composition probe. UltraCache will keep rendering inline fallback HTML."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:339
+msgid "The ESI probe was skipped because the public frontend request failed."
+msgstr ""
+
+#: includes/admin/js/varnish.js:161
+msgid "Verified, signals hidden"
+msgstr ""
+
+#: includes/admin/js/varnish.js:149
+msgid "Run test again"
+msgstr ""
+
+#: includes/admin/js/varnish.js:168
+msgid "Fallback only"
+msgstr ""
+
+#: includes/admin/js/varnish.js:170
+msgid "Test required"
+msgstr ""
+
+#: includes/admin/js/varnish.js:280
+msgid "Run Test Varnish after installing the ESI VCL rules. Until verification succeeds, registered fragments render inline fallback HTML."
+msgstr ""
+
+#: includes/admin/js/varnish.js:424
+msgid "Verified public fragments emit signed same-origin ESI includes with inline fallback HTML."
+msgstr ""
+
+#: includes/admin/js/varnish.js:425
+msgid "Requests ESI support. Registered fragments continue rendering inline fallback HTML until Test Varnish verifies end-to-end ESI composition."
+msgstr ""
+
+#: includes/admin/js/varnish.js:431
+msgid "Generic Varnish ESI rules"
+msgstr ""
+
+#: includes/admin/js/varnish.js:432
+msgid "Add these rules to a VCL that does not already process Surrogate-Control ESI responses, reload Varnish, and run Test Varnish."
+msgstr ""
+
+#: includes/admin/js/varnish.js:438
+msgid "Copy VCL snippet"
+msgstr ""
+
+#: includes/admin/js/varnish.js:461
+msgid "Test Varnish checks the configured connection, one exact front-page invalidation, the public refill, and end-to-end ESI composition."
+msgstr ""
+
+#: includes/admin/js/varnish.js:279
+msgid "ESI"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:489
+msgid "ESI composition succeeded, but the public fragment was not reused from shared cache across repeated parent deliveries. UltraCache will keep rendering inline fallback HTML."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php
+msgid "The ESI fragment context contains too many values."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php
+msgid "The ESI fragment context exceeds its configured size limit."
+msgstr ""
+
+#: includes/esi/class-esi-lifecycle-trait.php
+msgid "The public ESI fragment is not registered."
+msgstr ""
+
+#: includes/esi/class-esi-lifecycle-trait.php
+msgid "The ESI fragment URL API is unavailable."
+msgstr ""
+
+#: includes/esi/class-esi-lifecycle-trait.php
+msgid "The ESI fragment URL is not an exact trusted frontend URL for this site."
+msgstr ""
+
+#: includes/esi/class-esi-lifecycle-trait.php
+msgid "Varnish exact-URL invalidation is unavailable."
+msgstr ""
+
+#: includes/esi/class-esi-lifecycle-trait.php
+msgid "The exact public ESI fragment URL was invalidated."
+msgstr ""
+
+#: includes/esi/class-esi-lifecycle-trait.php
+msgid "The exact public ESI fragment URL could not be invalidated."
+msgstr ""
+
+#: includes/esi/functions.php
+msgid "The ESI fragment purge API is unavailable."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php
+msgid "The ESI fragment context token exceeds the supported URL size."
+msgstr ""
+
+#: includes/esi/functions.php:339
+msgid "Private ESI fragments are never stored in shared cache and do not require invalidation."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:60
+msgid "The ESI fragment scope must be public or private."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:66
+msgid "Private ESI fragments require at least one allowed cookie name or prefix."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:431
+msgid "The private ESI cookie header exceeds its configured limit."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php:473
+msgid "The filtered private ESI cookie header exceeds its configured limit."
+msgstr ""
+
+#: includes/esi/class-esi-endpoint-trait.php:196
+msgid "The private ESI request did not arrive through the verified internal transport."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:226
+msgid "The ESI probe kind is invalid."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:710
+msgid "Varnish public ESI and private/session transport are verified, including shared parent reuse, isolated session output, non-cacheable private fragments, and onerror containment."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:713
+msgid "Public ESI and private/session transport are verified, but Varnish or cache HIT headers are hidden."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:716
+msgid "Public Varnish ESI is verified. Private/session transport is unavailable, so private fragments continue rendering inline fallback HTML."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:719
+msgid "Public ESI is verified, but private/session transport is unavailable and Varnish or cache HIT headers are hidden."
+msgstr ""
+
+#: includes/admin/js/varnish.js:350
+msgid "Public ESI"
+msgstr ""
+
+#: includes/admin/js/varnish.js:351
+msgid "Private ESI"
+msgstr ""
+
+#: includes/admin/js/varnish.js:483
+msgid "Verified public fragments use shared fragment cache, while private fragments use isolated no-store session transport with inline fallback HTML."
+msgstr ""
+
+#: includes/admin/js/varnish.js:485
+msgid "Public ESI is verified. Private fragments remain inline fallback until Test Varnish verifies session isolation and no-store transport."
+msgstr ""
+
+#: includes/admin/js/varnish.js:492
+msgid "Generic Varnish ESI and private-session rules"
+msgstr ""
+
+#: includes/admin/js/varnish.js:493
+msgid "Add these rules to a VCL that does not already process Surrogate-Control ESI responses. Extend the documented transport-cookie expressions only for cookies rendered exclusively inside private fragments, reload Varnish, and run Test Varnish."
+msgstr ""
+
+#: includes/esi/class-esi-registry.php
+msgid "Private ESI fragment fallback must be static HTML."
+msgstr ""
+
+#: includes/integrations/woocommerce/class-woocommerce-esi-trait.php
+msgid "WooCommerce classic mini-cart APIs are unavailable."
+msgstr ""
+
+#: includes/integrations/woocommerce/class-woocommerce-esi-trait.php
+msgid "The WooCommerce cart could not be loaded."
+msgstr ""
+
+#: includes/integrations/woocommerce/class-woocommerce-esi-trait.php
+msgid "The WooCommerce cart is unavailable."
+msgstr ""
+
+#: includes/integrations/woocommerce/class-woocommerce-esi-trait.php
+msgid "View cart"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Woo mini-cart ESI"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "VCL update required"
+msgstr ""
+
+#: includes/esi/class-esi-registry.php
+msgid "The ESI fragment renderer exceeded its configured time budget."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "My Varnish server has only a basic setup. How can I enable ESI and WooCommerce mini-cart support?"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Suggested configuration:"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "This generic VCL snippet is a suggestion and is not installed automatically. Merge the relevant rules into your existing vcl_recv, vcl_backend_fetch, and vcl_backend_response blocks; do not replace your complete VCL file blindly."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "The same baseline rules can be used across Varnish servers, but control-panel paths, include structure, and reload commands differ. Review the snippet for your setup, compile and reload Varnish, and then run Test Varnish again."
+msgstr ""
+
+#: includes/admin/js/varnish.js:129
+msgid "Varnish invalidation"
+msgstr ""
+
+#: includes/admin/js/varnish.js:130
+msgid "Varnish refill"
+msgstr ""
+
+#: includes/admin/js/varnish.js:149
+msgid "%d attempt(s)"
+msgstr ""
+
+#: includes/admin/js/varnish.js:154
+msgid "Action: fix the reported Varnish transport or authentication error, then run the invalidation or Test Varnish again."
+msgstr ""
+
+#: includes/admin/js/varnish.js:155
+msgid "Action: fix the reported HTTP or origin error, then run the affected-page or site warm-up again."
+msgstr ""
+
+#: includes/admin/js/varnish.js:265
+msgid "Last test failed"
+msgstr ""
+
+#: includes/admin/js/varnish.js:267
+msgid "%d terminal error(s)"
+msgstr ""
+
+#: includes/admin/js/varnish.js:269
+msgid "%1$d queued · %2$d processing"
+msgstr ""
+
+#: includes/admin/js/varnish.js:270
+msgid "Ready"
+msgstr ""
+
+#: includes/admin/js/varnish.js:300
+msgid "%d queue item(s) stopped after their automatic retries."
+msgstr ""
+
+#: includes/admin/js/varnish.js:305
+msgid "Additional terminal errors are not shown here."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+#, php-format
+msgid "Warm pipeline yielded to the %s and will continue on the next tick."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Public ESI requires Varnish to advertise ESI/1.0 and process only HTML responses that explicitly request it. Private/session ESI additionally uses req_top to carry only the built-in allowlisted cookies into signed UltraCache no-store fragment subrequests."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Suggested request-opt-in configuration:"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "The recommended snippet requires two independent signals: the request-side ultracache_esi_optin=1 browser marker and the X-UltraCache-ESI-Shared-Parent: 1 response approval. UltraCache sets the session marker only on pages that render the verified classic mini-cart ESI adapter. Without both signals, WooCommerce requests remain PASS and normal cart behavior is preserved."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "This is a suggestion and is not installed automatically. Merge the relevant rules into your existing VCL instead of replacing an unrelated full configuration blindly. Compile/reload Varnish and run Test Varnish again. Frontend ESI composition probes use an independent 20-second timeout; the Admin endpoint timeout controls only Varnish admin socket operations."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Copy handshake VCL snippet"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "UltraCache CWP Varnish template:"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Use the bundled fail-closed template on CWP servers. Sites without the UltraCache request marker keep normal WooCommerce PASS behavior. On verified adapter pages, UltraCache approves only cached parents that contain the classic WooCommerce mini-cart ESI fragment."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "The file preserves the CWP placeholders %domain%, %backend_domain%, %proxy_ip%, and %proxy_port%. Review the active include structure, rebuild affected domain configurations, compile/reload Varnish, and run Test Varnish."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Download UltraCache CWP Varnish template (.tpl)"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:236
+msgid "Varnish %1$s refill followed a local redirect to %2$s, but exact invalidation of the canonical URL failed."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:254
+msgid "HTTP %1$d redirected to the verified local canonical URL %2$s; the canonical refill returned HTTP 200."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:259
+msgid "HTTP %1$d redirected to the verified local canonical URL %2$s; the canonical refill failed: %3$s"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:262
+msgid "Unknown refill error."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:269
+msgid "HTTP %1$d redirected to %2$s, but the destination is not a verified local canonical URL."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:274
+msgid "HTTP %d redirected without a usable Location header."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:304
+msgid "Varnish %1$s bucket refilled at canonical URL %2$s."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:307
+msgid "Varnish %1$s bucket refill failed: %2$s"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:524
+msgid "HTTP %1$d redirected to %2$s."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-refill-trait.php:525
+msgid "HTTP %d redirected without a Location header."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php:37
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php:45
+msgid "The detected Varnish configuration could not be stored."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php:73
+msgid "Varnish discovery runner is unavailable."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php:84
+msgid "Varnish discovery returned an invalid result."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php:110
+msgid "Varnish was detected and configured automatically."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php:121
+msgid "A probable Varnish endpoint was detected."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php:132
+msgid "No working Varnish configuration was detected."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-trait.php:37
+msgid "The canonical site URL is unavailable for Varnish discovery."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-trait.php:47
+msgid "The homepage response did not expose a Varnish header."
+msgstr ""
+
+#. translators: 1: Varnish method, 2: endpoint.
+#: includes/integrations/varnish/class-varnish-discovery-trait.php:108
+msgid "Detected Varnish %1$s at %2$s and saved the working configuration."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-trait.php:144
+msgid "A Varnish HTTP listener was found, but it requires a token or control key."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-trait.php:162
+msgid "Varnish was detected on the homepage, but no tested HTTP PURGE or BAN endpoint accepted the request."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:460
+msgid "Varnish discovery helper is not available."
+msgstr ""
+
+#: includes/admin/js/varnish.js:554
+msgid "Checks the homepage for Varnish, tests common HTTP PURGE and BAN endpoints, and saves the first working configuration automatically."
+msgstr ""
+
+#: includes/admin/js/varnish.js:554
+msgid "Detect Varnish Configuration"
+msgstr ""
+
+#: includes/admin/js/varnish.js:555
+msgid "Save Varnish Settings before testing."
+msgstr ""
+
+#: includes/admin/js/varnish.js:556
+#: includes/admin/js/varnish.js:557
+msgid "Save Varnish Settings before flushing."
+msgstr ""
+
+#: includes/admin/js/varnish.js:559
+msgid "Unsaved Varnish changes detected. Don't forget to press Save Varnish Settings before testing or flushing."
+msgstr ""
+
+#: includes/admin/js/varnish.js:560
+msgid "Detection checks the homepage and saves the first working HTTP PURGE or BAN configuration automatically. Manual field changes still require Save Varnish Settings before testing or flushing."
+msgstr ""
+
+#. translators: %s: Varnish action name.
+#: includes/admin/js/varnish.js:640
+msgid "Save Varnish Settings before running %s."
+msgstr ""
+
+#: includes/admin/js/varnish.js:641
+msgid "this Varnish action"
+msgstr ""
+
+#: includes/admin/js/varnish.js:707
+msgid "the site Varnish flush"
+msgstr ""
+
+#: includes/admin/js/varnish.js:716
+msgid "the entire-host Varnish flush"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Media Library Replacement"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Replace existing JPG/PNG Media Library files and references with the selected output format. Complete the steps in order: prepare the replacement, apply the changes, verify the result, and delete the original files when verification is complete."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Scans the Media Library, verifies that the required replacement files are ready, and prepares metadata, database, and active-theme CSS changes. No live references are changed during this step."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Applies the prepared changes to attachment metadata, database references, and active-theme CSS. The website starts using the replacement files after this step."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Checks that replacement files exist and that attachment metadata, database references, and active-theme CSS references were updated correctly."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Permanently deletes the original JPG/PNG files after the replacement has been applied and verified."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Preparing Replacement…"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Preparation Complete"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Preparation Failed"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Resume Preparation"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Retry Preparation"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Prepare Replacement"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Applying Replacement…"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Replacement Applied"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Replacement Failed"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Resume Replacement"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Apply Replacement"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Verifying Replacement…"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Verification Complete"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Retry Verification"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Resume Verification"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Verify Replacement"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Deleting Original Files…"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Original Files Deleted"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Retry Original File Deletion"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Resume Original File Deletion"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Delete Original Files"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "No current proof"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Not tested"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Admin connection"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "How do I run a full-site warm-up from WP-CLI?"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "This command uses UltraCache's existing full-site URL discovery and foreground warm-up pipeline. It warms the original, WebP, and AVIF HTML buckets, builds Separate CSS Bundles, and runs verified Varnish or LiteSpeed stages for the same URLs. Dynamic cart, checkout, account, and other non-cacheable pages are skipped normally."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Replace the three example paths with the PHP executable, WP-CLI file, and WordPress installation paths on your server:"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "WP-CLI runs as a foreground warm-up owner. A newer UI or WP-CLI warm-up takes ownership, while background cron work yields automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Should I use BAN or HTTP PURGE for Varnish?"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Think of PURGE as removing one exact box from a shelf. BAN adds a rule that marks every matching box as unusable. Both prevent visitors from receiving old cached content, but BAN can describe a much larger group in one operation."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Best choice when available: Admin / BAN."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Use it when your host provides a working Varnish admin endpoint and secret. UltraCache can verify one URL with Exact BAN, combine many URLs with Batch BAN, clear all HTML for the site, or clear the entire host. It is the most capable option."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Use HTTP PURGE when Admin / BAN is not available."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Many managed hosts expose only a local HTTP purge endpoint. UltraCache can still invalidate and refill exact URLs correctly, but site-wide clearing may need known-URL purges plus TTL expiry unless the host exposes additional verified HTTP capabilities."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Choosing Admin / BAN does not mean exact invalidation is missing. Exact BAN performs that job in Admin mode, so Exact PURGE is shown as “Unavailable in Admin/BAN mode.” That label describes the selected control method, not a lost feature. Choose the mode your server actually exposes, then use Test Varnish to see which capabilities are Supported."
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Supported"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Unavailable in Admin/BAN mode"
+msgstr ""
+
+
+#: includes/admin/js/varnish.js
+msgid "HTTP connection"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php
+msgid "HTML variant separation is unavailable because the current media configuration uses one HTML bucket."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php
+msgid "The canonical front-page warm pipeline is unavailable for the HTML variant test."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php
+msgid "The canonical warm pipeline did not complete every active HTML variant and Varnish refill stage."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php
+msgid "Varnish served the correct cached HTML object for every active original, WebP, and AVIF bucket after the canonical warm pipeline completed."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php
+msgid "Varnish did not preserve the correct cached HTML object for every active variant bucket."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php
+msgid "HTML variants are not supported because the exact Varnish invalidation and refill test did not complete."
+msgstr ""
+
+#: includes/admin/js/varnish-flush-scope.js
+msgid "HTML pages only — not supported"
+msgstr ""
+
+#: includes/admin/js/varnish-flush-scope.js
+msgid "Entire host — not supported"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-queue-trait.php
+#, php-format
+msgid "The persistent Varnish invalidation queue was unavailable: %1$d URL(s) used the bounded synchronous fallback and %2$d URL(s) were left to expire by TTL."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-queue-trait.php
+#, php-format
+msgid "The persistent Varnish invalidation queue was unavailable, so all %d URL(s) used the bounded synchronous fallback."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-queue-trait.php
+msgid "The current Varnish runtime contract cannot execute targeted invalidation."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-queue-trait.php
+msgid "No valid local URL remained after Varnish invalidation validation."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-queue-trait.php
+#, php-format
+msgid "Accepted %1$d Varnish URL invalidation(s): %2$d inserted, %3$d coalesced, %4$d upgraded, and %5$d could not be persisted. The unpersisted URL(s) were left to expire by TTL."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-queue-trait.php
+#, php-format
+msgid "Accepted %1$d Varnish URL invalidation(s): %2$d inserted, %3$d coalesced, and %4$d upgraded."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-queue-trait.php
+#, php-format
+msgid "The persistent Varnish invalidation queue was unavailable and no URL fit inside the bounded synchronous request limit. %d URL(s) were left to expire by TTL."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-queue-trait.php
+msgid "The persistent Varnish invalidation queue was unavailable. A bounded synchronous fallback may be attempted."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php
+msgid "Run Test Varnish successfully before UltraCache exposes those contracts to runtime invalidation."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The confirmation belongs to a different Media Library replacement job. Run the matching preview again."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The confirmation belongs to a different WordPress user. Create a new confirmation from the current session."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The confirmation belongs to a different destructive replacement action. Run the matching preview again."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The confirmation belongs to a different replacement generation. Run the matching preview again before starting the action."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The confirmation expired. Run the matching preview again before starting the destructive action."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The destructive replacement action was started by a different WordPress user. Resume it from the original user session."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The replacement plan or confirmation changed before the destructive action could start. Run the matching preview again."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "This start-confirmation token has already been consumed. Continue the current action without replaying the token."
+msgstr ""
+
+#: includes/media/queue/class-media-queue-runner-trait.php
+msgid "This media queue item was stopped after repeated worker terminations and must be retried manually."
+msgstr ""
+
+#: includes/media/queue/class-media-queue-runner-trait.php
+msgid "This media queue item reached the stale-worker recovery limit and must be retried manually."
+msgstr ""
+
+#: includes/media/conversion/class-media-source-admission-trait.php:113 includes/media/conversion/class-media-source-admission-trait.php:300
+msgid "The source image dimensions are invalid."
+msgstr ""
+
+#: includes/media/conversion/class-media-source-admission-trait.php:115 includes/media/conversion/class-media-source-admission-trait.php:302
+msgid "The source image dimensions exceed the configured decode limit."
+msgstr ""
+
+#: includes/media/conversion/class-media-source-admission-trait.php:117 includes/media/conversion/class-media-source-admission-trait.php:304
+msgid "The source image pixel count exceeds the configured decode limit."
+msgstr ""
+
+#: includes/media/conversion/class-media-source-admission-trait.php:298
+msgid "The source image cannot be decoded within the available memory budget."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1048
+msgid "Imagick resource limits could not be applied before decoding the source image."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1054
+msgid "Imagick could not read the source image."
+msgstr ""
+
+#: includes/media/conversion/class-media-output-commit-trait.php:91
+msgid "The generated image temporary path is not in the destination directory."
+msgstr ""
+
+#: includes/media/conversion/class-media-output-commit-trait.php:97
+msgid "The encoder produced a temporary image that failed format validation."
+msgstr ""
+
+#: includes/media/conversion/class-media-output-commit-trait.php:109
+msgid "The generated image could not be atomically committed."
+msgstr ""
+
+#: includes/media/conversion/class-media-output-commit-trait.php:121
+msgid "The generated image commit did not produce the expected final file state."
+msgstr ""
+
+#: includes/media/conversion/class-media-output-commit-trait.php:127
+msgid "The atomically committed image failed final format validation."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:993
+msgid "A same-directory temporary WebP path could not be created."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1035
+msgid "The WordPress image editor wrote outside the requested temporary output path."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1082
+#: includes/media/conversion/class-media-encoder-trait.php:1198
+msgid "A same-directory temporary image path could not be created."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1233
+msgid "GD could not write the generated image."
+msgstr ""
+
+
+#: includes/media/conversion/class-media-encoder-trait.php
+msgid "Imagick could not normalize the source image orientation."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php
+msgid "GD could not normalize the source image orientation."
+msgstr ""
+
+#: includes/media/conversion/class-media-source-animation-trait.php
+msgid "Animated WebP sources are preserved because converting them would discard their animation."
+msgstr ""
+
+#: includes/media/conversion/class-media-conversion-test-trait.php
+msgid "Preserved animated WebP"
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:189
+msgid "The active Imagick AVIF delegate did not pass the color-profile self-test."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1174
+msgid "Imagick could not read the source image color profile safely."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1180
+msgid "The source container declares an embedded color profile, but Imagick did not expose it."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1194
+msgid "Imagick could not restore the source color profile after metadata cleanup."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1217
+msgid "The active Imagick delegate discarded the source color profile and could not convert the pixels safely to sRGB."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1222
+msgid "A same-directory temporary image path could not be created for the sRGB fallback."
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:1227
+msgid "Imagick could not encode the color-managed sRGB fallback."
+msgstr ""
+
+#: includes/media/conversion/class-media-source-color-profile-trait.php:67
+msgid "The source image contains color-profile metadata that this encoder cannot preserve safely."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:253
+msgid "Imagick passed opaque, transparent, and color-profile AVIF tests."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:254
+msgid "Imagick passed the pixel tests, but profiled sources will be skipped because color management was not verified."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:285
+msgid "The bundled color-profile AVIF self-test image is missing or unreadable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:290
+msgid "The color-profile AVIF self-test source failed decoder admission."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:295
+msgid "Unable to create the Imagick color-profile AVIF self-test file."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:305
+msgid "Imagick could not decode the color-profile AVIF self-test source."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:309
+msgid "Imagick did not expose the bundled source ICC profile."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:314
+msgid "Imagick could not restore the bundled source ICC profile."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:318
+msgid "Imagick did not create a valid AVIF from the profiled JPEG."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:323
+msgid "Imagick neither preserved the ICC profile nor converted the pixels to sRGB."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:327
+msgid "Imagick could not encode the sRGB color-management fallback."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:330
+msgid "Imagick preserved the source ICC profile or converted the pixels safely to sRGB."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:336
+msgid "Imagick color-profile AVIF test failed: %s"
+msgstr ""
+
+
+#: includes/media/conversion/class-media-encoder-trait.php:1196
+msgid "Imagick could not resize the uploaded image within the configured maximum side."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:322
+msgid "Imagick could not create the sRGB reference pixels for the color-profile self-test."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:350
+msgid "Imagick could not decode the generated color-profile AVIF for pixel validation."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:354
+msgid "Imagick could not inspect the generated color-profile AVIF during pixel validation."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:357
+msgid "Imagick could not normalize the generated color-profile AVIF to sRGB for pixel validation."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:435
+msgid "The color-profile AVIF dimensions do not match the 32x32 source."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:449
+msgid "The color-profile AVIF test is missing the %s sample."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:465
+msgid "The generated AVIF color samples differ too far from the sRGB reference."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:474
+msgid "The generated AVIF passed the color-managed sRGB pixel round trip."
+msgstr ""
+
+#: includes/media/conversion/class-media-output-commit-trait.php
+msgid "The generated image freshness timestamp could not be verified."
+msgstr ""
+
+#: includes/media/conversion/class-media-output-commit-trait.php
+msgid "The generated image timestamp could not be aligned with its source file."
+msgstr ""
+
+#: includes/media/conversion/class-media-output-commit-trait.php
+msgid "The generated image timestamp remained older than its source file."
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "All ESI fragments — last 24 hours"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "WooCommerce mini-cart ESI — last 24 hours"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Sampling rate"
+msgstr ""
+
+#. translators: %d: ESI request sampling interval.
+#: includes/admin/js/varnish.js
+#, php-format
+msgid "1 in %d fragment requests"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Sampled requests"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Estimated requests"
+msgstr ""
+
+#. translators: 1: estimated requests, 2: estimated requests per hour.
+#: includes/admin/js/varnish.js
+#, php-format
+msgid "%1$s total · %2$s per hour"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Estimated request mix"
+msgstr ""
+
+#. translators: 1: estimated public ESI requests, 2: estimated private ESI requests.
+#: includes/admin/js/varnish.js
+#, php-format
+msgid "%1$s public · %2$s private"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Average render time"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Maximum render time"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Average output size"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Contained errors"
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "No sampled requests"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3636
+msgid "Lazy load third-party iframes"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3637
+msgid "Delays eligible offscreen third-party embeds, such as Google Maps and videos, until they are within 400 pixels of the viewport. Payment, authentication, CAPTCHA, hidden or functional frames, and critical checkout/account pages remain unchanged."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "Varnish invalidation is scheduled independently; page warming remains paused because Background warm pages per minute is 0."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "Varnish invalidation is waiting for the next background worker run."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "The Varnish invalidation operation budget is exhausted for this minute; invalidation will continue in the next minute."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "Queued Varnish invalidation is yielding to an active foreground warm-up."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "Persistent Varnish invalidation is waiting for its next operation or retry window."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "Page warming will continue after invalidation finishes."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "Page warming is queued and paused because Background warm pages per minute is 0."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "No background page work is enabled or waiting."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Scheduled Varnish invalidation"
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php
+msgid "Page warming remains paused because Background warm pages per minute is 0."
+msgstr ""
+
+#: includes/admin/js/varnish.js:349
+#: includes/admin/js/varnish.js:383
+msgid "%1$d of %2$d"
+msgstr ""
+
+#: includes/admin/js/varnish.js:350
+msgid "%d verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:385
+msgid "Bucket %d"
+msgstr ""
+
+#: includes/admin/js/varnish.js:325
+msgid "Configuration changed · run Test Varnish again"
+msgstr ""
+
+#: includes/admin/js/varnish.js:280
+msgid "Configured · %d min grace"
+msgstr ""
+
+#: includes/admin/js/varnish.js:263
+msgid "Disabled · 0 min grace"
+msgstr ""
+
+#: includes/admin/js/varnish.js:392
+msgid "HIT/STALE not verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:392
+msgid "HIT/STALE verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:380
+msgid "HTML variant verification details"
+msgstr ""
+
+#: includes/admin/js/varnish.js:390
+msgid "HTTP %s"
+msgstr ""
+
+#: includes/admin/js/varnish.js:272
+msgid "Inactive · %d min configured"
+msgstr ""
+
+#: includes/admin/js/varnish.js:378
+msgid "None reported"
+msgstr ""
+
+#: includes/admin/js/varnish.js:342
+msgid "Not applicable · fewer than two active HTML buckets"
+msgstr ""
+
+#: includes/admin/js/varnish.js:341
+msgid "Not applicable · one active HTML bucket (%s)"
+msgstr ""
+
+#: includes/admin/js/varnish.js:333
+msgid "Proof expired · run Test Varnish again"
+msgstr ""
+
+#: includes/admin/js/varnish.js:538
+msgid "Stale grace policy"
+msgstr ""
+
+#: includes/admin/js/varnish.js:309
+msgid "Supported · current endpoint proof"
+msgstr ""
+
+#: includes/admin/js/varnish.js:393
+msgid "Varnish detected"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-stale-refresh-trait.php:34
+msgid "Varnish grace follows the Automation & Scheduling lifetime settings and is currently 0 seconds."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-stale-refresh-trait.php:37
+msgid "Varnish grace is configured by Automation & Scheduling but inactive because Varnish integration is disabled."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-stale-refresh-trait.php:41
+msgid "Varnish grace is configured from the Automation & Scheduling stale window: %d seconds."
+msgstr ""
+
+#: includes/admin/js/varnish.js:393
+msgid "Varnish not detected"
+msgstr ""
+
+#: includes/admin/js/varnish.js:366
+msgid "Verification failed"
+msgstr ""
+
+#: includes/admin/js/varnish.js:360
+msgid "Verification incomplete · endpoint proof is not current"
+msgstr ""
+
+#: includes/admin/js/varnish.js:383
+msgid "Verified buckets"
+msgstr ""
+
+#: includes/admin/js/varnish.js:391
+msgid "returned %s"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3806
+msgid "Ignore color profile preservation"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3807
+msgid "Allow AVIF/WebP conversion when an embedded ICC/ICM profile cannot be verified or preserved. Converted colors may differ slightly; Convert new uploads and Media Library Replacement still change attachment files when their workflows run."
+msgstr ""
+
+#: includes/media/conversion/class-media-source-animation-trait.php:144
+msgid "The requested image conversion was skipped by the active media policy."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Upload image format"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Choose the format used for the actual uploaded attachment file when Convert new uploads is enabled."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "Replace existing JPG/PNG Media Library files and references with the selected image replacement format. Complete the steps in order: prepare the replacement, apply the changes, verify the result, and delete the original files when verification is complete."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "Image replacement format"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "Choose the target format that replaces existing JPG/PNG Media Library files and references."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "Image replacement format is locked because the destructive Do stage has started. Complete the current job or use the existing recovery path before changing it."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "Image replacement format is locked until the current destructive replacement job is complete or recovered."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The image replacement format changed after the previous readiness or Prepare plan. Run Prepare again to build a new plan for the selected format."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The image replacement policy changed after the readiness inventory. Run the inventory again."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The image replacement policy changed after Prepare. Restart readiness and Prepare."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The Media Library replacement policy changed after Prepare. Restart Prepare before running Do."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The Media Library replacement policy changed after Do. Restart the replacement plan."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js includes/media/replacement/class-media-replacement-session-trait.php includes/media/replacement/class-media-replacement-readiness-trait.php includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "The Media Library replacement policy changed after Verify."
+msgstr ""
+
+#: includes/settings/class-settings-persistence-trait.php
+msgid "Image replacement format cannot change after the destructive Do stage has started. Complete the current job or use the existing recovery path first."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Rebuild Preparation"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php:395
+msgid "Replacement readiness generation is paused and can be resumed."
+msgstr ""
+
+#. translators: 1: target image format, 2: verification pass, 3: scanned attachments, 4: total candidate attachments.
+#: includes/media/replacement/class-media-replacement-readiness-trait.php:400
+msgid "Generating and verifying exact %1$s replacement files. Pass %2$d scanned %3$d of %4$d candidate attachments."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php:845
+msgid "Exact replacement generation is paused."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:748
+msgid "Generating"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:749
+msgid "Paused"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:752
+msgid "generated unit(s)"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php:336
+msgid "The exact target queue row was skipped and no replacement file was generated."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:848
+msgid "AVIF source decoding was not tested."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:851
+msgid "AVIF to WebP conversion was not tested."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:884
+msgid "Imagick AVIF source decoding is unavailable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:885
+msgid "Imagick AVIF to WebP conversion is unavailable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:891
+msgid "The bundled AVIF source-decode fixture or its JPEG reference is missing or unreadable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:930
+msgid "Imagick AVIF to WebP conversion was not attempted because AVIF source decoding failed."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:940
+msgid "Imagick WebP encoding is unavailable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:946
+msgid "Unable to create the Imagick AVIF to WebP self-test file."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:958
+msgid "Imagick did not create a valid WebP from the bundled AVIF source."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:973
+msgid "Imagick decoded the bundled AVIF, encoded WebP, and passed sampled pixel validation."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:987
+msgid "Imagick AVIF source capability test failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1018
+msgid "GD AVIF source decoding is unavailable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1047
+msgid "GD could not decode the AVIF capability reference JPEG: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1050
+msgid "GD could not decode the AVIF capability reference JPEG."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1070
+msgid "GD could not decode the bundled AVIF source fixture: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1073
+msgid "GD could not decode the bundled AVIF source fixture."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1096
+msgid "GD AVIF to WebP conversion was not attempted because AVIF source decoding failed."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1101
+msgid "GD WebP encode/decode support is unavailable."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1106
+msgid "Unable to create the GD AVIF to WebP self-test file."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1127
+msgid "GD AVIF to WebP encoding failed: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1130
+msgid "GD did not create a valid WebP from the bundled AVIF source."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1150
+msgid "GD could not decode the AVIF-to-WebP self-test output: %s"
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1153
+msgid "GD could not decode the AVIF-to-WebP self-test output."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1168
+msgid "GD decoded the bundled AVIF, encoded WebP, and passed sampled pixel validation."
+msgstr ""
+
+#: includes/media/class-media-avif-self-test-trait.php:1182
+msgid "GD AVIF source capability test failed: %s"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:309
+msgid "Imagick AVIF encode self-test"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:309
+msgid "Imagick AVIF decode self-test"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:309
+msgid "Imagick AVIF to WebP self-test"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:309
+msgid "GD AVIF encode self-test"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:309
+msgid "GD AVIF decode self-test"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:309
+msgid "GD AVIF to WebP self-test"
+msgstr ""
+
+#: includes/admin/js/dashboard-diagnostics-ui.js:309
+msgid "AVIF source to WebP capability"
+msgstr ""
+
+#: includes/media/conversion/class-media-encoder-trait.php:281
+msgid "No verified AVIF decoder and WebP encoder combination is available."
+msgstr ""
+
+#: includes/media/conversion/class-media-conversion-test-trait.php:381
+msgid "Source format"
+msgstr ""
+
+#: includes/media/conversion/class-media-conversion-test-trait.php:395
+#: includes/media/conversion/class-media-conversion-test-trait.php:399
+msgid "Preserved animated image"
+msgstr ""
+
+#: includes/media/conversion/class-media-conversion-test-trait.php:507
+#: includes/media/conversion/class-media-conversion-test-trait.php:573
+msgid "No readable AVIF, JPG, or PNG images were found in the Media Library."
+msgstr ""
+
+#: includes/media/conversion/class-media-source-animation-trait.php:173
+msgid "Animated AVIF sources are preserved because converting them would discard their animation."
+msgstr ""
+
+#: includes/media/conversion/class-media-upload-conversion-trait.php:136
+msgid "UltraCache upload conversion requires a verified decoder and WebP encoder for the uploaded image format."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:664
+msgid "A destination collision appeared before atomic publication. No existing file was changed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:914
+msgid "A destination filename collision blocked Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:578
+msgid "A different AVIF/WebP file already exists at the planned Media Library destination. Select overwrite with backup and restart Prepare, or resolve the collision manually."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:654
+msgid "Choose what Prepare does when a different AVIF/WebP file already exists at the planned Media Library destination."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:282
+msgid "Different destination file exists. Prepare blocks it unless overwrite with verified backup is selected."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:664
+msgid "Different existing destination files will be backed up before atomic replacement. Backups remain available for rollback until Delete Originals completes."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:653
+msgid "Existing destination files"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:284
+msgid "Existing destination was atomically overwritten after a verified backup was persisted."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:643
+msgid "Generated image could not be staged beside the planned Media Library destination."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-cleanup-trait.php:469
+msgid "Overwrite backup cleanup failed."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:113
+msgid "Overwrite with backup is selected. Prepare may replace different existing AVIF/WebP destination files after preserving verified UltraCache backups for rollback until Delete Originals completes."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:660
+msgid "Overwrite with verified backup"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:716
+msgid "Published file fingerprint could not be persisted."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:703
+msgid "Published file registry update failed and the destination could not be rolled back."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:748
+msgid "Published file registry update failed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:515
+msgid "Replacement destination plan could not be persisted."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-registry-trait.php:91
+msgid "Restart is unavailable after the destructive replacement stage has started."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:659
+msgid "Stop and report collisions"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:695
+msgid "The atomically published replacement file failed validation and could not be rolled back."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:694
+msgid "The atomically published replacement file failed validation and the previous destination state was restored."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js:667
+msgid "The collision policy differs from the active replacement plan. Restart Prepare to apply the selected policy."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:672
+msgid "The destination changed after collision validation. No overwrite was performed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:432
+msgid "The destination was restored, but its UltraCache backup could not be removed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:445
+msgid "The destination was restored, but the replacement registry could not be updated."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:608
+msgid "The existing destination backup failed verification."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:589
+msgid "The existing destination changed after UltraCache created its overwrite backup. Prepare stopped without replacing the newer file."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:600
+msgid "The existing destination could not be backed up before overwrite."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:593
+msgid "The existing destination could not be fingerprinted before overwrite."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:367
+msgid "The original destination is already restored, but its UltraCache backup could not be removed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:380
+msgid "The original destination is restored, but the replacement registry could not be updated."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:625
+msgid "The overwrite backup was created, but its registry state could not be persisted."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:421
+msgid "The overwritten destination backup could not be atomically restored."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:462
+msgid "The overwritten destination backup could not be removed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-metadata-trait.php:1106
+#: includes/media/replacement/class-media-replacement-metadata-trait.php:1191
+msgid "The overwritten destination backup could not be restored."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:406
+msgid "The overwritten destination backup could not be staged for restoration."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:386
+msgid "The overwritten destination backup is missing or no longer matches the replacement registry."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:472
+msgid "The overwritten destination backup was removed, but the replacement registry could not be updated."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:397
+msgid "The overwritten destination changed after UltraCache publication, so its backup was not restored over the newer file."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:358
+msgid "The overwritten destination registry row is invalid."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:551
+msgid "The persisted overwrite backup is missing or invalid. Prepare stopped without changing the destination."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:775
+msgid "The replacement destination created by the failed publication could not be removed."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:805
+msgid "The replacement job could not be resolved for restart cleanup."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:426
+msgid "The restored destination does not match its persisted backup."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:414
+msgid "The staged overwritten destination backup failed validation."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:680
+msgid "The staged replacement file could not be atomically published."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:652
+msgid "The staged replacement file failed validation."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:531
+msgid "Two replacement registry rows resolve to the same Media Library destination but require different image bytes. Overwrite cannot resolve an internal replacement-plan collision."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:544
+msgid "WordPress filesystem is not available for Media Library replacement publication."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:504
+msgid "WordPress upload destination could not be resolved consistently."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:776
+msgid "A pre-existing replacement destination was preserved after the failed publication."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-files-trait.php:781
+msgid "The replacement destination changed after publication, so the newer file was not removed."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-test-action-trait.php:282
+msgid "Every configured Varnish admin endpoint has current isolated-canary proof for exact BAN behavior."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php:300
+msgid "Admin BAN transport is configured. Exact URL invalidation requires a successful isolated canary, while HTML-only and entire-host scopes require independent topology proof."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php:315
+msgid "Site-wide flush actions remain unavailable until the requested scope is independently behavior-verified."
+msgstr ""
+
+
+#: includes/admin/js/varnish.js:541
+msgid "Control connection"
+msgstr ""
+
+#: includes/admin/js/varnish.js:544
+msgid "Shared-cache behavior"
+msgstr ""
+
+#: includes/admin/js/varnish.js:547
+msgid "Not verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:632
+msgid "Exact invalidation verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:634
+msgid "Admin transport verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:634
+msgid "Transport verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:843
+msgid "The configured Varnish control connection could not be authenticated or reached. Check the endpoint and secret, then run Test Varnish again."
+msgstr ""
+
+#: includes/admin/js/varnish.js:846
+msgid "The Varnish control connection succeeded, but exact cache invalidation was not verified for the active VCL. UltraCache will use the next verified fallback."
+msgstr ""
+
+#: includes/admin/js/varnish.js:929
+msgid "Connected"
+msgstr ""
+
+#: includes/admin/js/varnish.js:931
+msgid "Connection failed"
+msgstr ""
+
+#: includes/admin/js/varnish-flush-scope.js:74
+msgid "HTML pages only"
+msgstr ""
+
+#: includes/admin/js/varnish-flush-scope.js:182
+msgid "HTML pages only — not tested"
+msgstr ""
+
+#: includes/admin/js/varnish-flush-scope.js:76
+msgid "Entire host"
+msgstr ""
+
+#: includes/admin/js/varnish-flush-scope.js:190
+msgid "Entire host — not tested"
+msgstr ""
+
+#: includes/admin/js/varnish.js:164
+msgid "Proof expired"
+msgstr ""
+
+#: includes/admin/js/varnish.js:481
+msgid "Partially verified"
+msgstr ""
+
+#: includes/admin/js/varnish.js:484
+msgid "Partially tested"
+msgstr ""
+
+#: includes/admin/js/varnish.js:490
+msgid "Not configured"
+msgstr ""
+
+#: includes/admin/js/varnish.js:632
+msgid "Exact proof expiry"
+msgstr ""
+
+#: includes/admin/js/varnish.js:643
+msgid "Exact PURGE"
+msgstr ""
+
+#: includes/admin/js/varnish.js:645
+msgid "Exact BAN"
+msgstr ""
+
+#: includes/admin/js/varnish.js:646
+msgid "Batch BAN"
+msgstr ""
+
+#: includes/admin/js/varnish.js:647
+msgid "HTML-only flush"
+msgstr ""
+
+#: includes/admin/js/varnish.js:648
+msgid "Entire-host flush"
+msgstr ""
+
+#: includes/admin/js/varnish.js:662
+msgid "Flush scope status"
+msgstr ""
+
+#: includes/admin/js/varnish.js:663
+msgid "ESI capability status"
+msgstr ""
+
+#: includes/admin/js/varnish.js:715
+msgid "Exact invalidation"
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:917
+msgid "The public-path ESI probe was skipped because no configured HTTP endpoint was reachable."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:927
+msgid "HTML variants were not tested because exact invalidation was not verified on every configured HTTP endpoint."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1197
+msgid "The two-canary batch BAN expression could not be built."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1289
+msgid "Both batch BAN canaries require a cacheable WordPress-served route before the batch expression is tested."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1304
+msgid "A batch BAN canary changed before the batch invalidation command was sent."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1360
+msgid "One batch BAN expression invalidated both isolated canary URLs and both refills stabilized on generation 2."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1361
+msgid "The batch BAN command was accepted, but both canary URLs did not expose generation 2."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1388
+msgid "Batch BAN was not tested because the canonical public canary path cannot be bound to one specific Admin control socket in a multi-node topology."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1444
+msgid "Every configured Varnish control endpoint passed the two-URL batch BAN proof."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1446
+msgid "Batch BAN was behavior-verified on only part of the configured control-endpoint topology."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1448
+msgid "The two-URL batch BAN transport was not tested because the required cacheable canaries were unavailable."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1450
+msgid "At least one configured Varnish control endpoint failed the two-URL batch BAN proof."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1451
+msgid "The two-URL batch BAN transport was tested on only part of the configured endpoint topology."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1515
+msgid "The flush-scope proof requires a cacheable WordPress-served HTML canary route."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1533
+msgid "The flush-scope proof requires a stable opaque static canary."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1566
+msgid "The HTML or static canary changed before the scope invalidation command was sent."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1614
+msgid "HTML-only flush renewed the HTML canary while the opaque static canary remained cached."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1615
+msgid "Entire-host flush renewed both the HTML and opaque static canaries."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1616
+msgid "The accepted scope invalidation command did not produce the required HTML/static behavior."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1642
+msgid "HTML-only and entire-host flush were not tested because the canonical public canary path cannot be bound to one specific Admin control socket in a multi-node topology."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1781
+msgid "Every configured endpoint passed both HTML-only and entire-host behavior proofs."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1783
+msgid "Only part of the requested Varnish flush topology was behavior-verified."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1785
+msgid "The HTML-only and entire-host transports were not tested because the required cacheable canaries were unavailable."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1787
+msgid "The configured Varnish transport did not pass HTML-only or entire-host behavior proof."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1788
+msgid "The HTML-only or entire-host transport was tested on only part of the configured endpoint topology."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2023
+msgid "HTML variants were not tested because the exact Varnish invalidation and refill test did not complete."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-canary-trait.php:320
+msgid "The static Varnish canary path could not be resolved."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-canary-trait.php:325
+msgid "The static Varnish canary directory could not be created."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-canary-trait.php:332
+msgid "The static Varnish canary file could not be written."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-esi-capability-trait.php:152
+msgid "The stored public-path ESI behavior proof expired. Run Test Varnish again."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php:203
+msgid "The configured Varnish transport did not pass the HTML-only or entire-host behavior proof."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php:204
+msgid "Run Test Varnish to verify HTML-only or entire-host invalidation for every configured endpoint."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php:633
+msgid "The configured Varnish diagnostic transport is unavailable."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php:656
+msgid "The Varnish diagnostic scope expression could not be built."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php:710
+#, php-format
+msgid "The %1$s diagnostic invalidation command was accepted by %2$d endpoint(s)."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-flush-scope-trait.php:711
+#, php-format
+msgid "The %1$s diagnostic invalidation command failed on %2$d endpoint(s)."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1837
+msgid "The soft-purge diagnostic endpoint or canary URL is invalid."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1991
+msgid "Soft purge was not tested because no stable cacheable canary route was available for this endpoint."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1994
+msgid "The endpoint did not accept the diagnostic soft PURGE request."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:1997
+msgid "Soft PURGE was accepted, but the next response did not expose the cached first generation as a high-confidence STALE/grace response."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2000
+msgid "The endpoint exposed a stale response after soft PURGE, but bounded polling did not reach a stable high-confidence HIT for the new origin generation."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2003
+msgid "The endpoint passed the soft-purge sequence: cached generation 1 became STALE, revalidated at origin, and returned generation 2 as a stable HIT."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2049
+msgid "Soft-purge behavior proof applies only to HTTP endpoint mode with Soft or Automatic invalidation and a positive stale-while-revalidate window."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2081
+msgid "Authenticated origin revalidation was not tested because no endpoint reached the soft-PURGE behavior step."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2106
+msgid "Soft expiry, stale-to-fresh refill, and authenticated origin revalidation were verified."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2131
+msgid "Every configured HTTP endpoint passed soft expiry, stale-to-fresh refill, and authenticated origin-revalidation proof."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2134
+msgid "Soft purge was not tested because no configured endpoint exposed a stable cacheable canary route."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2137
+msgid "Soft purge is verified on only part of the configured HTTP endpoint topology. Runtime soft purge remains disabled."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2140
+msgid "Authenticated origin revalidation was not verified."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-behavior-test-trait.php:2143
+msgid "The configured HTTP endpoint topology did not pass the complete soft-purge stale-to-fresh behavior proof."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-performance-trait.php:433
+msgid "The Varnish transport, endpoint/VCL capability contract, or HTML variant policy changed. Run the performance snapshot again."
+msgstr ""
+
+#: includes/media/queue/class-media-queue-runner-trait.php
+msgid "A media worker is active. Retry Failed can run after the current image finishes."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Recovers interrupted queue rows and moves failed rows back to pending so image conversion can continue."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Some images outside the Media Library stay as JPEG or PNG even though Image Rewrite is enabled. Can I do something?"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Yes. UltraCache normally creates optimized AVIF or WebP versions of local images used by your theme or plugins in the background. If a conversion was interrupted or failed, open Media Optimization and press Retry Failed. UltraCache will recover interrupted jobs and retry failed image conversions. The original theme or plugin image remains unchanged."
+msgstr ""
+
+#: includes/media/queue/class-media-queue-runner-trait.php
+msgid "The media worker lost its queue claim before the exception could be saved."
+msgstr ""
+
+#: includes/media/queue/class-media-queue-runner-trait.php
+msgid "UltraCache could not update every retryable media queue row."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php
+#, php-format
+msgid "intermediate size %s"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php
+msgid "main image"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php
+#, php-format
+msgid "Attachment %1$d, %2$s, %3$s: %4$s"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php
+msgid "The required target file is not ready."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php
+#, php-format
+msgid "Replacement readiness stopped after detecting no conversion progress. %1$d required %2$s variant(s) remain blocked. %3$s"
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-readiness-trait.php
+#, php-format
+msgid "Replacement readiness complete, but blockers remain. %s"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Intermediate image"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Main image"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Required output is not ready."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Please run “Scan Media Library & Repair Status” and rerun “Start / Resume Conversion”."
+msgstr ""
+
+#. translators: 1: readiness generation match, 2: current candidates, 3: planned candidates, 4: scanned candidates, 5: unique registry variants, 6: readiness variants, 7: metadata mapping rows, 8: skipped registry rows, 9: failed registry rows, 10: scan insertion failures.
+#: includes/media/replacement/class-media-replacement-registry-trait.php
+msgid "Prepare consistency check failed. Generation match: %1$s · candidates current/planned/scanned: %2$d/%3$d/%4$d · unique variants registry/readiness: %5$d/%6$d · metadata mappings: %7$d · registry skipped/failed: %8$d/%9$d · scan failures: %10$d."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+#: includes/admin/js/media-replacement-ui.js
+msgid "Preparation failed. Open Advanced / Manual Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Database scan"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "rows"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "last batch"
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "cursor"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js
+msgid "Open Decide Blockers and resolve every blocker group to finalize Prepare."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-blockers-trait.php
+msgid "Blocker decisions were saved, but the affected database or Theme CSS plans could not be reset. Use Restart Replacement Plan."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-blockers-trait.php
+msgid "Blocker decisions are saved. Prepare is finalizing the affected file, database, and Theme CSS plans; Apply remains a separate user action."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-blockers-trait.php
+msgid "Blocker decisions are saved. Prepare is running the final pre-Do guard; Apply remains a separate user action."
+msgstr ""
+
+#. translators: 1: database table, 2: database column.
+#: includes/media/replacement/class-media-replacement-database-trait.php
+msgid "The bounded database reference query failed for %1$s.%2$s. Restart Prepare after correcting the database error."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-database-trait.php
+msgid "A database reference could not be persisted in the replacement index. Restart Prepare after correcting the database error."
+msgstr ""
+
+#. translators: 1: database table, 2: database column.
+#: includes/media/replacement/class-media-replacement-database-trait.php
+msgid "The bounded database reference cursor made no progress for %1$s.%2$s. Restart Prepare after checking the table key."
+msgstr ""
+
+#. translators: 1: completed columns, 2: total columns, 3: rows scanned in this request, 4: total rows scanned, 5: indexed references, 6: current table, 7: current column, 8: current keyset/offset cursor.
+#: includes/media/replacement/class-media-replacement-database-trait.php
+msgid "Database reference index: %1$d of %2$d text-like columns complete; %3$d rows scanned in this request, %4$d total; %5$d references indexed. Current: %6$s.%7$s · cursor %8$s."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-registry-trait.php
+msgid "Prepare could not defer complete attachments that contain blocker rows. Restart Prepare."
+msgstr ""
+
+#. translators: 1: blocker groups, 2: affected attachments.
+#: includes/media/replacement/class-media-replacement-registry-trait.php
+msgid "Prepare recorded %1$d blocker group(s) affecting %2$d attachment(s) and is continuing the remaining discovery and planning work."
+msgstr ""
+
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "Prepare completed discovery and planning. Resolve the recorded blocker groups to finalize the plan."
+msgstr ""
+
+#. translators: 1: blocker groups, 2: affected attachments.
+#: includes/media/replacement/class-media-replacement-workflow-trait.php
+msgid "Prepare completed discovery and planning with %1$d blocker group(s) affecting %2$d attachment(s). Open Decide Blockers to finalize the plan."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js:1746
+msgid "Blocker decisions were returned for a different replacement job. Refresh the workflow status and open Decide Blockers again."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js:1738
+msgid "The blocker response is incomplete. Refresh the workflow status and open Decide Blockers again."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js:1743
+msgid "The blocker response did not identify its replacement job."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js:1750
+msgid "The blocker response group count is inconsistent. Refresh the workflow status and open Decide Blockers again."
+msgstr ""
+
+
+#: includes/admin/js/media-replacement.js:1753
+msgid "The blocker response did not contain the groups reported by Prepare. Refresh the workflow status and open Decide Blockers again."
+msgstr ""
+
+#: includes/admin/js/media-replacement.js:1831
+msgid "The blocker modal is not attached to an active replacement job."
+msgstr ""
+
+
+
+#: includes/media/replacement/class-media-replacement-files-trait.php
+msgid "An overwritten destination could not be restored before restarting Prepare."
+msgstr ""
+
+
+
+#: includes/admin/js/ui.js
+msgid "Some converted images have a color shift, but I need strict color accuracy. What should I do?"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Disable Ignore color profile preservation. UltraCache will then require embedded ICC/ICM profiles to be read and preserved or converted safely. Images whose profiles cannot be verified or preserved may be skipped and remain in their original JPG/PNG format instead of being converted to AVIF/WebP."
+msgstr ""
+
+
+#: generated in UltraCache 2.59.13.02
+msgid "Elementor Cache"
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Elementor native cache clear and per-page generated CSS warm reconciliation are available."
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Elementor is active, but its native cache clear manager is unavailable in this request."
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Elementor was not detected."
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Elementor native cache clear is unavailable."
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Elementor cache and generated files were cleared successfully."
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Elementor cache clear failed: %s"
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Handled by the Elementor-originated cache clear that requested this Flush All."
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Elementor was not detected or its native cache clear is unavailable."
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "Also clear Elementor's native cached element output and generated files when Flush All Cache runs. Each page's referenced Elementor CSS is verified and regenerated as needed before that page is stored or warmed by UltraCache."
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "I use Elementor. How should Element Cache be configured?"
+msgstr ""
+
+#: generated in UltraCache 2.59.13.02
+msgid "For mostly static Elementor sites, set Elementor's Element Cache expiration to 1 Year if that cache lifetime fits the site's dynamic content. This controls Elementor's cached element output; it does not control generated CSS-file clearing. UltraCache does not change this Elementor setting. When Elementor generated CSS is cleared, UltraCache verifies the Elementor CSS referenced by each page and regenerates missing files before that page is stored or warmed. Verify dynamic widgets, shortcodes, forms, personalized content, cart, checkout, and account output before using a long Element Cache expiration."
+msgstr ""
+
+
+#: includes/integrations/elementor/class-elementor-cache-coherency-trait.php
+msgid "Elementor native generated-files and element-output cache clear is available, but per-page generated CSS warm reconciliation is unavailable."
+msgstr ""
+
+#: includes/integrations/elementor/class-elementor-page-css-dependency-trait.php
+msgid "Elementor CSS dependency post-%1$d.css is unresolved: %2$s"
+msgstr ""
+
+#: includes/integrations/elementor/class-elementor-page-css-dependency-trait.php
+msgid "Elementor CSS dependency reconciliation failed: %s"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "HTML JS dependency analysis was not available for this URL."
+msgstr ""
+
+#: includes/admin/js/diagnostics.js
+msgid "Strong JS Dependency Suggestions"
+msgstr ""
+
+#: includes/admin/js/diagnostics.js
+msgid "Enter a same-site URL. Analyze HTML JS Dependencies looks for high-confidence silent execution-order conflicts, including lifecycle events that can be missed without a console error. Scan Browser Runtime Errors opens the page in your browser and captures console/runtime errors. Scan buttons do not change either list automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js:999
+msgid "I completed all the steps above and there are no JavaScript errors, but something still does not work. What should I do?"
+msgstr ""
+
+#: includes/admin/js/ui.js:1000
+msgid "Open JS Defer / Delay Safeguards & Diagnostics and click Analyze HTML JS Dependencies. Some JavaScript problems do not produce console errors. A script may load successfully but execute too late, miss an initialization event, or run in the wrong order relative to another script it depends on."
+msgstr ""
+
+#: includes/admin/js/ui.js:1001
+msgid "UltraCache will analyze the scripts used on the page and look for strong signs of dependency and execution-order conflicts. Do not add every suggested script blindly. Start with the page element or functionality that is not working, identify which plugin, theme, or component it belongs to, and compare that with the findings. Apply the most relevant safeguard first, then test the page again."
+msgstr ""

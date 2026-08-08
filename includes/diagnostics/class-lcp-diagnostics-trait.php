@@ -68,9 +68,10 @@ trait Ultra_Cache_WP_LCP_Diagnostics_Trait
         $fallback = array(
             'available' => false,
             'message'   => __('LCP observation details are unavailable.', 'ultracache'),
-            'pageHash'  => '',
-            'pageUrl'   => '',
-            'mappings'  => array(),
+            'pageHash'       => '',
+            'pageUrl'        => '',
+            'manualSelector' => '',
+            'mappings'       => array(),
         );
 
         if (!class_exists('Ultra_Cache_Engine') || !method_exists('Ultra_Cache_Engine', 'get_instance')) {

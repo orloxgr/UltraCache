@@ -393,12 +393,14 @@ private function script_handle_has_inline_before_segments($handle)
 
         return in_array($handle, array(
             'ultracache-mailerlite-lazy-nonce',
+            'ultracache-async-css-runtime',
             'ultracache-runtime-js-scan-collector',
             'ultracache-delayed-js-loader',
             'ultracache-runtime-font-css-map',
             'ultracache-dynamic-icon-font-delay',
             'ultracache-font-display-cssom-patch',
             'ultracache-woocommerce-cart-fragments-delay',
+            'ultracache-woocommerce-esi-optin',
             'ultracache-lcp-observer',
         ), true);
     }
@@ -420,7 +422,7 @@ private function script_handle_has_inline_before_segments($handle)
 
         $src = isset($record['src']) ? (string) $record['src'] : '';
         if ('' !== $src && false !== strpos($src, '/ultracache/assets/js/')) {
-            return (false !== strpos($src, '/mailerlite-lazy-nonce.js') || false !== strpos($src, '/runtime-js-scan-collector.js') || false !== strpos($src, '/delayed-js-loader.js') || false !== strpos($src, '/runtime-font-css-map.js') || false !== strpos($src, '/dynamic-icon-font-delay.js') || false !== strpos($src, '/font-display-cssom-patch.js') || false !== strpos($src, '/woocommerce-cart-fragments-delay.js') || false !== strpos($src, '/lcp-observer.js'));
+            return (false !== strpos($src, '/mailerlite-lazy-nonce.js') || false !== strpos($src, '/async-css-runtime.js') || false !== strpos($src, '/runtime-js-scan-collector.js') || false !== strpos($src, '/delayed-js-loader.js') || false !== strpos($src, '/runtime-font-css-map.js') || false !== strpos($src, '/dynamic-icon-font-delay.js') || false !== strpos($src, '/font-display-cssom-patch.js') || false !== strpos($src, '/woocommerce-cart-fragments-delay.js') || false !== strpos($src, '/woocommerce-esi-optin.js') || false !== strpos($src, '/lcp-observer.js'));
         }
 
         return false;

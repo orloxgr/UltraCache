@@ -19,8 +19,12 @@
 	var started = Date.now ? Date.now() : 0;
 	var readyActive = false;
 	var readyHooked = false;
+	var readyHookTarget = null;
 	var readyQueue = [];
 	var readyOriginal = null;
+	var readyThenHooked = false;
+	var readyThenTarget = null;
+	var readyThenOriginal = null;
 	var executedScriptKeys = Object.create(null);
 	var skippedDetached = 0;
 	var skippedDuplicate = 0;
@@ -175,23 +179,46 @@
 
 	function tryHookReady() {
 		var jq = window.jQuery;
-		if (!readyActive || readyHooked || !jq || !jq.fn || typeof jq.fn.ready !== 'function') {
+		if (!readyActive || !jq) {
 			return;
 		}
 
-		readyOriginal = jq.fn.ready;
-		jq.fn.ready = function (fn) {
-			if (readyActive && typeof fn === 'function') {
-				readyQueue.push({ fn: fn });
+		if (!readyHooked && jq.fn && typeof jq.fn.ready === 'function') {
+			readyHookTarget = jq.fn;
+			readyOriginal = jq.fn.ready;
+			var originalReady = readyOriginal;
+			jq.fn.ready = function (fn) {
+				if (readyActive && typeof fn === 'function') {
+					readyQueue.push({ fn: fn, jq: jq, type: 'ready' });
+					mark('ready-held', readyQueue.length);
+					return this;
+				}
+
+				return originalReady.apply(this, arguments);
+			};
+
+			readyHooked = true;
+			mark('ready-hooked', '1');
+		}
+
+		if (!readyThenHooked && jq.ready && typeof jq.ready.then === 'function' && typeof jq.Deferred === 'function') {
+			readyThenTarget = jq.ready;
+			readyThenOriginal = jq.ready.then;
+			var originalReadyThen = readyThenOriginal;
+			jq.ready.then = function (onFulfilled) {
+				if (!readyActive || typeof onFulfilled !== 'function') {
+					return originalReadyThen.apply(this, arguments);
+				}
+
+				var deferred = jq.Deferred();
+				readyQueue.push({ fn: onFulfilled, jq: jq, type: 'then', deferred: deferred });
 				mark('ready-held', readyQueue.length);
-				return this;
-			}
+				return deferred.promise();
+			};
 
-			return readyOriginal.apply(this, arguments);
-		};
-
-		readyHooked = true;
-		mark('ready-hooked', '1');
+			readyThenHooked = true;
+			mark('ready-then-hooked', '1');
+		}
 	}
 
 	function beginReadyHold() {
@@ -205,13 +232,23 @@
 		readyActive = false;
 
 		var jq = window.jQuery;
-		if (readyHooked && jq && jq.fn && readyOriginal) {
+		if (readyHooked && readyHookTarget && readyOriginal) {
 			try {
-				jq.fn.ready = readyOriginal;
+				readyHookTarget.ready = readyOriginal;
+			} catch (e) {}
+		}
+		if (readyThenHooked && readyThenTarget && readyThenOriginal) {
+			try {
+				readyThenTarget.then = readyThenOriginal;
 			} catch (e) {}
 		}
 
 		readyHooked = false;
+		readyHookTarget = null;
+		readyOriginal = null;
+		readyThenHooked = false;
+		readyThenTarget = null;
+		readyThenOriginal = null;
 		mark('ready-hold', '0');
 		mark('ready-flush-count', readyQueue.length);
 
@@ -220,9 +257,30 @@
 		emit('ultracache:delayed-jquery-ready-flush', { mode: mode || 'first-party', count: queue.length });
 
 		for (var i = 0; i < queue.length; i++) {
+			var item = queue[i];
+			var itemJq = item.jq || jq;
 			try {
-				queue[i].fn.call(document, jq);
+				var value = item.fn.call(document, itemJq);
+				if (item.deferred) {
+					if (value && typeof value.then === 'function') {
+						value.then((function (deferred) {
+							return function (resolvedValue) {
+								deferred.resolveWith(document, [resolvedValue]);
+							};
+						})(item.deferred), (function (deferred) {
+							return function (error) {
+								deferred.rejectWith(document, [error]);
+							};
+						})(item.deferred));
+					} else {
+						item.deferred.resolveWith(document, [value]);
+					}
+				}
 			} catch (err) {
+				if (item.deferred) {
+					item.deferred.rejectWith(document, [err]);
+					continue;
+				}
 				setTimeout((function (error) {
 					return function () {
 						throw error;

@@ -27,6 +27,10 @@ final class Ultra_Cache_Object_Cache_Backend_Context {
 		return (string) $this->invoke('normalize_key', array($key), '');
 	}
 
+	public function get_runtime_scope($group) {
+		return (string) $this->invoke('get_runtime_scope', array($group), 'global');
+	}
+
 	public function should_suspend_cache_addition() {
 		return (bool) $this->invoke('should_suspend_cache_addition', array(), false);
 	}
@@ -53,6 +57,10 @@ final class Ultra_Cache_Object_Cache_Backend_Context {
 
 	public function runtime_clear() {
 		return (bool) $this->invoke('runtime_clear', array(), true);
+	}
+
+	public function runtime_reset() {
+		return (bool) $this->invoke('runtime_reset', array(), true);
 	}
 
 	public function runtime_clear_group($group) {
@@ -100,6 +108,25 @@ final class Ultra_Cache_Object_Cache_Backend_Context {
 		return (bool) $this->invoke('write_redis_payload', array($key, $group, $payload, $expire), false);
 	}
 
+	public function add_redis_payload($key, $group, $payload, $expire) {
+		$status = $this->invoke('add_redis_payload', array($key, $group, $payload, $expire), 'unavailable');
+		return is_string($status) ? $status : 'unavailable';
+	}
+
+	public function replace_redis_payload($key, $group, $payload, $expire) {
+		$status = $this->invoke('replace_redis_payload', array($key, $group, $payload, $expire), 'unavailable');
+		return is_string($status) ? $status : 'unavailable';
+	}
+
+	public function mutate_redis_numeric_payload($key, $group, $offset, $decrement, $runtime_present = false, $runtime_value = null, $runtime_authoritative = false) {
+		$result = $this->invoke(
+			'mutate_redis_numeric_payload',
+			array($key, $group, (int) $offset, (bool) $decrement, (bool) $runtime_present, $runtime_value, (bool) $runtime_authoritative),
+			array('status' => 'unavailable')
+		);
+		return is_array($result) ? $result : array('status' => 'unavailable');
+	}
+
 	public function delete_redis_payload($key, $group) {
 		return (bool) $this->invoke('delete_redis_payload', array($key, $group), true);
 	}
@@ -110,6 +137,25 @@ final class Ultra_Cache_Object_Cache_Backend_Context {
 
 	public function write_apcu_payload($key, $group, $payload, $expire) {
 		return (bool) $this->invoke('write_apcu_payload', array($key, $group, $payload, $expire), false);
+	}
+
+	public function add_apcu_payload($key, $group, $payload, $expire) {
+		$status = $this->invoke('add_apcu_payload', array($key, $group, $payload, $expire), 'unavailable');
+		return is_string($status) ? $status : 'unavailable';
+	}
+
+	public function replace_apcu_payload($key, $group, $payload, $expire) {
+		$status = $this->invoke('replace_apcu_payload', array($key, $group, $payload, $expire), 'unavailable');
+		return is_string($status) ? $status : 'unavailable';
+	}
+
+	public function mutate_apcu_numeric_payload($key, $group, $offset, $decrement, $runtime_present = false, $runtime_value = null, $runtime_authoritative = false) {
+		$result = $this->invoke(
+			'mutate_apcu_numeric_payload',
+			array($key, $group, (int) $offset, (bool) $decrement, (bool) $runtime_present, $runtime_value, (bool) $runtime_authoritative),
+			array('status' => 'unavailable')
+		);
+		return is_array($result) ? $result : array('status' => 'unavailable');
 	}
 
 	public function read_sqlite_payload($key, $group) {
@@ -128,8 +174,12 @@ final class Ultra_Cache_Object_Cache_Backend_Context {
 		return (bool) $this->invoke('replace_sqlite_payload', array($key, $group, $payload), false);
 	}
 
-	public function mutate_sqlite_numeric_payload($key, $group, $offset, $decrement) {
-		return $this->invoke('mutate_sqlite_numeric_payload', array($key, $group, $offset, $decrement), false);
+	public function mutate_sqlite_numeric_payload($key, $group, $offset, $decrement, $runtime_present = false, $runtime_value = null) {
+		return $this->invoke(
+			'mutate_sqlite_numeric_payload',
+			array($key, $group, $offset, $decrement, (bool) $runtime_present, $runtime_value),
+			false
+		);
 	}
 
 	public function read_disk_payload($key, $group) {
@@ -138,5 +188,34 @@ final class Ultra_Cache_Object_Cache_Backend_Context {
 
 	public function write_disk_payload($key, $group, $payload) {
 		return (bool) $this->invoke('write_disk_payload', array($key, $group, $payload), false);
+	}
+
+	public function set_disk_payload($key, $group, $payload) {
+		$status = $this->invoke('set_disk_payload', array($key, $group, $payload), 'unavailable');
+		return is_string($status) ? $status : 'unavailable';
+	}
+
+	public function add_disk_payload($key, $group, $payload) {
+		$status = $this->invoke('add_disk_payload', array($key, $group, $payload), 'unavailable');
+		return is_string($status) ? $status : 'unavailable';
+	}
+
+	public function replace_disk_payload($key, $group, $payload) {
+		$status = $this->invoke('replace_disk_payload', array($key, $group, $payload), 'unavailable');
+		return is_string($status) ? $status : 'unavailable';
+	}
+
+	public function mutate_disk_numeric_payload($key, $group, $offset, $decrement, $runtime_present = false, $runtime_value = null, $runtime_authoritative = false) {
+		$result = $this->invoke(
+			'mutate_disk_numeric_payload',
+			array($key, $group, (int) $offset, (bool) $decrement, (bool) $runtime_present, $runtime_value, (bool) $runtime_authoritative),
+			array('status' => 'unavailable')
+		);
+		return is_array($result) ? $result : array('status' => 'unavailable');
+	}
+
+	public function delete_disk_payload_status($key, $group) {
+		$status = $this->invoke('delete_disk_payload_status', array($key, $group), 'unavailable');
+		return is_string($status) ? $status : 'unavailable';
 	}
 }

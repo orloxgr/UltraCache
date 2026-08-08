@@ -1,0 +1,14 @@
+UltraCache color-profile diagnostic assets
+==========================================
+
+ultracache-srgb.icc
+-------------------
+sRGB IEC61966-2.1 profile created by Graeme W. Gill. The profile itself states:
+"Released into the public domain. No Warranty, Use at your own risk."
+
+color-profile-self-test-cmyk.jpg
+--------------------------------
+Generated specifically for UltraCache as a 32x32 CMYK JPEG. It embeds the
+FOGRA39L_coated ICC profile distributed by the TeX Live colorprofiles package.
+That profile states that it is free of known copyright restrictions.
+The JPEG pixel fixture and packaging are part of UltraCache under the plugin license.

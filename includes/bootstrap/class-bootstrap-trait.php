@@ -110,12 +110,19 @@ trait Ultra_Cache_WP_Bootstrap_Trait
     private function register_hooks()
     {
         $this->register_request_profile_hooks();
+        add_action('plugins_loaded', array(__CLASS__, 'maybe_run_public_warm_runtime_upgrade_reset'), 1);
+        add_action('plugins_loaded', array(__CLASS__, 'maybe_run_final_transient_cleanup'), 2);
         add_action('plugins_loaded', array($this, 'bootstrap_components'), 5);
         add_action('rest_api_init', array($this, 'bootstrap_rest_api'), 0);
         if (self::should_run_bootstrap_reconcile_hooks()) {
             add_action('plugins_loaded', array($this, 'reconcile_page_cache_dropin'), 19);
             add_action('plugins_loaded', array($this, 'reconcile_object_cache_dropin'), 20);
         }
+        add_filter('query_vars', array($this, 'register_esi_query_var'));
+        add_filter('query_vars', array($this, 'register_varnish_canary_query_var'));
+        add_filter('posts_pre_query', array($this, 'maybe_bypass_esi_fragment_main_query'), -20000, 2);
+        add_action('template_redirect', array($this, 'maybe_serve_varnish_canary'), -30000);
+        add_action('template_redirect', array($this, 'maybe_serve_esi_fragment'), -20000);
         add_action('init', array($this, 'maybe_mark_ultracache_admin_no_cache'), 0);
         add_action('admin_init', array(__CLASS__, 'register_dashboard_setting'), 0);
         add_action('admin_init', array(__CLASS__, 'cleanup_legacy_dropin_backup_directory'), 1);
@@ -137,11 +144,18 @@ trait Ultra_Cache_WP_Bootstrap_Trait
         add_action('ultracache_scheduled_cache_cleanup', array($this, 'handle_scheduled_cache_cleanup'));
         add_action('ultracache_cron_warm_tick', array($this, 'handle_cron_warm_tick'));
         add_action('ultracache_cron_warm_tick_kickoff', array($this, 'handle_cron_warm_tick_kickoff'));
+        add_action('wp_loaded', array($this, 'handle_cron_warm_worker_recovery'), 50);
         add_filter('upgrader_install_package_result', array($this, 'track_upgrader_install_package_result'), 20, 2);
         add_action('upgrader_process_complete', array($this, 'handle_upgrader_process_complete'), 20, 2);
         add_action('ultracache_after_purge_all', array($this, 'handle_varnish_after_purge_all'), 10, 1);
+        add_action('ultracache_after_purge_all', array($this, 'handle_litespeed_after_purge_all'), 11, 1);
         add_action('ultracache_after_purge_all', array($this, 'handle_cron_warm_after_purge_all'), 20, 1);
         add_action('ultracache_after_purge_urls', array($this, 'handle_varnish_after_purge_urls'), 10, 3);
+        add_action('ultracache_after_purge_urls', array($this, 'handle_litespeed_after_purge_urls'), 11, 3);
+        add_action('ultracache_esi_fragment_render_metrics', array(__CLASS__, 'record_varnish_esi_fragment_render_metrics'), 10, 6);
+        add_action('ultracache_esi_fragment_error_contained', array(__CLASS__, 'record_varnish_esi_fragment_contained_error'), 10, 4);
+        add_action('ultracache_after_update_purge', array($this, 'handle_litespeed_after_purge_all'), 11, 1);
+        add_action('elementor/core/files/clear_cache', array($this, 'handle_elementor_files_cache_clear'), PHP_INT_MAX);
         add_action('wp_loaded', array($this, 'maybe_fix_revslider_footer_conflict'), 1);
     }
 
@@ -259,6 +273,48 @@ trait Ultra_Cache_WP_Bootstrap_Trait
             case 'WP_CACHE is defined outside the UltraCache managed block in a non-standard way and must be changed manually before page cache can be enabled.':
                 return __('WP_CACHE is defined outside the UltraCache managed block in a non-standard way and must be changed manually before page cache can be enabled.', 'ultracache');
 
+            case 'W3 Total Cache':
+                return __('W3 Total Cache', 'ultracache');
+
+            case 'WP Rocket':
+                return __('WP Rocket', 'ultracache');
+
+            case 'WP Super Cache':
+                return __('WP Super Cache', 'ultracache');
+
+            case 'LiteSpeed Cache':
+                return __('LiteSpeed Cache', 'ultracache');
+
+            case 'SiteGround Optimizer':
+                return __('SiteGround Optimizer', 'ultracache');
+
+            case 'WP Fastest Cache':
+                return __('WP Fastest Cache', 'ultracache');
+
+            case 'Breeze':
+                return __('Breeze', 'ultracache');
+
+            case 'Redis Object Cache':
+                return __('Redis Object Cache', 'ultracache');
+
+            case 'Docket Cache':
+                return __('Docket Cache', 'ultracache');
+
+            case 'Object Cache Pro':
+                return __('Object Cache Pro', 'ultracache');
+
+            case 'Memcached Object Cache':
+                return __('Memcached Object Cache', 'ultracache');
+
+            case 'Powered Cache':
+                return __('Powered Cache', 'ultracache');
+
+            case 'Cache Enabler':
+                return __('Cache Enabler', 'ultracache');
+
+            case 'Autoptimize':
+                return __('Autoptimize', 'ultracache');
+
             case 'Reverse Proxy Cache':
                 return __('Reverse Proxy Cache', 'ultracache');
 
@@ -292,14 +348,17 @@ trait Ultra_Cache_WP_Bootstrap_Trait
             case 'Cron warm up stopped.':
                 return __('Cron warm up stopped.', 'ultracache');
 
-            case 'Cron warm up is blocked while a manual warm-up is active or paused.':
-                return __('Cron warm up is blocked while a manual warm-up is active or paused.', 'ultracache');
+            case 'Background automation is yielding to an active foreground warm-up.':
+                return __('Background automation is yielding to an active foreground warm-up.', 'ultracache');
 
-            case 'Cron warm up stopped because a manual warm-up has priority.':
-                return __('Cron warm up stopped because a manual warm-up has priority.', 'ultracache');
+            case 'Background automation yielded to an active foreground warm-up.':
+                return __('Background automation yielded to an active foreground warm-up.', 'ultracache');
 
-            case 'Cron warm up skipped because a manual warm-up has priority.':
-                return __('Cron warm up skipped because a manual warm-up has priority.', 'ultracache');
+            case 'Background automation skipped this tick because a foreground warm-up has priority.':
+                return __('Background automation skipped this tick because a foreground warm-up has priority.', 'ultracache');
+
+            case "Queued Varnish invalidation used this tick's background URL budget; page automation will continue on the next tick.":
+                return __("Queued Varnish invalidation used this tick's background URL budget; page automation will continue on the next tick.", 'ultracache');
 
             case 'Scheduled cache cleanup was skipped because a manual warm-up has priority.':
                 return __('Scheduled cache cleanup was skipped because a manual warm-up has priority.', 'ultracache');
@@ -307,8 +366,8 @@ trait Ultra_Cache_WP_Bootstrap_Trait
             case 'Invalid manual warm-up job type.':
                 return __('Invalid manual warm-up job type.', 'ultracache');
 
-            case 'Another administrator has an active or paused manual warm-up.':
-                return __('Another administrator has an active or paused manual warm-up.', 'ultracache');
+            case 'A newer foreground warm-up owner replaced the previous session.':
+                return __('A newer foreground warm-up owner replaced the previous session.', 'ultracache');
 
             case 'Manual warm-up started with priority over cron warm-up.':
                 return __('Manual warm-up started with priority over cron warm-up.', 'ultracache');
@@ -316,8 +375,8 @@ trait Ultra_Cache_WP_Bootstrap_Trait
             case 'Manual warm-up ownership could not be verified.':
                 return __('Manual warm-up ownership could not be verified.', 'ultracache');
 
-            case 'Manual warm-up paused. Cron warm-up remains blocked.':
-                return __('Manual warm-up paused. Cron warm-up remains blocked.', 'ultracache');
+            case 'Manual warm-up paused. Background automation may continue.':
+                return __('Manual warm-up paused. Background automation may continue.', 'ultracache');
 
             case 'Manual warm-up ownership released.':
                 return __('Manual warm-up ownership released.', 'ultracache');

@@ -13,7 +13,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
 
     private function runtime_js_diagnostic_queue_db_version()
     {
-        return '1';
+        return '2';
     }
 
     private function runtime_js_diagnostic_queue_db_version_option_key()
@@ -45,6 +45,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
         $sql = "CREATE TABLE {$table} (
             job_id varchar(64) NOT NULL,
             scan_type varchar(30) NOT NULL DEFAULT 'runtime',
+            scan_id varchar(64) NOT NULL DEFAULT '',
             status varchar(20) NOT NULL DEFAULT 'queued',
             target_url text NULL,
             scan_context varchar(30) NOT NULL DEFAULT 'anonymous',
@@ -61,6 +62,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
             PRIMARY KEY  (job_id),
             KEY status_updated (status, updated_at),
             KEY scan_type_status (scan_type, status),
+            KEY scan_id_updated (scan_id, updated_at),
             KEY created_at (created_at)
         ) {$charset_collate};";
 
@@ -87,6 +89,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
         $buckets = array(
             'confirmedErrorFixes' => array(),
             'suggestions'         => array(),
+            'persistentFailures'  => array(),
             'reviewOnly'          => array(),
             'alreadyListed'       => array(),
             'ignored'             => array(),
@@ -100,6 +103,10 @@ trait Ultra_Cache_Profiler_Queue_Trait
                 $buckets['ignored'][] = $item;
                 continue;
             }
+            if (!empty($item['stillFailingWhileListed'])) {
+                $buckets['persistentFailures'][] = $item;
+                continue;
+            }
             if (!empty($item['alreadyExcluded'])) {
                 $buckets['alreadyListed'][] = $item;
                 continue;
@@ -108,7 +115,9 @@ trait Ultra_Cache_Profiler_Queue_Trait
                 $buckets['reviewOnly'][] = $item;
                 continue;
             }
-            if (isset($scan['source']) && 'browser-runtime' === (string) $scan['source']) {
+            if (isset($item['source']) && 'page-dependency-analysis' === (string) $item['source']) {
+                $buckets['suggestions'][] = $item;
+            } elseif (isset($scan['source']) && 'browser-runtime' === (string) $scan['source']) {
                 $buckets['confirmedErrorFixes'][] = $item;
             } elseif (isset($item['category']) && in_array((string) $item['category'], array('browser-runtime-error', 'appendable-fix'), true)) {
                 $buckets['confirmedErrorFixes'][] = $item;
@@ -123,7 +132,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
     private function runtime_js_diagnostic_queue_result_from_scan(array $scan, array $report = array())
     {
         $buckets = $this->runtime_js_diagnostic_queue_buckets_from_scan($scan);
-        return array(
+        $result = array(
             'available'            => true,
             'dashboardScan'        => $scan,
             'report'               => $report,
@@ -131,6 +140,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
             'bucketCounts'         => array(
                 'confirmedErrorFixes' => count($buckets['confirmedErrorFixes']),
                 'suggestions'         => count($buckets['suggestions']),
+                'persistentFailures'  => count($buckets['persistentFailures']),
                 'reviewOnly'          => count($buckets['reviewOnly']),
                 'alreadyListed'       => count($buckets['alreadyListed']),
                 'ignored'             => count($buckets['ignored']),
@@ -140,7 +150,25 @@ trait Ultra_Cache_Profiler_Queue_Trait
             'suggestionCount'      => isset($scan['suggestionCount']) ? (int) $scan['suggestionCount'] : (isset($scan['suggestion_count']) ? (int) $scan['suggestion_count'] : 0),
             'missingCount'         => isset($scan['missingCount']) ? (int) $scan['missingCount'] : (isset($scan['missing_count']) ? (int) $scan['missing_count'] : 0),
             'alreadyExcludedCount' => isset($scan['alreadyExcludedCount']) ? (int) $scan['alreadyExcludedCount'] : (isset($scan['already_excluded_count']) ? (int) $scan['already_excluded_count'] : 0),
+            'persistentListedFailureCount' => isset($scan['persistentListedFailureCount']) ? (int) $scan['persistentListedFailureCount'] : (isset($scan['persistent_listed_failure_count']) ? (int) $scan['persistent_listed_failure_count'] : 0),
+            'dependencyRiskCount' => isset($scan['dependencyRiskCount']) ? (int) $scan['dependencyRiskCount'] : (isset($scan['dependency_risk_count']) ? (int) $scan['dependency_risk_count'] : 0),
         );
+
+        foreach (array(
+            'consoleInputTruncated',
+            'originalByteCount',
+            'processedByteCount',
+            'originalLineCount',
+            'processedLineCount',
+            'consoleInputTruncationReasons',
+            'consoleInputLimits',
+        ) as $metadata_key) {
+            if (array_key_exists($metadata_key, $scan)) {
+                $result[$metadata_key] = $scan[$metadata_key];
+            }
+        }
+
+        return $result;
     }
 
     private function runtime_js_diagnostic_queue_cache_group()
@@ -188,6 +216,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
         return array(
             'id'              => sanitize_text_field((string) ($row['job_id'] ?? '')),
             'scanType'        => sanitize_key((string) ($row['scan_type'] ?? 'runtime')),
+            'scanId'          => sanitize_key((string) ($row['scan_id'] ?? '')),
             'status'          => sanitize_key((string) ($row['status'] ?? 'queued')),
             'targetUrl'       => isset($row['target_url']) ? esc_url_raw((string) $row['target_url']) : '',
             'scanContext'     => isset($row['scan_context']) && 'logged-in' === (string) $row['scan_context'] ? 'logged-in' : 'anonymous',
@@ -229,6 +258,49 @@ trait Ultra_Cache_Profiler_Queue_Trait
         return $job;
     }
 
+    private function runtime_js_diagnostic_queue_get_job_by_scan_id($scan_id)
+    {
+        global $wpdb;
+        if (!$this->ensure_runtime_js_diagnostic_queue_table()) {
+            return null;
+        }
+        $scan_id = sanitize_key((string) $scan_id);
+        if ('' === $scan_id) {
+            return null;
+        }
+
+        $table = $this->runtime_js_diagnostic_queue_table_name();
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Authoritative lookup by bounded scan id in the UltraCache-owned diagnostic jobs table.
+        $row = $wpdb->get_row(
+            $wpdb->prepare('SELECT * FROM %i WHERE scan_id = %s ORDER BY updated_at DESC, created_at DESC LIMIT 1', $table, $scan_id),
+            ARRAY_A
+        );
+        return is_array($row) ? $this->runtime_js_diagnostic_queue_row_to_job($row) : null;
+    }
+
+    private function runtime_js_diagnostic_queue_report_job_id($scan_id)
+    {
+        $scan_id = sanitize_key((string) $scan_id);
+        return '' !== $scan_id ? 'jsdr_' . sha1($scan_id) : '';
+    }
+
+    private function runtime_js_diagnostic_queue_delete_job($job_id)
+    {
+        global $wpdb;
+        if (!$this->ensure_runtime_js_diagnostic_queue_table()) {
+            return false;
+        }
+        $job_id = sanitize_text_field((string) $job_id);
+        if ('' === $job_id) {
+            return false;
+        }
+        $table = $this->runtime_js_diagnostic_queue_table_name();
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Delete one superseded standalone report row after it is merged into the authoritative queue job.
+        $deleted = $wpdb->delete($table, array('job_id' => $job_id), array('%s'));
+        $this->runtime_js_diagnostic_queue_delete_cache($job_id);
+        return 1 === (int) $deleted;
+    }
+
     private function runtime_js_diagnostic_queue_latest_job()
     {
         global $wpdb;
@@ -258,16 +330,21 @@ trait Ultra_Cache_Profiler_Queue_Trait
             return null;
         }
         $now = time();
-        $job_id = $this->runtime_js_diagnostic_queue_new_job_id();
+        $job_id = !empty($data['job_id']) ? sanitize_text_field((string) $data['job_id']) : $this->runtime_js_diagnostic_queue_new_job_id();
+        if ('' === $job_id) {
+            return null;
+        }
         $table = $this->runtime_js_diagnostic_queue_table_name();
+        $console_input = $this->runtime_js_scan_prepare_console_input($data['console_text'] ?? '');
         $row = array(
             'job_id'           => $job_id,
             'scan_type'        => sanitize_key((string) ($data['scan_type'] ?? 'runtime')),
+            'scan_id'          => sanitize_key((string) ($data['scan_id'] ?? '')),
             'status'           => sanitize_key((string) ($data['status'] ?? 'running')),
             'target_url'       => esc_url_raw((string) ($data['target_url'] ?? '')),
             'scan_context'     => isset($data['scan_context']) && 'logged-in' === (string) $data['scan_context'] ? 'logged-in' : 'anonymous',
             'message'          => sanitize_text_field((string) ($data['message'] ?? 'JS diagnostic queue started.')),
-            'console_text'     => isset($data['console_text']) ? sanitize_textarea_field((string) $data['console_text']) : '',
+            'console_text'     => (string) $console_input['text'],
             'payload'          => maybe_serialize(isset($data['payload']) && is_array($data['payload']) ? $data['payload'] : array()),
             'result'           => maybe_serialize(isset($data['result']) && is_array($data['result']) ? $data['result'] : array()),
             'progress_current' => isset($data['progress_current']) ? absint($data['progress_current']) : 5,
@@ -278,7 +355,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
             'finished_at'      => isset($data['finished_at']) ? absint($data['finished_at']) : 0,
         );
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache-owned diagnostic queue insert; related queue object-cache entries are invalidated immediately after write.
-        $ok = $wpdb->insert($table, $row, array('%s','%s','%s','%s','%s','%s','%s','%s','%s','%d','%d','%d','%d','%d','%d'));
+        $ok = $wpdb->insert($table, $row, array('%s','%s','%s','%s','%s','%s','%s','%s','%s','%s','%d','%d','%d','%d','%d','%d'));
         if (!$ok) {
             return null;
         }
@@ -298,6 +375,18 @@ trait Ultra_Cache_Profiler_Queue_Trait
         }
         $row = array('updated_at' => time());
         $formats = array('%d');
+        if (isset($changes['scan_id'])) {
+            $row['scan_id'] = sanitize_key((string) $changes['scan_id']);
+            $formats[] = '%s';
+        }
+        if (isset($changes['target_url'])) {
+            $row['target_url'] = esc_url_raw((string) $changes['target_url']);
+            $formats[] = '%s';
+        }
+        if (isset($changes['scan_context'])) {
+            $row['scan_context'] = 'logged-in' === sanitize_key((string) $changes['scan_context']) ? 'logged-in' : 'anonymous';
+            $formats[] = '%s';
+        }
         if (isset($changes['status'])) {
             $row['status'] = sanitize_key((string) $changes['status']);
             $formats[] = '%s';
@@ -347,7 +436,13 @@ trait Ultra_Cache_Profiler_Queue_Trait
         }
         $target_url = isset($params['url']) ? esc_url_raw((string) $params['url']) : home_url('/');
         $scan_context = isset($params['scanContext']) && 'logged-in' === sanitize_key((string) $params['scanContext']) ? 'logged-in' : 'anonymous';
-        $console_text = isset($params['text']) ? (string) $params['text'] : '';
+        $console_input = $this->runtime_js_scan_prepare_console_input($params['text'] ?? '');
+        $console_text = (string) $console_input['text'];
+        $console_input_metadata = $this->runtime_js_scan_console_input_metadata($console_input);
+        $job_payload = array('url' => $target_url, 'scanContext' => $scan_context);
+        if ('console' === $scan_type) {
+            $job_payload = array_merge($job_payload, $console_input_metadata);
+        }
 
         $job = $this->runtime_js_diagnostic_queue_insert_job(array(
             'scan_type'        => $scan_type,
@@ -357,7 +452,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
             'console_text'     => $console_text,
             'message'          => 'runtime' === $scan_type ? __('Browser runtime JS diagnostic queue started.', 'ultracache') : __('Console JS diagnostic queue started.', 'ultracache'),
             'progress_current' => 10,
-            'payload'          => array('url' => $target_url, 'scanContext' => $scan_context),
+            'payload'          => $job_payload,
         ));
         if (!is_array($job)) {
             return new WP_REST_Response(array('success' => false, 'message' => __('Could not create JS diagnostic queue job.', 'ultracache')), 500);
@@ -376,7 +471,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
             $scripts = $this->runtime_js_scan_fetch_script_inventory_for_url($target_url);
             $errors = $this->runtime_js_scan_console_text_to_errors($console_text);
             $scan = $this->build_runtime_js_scan_suggestions($errors, $scripts);
-            $dashboard_scan = array(
+            $dashboard_scan = array_merge(array(
                 'available'              => true,
                 'source'                 => 'console-paste-runtime-engine',
                 'runtimeErrorCount'      => count($errors),
@@ -384,6 +479,8 @@ trait Ultra_Cache_Profiler_Queue_Trait
                 'suggestionCount'        => isset($scan['suggestion_count']) ? (int) $scan['suggestion_count'] : 0,
                 'missingCount'           => isset($scan['missing_count']) ? (int) $scan['missing_count'] : 0,
                 'alreadyExcludedCount'   => isset($scan['already_excluded_count']) ? (int) $scan['already_excluded_count'] : 0,
+                'persistentListedFailureCount' => isset($scan['persistent_listed_failure_count']) ? (int) $scan['persistent_listed_failure_count'] : 0,
+                'dependencyRiskCount'    => isset($scan['dependency_risk_count']) ? (int) $scan['dependency_risk_count'] : 0,
                 'suggestions'            => isset($scan['suggestions']) && is_array($scan['suggestions']) ? array_slice($scan['suggestions'], 0, 80) : array(),
                 'errors'                 => array_slice($errors, 0, 40),
                 'resourceErrors'         => array(),
@@ -392,7 +489,7 @@ trait Ultra_Cache_Profiler_Queue_Trait
                 'scriptInventorySummary' => $this->runtime_js_scan_inventory_summary($scripts),
                 'scanContext'            => 'console-paste',
                 'completed'              => true,
-            );
+            ), $console_input_metadata);
             $result = $this->runtime_js_diagnostic_queue_result_from_scan($dashboard_scan, array('errors' => $errors, 'scripts' => $scripts));
             $job = $this->runtime_js_diagnostic_queue_update_job($job['id'], array(
                 'status' => 'done',

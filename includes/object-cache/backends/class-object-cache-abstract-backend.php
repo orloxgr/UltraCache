@@ -30,16 +30,21 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 		$group = $this->context->normalize_group($group);
 		$key = $this->context->normalize_key($key);
 
+		if ($this->context->is_non_persistent_group($group)) {
+			if ($this->context->runtime_has($key, $group)) {
+				$found = true;
+				$this->context->record_hit();
+				return $this->context->runtime_get($key, $group);
+			}
+			$found = false;
+			$this->context->record_miss();
+			return false;
+		}
+
 		if (!$force && $this->context->runtime_has($key, $group)) {
 			$found = true;
 			$this->context->record_hit();
 			return $this->context->runtime_get($key, $group);
-		}
-
-		if ($this->context->is_non_persistent_group($group)) {
-			$found = false;
-			$this->context->record_miss();
-			return false;
 		}
 
 		$payload = $this->read_persistent_payload($key, $group);
@@ -49,8 +54,9 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 			return false;
 		}
 
-		if (!empty($payload['expires_at']) && (int) $payload['expires_at'] < time()) {
-			$this->delete($key, $group);
+		if (!empty($payload['expires_at']) && (int) $payload['expires_at'] <= time()) {
+			$this->context->runtime_delete($key, $group);
+			$this->context->delete_persistent_payload($key, $group);
 			$found = false;
 			$this->context->record_miss();
 			return false;
@@ -65,9 +71,6 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 	public function set($key, $data, $group = 'default', $expire = 0) {
 		$group = $this->context->normalize_group($group);
 		$key = $this->context->normalize_key($key);
-		if ($this->context->should_suspend_cache_addition()) {
-			return true;
-		}
 
 		$this->context->runtime_set($key, $group, $data);
 		if ($this->context->is_non_persistent_group($group)) {
@@ -86,15 +89,14 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 		$key = $this->context->normalize_key($key);
 
 		if ($this->context->should_suspend_cache_addition()) {
-			$found = false;
-			$this->get($key, $group, true, $found);
-			return !$found;
+			return false;
+		}
+
+		if ($this->context->runtime_has($key, $group)) {
+			return false;
 		}
 
 		if ($this->context->is_non_persistent_group($group)) {
-			if ($this->context->runtime_has($key, $group)) {
-				return false;
-			}
 			$this->context->runtime_set($key, $group, $data);
 			return true;
 		}
@@ -111,12 +113,12 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 		$group = $this->context->normalize_group($group);
 		$key = $this->context->normalize_key($key);
 
+		if ($this->context->runtime_has($key, $group)) {
+			return $this->set($key, $data, $group, (int) $expire);
+		}
+
 		if ($this->context->is_non_persistent_group($group)) {
-			if (!$this->context->runtime_has($key, $group)) {
-				return false;
-			}
-			$this->context->runtime_set($key, $group, $data);
-			return true;
+			return false;
 		}
 
 		$found = false;
@@ -130,6 +132,23 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 	public function delete($key, $group = 'default') {
 		$group = $this->context->normalize_group($group);
 		$key = $this->context->normalize_key($key);
+		$runtime_exists = $this->context->runtime_has($key, $group);
+
+		if (!$runtime_exists) {
+			if ($this->context->is_non_persistent_group($group)) {
+				return false;
+			}
+
+			$payload = $this->read_persistent_payload($key, $group);
+			if (!is_array($payload) || !array_key_exists('value', $payload)) {
+				return false;
+			}
+			if (!empty($payload['expires_at']) && (int) $payload['expires_at'] <= time()) {
+				$this->context->delete_persistent_payload($key, $group);
+				return false;
+			}
+		}
+
 		$this->context->runtime_delete($key, $group);
 		if ($this->context->is_non_persistent_group($group)) {
 			return true;
@@ -138,12 +157,26 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 	}
 
 	public function incr($key, $offset = 1, $group = 'default') {
-		$found = false;
-		$value = $this->get($key, $group, true, $found);
-		if (!$found || !is_numeric($value)) {
+		$group = $this->context->normalize_group($group);
+		$key = $this->context->normalize_key($key);
+
+		$found = $this->context->runtime_has($key, $group);
+		if ($found) {
+			$this->context->record_hit();
+			$value = $this->context->runtime_get($key, $group);
+		} else {
+			$value = $this->get($key, $group, true, $found);
+		}
+		if (!$found) {
 			return false;
 		}
+		if (!is_numeric($value)) {
+			$value = 0;
+		}
 		$value += (int) $offset;
+		if ($value < 0) {
+			$value = 0;
+		}
 		if (!$this->set($key, $value, $group)) {
 			return false;
 		}
@@ -151,10 +184,21 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 	}
 
 	public function decr($key, $offset = 1, $group = 'default') {
-		$found = false;
-		$value = $this->get($key, $group, true, $found);
-		if (!$found || !is_numeric($value)) {
+		$group = $this->context->normalize_group($group);
+		$key = $this->context->normalize_key($key);
+
+		$found = $this->context->runtime_has($key, $group);
+		if ($found) {
+			$this->context->record_hit();
+			$value = $this->context->runtime_get($key, $group);
+		} else {
+			$value = $this->get($key, $group, true, $found);
+		}
+		if (!$found) {
 			return false;
+		}
+		if (!is_numeric($value)) {
+			$value = 0;
 		}
 		$value -= (int) $offset;
 		if ($value < 0) {
@@ -171,6 +215,14 @@ abstract class Ultra_Cache_Object_Cache_Abstract_Backend implements Ultra_Cache_
 		$this->context->flush_persistent_cache();
 		$this->context->after_flush();
 		return true;
+	}
+
+	public function flush_runtime() {
+		return $this->context->runtime_clear();
+	}
+
+	public function reset_runtime() {
+		return $this->context->runtime_reset();
 	}
 
 	public function flush_group($group) {

@@ -58,6 +58,7 @@ trait ULTRACACHE_CLI_Helpers_Trait
     private function get_deprecated_setting_keys()
     {
         return array(
+            'cronWarmEnabled',
             'cronWarmStartAfterFlush',
             'warmAfterScheduledCleanup',
             'avifConversionEnabled',
@@ -297,12 +298,13 @@ trait ULTRACACHE_CLI_Helpers_Trait
             'browserCacheRulesEnabled',
             'apacheStaticHtmlDeliveryEnabled',
             'varnishCliEnabled',
+            'varnishConnectionConfigured',
             'preRenderOnSave',
             'woocommerceSafeModeEnabled',
             'cacheCleanupEnabled',
-            'cronWarmEnabled',
             'cronWarmStartAfterCleanup',
             'cronWarmStartAfterManualPurge',
+            'warmUncachedUrlsOnFirstVisit',
             'staleWhileRevalidateEnabled',
             'cacheQueryStringsEnabled',
             'redisUseTls',
@@ -316,6 +318,7 @@ trait ULTRACACHE_CLI_Helpers_Trait
             'redisConnectTimeoutMs',
             'redisReadTimeoutMs',
             'varnishCliTimeoutSeconds',
+            'varnishInvalidationsPerMinute',
             'cronWarmPagesPerMinute',
             'scheduledWarmLimit',
             'cacheFreshTtlMinutes',

@@ -231,25 +231,26 @@ trait Ultra_Cache_Engine_Media_Image_Trait
             }
 
             $cache_prefixes = array(
-                function_exists('ultracache_optimized_images_storage_url_path') ? ultracache_optimized_images_storage_url_path('avif') : '',
-                function_exists('ultracache_optimized_images_storage_url_path') ? ultracache_optimized_images_storage_url_path('webp') : '',
+                'avif' => function_exists('ultracache_optimized_images_storage_url_path') ? ultracache_optimized_images_storage_url_path('avif') : '',
+                'webp' => function_exists('ultracache_optimized_images_storage_url_path') ? ultracache_optimized_images_storage_url_path('webp') : '',
             );
 
             $relative = '';
-            foreach ($cache_prefixes as $prefix) {
+            $format = '';
+            foreach ($cache_prefixes as $candidate_format => $prefix) {
                 if ('' !== $prefix && 0 === strpos($path, $prefix)) {
                     $relative = ltrim(substr($path, strlen($prefix)), '/');
+                    $format = (string) $candidate_format;
                     break;
                 }
             }
 
-            if ('' === $relative || false !== strpos($relative, '..')) {
+            if ('' === $relative || '' === $format || !function_exists('ultracache_get_source_relative_path_from_optimized_media_path')) {
                 return '';
             }
 
-            $relative_dir = trim(str_replace('\\', '/', dirname($relative)), '. /');
-            $stem = pathinfo($relative, PATHINFO_FILENAME);
-            if ('' === $stem) {
+            $source_relative = ultracache_get_source_relative_path_from_optimized_media_path($relative, $format);
+            if (!$source_relative) {
                 return '';
             }
 
@@ -258,18 +259,13 @@ trait Ultra_Cache_Engine_Media_Image_Trait
                 return '';
             }
 
-            $candidate_dir = trailingslashit((string) $uploads['basedir']) . ('' !== $relative_dir ? trailingslashit($relative_dir) : '');
-            $candidate_url_dir = trailingslashit((string) $uploads['baseurl']) . ('' !== $relative_dir ? trailingslashit($relative_dir) : '');
-            $extensions = array('jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp');
-
-            foreach ($extensions as $extension) {
-                $candidate_file = $candidate_dir . $stem . '.' . $extension;
-                if (is_readable($candidate_file) && is_file($candidate_file)) {
-                    return $candidate_url_dir . rawurlencode($stem . '.' . $extension);
-                }
+            $source_file = trailingslashit(wp_normalize_path((string) $uploads['basedir'])) . ltrim((string) $source_relative, '/');
+            if (!is_readable($source_file) || !is_file($source_file)) {
+                return '';
             }
 
-            return '';
+            $encoded_segments = array_map('rawurlencode', explode('/', ltrim((string) $source_relative, '/')));
+            return trailingslashit((string) $uploads['baseurl']) . implode('/', $encoded_segments);
         }
 
         private function is_safe_local_public_image_url($url)

@@ -78,6 +78,10 @@
 				keys.varnishCliKeyManaged = true;
 				keys.varnishCliKeyExternal = true;
 			}
+			if (keys.configureVarnishConnection) {
+				delete keys.configureVarnishConnection;
+				keys.varnishConnectionConfigured = true;
+			}
 
 			return Object.keys(keys);
 		}
@@ -256,8 +260,8 @@
 					cssBundleCleanupDeleteLimit: Number(formSnapshot.cssBundleCleanupDeleteLimit || 60),
 					cronWarmPagesPerMinute: Number(formSnapshot.cronWarmPagesPerMinute || 0),
 					scheduledWarmLimit: Number(formSnapshot.scheduledWarmLimit || 1),
-					cacheFreshTtlMinutes: Number(formSnapshot.cacheFreshTtlMinutes || 15),
-					cacheMaxStaleMinutes: Number(formSnapshot.cacheMaxStaleMinutes || 720),
+					cacheFreshTtlMinutes: Number(formSnapshot.cacheFreshTtlMinutes || 1440),
+					cacheMaxStaleMinutes: Number(formSnapshot.cacheMaxStaleMinutes || 2880),
 				};
 				const response = await saveSettingsPatch(patch);
 				if (response && response.settings) {

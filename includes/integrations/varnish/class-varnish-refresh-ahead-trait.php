@@ -61,10 +61,11 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
             $varnish_settings = self::get_varnish_cli_settings();
         }
 
-        $configured = !empty($dashboard_settings['varnishRefreshAheadEnabled']);
-        $varnish_enabled = !empty($dashboard_settings['varnishCliEnabled']);
+        $automation = self::get_varnish_automation_policy($dashboard_settings);
+        $configured = !empty($automation['refreshAheadEnabled']);
+        $varnish_enabled = self::is_varnish_runtime_enabled($dashboard_settings);
         $http_mode = 'http' === (string) ($varnish_settings['mode'] ?? 'http');
-        $stale_seconds = max(0, min(86400, absint($dashboard_settings['varnishStaleWhileRevalidateSeconds'] ?? 0)));
+        $stale_seconds = max(0, min(86400, absint($automation['staleWhileRevalidateSeconds'] ?? 0)));
         $soft_capability = array(
             'supported' => false,
             'status' => $http_mode ? 'soft-purge-unverified' : 'http-only',
@@ -100,8 +101,8 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
             $status = 'soft-strategy-inactive';
             $message = self::maybe_translate('Refresh ahead requires Automatic or Soft purge + refill as the effective invalidation strategy.');
         } elseif (!$configured) {
-            $status = 'available';
-            $message = self::maybe_translate('Refresh ahead is available but disabled. Candidate collection begins only after the feature is enabled.');
+            $status = 'automation-inactive';
+            $message = self::maybe_translate('Refresh ahead follows Automation & Scheduling and becomes active when scheduled warm-up and stale refresh are both active.');
         } else {
             $status = 'active';
             $message = self::maybe_translate('Refresh ahead is active. Its scanner collects bounded candidates, probes due pages, and queues the shared page-warm pipeline.');
@@ -170,6 +171,7 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
     {
         $dashboard_settings = empty($settings) ? self::get_dashboard_settings() : $settings;
         $varnish_settings = self::get_varnish_cli_settings();
+        $automation = self::get_varnish_automation_policy($dashboard_settings);
         $contract = self::get_varnish_refresh_ahead_activation_contract($dashboard_settings, $varnish_settings);
         $active = !empty($contract['active']);
         $candidate_summary = $active && method_exists(static::class, 'get_varnish_refresh_candidate_summary')
@@ -182,8 +184,8 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
             'active' => $active,
             'status' => sanitize_key((string) ($contract['status'] ?? 'unavailable')),
             'message' => (string) ($contract['message'] ?? ''),
-            'thresholdPercent' => max(50, min(95, absint($dashboard_settings['varnishRefreshAheadThresholdPercent'] ?? 85))),
-            'maxPagesPerRun' => max(1, min(10, absint($dashboard_settings['varnishRefreshAheadMaxPages'] ?? 5))),
+            'thresholdPercent' => max(50, min(95, absint($automation['refreshAheadThresholdPercent'] ?? 85))),
+            'maxPagesPerRun' => max(1, min(10, absint($automation['refreshAheadMaxPages'] ?? 5))),
             'candidateCount' => max(0, (int) ($candidate_summary['count'] ?? 0)),
             'candidateSources' => is_array($candidate_summary['sources'] ?? null) ? $candidate_summary['sources'] : array(),
             'capability' => is_array($contract['softPurgeCapability'] ?? null) ? $contract['softPurgeCapability'] : array(),
@@ -344,6 +346,60 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
     }
 
     /**
+     * Calculate the shared bounded retry backoff used by transient public-probe
+     * and durable queue failures.
+     *
+     * @param int $probe_count Previous probe count.
+     * @return int
+     */
+    private static function calculate_varnish_refresh_ahead_retry_backoff_at($probe_count = 0)
+    {
+        $multiplier = max(1, min(6, (int) $probe_count + 1));
+        return time() + (self::get_varnish_refresh_ahead_scan_interval() * $multiplier);
+    }
+
+    /**
+     * Return the current scanner priority/capacity gate.
+     *
+     * Ordinary shared page-refill rows do not block discovery. Each candidate
+     * still checks its own pending refill before probing, while foreground
+     * ownership, invalidation ordering, and a paused global background rate
+     * remain hard gates.
+     *
+     * @return array<string,mixed>
+     */
+    private static function get_varnish_refresh_ahead_scan_gate()
+    {
+        if (self::is_manual_warmup_blocking_cron()) {
+            return array(
+                'allowed' => false,
+                'reason' => 'foreground-priority',
+                'message' => self::maybe_translate('Refresh-ahead scan yielded to the active foreground warm-up owner.'),
+            );
+        }
+        if (self::has_pending_varnish_invalidation_rows()) {
+            return array(
+                'allowed' => false,
+                'reason' => 'invalidation-pending',
+                'message' => self::maybe_translate('Refresh-ahead scan yielded while a Varnish invalidation is pending or processing.'),
+            );
+        }
+        if (self::get_shared_automation_pages_per_minute() < 1) {
+            return array(
+                'allowed' => false,
+                'reason' => 'background-rate-paused',
+                'message' => self::maybe_translate('Refresh-ahead scan is paused because the shared background page rate is zero.'),
+            );
+        }
+
+        return array(
+            'allowed' => true,
+            'reason' => 'ready',
+            'message' => '',
+        );
+    }
+
+    /**
      * Calculate a bounded next-probe timestamp from one public observation.
      *
      * @param array    $probe             Normalized public response.
@@ -368,8 +424,7 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
             return $now + max($scan_interval, $threshold_seconds);
         }
         if (empty($probe['success']) && self::is_varnish_refill_failure_retryable($probe)) {
-            $multiplier = max(1, min(6, (int) $probe_count + 1));
-            return $now + ($scan_interval * $multiplier);
+            return self::calculate_varnish_refresh_ahead_retry_backoff_at($probe_count);
         }
         return $now + max(15 * MINUTE_IN_SECONDS, $scan_interval);
     }
@@ -563,11 +618,14 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
                 return array('ran' => false, 'reason' => 'not-due');
             }
 
-            if (self::is_manual_warmup_blocking_cron() || self::has_pending_varnish_queue_rows()) {
-                $state['lastScanAt'] = $now;
-                $state['lastMessage'] = self::maybe_translate('Refresh-ahead scan skipped because another UltraCache warm or Varnish queue operation has priority.');
+            $scan_gate = self::get_varnish_refresh_ahead_scan_gate();
+            if (empty($scan_gate['allowed'])) {
+                $state['lastMessage'] = (string) ($scan_gate['message'] ?? '');
                 self::save_varnish_refresh_ahead_state($state);
-                return array('ran' => false, 'reason' => 'queue-busy');
+                return array(
+                    'ran' => false,
+                    'reason' => sanitize_key((string) ($scan_gate['reason'] ?? 'priority-gate')),
+                );
             }
 
             $max_pages = max(1, min(10, (int) ($status['maxPagesPerRun'] ?? 5)));
@@ -583,6 +641,7 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
             $details = array();
             $probe_updates = array();
             $eligible_urls = array();
+            $eligible_probe_counts = array();
             $probed = 0;
             $eligible = 0;
             $queued = 0;
@@ -635,6 +694,7 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
                 if ($near_expiry) {
                     ++$eligible;
                     $eligible_urls[$url] = $url;
+                    $eligible_probe_counts[$url] = max(0, (int) ($candidate['probeCount'] ?? 0));
                     $detail['status'] = 'eligible';
                 } elseif (empty($probe['success'])) {
                     ++$errors;
@@ -693,7 +753,9 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
                         'lastResult' => $url_queued ? 'queued' : 'queue-failed',
                         'nextProbeAt' => $url_queued
                             ? $now + max(self::get_varnish_refresh_ahead_scan_interval(), $threshold_seconds)
-                            : $now + self::get_varnish_refresh_ahead_scan_interval(),
+                            : self::calculate_varnish_refresh_ahead_retry_backoff_at(
+                                max(0, (int) ($eligible_probe_counts[$detail_url] ?? 0))
+                            ),
                     );
                 }
                 unset($detail);
@@ -716,8 +778,12 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
             );
             self::save_varnish_refresh_ahead_state($state);
 
-            if ($queued > 0) {
-                self::ensure_cron_warm_events_scheduled(1, true);
+            if (
+                $queued > 0
+                && !self::is_manual_warmup_blocking_cron()
+                && self::get_shared_automation_pages_per_minute() > 0
+            ) {
+                self::ensure_cron_warm_events_scheduled(1);
             }
 
             return array_merge(array('ran' => true), $state);

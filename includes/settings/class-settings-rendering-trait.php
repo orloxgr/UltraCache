@@ -123,14 +123,9 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
     {
         self::$dashboard_settings_cache = null;
         self::$settings_cache = null;
-        delete_transient('ultracache_frontend_compression_probe_v1');
-        delete_transient('ultracache_object_cache_support_status_v1');
-        delete_transient('ultracache_media_support_status_v4');
-        delete_transient('ultracache_imagick_avif_alpha_probe_v1');
-        delete_transient('ultracache_gd_avif_alpha_probe_v3');
-        delete_transient('ultracache_gd_webp_encode_probe_v2');
-        delete_transient('ultracache_media_queue_init_maintenance_v1');
-        ultracache_reset_loopback_ssl_status();
+        if (function_exists('ultracache_delete_coordination_records_by_prefix')) {
+            ultracache_delete_coordination_records_by_prefix('lock', 'ultracache_media_queue_init_maintenance_v1');
+        }
 
         if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_settings_cache')) {
             Ultra_Cache_Object_Cache_Manager::reset_settings_cache();
@@ -330,24 +325,49 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
         $defer_stage_safe = $defer_js_enabled || $defer_all_js_enabled || $delay_all_js_enabled || $defer_stage_balanced;
         $manual_lcp_selector_split = self::split_manual_lcp_selector_setting($ui['manualLcpHeroSelector'] ?? '');
         $defaults = self::get_dashboard_defaults();
-        $varnish_stale_while_revalidate_seconds = self::sanitize_bounded_integer_setting(
-            $ui['varnishStaleWhileRevalidateSeconds'] ?? $defaults['varnishStaleWhileRevalidateSeconds'],
-            $defaults['varnishStaleWhileRevalidateSeconds'],
-            0,
-            86400
+        $cache_fresh_ttl_minutes = self::sanitize_bounded_integer_setting(
+            $ui['cacheFreshTtlMinutes'] ?? $defaults['cacheFreshTtlMinutes'],
+            $defaults['cacheFreshTtlMinutes'],
+            1,
+            525600
         );
-        if ($varnish_stale_while_revalidate_seconds > 0) {
-            $varnish_mode = self::sanitize_varnish_mode($ui['varnishCliMode'] ?? 'http');
-            $varnish_servers_raw = self::sanitize_varnish_servers_string($ui['varnishCliServers'] ?? '', $varnish_mode);
-            $varnish_capability = self::get_varnish_soft_purge_capability(array(
-                'mode' => $varnish_mode,
-                'servers' => array_values(array_filter(array_map('trim', preg_split('/\s+/', $varnish_servers_raw)))),
-                'key' => function_exists('ultracache_get_varnish_password') ? trim((string) ultracache_get_varnish_password()) : '',
-            ));
-            if (empty($varnish_capability['supported'])) {
-                $varnish_stale_while_revalidate_seconds = 0;
-            }
-        }
+        $cache_max_stale_minutes = max(
+            $cache_fresh_ttl_minutes,
+            self::sanitize_bounded_integer_setting(
+                $ui['cacheMaxStaleMinutes'] ?? $defaults['cacheMaxStaleMinutes'],
+                $defaults['cacheMaxStaleMinutes'],
+                1,
+                525600
+            )
+        );
+        $varnish_automation_policy = method_exists(static::class, 'get_varnish_automation_policy')
+            ? self::get_varnish_automation_policy($ui)
+            : array(
+                'freshTtlMinutes' => $cache_fresh_ttl_minutes,
+                'maxStaleMinutes' => $cache_max_stale_minutes,
+                'ttlOnlyMinutes' => min(10, $cache_fresh_ttl_minutes),
+                'staleWhileRevalidateSeconds' => !empty($ui['staleWhileRevalidateEnabled'])
+                    ? min(86400, max(0, ($cache_max_stale_minutes - $cache_fresh_ttl_minutes) * MINUTE_IN_SECONDS))
+                    : 0,
+                'refillAfterTargetedInvalidation' => true,
+                'warmWithSiteWarmup' => true,
+                'refreshAheadEnabled' => false,
+                'refreshAheadThresholdPercent' => 85,
+                'refreshAheadMaxPages' => 5,
+                'refreshAheadPinnedUrls' => '',
+            );
+        $shared_cache_delivery_status = method_exists(static::class, 'get_shared_cache_delivery_status')
+            ? self::get_shared_cache_delivery_status($ui)
+            : array(
+                'enabled' => self::is_varnish_runtime_enabled($ui),
+                'controlVerified' => false,
+                'mode' => self::is_varnish_runtime_enabled($ui) ? 'ttl-only' : 'disabled',
+                'ttlMinutes' => (int) $varnish_automation_policy['ttlOnlyMinutes'],
+                'ttlOnlyMinutes' => (int) $varnish_automation_policy['ttlOnlyMinutes'],
+            );
+        $varnish_stale_while_revalidate_seconds = max(0, min(86400, absint(
+            $varnish_automation_policy['staleWhileRevalidateSeconds'] ?? 0
+        )));
 
         self::$settings_cache = array(
             'enabled'                      => !empty($ui['pageCacheEnabled']),
@@ -434,6 +454,7 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'lcp_frontend_discovery_started_at' => absint($ui['lcpFrontendDiscoveryStartedAt'] ?? 0),
             'lcp_frontend_discovery_expires_at' => absint($ui['lcpFrontendDiscoveryExpiresAt'] ?? 0),
             'lazy_load_images'            => !empty($ui['lazyLoadImagesEnabled']),
+            'lazy_load_third_party_iframes' => !empty($ui['lazyLoadThirdPartyIframesEnabled']),
             'lcp_boundary_defer'           => !empty($ui['lcpBoundaryDeferEnabled']),
             'lcp_image_priority_override_list' => $manual_lcp_selector_split['images'],
             'manual_lcp_hero_selector_list' => $manual_lcp_selector_split['selectors'],
@@ -457,29 +478,47 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'speculation_rules_enabled'    => !empty($ui['speculationRulesEnabled']),
             'browser_cache_rules'          => !empty($ui['browserCacheRulesEnabled']),
             'apache_static_html_delivery'  => !empty($ui['apacheStaticHtmlDeliveryEnabled']),
-            'varnish_cli_enabled'          => !empty($ui['varnishCliEnabled']),
+            'litespeed_cache_enabled'      => !empty($ui['liteSpeedCacheEnabled']) && !empty($ui['pageCacheEnabled']),
+            'litespeed_refill_after_targeted_invalidation' => !empty($ui['liteSpeedRefillAfterTargetedInvalidation']),
+            'litespeed_warm_during_site_warmup' => !empty($ui['liteSpeedWarmDuringSiteWarmup']),
+            'litespeed_stale_purge_enabled' => !empty($ui['liteSpeedStalePurgeEnabled']),
+            'litespeed_refresh_ahead_enabled' => !empty($ui['liteSpeedRefreshAheadEnabled']),
+            'litespeed_refresh_ahead_threshold_percent' => max(50, min(95, absint($ui['liteSpeedRefreshAheadThresholdPercent'] ?? 85))),
+            'litespeed_refresh_ahead_max_pages' => max(1, min(10, absint($ui['liteSpeedRefreshAheadMaxPages'] ?? 5))),
+            'litespeed_refresh_ahead_pinned_urls' => (string) ($ui['liteSpeedRefreshAheadPinnedUrls'] ?? ''),
+            'shared_cache_delivery_enabled' => !empty($shared_cache_delivery_status['enabled']),
+            'shared_cache_control_verified' => !empty($shared_cache_delivery_status['controlVerified']),
+            'shared_cache_control_proof_expires_at' => absint($shared_cache_delivery_status['controlProofExpiresAt'] ?? 0),
+            'shared_cache_delivery_mode'    => sanitize_key((string) ($shared_cache_delivery_status['mode'] ?? 'disabled')),
+            'shared_cache_ttl_minutes'       => self::sanitize_bounded_integer_setting($shared_cache_delivery_status['ttlMinutes'] ?? 0, 0, 0, 525600),
+            'shared_cache_managed_ttl_minutes' => self::sanitize_bounded_integer_setting($shared_cache_delivery_status['managedTtlMinutes'] ?? 1440, 1440, 1, 525600),
+            'shared_cache_ttl_only_minutes'  => self::sanitize_bounded_integer_setting($shared_cache_delivery_status['ttlOnlyMinutes'] ?? 10, 10, 1, 1440),
+            'varnish_cli_enabled'          => self::is_varnish_runtime_enabled($ui),
             'varnish_cli_mode'             => self::sanitize_varnish_mode($ui['varnishCliMode']),
             'varnish_cli_servers'          => self::sanitize_varnish_servers_string($ui['varnishCliServers'], self::sanitize_varnish_mode($ui['varnishCliMode'])),
             'varnish_cli_key'              => trim((string) $ui['varnishCliKey']),
             'varnish_cli_timeout_seconds'  => max(1, min(15, absint($ui['varnishCliTimeoutSeconds']))),
+            'varnish_invalidations_per_minute' => max(1, min(600, absint($ui['varnishInvalidationsPerMinute'] ?? 10))),
             'varnish_cli_method'           => ('PURGE' === strtoupper(trim((string) $ui['varnishCliMethod']))) ? 'PURGE' : 'BAN',
             'varnish_invalidation_strategy' => self::sanitize_varnish_invalidation_strategy($ui['varnishInvalidationStrategy'] ?? 'ban'),
             'varnish_flush_scope'          => self::sanitize_varnish_flush_scope($ui['varnishFlushScope'] ?? 'auto'),
-            'varnish_html_ttl_minutes'     => self::sanitize_bounded_integer_setting($ui['varnishHtmlTtlMinutes'] ?? $defaults['varnishHtmlTtlMinutes'], $defaults['varnishHtmlTtlMinutes'], 0, 525600),
             'varnish_stale_while_revalidate_seconds' => $varnish_stale_while_revalidate_seconds,
-            'varnish_refill_after_targeted_invalidation' => !empty($ui['varnishRefillAfterTargetedInvalidation']),
-            'varnish_warm_during_manual_warmup' => !empty($ui['varnishWarmDuringManualWarmup']),
-            'varnish_refresh_ahead_enabled'  => !empty($ui['varnishRefreshAheadEnabled']),
-            'varnish_refresh_ahead_threshold_percent' => self::sanitize_bounded_integer_setting($ui['varnishRefreshAheadThresholdPercent'] ?? $defaults['varnishRefreshAheadThresholdPercent'], $defaults['varnishRefreshAheadThresholdPercent'], 50, 95),
-            'varnish_refresh_ahead_max_pages' => self::sanitize_bounded_integer_setting($ui['varnishRefreshAheadMaxPages'] ?? $defaults['varnishRefreshAheadMaxPages'], $defaults['varnishRefreshAheadMaxPages'], 1, 10),
-            'varnish_refresh_ahead_pinned_urls' => self::parse_textarea_setting(self::sanitize_local_url_textarea_setting($ui['varnishRefreshAheadPinnedUrls'] ?? '', 25)),
+            'varnish_refill_after_targeted_invalidation' => !empty($varnish_automation_policy['refillAfterTargetedInvalidation']),
+            'varnish_warm_during_manual_warmup' => !empty($varnish_automation_policy['warmWithSiteWarmup']),
+            'varnish_refresh_ahead_enabled'  => !empty($varnish_automation_policy['refreshAheadEnabled']),
+            'varnish_refresh_ahead_threshold_percent' => max(50, min(95, absint($varnish_automation_policy['refreshAheadThresholdPercent'] ?? 85))),
+            'varnish_refresh_ahead_max_pages' => max(1, min(10, absint($varnish_automation_policy['refreshAheadMaxPages'] ?? 5))),
+            'varnish_refresh_ahead_pinned_urls' => '',
             'media_optimization_enabled'   => !empty($ui['mediaOptimizationEnabled']),
             'media_generate_on_upload'     => !empty($ui['mediaGenerateOnUploadEnabled']),
             'media_generate_on_demand'     => !empty($ui['mediaGenerateOnDemandEnabled']),
             'media_upload_conversion_enabled' => !empty($ui['mediaUploadConversionEnabled']),
             'image_upload_max_side'        => self::sanitize_bounded_integer_setting($ui['imageUploadMaxSide'] ?? $defaults['imageUploadMaxSide'], $defaults['imageUploadMaxSide'], 1, 8192),
+            'media_ignore_color_profile_preservation' => !empty($ui['mediaIgnoreColorProfilePreservation']),
+            'media_upload_format'          => self::sanitize_media_output_mode($ui['mediaUploadFormat'] ?? $defaults['mediaUploadFormat']),
             'media_output_mode'            => self::sanitize_media_output_mode($ui['mediaOutputMode']),
             'media_fallback_format'        => self::sanitize_media_fallback_format($ui['mediaFallbackFormat'] ?? $defaults['mediaFallbackFormat'], $ui['mediaOutputMode'] ?? $defaults['mediaOutputMode']),
+            'media_replacement_format'     => self::sanitize_media_output_mode($ui['mediaReplacementFormat'] ?? $defaults['mediaReplacementFormat']),
             'media_quality'                => self::sanitize_media_quality($ui['mediaQuality'] ?? $defaults['mediaQuality']),
             'woo_safe_mode'                => !empty($ui['woocommerceSafeModeEnabled']),
             'cache_cleanup_enabled'        => !empty($ui['cacheCleanupEnabled']),
@@ -489,12 +528,13 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'flush_all_include_litespeed' => !empty($ui['flushAllIncludeLiteSpeed']),
             'flush_all_include_nginx'     => !empty($ui['flushAllIncludeNginx']),
             'flush_all_include_varnish'   => !empty($ui['flushAllIncludeVarnish']),
+            'flush_all_include_elementor' => !empty($ui['flushAllIncludeElementor']),
             'cache_cleanup_interval_hours' => max(1, absint($ui['cacheCleanupIntervalHours'])),
             'css_bundle_cleanup_grace_seconds' => HOUR_IN_SECONDS * self::sanitize_bounded_integer_setting($ui['cssBundleCleanupGraceHours'] ?? 48, 48, 1, 168),
             'css_bundle_cleanup_delete_limit' => self::sanitize_bounded_integer_setting($ui['cssBundleCleanupDeleteLimit'] ?? 60, 60, 5, 500),
-            'cron_warm_enabled'            => !empty($ui['cronWarmEnabled']),
             'cron_warm_start_after_cleanup'=> !empty($ui['cronWarmStartAfterCleanup']),
             'cron_warm_start_after_manual_purge'=> !empty($ui['cronWarmStartAfterManualPurge']),
+            'warm_uncached_urls_on_first_visit' => !empty($ui['warmUncachedUrlsOnFirstVisit']),
             'debug_headers_enabled'        => !empty($ui['debugHeadersEnabled']),
             'cron_warm_pages_per_minute'   => max(0, absint($ui['cronWarmPagesPerMinute'])),
             'scheduled_warm_limit'         => max(1, absint($ui['scheduledWarmLimit'])),
@@ -502,8 +542,8 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'warm_menu_depth'              => in_array((string) ($ui['warmMenuDepth'] ?? ''), array('1', '2', '3', 'all'), true) ? (string) $ui['warmMenuDepth'] : '',
             'warm_full_site_sources'       => self::parse_textarea_setting(str_replace(',', "\n", (string) ($ui['warmFullSiteSources'] ?? ''))),
             'stale_while_revalidate_enabled' => !empty($ui['staleWhileRevalidateEnabled']),
-            'cache_fresh_ttl_minutes'      => self::sanitize_positive_integer_setting($ui['cacheFreshTtlMinutes'] ?? $defaults['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1),
-            'cache_max_stale_minutes'      => max(self::sanitize_positive_integer_setting($ui['cacheFreshTtlMinutes'] ?? $defaults['cacheFreshTtlMinutes'], $defaults['cacheFreshTtlMinutes'], 1), self::sanitize_positive_integer_setting($ui['cacheMaxStaleMinutes'] ?? $defaults['cacheMaxStaleMinutes'], $defaults['cacheMaxStaleMinutes'], 1)),
+            'cache_fresh_ttl_minutes'      => $cache_fresh_ttl_minutes,
+            'cache_max_stale_minutes'      => $cache_max_stale_minutes,
             'excluded_paths'               => $excluded_paths,
             'excluded_query_args'          => $excluded_query_args,
         );

@@ -95,10 +95,21 @@ trait Ultra_Cache_Rest_Schemas_Trait
         return in_array(sanitize_key((string) $value), array('configured', 'entire-host'), true);
     }
 
-    public function sanitize_media_output_mode_param($value)
+    public function sanitize_media_format_param($value)
     {
         $value = strtolower(trim((string) $value));
         return in_array($value, array('avif', 'webp'), true) ? $value : 'webp';
+    }
+
+    public function validate_media_format_param($value)
+    {
+        $value = strtolower(trim((string) $value));
+        return in_array($value, array('avif', 'webp'), true);
+    }
+
+    public function sanitize_media_output_mode_param($value)
+    {
+        return $this->sanitize_media_format_param($value);
     }
 
     public function validate_media_output_mode_param($value)
@@ -313,6 +324,7 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'mediaGenerateOnUploadEnabled'        => array('type' => 'boolean', 'required' => false),
             'mediaGenerateOnDemandEnabled'        => array('type' => 'boolean', 'required' => false),
             'mediaUploadConversionEnabled'        => array('type' => 'boolean', 'required' => false),
+            'mediaIgnoreColorProfilePreservation' => array('type' => 'boolean', 'required' => false),
             'imageUploadMaxSide'                  => array(
                 'type'              => 'integer',
                 'required'          => false,
@@ -328,8 +340,10 @@ trait Ultra_Cache_Rest_Schemas_Trait
                 'sanitize_callback' => 'rest_sanitize_request_arg',
                 'validate_callback' => 'rest_validate_request_arg',
             ),
+            'mediaUploadFormat'                  => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_media_format_param'), 'validate_callback' => array($this, 'validate_media_format_param')),
             'mediaOutputMode'                     => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_media_output_mode_param'), 'validate_callback' => array($this, 'validate_media_output_mode_param')),
             'mediaFallbackFormat'                 => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_media_fallback_format_param'), 'validate_callback' => array($this, 'validate_media_fallback_format_param')),
+            'mediaReplacementFormat'             => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_media_format_param'), 'validate_callback' => array($this, 'validate_media_format_param')),
             'mediaQuality'                        => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_media_quality_param'), 'validate_callback' => array($this, 'validate_media_quality_param')),
             'javascriptStrategy'                   => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_javascript_strategy_param'), 'validate_callback' => array($this, 'validate_javascript_strategy_param')),
             'deferJsEnabled'                       => array('type' => 'boolean', 'required' => false),
@@ -386,6 +400,7 @@ trait Ultra_Cache_Rest_Schemas_Trait
                 'enum'              => array('1_hour', '4_hours', '8_hours', '1_day', '3_days', '1_week', 'indefinitely'),
             ),
             'lazyLoadImagesEnabled'                => array('type' => 'boolean', 'required' => false),
+            'lazyLoadThirdPartyIframesEnabled'     => array('type' => 'boolean', 'required' => false),
             'lcpBoundaryDeferEnabled'              => array('type' => 'boolean', 'required' => false),
             'manualLcpHeroSelector'                => array('type' => 'string', 'required' => false),
             'mainThreadReliefEnabled'              => array('type' => 'boolean', 'required' => false),
@@ -408,23 +423,25 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'speculationRulesEnabled'              => array('type' => 'boolean', 'required' => false),
             'browserCacheRulesEnabled'             => array('type' => 'boolean', 'required' => false),
             'apacheStaticHtmlDeliveryEnabled'      => array('type' => 'boolean', 'required' => false),
-            'varnishCliEnabled'                    => array('type' => 'boolean', 'required' => false),
+            'liteSpeedCacheEnabled'                => array('type' => 'boolean', 'required' => false),
+            'liteSpeedRefillAfterTargetedInvalidation' => array('type' => 'boolean', 'required' => false),
+            'liteSpeedWarmDuringSiteWarmup'         => array('type' => 'boolean', 'required' => false),
+            'liteSpeedStalePurgeEnabled'             => array('type' => 'boolean', 'required' => false),
+            'liteSpeedRefreshAheadEnabled'           => array('type' => 'boolean', 'required' => false),
+            'liteSpeedRefreshAheadThresholdPercent'  => array('type' => 'integer', 'required' => false, 'minimum' => 50, 'maximum' => 95),
+            'liteSpeedRefreshAheadMaxPages'          => array('type' => 'integer', 'required' => false, 'minimum' => 1, 'maximum' => 10),
+            'liteSpeedRefreshAheadPinnedUrls'        => array('type' => 'string', 'required' => false),
+            'varnishCliEnabled'                  => array('type' => 'boolean', 'required' => false),
+            'configureVarnishConnection'          => array('type' => 'boolean', 'required' => false),
             'varnishCliMode'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_mode_param'), 'validate_callback' => array($this, 'validate_varnish_mode_param')),
             'varnishCliServers'                    => array('type' => 'string', 'required' => false),
             'varnishCliKey'                        => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_secret_constant_param')),
             'clearVarnishCliKey'                   => array('type' => 'boolean', 'required' => false),
             'varnishCliTimeoutSeconds'             => array('type' => 'integer', 'required' => false),
+            'varnishInvalidationsPerMinute'         => array('type' => 'integer', 'required' => false, 'minimum' => 1, 'maximum' => 600),
             'varnishCliMethod'                     => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_method_param'), 'validate_callback' => array($this, 'validate_varnish_method_param')),
             'varnishInvalidationStrategy'              => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_invalidation_strategy_param'), 'validate_callback' => array($this, 'validate_varnish_invalidation_strategy_param')),
             'varnishFlushScope'                    => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_flush_scope_param'), 'validate_callback' => array($this, 'validate_varnish_flush_scope_param')),
-            'varnishHtmlTtlMinutes'                 => array('type' => 'integer', 'required' => false, 'minimum' => 0, 'maximum' => 525600),
-            'varnishStaleWhileRevalidateSeconds'     => array('type' => 'integer', 'required' => false, 'minimum' => 0, 'maximum' => 86400),
-            'varnishRefillAfterTargetedInvalidation' => array('type' => 'boolean', 'required' => false),
-            'varnishWarmDuringManualWarmup'          => array('type' => 'boolean', 'required' => false),
-            'varnishRefreshAheadEnabled'               => array('type' => 'boolean', 'required' => false),
-            'varnishRefreshAheadThresholdPercent'      => array('type' => 'integer', 'required' => false, 'minimum' => 50, 'maximum' => 95),
-            'varnishRefreshAheadMaxPages'              => array('type' => 'integer', 'required' => false, 'minimum' => 1, 'maximum' => 10),
-            'varnishRefreshAheadPinnedUrls'             => array('type' => 'string', 'required' => false),
             'preRenderOnSave'                      => array('type' => 'boolean', 'required' => false),
             'woocommerceSafeModeEnabled'           => array('type' => 'boolean', 'required' => false),
             'cacheCleanupEnabled'                  => array('type' => 'boolean', 'required' => false),
@@ -434,9 +451,12 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'flushAllIncludeLiteSpeed'           => array('type' => 'boolean', 'required' => false),
             'flushAllIncludeNginx'               => array('type' => 'boolean', 'required' => false),
             'flushAllIncludeVarnish'             => array('type' => 'boolean', 'required' => false),
+            'flushAllIncludeElementor'           => array('type' => 'boolean', 'required' => false),
+            // Legacy migration-only input; omitted from canonical settings output.
             'cronWarmEnabled'                      => array('type' => 'boolean', 'required' => false),
             'cronWarmStartAfterCleanup'            => array('type' => 'boolean', 'required' => false),
             'cronWarmStartAfterManualPurge'        => array('type' => 'boolean', 'required' => false),
+            'warmUncachedUrlsOnFirstVisit'          => array('type' => 'boolean', 'required' => false),
             'cacheCleanupIntervalHours'            => array('type' => 'integer', 'required' => false),
             'cssBundleCleanupGraceHours'       => array('type' => 'integer', 'required' => false),
             'cssBundleCleanupDeleteLimit'      => array('type' => 'integer', 'required' => false),
@@ -446,8 +466,8 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'warmMenuDepth'                       => array('type' => 'string', 'required' => false),
             'warmFullSiteSources'                 => array('type' => 'string', 'required' => false),
             'staleWhileRevalidateEnabled'          => array('type' => 'boolean', 'required' => false),
-            'cacheFreshTtlMinutes'                 => array('type' => 'integer', 'required' => false),
-            'cacheMaxStaleMinutes'                 => array('type' => 'integer', 'required' => false),
+            'cacheFreshTtlMinutes'                 => array('type' => 'integer', 'required' => false, 'minimum' => 1, 'maximum' => 525600),
+            'cacheMaxStaleMinutes'                 => array('type' => 'integer', 'required' => false, 'minimum' => 1, 'maximum' => 525600),
             'debugHeadersEnabled'                  => array('type' => 'boolean', 'required' => false),
             'cacheExceptionPaths'                  => array('type' => 'string', 'required' => false),
             'cacheExceptionQueryArgs'              => array('type' => 'string', 'required' => false),

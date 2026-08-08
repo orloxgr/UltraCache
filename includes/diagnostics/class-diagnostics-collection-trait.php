@@ -152,7 +152,8 @@ private static function get_font_pipeline_diagnostics($settings = array())
                     if (!is_string($css)) {
                         $css = '';
                     }
-                    $font_faces = preg_match_all('/@font-face\s*{/i', $css);
+                    $font_face_scan = ultracache_css_scan_font_face_blocks($css);
+                    $font_faces = empty($font_face_scan['malformed']) ? count((array) $font_face_scan['blocks']) : 0;
                     $woff2 = preg_match_all('/\.woff2(?:[\?#][^"\')\s]*)?/i', $css);
                     $woff = preg_match_all('/\.woff(?!2)(?:[\?#][^"\')\s]*)?/i', $css);
                     $ttf = preg_match_all('/\.ttf(?:[\?#][^"\')\s]*)?/i', $css);
@@ -936,6 +937,24 @@ private static function analyze_css_bundle_storage_for_diagnostics($css_bundle_d
             return $summary;
         }
 
+private static function get_cache_storage_diagnostics_state_name()
+        {
+            return 'ultracache_state:dashboard.storage_diagnostics';
+        }
+
+private static function get_cache_storage_diagnostics_fingerprint()
+        {
+            $payload = array(
+                'contract' => 1,
+                'cacheDir' => ultracache_content_cache_storage_dir(),
+                'cssBundleDir' => ultracache_generated_asset_dir('css-bundles'),
+                'objectDir' => ultracache_object_cache_storage_dir(),
+                'avifDir' => ultracache_optimized_images_storage_dir('avif'),
+                'webpDir' => ultracache_optimized_images_storage_dir('webp'),
+            );
+            return hash('sha256', (string) wp_json_encode($payload));
+        }
+
 private static function get_cache_storage_diagnostics($settings = array(), $css_summary = null, $force_refresh = false)
         {
             $cache_dir = ultracache_content_cache_storage_dir();
@@ -943,17 +962,32 @@ private static function get_cache_storage_diagnostics($settings = array(), $css_
             $object_dir = ultracache_object_cache_storage_dir();
             $avif_dir = ultracache_optimized_images_storage_dir('avif');
             $webp_dir = ultracache_optimized_images_storage_dir('webp');
-            $storage_cache_key = 'ultracache_cache_storage_diagnostics_v2';
+            $state_name = self::get_cache_storage_diagnostics_state_name();
+            $fingerprint = self::get_cache_storage_diagnostics_fingerprint();
 
             if (!$force_refresh) {
-                $cached_storage = get_transient($storage_cache_key);
-                if (is_array($cached_storage) && isset($cached_storage['total'])) {
-                    $cached_storage['cached'] = true;
-                    $cached_storage['scanSkipped'] = false;
-                    $cached_storage['message'] = isset($cached_storage['message']) && '' !== (string) $cached_storage['message']
-                        ? (string) $cached_storage['message']
-                        : self::maybe_translate('Storage diagnostics are cached. Use Refresh storage diagnostics for a capped filesystem rescan.');
-                    return $cached_storage;
+                $record = function_exists('ultracache_get_state_record_read_only')
+                    ? ultracache_get_state_record_read_only($state_name)
+                    : array();
+                $stored = isset($record['payload']) && is_array($record['payload']) ? $record['payload'] : array();
+                if (isset($stored['total']) && is_array($stored['total'])) {
+                    $scanned_at = max(0, (int) ($stored['scannedAt'] ?? ($record['updatedAt'] ?? 0)));
+                    $configuration_changed = !hash_equals((string) ($stored['fingerprint'] ?? ''), $fingerprint);
+                    $stale = $scanned_at > 0 && (time() - $scanned_at) > DAY_IN_SECONDS;
+                    $stored['cached'] = true;
+                    $stored['persistent'] = true;
+                    $stored['scanSkipped'] = true;
+                    $stored['configurationChanged'] = $configuration_changed;
+                    $stored['stale'] = $stale;
+                    $stored['state'] = $configuration_changed ? 'configuration-changed' : ($stale ? 'stale' : 'current');
+                    if ($configuration_changed) {
+                        $stored['message'] = self::maybe_translate('Storage paths or the diagnostics contract changed. The persisted scan remains visible as historical evidence; refresh storage diagnostics before treating it as current.');
+                    } elseif ($stale) {
+                        $stored['message'] = self::maybe_translate('Storage diagnostics are persistent but older than 24 hours. Refresh storage diagnostics for current bounded counts.');
+                    } else {
+                        $stored['message'] = self::maybe_translate('Storage diagnostics are loaded from persistent state. Use Refresh storage diagnostics for a new capped filesystem scan.');
+                    }
+                    return $stored;
                 }
 
                 return array(
@@ -962,11 +996,15 @@ private static function get_cache_storage_diagnostics($settings = array(), $css_
                     'warnings' => array(self::maybe_translate('Storage diagnostics are passive until manually refreshed; normal dashboard refresh does not scan cache/media directories.')),
                     'scanLimit' => 0,
                     'cached' => false,
+                    'persistent' => true,
                     'scanSkipped' => true,
                     'scannedAt' => 0,
-                    'message' => self::maybe_translate('Use Refresh storage diagnostics to run a capped filesystem scan.'),
+                    'computedAt' => 0,
+                    'state' => 'not-measured',
+                    'message' => self::maybe_translate('Use Refresh storage diagnostics to create the persistent capped filesystem snapshot.'),
                     'total' => array('files' => 0, 'bytes' => 0, 'truncated' => false),
                     'pageCache' => array('files' => 0, 'bytes' => 0, 'truncated' => false),
+                    'cacheRoot' => array('files' => 0, 'bytes' => 0, 'truncated' => false),
                     'cssBundles' => array('files' => 0, 'bytes' => 0, 'recognizedBundleFiles' => 0, 'warningLevel' => 'notice', 'message' => self::maybe_translate('CSS bundle storage has not been scanned yet.')),
                     'objectCacheDisk' => array('files' => 0, 'bytes' => 0, 'truncated' => false, 'exists' => is_dir($object_dir)),
                     'mediaCache' => array(
@@ -1054,6 +1092,11 @@ private static function get_cache_storage_diagnostics($settings = array(), $css_
                     'bytes' => (int) $page_cache['bytes'],
                     'truncated' => !empty($page_cache['truncated']),
                 ),
+                'cacheRoot' => array(
+                    'files' => (int) $cache_root['files'],
+                    'bytes' => (int) $cache_root['bytes'],
+                    'truncated' => !empty($cache_root['truncated']),
+                ),
                 'cssBundles' => array_merge(
                     $css_storage,
                     array(
@@ -1086,7 +1129,29 @@ private static function get_cache_storage_diagnostics($settings = array(), $css_
                 ),
             );
 
-            set_transient($storage_cache_key, $diagnostics, 10 * MINUTE_IN_SECONDS);
+            $diagnostics['fingerprint'] = $fingerprint;
+            $diagnostics['state'] = 'current';
+            $diagnostics['persistent'] = true;
+            $diagnostics['computedAt'] = max(0, (int) ($diagnostics['scannedAt'] ?? time()));
+
+            if (function_exists('ultracache_mutate_state_record')) {
+                $mutation = ultracache_mutate_state_record(
+                    $state_name,
+                    static function () use ($diagnostics) {
+                        return $diagnostics;
+                    },
+                    3,
+                    $diagnostics
+                );
+                if (empty($mutation['success'])) {
+                    $diagnostics['persistent'] = false;
+                    $diagnostics['persistenceError'] = (string) ($mutation['reason'] ?? 'write_failed');
+                }
+            } else {
+                $diagnostics['persistent'] = false;
+                $diagnostics['persistenceError'] = 'state_storage_unavailable';
+            }
+
             return $diagnostics;
         }
 
@@ -1282,11 +1347,9 @@ private static function get_css_bundle_summary_diagnostics($settings = array())
 
 private static function get_security_hard_query_args()
         {
-            return array(
-                '_wpnonce', '_ajax_nonce', 'nonce', 'security', 'token', 'auth', 'auth_token', 'access_token',
-                'key', 'order_key', 'password', 'pass', 'pwd', 'redirect_to', 'customer-logout', 'logout',
-                'pay_for_order', 'cancel_order', 'download_file'
-            );
+            return function_exists('ultracache_get_query_cache_hard_blocked_defaults')
+                ? ultracache_get_query_cache_hard_blocked_defaults()
+                : array();
         }
 
 private static function get_security_cache_correctness_diagnostics(array $settings)
@@ -1311,6 +1374,13 @@ private static function get_security_cache_correctness_diagnostics(array $settin
             $varnish_secret_in_settings = is_array($settings_option_raw) && isset($settings_option_raw['varnishCliKey']) && '' !== trim((string) $settings_option_raw['varnishCliKey']);
             $dangerous_query_args = self::get_security_hard_query_args();
             $configured_query_args = self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($settings['cacheExceptionQueryArgs'] ?? array())));
+            $query_policy = function_exists('ultracache_build_query_cache_policy')
+                ? ultracache_build_query_cache_policy(
+                    !empty($settings['cacheQueryStringsEnabled']),
+                    self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($settings['cacheQueryStringAllowlist'] ?? array()))),
+                    $configured_query_args
+                )
+                : array();
             $configured_lookup = array_fill_keys(array_map('sanitize_key', $configured_query_args), true);
             $missing_visible = array();
             foreach ($dangerous_query_args as $arg) {
@@ -1335,7 +1405,8 @@ private static function get_security_cache_correctness_diagnostics(array $settin
                     'loggedInBypass' => true,
                     'woocommerceSafeModeEnabled' => !empty($settings['woocommerceSafeModeEnabled']),
                     'queryStringsEnabled' => !empty($settings['cacheQueryStringsEnabled']),
-                    'queryAllowlistCount' => count(self::parse_textarea_setting(self::sanitize_setting_key_list((array) ($settings['cacheQueryStringAllowlist'] ?? array())))),
+                    'queryAllowlistCount' => count((array) ($query_policy['allowlist'] ?? array())),
+                    'queryPolicyFingerprint' => (string) ($query_policy['fingerprint'] ?? ''),
                     'configuredExcludedQueryArgs' => count($configured_query_args),
                     'hardSensitiveQueryArgs' => count($dangerous_query_args),
                     'hardSensitiveQueryArgsMissingFromVisibleList' => count($missing_visible),
@@ -1348,6 +1419,7 @@ private static function get_security_cache_correctness_diagnostics(array $settin
                     'varnishSecretLocation' => $varnish_secret_location,
                     'varnishSecretInSettingsOption' => $varnish_secret_in_settings,
                 ),
+                'queryPolicy' => $query_policy,
                 'hardSensitiveQueryArgs' => $dangerous_query_args,
                 'hardSensitiveQueryArgsMissingFromVisibleList' => array_values($missing_visible),
                 'cookieBypassPrefixes' => array('wordpress_logged_in_', 'wordpress_sec_', 'comment_author_', 'wp-postpass_', 'woocommerce_items_in_cart', 'woocommerce_cart_hash', 'wp_woocommerce_session_'),

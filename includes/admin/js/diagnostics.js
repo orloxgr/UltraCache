@@ -82,6 +82,8 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 		const [scan, setScan] = useState(null);
 		const [populateBusy, setPopulateBusy] = useState(false);
 		const [scanBusy, setScanBusy] = useState(false);
+		const [scanStatus, setScanStatus] = useState('');
+		const [scanProgress, setScanProgress] = useState(null);
 		const [runtimeScanBusy, setRuntimeScanBusy] = useState(false);
 		const [runtimeScanStatus, setRuntimeScanStatus] = useState('');
 		const [runtimeScanContext, setRuntimeScanContext] = useState('anonymous');
@@ -102,6 +104,39 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 		useEffect(() => {
 			setForceDraft(forceDeferValue || '');
 		}, [forceDeferValue]);
+
+		useEffect(() => {
+			let cancelled = false;
+			if (disabled || typeof onScan !== 'function' || !defaultScanUrl) {
+				return undefined;
+			}
+			(async function resumeHtmlDependencyScan() {
+				try {
+					const result = await onScan(defaultScanUrl, function(progress, message) {
+						if (cancelled) {
+							return;
+						}
+						setScanBusy(true);
+						setScanProgress((previous) => Object.assign({}, previous && typeof previous === 'object' ? previous : {}, progress && typeof progress === 'object' ? progress : {}));
+						setScanStatus(String(message || 'Resuming HTML JS dependency analysis…'));
+					}, { resumeOnly: true });
+					if (!cancelled && result && typeof result === 'object') {
+						setScan(result);
+						if (result.scannedUrl) {
+							setScanUrl(String(result.scannedUrl));
+						}
+						setScanStatus('HTML JS dependency analysis completed.');
+					}
+				} finally {
+					if (!cancelled) {
+						setScanBusy(false);
+					}
+				}
+			})();
+			return function() {
+				cancelled = true;
+			};
+		}, []);
 
 
 		const currentValue = String(value || '');
@@ -127,12 +162,16 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 			return target === 'exclusion' || !!(item && item.fallbackRecommended && !item.alreadyExcluded);
 		}
 		const suggestions = scan && Array.isArray(scan.suggestions) ? scan.suggestions : [];
+		const isStrongHtmlScan = !!(scan && String(scan.source || '') === 'html-strong-dependency-analysis');
 		const actionableSuggestions = suggestions.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored);
-		const alreadyListedSuggestions = actionableSuggestions.filter((item) => suggestionInFallback(item));
+		const persistentListedFailureSuggestions = actionableSuggestions.filter((item) => !!(item && item.stillFailingWhileListed));
+		const alreadyListedSuggestions = actionableSuggestions.filter((item) => suggestionInFallback(item) && !(item && item.stillFailingWhileListed));
 		const appendableSuggestions = actionableSuggestions.filter((item) => item.appendable !== false && !item.alreadyExcluded);
 		const reviewOnlySuggestions = actionableSuggestions.filter((item) => item.appendable === false && !item.alreadyExcluded);
 		const missingAppendableSuggestions = appendableSuggestions.filter((item) => !suggestionPrefersExclusion(item) && !suggestionInFallback(item) && !suggestionInForce(item));
-		const fallbackAppendableSuggestions = appendableSuggestions.filter((item) => !suggestionInFallback(item));
+		const fallbackAppendableSuggestions = isStrongHtmlScan
+			? appendableSuggestions.filter((item) => !suggestionInFallback(item) && (suggestionPrefersExclusion(item) || suggestionInForce(item)))
+			: appendableSuggestions.filter((item) => !suggestionInFallback(item));
 		const fallbackEscalationSuggestions = fallbackAppendableSuggestions.filter((item) => suggestionInForce(item) || suggestionPrefersExclusion(item));
 		const alreadyListedAppendableSuggestions = alreadyListedSuggestions;
 		const missingReviewOnlySuggestions = reviewOnlySuggestions.filter((item) => !suggestionInFallback(item) && !suggestionInForce(item));
@@ -145,6 +184,7 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 		const confirmedErrorMissingCount = hasConfirmedRuntimeErrors ? missingAppendableSuggestions.length : 0;
 		const suggestionMissingCount = hasConfirmedRuntimeErrors ? 0 : liveMissingCount;
 		const liveAlreadyListedCount = alreadyListedAppendableSuggestions.length;
+		const persistentListedFailureCount = persistentListedFailureSuggestions.length;
 		const reviewOnlyCount = reviewOnlySuggestions.length;
 		const runtimeErrors = scan && Array.isArray(scan.errors) ? scan.errors : [];
 		const resourceErrors = scan && Array.isArray(scan.resourceErrors) ? scan.resourceErrors : (scan && Array.isArray(scan.blockedResources) ? scan.blockedResources : []);
@@ -153,8 +193,10 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 		const missingConsoleErrorSuggestions = consoleErrorSuggestions.filter((line) => !isSuggestionPresentInDraft(draftValue, line) && !isSuggestionPresentInDraft(forceDraftValue, line));
 		const consoleSuggestions = consoleErrorScan && Array.isArray(consoleErrorScan.suggestions) ? consoleErrorScan.suggestions : [];
 		const consoleActionableSuggestions = consoleSuggestions.filter((item) => item && item.suggestedExclusion && item.confidence !== 'ignored' && !item.ignored);
+		const consolePersistentFailures = consoleActionableSuggestions.filter((item) => !!(item && item.stillFailingWhileListed));
+		const consoleDependencyRisks = consoleActionableSuggestions.filter((item) => item && item.source === 'page-dependency-analysis');
 		const consoleAppendableSuggestions = consoleActionableSuggestions.filter((item) => item.appendable !== false && !item.alreadyExcluded);
-		const consoleReviewOnlySuggestions = consoleActionableSuggestions.filter((item) => item.appendable === false && !item.alreadyExcluded);
+		const consoleReviewOnlySuggestions = consoleActionableSuggestions.filter((item) => item.appendable === false && !item.alreadyExcluded && !item.stillFailingWhileListed);
 		const consoleFallbackSuggestions = consoleAppendableSuggestions
 			.map((item) => suggestionLine(item))
 			.filter((line, index, lines) => line && !isSuggestionPresentInDraft(draftValue, line) && lines.indexOf(line) === index);
@@ -165,6 +207,13 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 		const jsDiagnosticQueueProgressTotal = jsDiagnosticQueue ? Math.max(1, Number(jsDiagnosticQueue.progressTotal || 100)) : 100;
 		const jsDiagnosticQueueProgressCurrent = jsDiagnosticQueue ? Math.max(0, Math.min(jsDiagnosticQueueProgressTotal, Number(jsDiagnosticQueue.progressCurrent || 0))) : 0;
 		const jsDiagnosticQueueProgressPercent = jsDiagnosticQueue ? Math.round((jsDiagnosticQueueProgressCurrent / jsDiagnosticQueueProgressTotal) * 100) : 0;
+		const htmlDependencyProgress = scanProgress && typeof scanProgress === 'object' ? scanProgress : {};
+		const htmlDependencyProgressPercent = Math.max(0, Math.min(100, Number(htmlDependencyProgress.progressPercent || 0)));
+		const htmlDependencyTotalScripts = Math.max(0, Number(htmlDependencyProgress.totalScripts || 0));
+		const htmlDependencyTotalFiles = Math.max(0, Number(htmlDependencyProgress.totalFiles || 0));
+		const htmlDependencyProcessedFiles = Math.max(0, Number(htmlDependencyProgress.processedFiles || 0));
+		const htmlDependencyCacheHits = Math.max(0, Number(htmlDependencyProgress.cacheHits || 0));
+		const htmlDependencyFreshFiles = Math.max(0, Number(htmlDependencyProgress.freshlyAnalyzedFiles || 0));
 
 
 
@@ -189,25 +238,18 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 			const suggested = normalizeSuggestionActionPattern(item && item.suggestedExclusion ? item.suggestedExclusion : '');
 			const sourcePath = getSuggestionSourcePath(item).replace(/^\/+/, '');
 			let ownerSlug = '';
-			let exactPattern = suggested;
 
 			const sourceOwnerMatch = sourcePath.match(/(?:^|\/)(?:plugins|themes)\/([^/]+)\/(.+)$/i);
 			const suggestedOwnerMatch = suggested.match(/(?:^|\/)(?:plugins|themes)\/([^/]+)\/(.+)$/i);
 			const ownerMatch = sourceOwnerMatch || suggestedOwnerMatch;
 			if (ownerMatch) {
 				ownerSlug = String(ownerMatch[1] || '').trim();
-				exactPattern = normalizeSuggestionActionPattern(ownerSlug + '/' + String(ownerMatch[2] || ''));
-			} else if (suggested && sourcePath) {
-				const sourceLower = sourcePath.toLowerCase();
-				const suggestedLower = suggested.toLowerCase();
-				const suffixIndex = sourceLower.lastIndexOf('/' + suggestedLower);
-				if (suffixIndex > 0) {
-					const prefix = sourcePath.slice(0, suffixIndex).replace(/\/+$/, '');
-					const prefixParts = prefix.split('/').filter(Boolean);
-					ownerSlug = prefixParts.length ? String(prefixParts[prefixParts.length - 1] || '') : '';
-					if (ownerSlug) {
-						exactPattern = normalizeSuggestionActionPattern(ownerSlug + '/' + suggested);
-					}
+			}
+
+			if (!ownerSlug && sourcePath) {
+				const sourcePluginThemeMatch = sourcePath.match(/(?:^|\/)(?:plugins|themes)\/([^/]+)(?:\/|$)/i);
+				if (sourcePluginThemeMatch) {
+					ownerSlug = String(sourcePluginThemeMatch[1] || '').trim();
 				}
 			}
 
@@ -218,17 +260,9 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 				}
 			}
 
-			const chainPattern = ownerSlug ? normalizeSuggestionActionPattern(ownerSlug + '/') : '';
-			if (chainPattern && exactPattern === chainPattern && sourcePath) {
-				const chainIndex = sourcePath.toLowerCase().lastIndexOf('/' + chainPattern.toLowerCase());
-				if (chainIndex >= 0) {
-					exactPattern = normalizeSuggestionActionPattern(sourcePath.slice(chainIndex + 1));
-				}
-			}
-
 			return {
-				exact: exactPattern || suggested,
-				chain: chainPattern,
+				exact: suggested,
+				chain: ownerSlug ? normalizeSuggestionActionPattern(ownerSlug + '/') : '',
 			};
 		}
 
@@ -622,12 +656,12 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 				const escalationCount = fallbackMissing.length - speedMissing.length;
 				setConsoleErrorSuggestions(extracted);
 				setConsoleErrorScan(scan || null);
-				if (!extracted.length && !reviewOnly.length) {
-					setConsoleErrorStatus('No Runtime Scan suggestions were detected. UltraCache only appends exact paths/handles resolved from the error, page inventory, or scanned plugin/theme sources.');
-				} else if (!extracted.length) {
-					setConsoleErrorStatus('Detected ' + reviewOnly.length + ' not-fixable Runtime Scan candidate(s). They are shown below for checking and can be appended one by one.');
+				const persistentCount = scan && typeof scan.persistentListedFailureCount !== 'undefined' ? Number(scan.persistentListedFailureCount || 0) : 0;
+				const dependencyRiskCount = scan && typeof scan.dependencyRiskCount !== 'undefined' ? Number(scan.dependencyRiskCount || 0) : 0;
+				if (!extracted.length && !reviewOnly.length && !persistentCount && !dependencyRiskCount) {
+					setConsoleErrorStatus('No Runtime Scan suggestions were detected. UltraCache only reports exact paths/handles resolved from the error, the page dependency graph, or scanned local JS sources.');
 				} else {
-					setConsoleErrorStatus('Detected ' + extracted.length + ' appendable Runtime Scan suggestion(s)' + (reviewOnly.length ? (' and ' + reviewOnly.length + ' not-fixable candidate(s)') : '') + (escalationCount ? ('; ' + escalationCount + ' already in Defer Instead can still be appended to "Do Not Defer or Delay".') : '') + '. Append the fixes you want, then save and purge cache.');
+					setConsoleErrorStatus('Detected ' + extracted.length + ' appendable Runtime Scan suggestion(s)' + (dependencyRiskCount ? (', ' + dependencyRiskCount + ' page/file dependency risk(s)') : '') + (persistentCount ? (', and ' + persistentCount + ' already-listed script(s) where the runtime error still persists') : '') + (reviewOnly.length ? (', plus ' + reviewOnly.length + ' not-fixable candidate(s)') : '') + (escalationCount ? ('; ' + escalationCount + ' already in Defer Instead can still be appended to "Do Not Defer or Delay".') : '') + '. Review the stored result below, append the fixes you want, then save and purge cache.');
 				}
 			} catch (error) {
 				setConsoleErrorSuggestions([]);
@@ -692,10 +726,16 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 			}
 			setSelectedSuggestionActions({});
 			setScanBusy(true);
+			setScanStatus('Preparing HTML JS dependency analysis…');
+			setScanProgress({ phase: 'prepare', progressPercent: 1 });
 			try {
-				const result = await onScan(scanUrl);
+				const result = await onScan(scanUrl, function(progress, message) {
+					setScanProgress((previous) => Object.assign({}, previous && typeof previous === 'object' ? previous : {}, progress && typeof progress === 'object' ? progress : {}));
+					setScanStatus(String(message || 'Analyzing HTML JS dependencies…'));
+				});
 				if (result && typeof result === 'object') {
 					setScan(result);
+					setScanStatus('HTML JS dependency analysis completed.');
 				}
 			} finally {
 				setScanBusy(false);
@@ -851,6 +891,22 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 				h(Button, { key: 'append-fallbacks', onClick: handleAppendFallbackSuggestions, disabled: !!disabled || !fallbackMissingCount }, 'Append to "Do Not Defer or Delay"' + (fallbackMissingCount ? ' (' + fallbackMissingCount + ')' : '')),
 				h(Button, { key: 'save', onClick: handleSaveBoth, disabled: !!disabled || (!hasChanges && !forceHasChanges && !safeguardListsOverlap), variant: 'primary' }, __('Save Both Lists', 'ultracache')),
 			]),
+			scanStatus ? h('div', { className: 'rounded-lg bg-sky-500/10 px-3 py-2', style: { marginTop: '10px' } }, [
+				h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
+					h('span', { className: 'text-sky-200 font-semibold text-[12px]' }, scanStatus),
+					h('span', { className: 'text-sky-300 font-mono text-[11px]' }, String(Math.round(htmlDependencyProgressPercent)) + '%'),
+				]),
+				h('div', { className: 'w-full h-2 rounded bg-black/30 overflow-hidden' }, [
+					h('div', { className: 'h-2 rounded bg-sky-500/80', style: { width: String(htmlDependencyProgressPercent) + '%' } }),
+				]),
+				(htmlDependencyTotalScripts || htmlDependencyTotalFiles) ? h('div', { className: 'text-[11px] text-zinc-400 mt-2 font-mono' }, [
+					'Page inventory: ' + String(htmlDependencyTotalScripts) + ' scripts',
+					htmlDependencyTotalFiles ? ' · Local JS: ' + String(htmlDependencyTotalFiles) : '',
+					htmlDependencyTotalFiles ? ' · Processed: ' + String(Math.min(htmlDependencyProcessedFiles, htmlDependencyTotalFiles)) + '/' + String(htmlDependencyTotalFiles) : '',
+					' · Cached: ' + String(htmlDependencyCacheHits),
+					' · Parsed now: ' + String(htmlDependencyFreshFiles),
+				]) : null,
+			]) : null,
 			h('div', { className: 'mt-5 mb-4', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px', alignItems: 'start' } }, [
 				h('div', { key: 'browser-scanner-panel', className: 'uc-field-wrap', style: { minWidth: 0 } }, [
 					h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
@@ -899,9 +955,9 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 				h('div', { key: 'console-handler-panel', className: 'uc-field-wrap', style: { minWidth: 0 } }, [
 					h('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
 						h('label', { className: 'uc-field-label' }, renderLabelWithHelp(__('Console Error Handler', 'ultracache'), __("What it does: reads pasted browser console errors and looks for missing globals, missing jQuery plugin methods, stack-trace URLs, and dependency clues.\n\nWhy it helps: it can propose the script that should move earlier instead of blindly excluding the script that shouted first.\n\nWatch for: it only proposes visible fixes. It does not create hidden exceptions.", 'ultracache'))),
-						consoleErrorSuggestions.length ? h('span', { className: (missingConsoleErrorSuggestions.length || consoleFallbackSuggestions.length) ? 'text-amber-300 font-mono text-[11px]' : 'text-emerald-300 font-mono text-[11px]' }, String(missingConsoleErrorSuggestions.length) + ' Defer Instead / ' + String(consoleFallbackSuggestions.length) + ' Do Not Defer or Delay / ' + String(consoleErrorSuggestions.length) + ' detected') : null,
+						(consoleErrorSuggestions.length || consolePersistentFailures.length) ? h('span', { className: (missingConsoleErrorSuggestions.length || consoleFallbackSuggestions.length || consolePersistentFailures.length) ? 'text-amber-300 font-mono text-[11px]' : 'text-emerald-300 font-mono text-[11px]' }, String(missingConsoleErrorSuggestions.length) + ' Defer Instead / ' + String(consoleFallbackSuggestions.length) + ' Do Not Defer or Delay / ' + String(consolePersistentFailures.length) + ' persistent / ' + String(consoleDependencyRisks.length) + ' dependency') : null,
 					]),
-					h('div', { className: 'text-xs text-zinc-500 mb-3 leading-relaxed' }, 'Paste browser console errors here. UltraCache uses the selected Page URL/front page to resolve missing jQuery plugin methods/globals to exact provider scripts where possible. Extraction lists appendable fixes and does not change either list until you append to Defer Instead or Do Not Defer or Delay.'),
+					h('div', { className: 'text-xs text-zinc-500 mb-3 leading-relaxed' }, "Paste browser console errors here. UltraCache also scans the selected page's actual WordPress script dependency graph and readable local JS files for provider/consumer and lifecycle-order risks. An already-listed script is kept visible when the same runtime error persists; it is not treated as solved just because the exclusion exists. Nothing changes until you append a proposed fix."),
 					h('label', { className: 'uc-field-label', style: { fontSize: '12px', color: '#6f7b8f' } }, renderLabelWithHelp(__('Console errors to analyze', 'ultracache'), __("What it does: gives the handler the raw error text to study.\n\nWhy it helps: error lines, stack traces, and script URLs help UltraCache tell the difference between the script that failed and the missing script that caused the failure.\n\nWatch for: after applying one fix, test again. One missing dependency can hide the next error.", 'ultracache'))),
 					h('textarea', {
 						className: 'uc-field-input uc-field-textarea',
@@ -937,16 +993,18 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 				h('div', { className: 'w-full h-2 rounded bg-black/30 overflow-hidden mb-3' }, [
 					h('div', { className: 'h-2 rounded bg-emerald-500/80', style: { width: String(jsDiagnosticQueueProgressPercent) + '%' } }),
 				]),
-				h('div', { className: 'grid grid-cols-2 md:grid-cols-5 gap-2 mb-3' }, [
+				h('div', { className: 'grid grid-cols-2 md:grid-cols-6 gap-2 mb-3' }, [
 					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Appendable Fixes'), h('div', { className: 'font-mono text-amber-300' }, String(jsDiagnosticQueueBucketCounts.confirmedErrorFixes || 0))]),
 					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Additional Matches'), h('div', { className: 'font-mono text-zinc-200' }, String(jsDiagnosticQueueBucketCounts.suggestions || 0))]),
+					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Persistent Errors'), h('div', { className: 'font-mono text-amber-300' }, String(jsDiagnosticQueueBucketCounts.persistentFailures || 0))]),
 					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Not Fixable'), h('div', { className: 'font-mono text-sky-300' }, String(jsDiagnosticQueueBucketCounts.reviewOnly || 0))]),
 					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Already Listed'), h('div', { className: 'font-mono text-emerald-300' }, String(jsDiagnosticQueueBucketCounts.alreadyListed || 0))]),
 					h('div', { className: 'rounded bg-black/15 px-2 py-2' }, [h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, 'Ignored'), h('div', { className: 'font-mono text-zinc-400' }, String(jsDiagnosticQueueBucketCounts.ignored || 0))]),
 				]),
 				h('div', { className: 'space-y-2 mb-3' }, [
 					renderJsDiagnosticQueueCategory('Appendable Fixes', jsDiagnosticQueueBucketCounts.confirmedErrorFixes || 0, jsDiagnosticQueueBuckets.confirmedErrorFixes || [], 'No confirmed fixes in this stored result.', 'jsdq-confirmed', { help: 'Ready-to-append fixes detected from confirmed runtime/console errors.' }),
-					renderJsDiagnosticQueueCategory('Additional Matches', jsDiagnosticQueueBucketCounts.suggestions || 0, jsDiagnosticQueueBuckets.suggestions || [], 'No suggestions in this stored result.', 'jsdq-suggestions', { help: 'Potential fixes. Append the exact source path or basename, then save and rescan.' }),
+					renderJsDiagnosticQueueCategory('Additional Matches', jsDiagnosticQueueBucketCounts.suggestions || 0, jsDiagnosticQueueBuckets.suggestions || [], 'No dependency/file-scan suggestions in this stored result.', 'jsdq-suggestions', { help: 'Page-scoped dependency risks found from WordPress registered dependencies and readable local JS lifecycle relationships.' }),
+					renderJsDiagnosticQueueCategory('Persistent Errors After Exclusion', jsDiagnosticQueueBucketCounts.persistentFailures || 0, jsDiagnosticQueueBuckets.persistentFailures || [], 'No already-listed script still reports the same runtime error.', 'jsdq-persistent', { readOnly: true, help: 'The script is already covered by Do Not Defer or Delay, but the same error still originates from it. Check whether the exclusion is effective on final HTML, then inspect the dependency suggestions instead of hiding this result.' }),
 					renderJsDiagnosticQueueCategory('Not Fixable', jsDiagnosticQueueBucketCounts.reviewOnly || 0, jsDiagnosticQueueBuckets.reviewOnly || [], 'No not-fixable items in this stored result.', 'jsdq-not-fixable', { readOnly: true, help: 'Information only. These findings are not fixable by a JS exclusion.' }),
 					renderJsDiagnosticQueueCategory('Already Listed', jsDiagnosticQueueBucketCounts.alreadyListed || 0, jsDiagnosticQueueBuckets.alreadyListed || [], 'No already listed items in this stored result.', 'jsdq-already-listed', { readOnly: true, help: 'These items are already covered by Defer Instead of Delay or Do Not Defer or Delay.' }),
 					renderJsDiagnosticQueueCategory('Ignored', jsDiagnosticQueueBucketCounts.ignored || 0, jsDiagnosticQueueBuckets.ignored || [], 'No ignored items in this stored result.', 'jsdq-ignored', { readOnly: true, help: 'Ignored findings do not require action.' }),
@@ -964,7 +1022,7 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 			]),
 			scan ? h('div', { className: 'mt-3 mb-2 text-xs bg-black/20 rounded-xl px-3 py-3', style: { padding: '5px' } }, [
 				h('div', { className: 'flex flex-wrap items-center justify-between gap-3 mb-2' }, [
-					h('span', { className: 'text-zinc-300 font-bold' }, __('JS Safeguard Safety Scan', 'ultracache')),
+					h('span', { className: 'text-zinc-300 font-bold' }, isStrongHtmlScan ? __('Strong JS Dependency Suggestions', 'ultracache') : __('JS Safeguard Safety Scan', 'ultracache')),
 					h('span', { className: 'text-zinc-500 font-mono break-all' }, [(scan.scanContext || runtimeScanContext) ? ('Context: ' + (String(scan.scanContext || runtimeScanContext) === 'logged-in' ? 'Logged-in/admin frontend' : 'Anonymous frontend') + ' · ') : '', (scan.scannedUrl || scan.profileUrl || scan.url) ? String(scan.scannedUrl || scan.profileUrl || scan.url) : '']),
 				]),
 				h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-2 mb-3' }, [
@@ -973,16 +1031,18 @@ function DeferDelayExclusionsField({ value, onSave, forceDeferValue, onForceDefe
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Missing', 'ultracache')), h('div', { className: liveMissingCount ? 'font-mono text-amber-300' : 'font-mono text-emerald-300' }, String(liveMissingCount))]),
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Do Not Defer or Delay', 'ultracache')), h('div', { className: fallbackMissingCount ? 'font-mono text-amber-300' : 'font-mono text-emerald-300' }, String(fallbackMissingCount))]),
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Already listed', 'ultracache')), h('div', { className: 'font-mono text-emerald-300' }, String(liveAlreadyListedCount))]),
+					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Persistent after exclusion', 'ultracache')), h('div', { className: persistentListedFailureCount ? 'font-mono text-amber-300' : 'font-mono text-zinc-300' }, String(persistentListedFailureCount))]),
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Not fixable', 'ultracache')), h('div', { className: missingReviewOnlySuggestions.length ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(reviewOnlyCount))]),
 					h('div', { className: 'rounded-lg bg-black/20 px-3 py-2' }, [h('div', { className: 'text-zinc-500 uppercase tracking-wider text-[10px]' }, __('Blocked resources', 'ultracache')), h('div', { className: resourceErrorCount ? 'font-mono text-sky-300' : 'font-mono text-zinc-300' }, String(resourceErrorCount || 0))]),
 				]),
 				renderResourceErrorsSection(resourceErrors),
 				renderRuntimeErrorsSection(runtimeErrors),
-				renderSuggestionSection('Missing recommended', liveMissingCount, missingAppendableSuggestions, 'No missing speed-first fixes. Defer Instead already covers these appendable scan results or they are in Do Not Defer or Delay.', 'missing-recommended', 'Append to Defer Instead adds these lines to Defer Instead of Delay.'),
+				renderSuggestionSection(isStrongHtmlScan ? 'Strong suggestions' : 'Missing recommended', liveMissingCount, missingAppendableSuggestions, isStrongHtmlScan ? 'No missing high-confidence silent dependency conflicts were found.' : 'No missing speed-first fixes. Defer Instead already covers these appendable scan results or they are in Do Not Defer or Delay.', 'missing-recommended', isStrongHtmlScan ? 'These are high-confidence execution-order conflicts found from the actual page script inventory and readable local JavaScript. Append only the fixes you want, then purge and rescan.' : 'Append to Defer Instead adds these lines to Defer Instead of Delay.'),
 				renderSuggestionSection('Do Not Defer or Delay candidates', fallbackEscalationCount, fallbackEscalationSuggestions, 'No scan findings need "Do Not Defer or Delay" for this scan.', 'fallback-candidates', 'These lines either already failed after Defer Instead or the scanner found an exclusion-first pattern such as a same-URL reload loop. Append to "Do Not Defer or Delay" moves them to the exclude list for the next test.', { grouped: true, collapsed: false }),
+				renderSuggestionSection('Persistent errors after exclusion', persistentListedFailureCount, persistentListedFailureSuggestions, 'No already-listed script still reports the same runtime error.', 'persistent-listed-failures', 'These scripts are already in Do Not Defer or Delay but the same runtime error still originates from them. If the scanned strategy is still Delay/Defer, purge and rescan. If it is blocking, inspect the dependency/file-scan recommendations instead of treating the script as solved.', { grouped: true, collapsed: false }),
 				renderSuggestionSection('Already listed recommended', liveAlreadyListedCount, alreadyListedAppendableSuggestions, 'No recommended fixes are already listed yet.', 'already-listed-recommended', 'Grouped and collapsed by default. These scan matches are already covered by your paired safeguard lists, including broad fragments that cover variant paths.', { grouped: true, collapsed: true }),
 				renderSuggestionSection('Not fixable detected', reviewOnlyCount, reviewOnlySuggestions, 'No not-fixable candidates were detected.', 'not-fixable-detected', 'Grouped and collapsed by default. Items listed here are informational and are not fixable by adding a JS safeguard.', { grouped: true, collapsed: true }),
-			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, __('Enter a same-site URL. Analyze HTML JS Dependencies reads final HTML. Scan Browser Runtime Errors opens the page in your browser, defaults to anonymous frontend mode, and captures console/runtime errors. Scan buttons do not change either list automatically.', 'ultracache')),
+			]) : h('div', { className: 'mt-2 mb-2 text-[11px] text-zinc-500', style: { padding: '5px' } }, __('Enter a same-site URL. Analyze HTML JS Dependencies looks for high-confidence silent execution-order conflicts, including lifecycle events that can be missed without a console error. Scan Browser Runtime Errors opens the page in your browser and captures console/runtime errors. Scan buttons do not change either list automatically.', 'ultracache')),
 		]);
 
 	}

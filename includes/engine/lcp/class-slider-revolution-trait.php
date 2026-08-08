@@ -61,33 +61,60 @@ private function get_sr7_generated_image_public_path_markers()
         );
     }
 
-private function extract_sr7_generated_image_relative_no_ext_from_path($path)
+private function extract_sr7_generated_image_source_relative_path_from_path($path)
     {
         $path = '/' . ltrim(str_replace('\\', '/', rawurldecode((string) $path)), '/');
         if ('' === trim($path, '/')) {
             return '';
         }
 
-        $relative = '';
-        foreach ($this->get_sr7_generated_image_public_path_markers() as $marker) {
-            $marker = '/' . ltrim(str_replace('\\', '/', (string) $marker), '/');
+        $markers = array(
+            array('marker' => $this->get_revslider_optimized_uploads_public_path_marker(), 'format' => ''),
+            array('marker' => trailingslashit($this->get_ultracache_optimized_images_public_path_marker('avif')) . 'revslider/o/', 'format' => 'avif'),
+            array('marker' => trailingslashit($this->get_ultracache_optimized_images_public_path_marker('webp')) . 'revslider/o/', 'format' => 'webp'),
+        );
+
+        foreach ($markers as $marker_state) {
+            $marker = '/' . ltrim(str_replace('\\', '/', (string) $marker_state['marker']), '/');
             $marker = trailingslashit($marker);
-            if (0 === stripos($path, $marker)) {
-                $relative = ltrim(substr($path, strlen($marker)), '/');
-                break;
+            if (0 !== stripos($path, $marker)) {
+                continue;
             }
+
+            $relative = ltrim(substr($path, strlen($marker)), '/');
+            if ('' === $relative || false !== strpos($relative, '..')) {
+                return '';
+            }
+
+            $format = (string) $marker_state['format'];
+            if ('' !== $format) {
+                if (!function_exists('ultracache_get_source_relative_path_from_optimized_media_path')) {
+                    return '';
+                }
+                $source_relative = ultracache_get_source_relative_path_from_optimized_media_path('revslider/o/' . ltrim($relative, '/'), $format);
+                if (!$source_relative || 0 !== strpos($source_relative, 'revslider/o/')) {
+                    return '';
+                }
+                $relative = ltrim(substr($source_relative, strlen('revslider/o/')), '/');
+            }
+
+            return preg_match('/\.(?:avif|webp|png|jpe?g|gif|svg)$/i', (string) $relative)
+                ? trim((string) $relative, '/')
+                : '';
         }
 
-        if ('' === $relative || false !== strpos($relative, '..')) {
+        return '';
+    }
+
+private function extract_sr7_generated_image_relative_no_ext_from_path($path)
+    {
+        $relative = $this->extract_sr7_generated_image_source_relative_path_from_path($path);
+        if ('' === $relative) {
             return '';
         }
 
-        if (!preg_match('/^(.+?)\.(?:avif|webp|png|jpe?g|gif|svg)(?:$|\?)/i', $relative, $match)) {
-            return '';
-        }
-
-        $relative_no_ext = isset($match[1]) ? trim((string) $match[1], '/') : '';
-        return '' !== $relative_no_ext ? $relative_no_ext : '';
+        $relative_no_ext = preg_replace('/\.(?:avif|webp|png|jpe?g|gif|svg)$/i', '', $relative);
+        return is_string($relative_no_ext) && '' !== $relative_no_ext ? trim($relative_no_ext, '/') : '';
     }
 
 private function find_revslider_upload_urls_in_html($html)
@@ -113,6 +140,204 @@ private function find_revslider_upload_urls_in_html($html)
         }
 
         return $urls;
+    }
+
+private function get_sr7_scanned_opening_tags($html, array $allowed_names, $start_offset = 0, $end_offset = null)
+    {
+        if (!function_exists('ultracache_scan_raw_html_tags')) {
+            return array();
+        }
+
+        $tags = array();
+        foreach (ultracache_scan_raw_html_tags((string) $html, $allowed_names, $start_offset, $end_offset) as $tag) {
+            if (!empty($tag['closing'])) {
+                continue;
+            }
+            $tags[] = $tag;
+        }
+
+        return $tags;
+    }
+
+private function find_sr7_url_attribute_in_raw_tag($tag_html, $raw_url)
+    {
+        $tag_html = (string) $tag_html;
+        $raw_url = html_entity_decode((string) $raw_url, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if ('' === $tag_html || '' === $raw_url) {
+            return '';
+        }
+
+        foreach (array('src', 'data-src', 'data-dbsrc', 'data-lazy-src', 'data-lazyload', 'data-image', 'data-origin', 'data-bg', 'data-background', 'data-bg-image', 'data-background-image', 'poster') as $attribute) {
+            $value = $this->extract_attribute_from_html_tag($tag_html, $attribute);
+            if ('' !== $value && (false !== strpos($value, $raw_url) || false !== strpos($raw_url, $value))) {
+                return $attribute;
+            }
+        }
+
+        foreach (array('srcset', 'data-srcset', 'data-lazy-srcset', 'data-lazyload-srcset') as $attribute) {
+            $value = $this->extract_attribute_from_html_tag($tag_html, $attribute);
+            foreach ($this->extract_candidate_urls_from_srcset($value) as $candidate_url) {
+                if ($candidate_url === $raw_url || false !== strpos($candidate_url, $raw_url) || false !== strpos($raw_url, $candidate_url)) {
+                    return $attribute;
+                }
+            }
+        }
+
+        foreach ($this->extract_candidate_urls_from_style($this->extract_attribute_from_html_tag($tag_html, 'style')) as $candidate_url) {
+            if ($candidate_url === $raw_url || false !== strpos($candidate_url, $raw_url) || false !== strpos($raw_url, $candidate_url)) {
+                return 'style';
+            }
+        }
+
+        return '';
+    }
+
+private function get_sr7_structural_marker_from_raw_tag($tag_html, $tag_name = '')
+    {
+        $tag_html = (string) $tag_html;
+        $parts = array(strtolower(trim((string) $tag_name)));
+        foreach (array('class', 'id', 'style', 'data-key', 'data-index', 'data-slide', 'data-slide-index', 'data-type', 'data-role') as $attribute) {
+            $value = trim($this->extract_attribute_from_html_tag($tag_html, $attribute));
+            if ('' !== $value) {
+                $parts[] = strtolower($value);
+            }
+        }
+
+        return trim(implode(' ', array_filter($parts)));
+    }
+
+private function sr7_raw_tag_marks_first_slide($tag_html)
+    {
+        $markers = array();
+        foreach (array('class', 'id', 'data-key', 'data-index', 'data-slide', 'data-slide-index') as $attribute) {
+            $value = strtolower(trim($this->extract_attribute_from_html_tag((string) $tag_html, $attribute)));
+            if ('' !== $value) {
+                $markers[] = $value;
+            }
+        }
+
+        foreach ($markers as $marker) {
+            if ('1' === $marker || 'slide-1' === $marker || 'slide_1' === $marker || 'sr7_1' === $marker) {
+                return true;
+            }
+            if (false !== strpos($marker, 'sr7_1') || false !== strpos($marker, '-1-')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+private function get_sr7_structured_raw_url_context($html, $offset, $raw_url)
+    {
+        $html = (string) $html;
+        $offset = max(0, (int) $offset);
+        if ('' === $html || $offset >= strlen($html) || !function_exists('ultracache_scan_raw_html_tags')) {
+            return array(
+                'tag' => 'SCRIPT',
+                'attribute' => 'script',
+                'class' => '',
+                'id' => '',
+                'style' => '',
+                'origin' => 'raw-block-fallback',
+                'first_slide' => false,
+                'tag_name' => '',
+            );
+        }
+
+        $allowed_names = array(
+            'sr7-module-bg',
+            'sr7-img',
+            'img',
+            'sr7-slide',
+            'sr7-content',
+            'sr7-module',
+            'rs-module',
+            'image_lists',
+            'script',
+        );
+        $container_names = array('sr7-slide', 'sr7-content', 'sr7-module', 'rs-module', 'image_lists', 'script');
+        $stack = array();
+        $exact_tag = null;
+
+        foreach (ultracache_scan_raw_html_tags($html, $allowed_names) as $tag) {
+            $tag_offset = isset($tag['offset']) ? (int) $tag['offset'] : 0;
+            $tag_end = isset($tag['end']) ? (int) $tag['end'] : $tag_offset;
+            $tag_name = isset($tag['name']) ? strtolower((string) $tag['name']) : '';
+
+            if ($tag_offset > $offset) {
+                break;
+            }
+
+            if (!empty($tag['closing'])) {
+                for ($index = count($stack) - 1; $index >= 0; --$index) {
+                    if ((string) ($stack[$index]['name'] ?? '') === $tag_name) {
+                        $stack = array_slice($stack, 0, $index);
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            if ($offset >= $tag_offset && $offset < $tag_end) {
+                $exact_tag = $tag;
+                break;
+            }
+
+            if (in_array($tag_name, $container_names, true) && empty($tag['self_closing'])) {
+                $stack[] = $tag;
+            }
+        }
+
+        $context_tag = is_array($exact_tag) ? $exact_tag : (!empty($stack) ? $stack[count($stack) - 1] : null);
+        $context_raw = is_array($context_tag) ? (string) ($context_tag['raw'] ?? '') : '';
+        $context_name = is_array($context_tag) ? strtolower((string) ($context_tag['name'] ?? '')) : '';
+        $structural_marker = $this->get_sr7_structural_marker_from_raw_tag($context_raw, $context_name);
+        $first_slide = $this->sr7_raw_tag_marks_first_slide($context_raw);
+        $has_structured_sr7_container = false;
+
+        if (!empty($stack)) {
+            foreach ($stack as $stack_tag) {
+                $stack_name = strtolower((string) ($stack_tag['name'] ?? ''));
+                if (0 === strpos($stack_name, 'sr7-') || 'rs-module' === $stack_name || 'image_lists' === $stack_name) {
+                    $has_structured_sr7_container = true;
+                    $stack_raw = (string) ($stack_tag['raw'] ?? '');
+                    $structural_marker .= ' ' . $this->get_sr7_structural_marker_from_raw_tag($stack_raw, $stack_name);
+                    $first_slide = $first_slide || $this->sr7_raw_tag_marks_first_slide($stack_raw);
+                }
+            }
+        }
+        $structural_marker = trim($structural_marker);
+
+        $is_explicit_sr7_tag = 0 === strpos($context_name, 'sr7-') || 'rs-module' === $context_name || 'image_lists' === $context_name;
+        $tag_name = '' !== $context_name ? strtoupper($context_name) : 'SCRIPT';
+        if ('IMAGE_LISTS' === $tag_name) {
+            $tag_name = 'SCRIPT';
+        }
+        $attribute = is_array($exact_tag) ? $this->find_sr7_url_attribute_in_raw_tag($context_raw, $raw_url) : '';
+        if ('' === $attribute) {
+            $attribute = 'script';
+        }
+
+        $origin = 'raw-block-fallback';
+        if ('sr7-img' === $context_name) {
+            $origin = 'sr7-image-tag';
+        } elseif ('sr7-module-bg' === $context_name) {
+            $origin = 'confirmed-module-background';
+        } elseif ($is_explicit_sr7_tag || $has_structured_sr7_container) {
+            $origin = 'sr7-structured-context';
+        }
+
+        return array(
+            'tag' => $tag_name,
+            'attribute' => $attribute,
+            'class' => $this->extract_attribute_from_html_tag($context_raw, 'class'),
+            'id' => $this->extract_attribute_from_html_tag($context_raw, 'id'),
+            'style' => trim($this->extract_attribute_from_html_tag($context_raw, 'style') . ' ' . $structural_marker),
+            'origin' => $origin,
+            'first_slide' => $first_slide,
+            'tag_name' => $context_name,
+        );
     }
 
 private function get_slider_hero_protected_fragments()
@@ -334,15 +559,16 @@ private function find_confirmed_sr7_module_bg_lcp_preload_candidates($html, $lim
             return array();
         }
 
-        if (!preg_match_all('/<sr7-module-bg\b[^>]*>/i', $html, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        $matches = $this->get_sr7_scanned_opening_tags($html, array('sr7-module-bg'));
+        if (empty($matches)) {
             return array();
         }
 
         $candidates = array();
         $seen = array();
         foreach ($matches as $index => $match) {
-            $tag_html = isset($match[0][0]) ? (string) $match[0][0] : '';
-            $tag_offset = isset($match[0][1]) ? (int) $match[0][1] : 0;
+            $tag_html = isset($match['raw']) ? (string) $match['raw'] : '';
+            $tag_offset = isset($match['offset']) ? (int) $match['offset'] : 0;
             if ('' === $tag_html) {
                 continue;
             }
@@ -430,14 +656,20 @@ private function find_marked_sr7_lcp_preload_candidates($html, $limit = 1)
             return array();
         }
 
-        if (!preg_match_all('/<(?:sr7-img|img)\b[^>]*\bdata-ultracache-sr7-lcp\s*=\s*(["\'])1\1[^>]*>/i', $html, $matches)) {
+        $matches = $this->get_sr7_scanned_opening_tags($html, array('sr7-img', 'img'));
+        if (empty($matches)) {
             return array();
         }
 
         $preferred = array();
         $generated = array();
-        foreach ($matches[0] as $index => $tag_html) {
-            $tag_html = (string) $tag_html;
+        $matched_index = 0;
+        foreach ($matches as $match) {
+            $tag_html = isset($match['raw']) ? (string) $match['raw'] : '';
+            if ('1' !== trim($this->extract_attribute_from_html_tag($tag_html, 'data-ultracache-sr7-lcp'))) {
+                continue;
+            }
+            $index = $matched_index++;
             $tag_name = 'SR7-IMG';
             if (preg_match('/^<\s*([a-z0-9:-]+)/i', $tag_html, $tag_match) && !empty($tag_match[1])) {
                 $tag_name = strtoupper((string) $tag_match[1]);
@@ -470,6 +702,8 @@ private function find_marked_sr7_lcp_preload_candidates($html, $limit = 1)
                 $candidate['is_sr7'] = true;
                 $candidate['sr7_markup_candidate'] = true;
                 $candidate['sr7_verified_first_slide'] = true;
+                $candidate['sr7_role'] = 'marked-sr7-image';
+                $candidate['lcp_reason'] = 'sr7-marked-image';
                 $candidate['score'] += 1400 + max(0, 100 - ((int) $index * 12));
 
                 if ($this->is_sr7_generated_image_list_url($candidate['url'])) {
@@ -496,6 +730,8 @@ private function find_marked_sr7_lcp_preload_candidates($html, $limit = 1)
                     $candidate['is_sr7'] = true;
                     $candidate['sr7_markup_candidate'] = true;
                     $candidate['sr7_verified_first_slide'] = true;
+                    $candidate['sr7_role'] = 'marked-sr7-image';
+                    $candidate['lcp_reason'] = 'sr7-marked-image';
                     $candidate['score'] += 1300 + max(0, 100 - ((int) $index * 12));
                     if ($this->is_sr7_generated_image_list_url($candidate['url'])) {
                         $generated[] = $candidate;
@@ -716,15 +952,16 @@ private function extract_sr7_static_context_lcp_candidates($context_html, $conte
             return array();
         }
 
-        if (!preg_match_all('/<(sr7-module-bg|sr7-img|img|div|section|figure|picture|sr7-slide|sr7-content)\\b[^>]*>/i', $context_html, $tag_matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        $tag_matches = $this->get_sr7_scanned_opening_tags($context_html, array('sr7-module-bg', 'sr7-img', 'img', 'div', 'section', 'figure', 'picture', 'sr7-slide', 'sr7-content'));
+        if (empty($tag_matches)) {
             return array();
         }
 
         $candidates = array();
         foreach ($tag_matches as $tag_index => $tag_match) {
-            $tag_html = isset($tag_match[0][0]) ? (string) $tag_match[0][0] : '';
-            $tag_name = isset($tag_match[1][0]) ? strtoupper((string) $tag_match[1][0]) : 'IMG';
-            $relative_tag_offset = isset($tag_match[0][1]) ? (int) $tag_match[0][1] : 0;
+            $tag_html = isset($tag_match['raw']) ? (string) $tag_match['raw'] : '';
+            $tag_name = isset($tag_match['name']) ? strtoupper((string) $tag_match['name']) : 'IMG';
+            $relative_tag_offset = isset($tag_match['offset']) ? (int) $tag_match['offset'] : 0;
             if ('' === $tag_html) {
                 continue;
             }
@@ -1358,22 +1595,29 @@ private function prefer_existing_nextgen_revslider_url($url)
         }
 
         $path = (string) wp_parse_url($url, PHP_URL_PATH);
-        $relative_no_ext = $this->extract_sr7_generated_image_relative_no_ext_from_path($path);
-        if ('' === $path || '' === $relative_no_ext) {
+        $source_relative = $this->extract_sr7_generated_image_source_relative_path_from_path($path);
+        if ('' === $path || '' === $source_relative || !function_exists('ultracache_build_optimized_media_relative_path')) {
             return $url;
         }
 
-        if (defined('ULTRACACHE_AVIF_DIR') && defined('ULTRACACHE_AVIF_URL')) {
-            $avif_path = trailingslashit(ULTRACACHE_AVIF_DIR) . 'revslider/o/' . $relative_no_ext . '.avif';
-            if ($this->is_generated_image_fresh_for_source($avif_path, $url)) {
-                return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_AVIF_URL) . 'revslider/o/' . $relative_no_ext . '.avif');
+        $uploads_relative = 'revslider/o/' . ltrim($source_relative, '/');
+        $source_url = function_exists('ultracache_uploads_storage_url')
+            ? ultracache_uploads_storage_url($uploads_relative)
+            : $url;
+
+        $avif_relative = ultracache_build_optimized_media_relative_path($uploads_relative, 'avif');
+        if ($avif_relative && defined('ULTRACACHE_AVIF_DIR') && defined('ULTRACACHE_AVIF_URL')) {
+            $avif_path = trailingslashit(ULTRACACHE_AVIF_DIR) . $avif_relative;
+            if ($this->is_generated_image_fresh_for_source($avif_path, $source_url)) {
+                return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_AVIF_URL) . $avif_relative);
             }
         }
 
-        if (defined('ULTRACACHE_WEBP_DIR') && defined('ULTRACACHE_WEBP_URL')) {
-            $webp_path = trailingslashit(ULTRACACHE_WEBP_DIR) . 'revslider/o/' . $relative_no_ext . '.webp';
-            if ($this->is_generated_image_fresh_for_source($webp_path, $url)) {
-                return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_WEBP_URL) . 'revslider/o/' . $relative_no_ext . '.webp');
+        $webp_relative = ultracache_build_optimized_media_relative_path($uploads_relative, 'webp');
+        if ($webp_relative && defined('ULTRACACHE_WEBP_DIR') && defined('ULTRACACHE_WEBP_URL')) {
+            $webp_path = trailingslashit(ULTRACACHE_WEBP_DIR) . $webp_relative;
+            if ($this->is_generated_image_fresh_for_source($webp_path, $source_url)) {
+                return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_WEBP_URL) . $webp_relative);
             }
         }
 
@@ -1398,6 +1642,57 @@ private function find_sr7_visual_boundary_offset($html)
         return -1;
     }
 
+private function get_sr7_lcp_candidate_contract_priority(array $candidate)
+    {
+        if (!empty($candidate['sr7_module_bg_candidate']) || 'module-bg-final-html' === (string) ($candidate['sr7_role'] ?? '')) {
+            return 600;
+        }
+
+        if (!empty($candidate['sr7_verified_first_slide']) || in_array((string) ($candidate['sr7_role'] ?? ''), array('module-background', 'slide-layer'), true)) {
+            return 500;
+        }
+
+        if (!empty($candidate['sr7_markup_candidate']) || 'marked-sr7-image' === (string) ($candidate['sr7_role'] ?? '')) {
+            return 450;
+        }
+
+        if (!empty($candidate['sr7_static_slide']) || in_array((string) ($candidate['sr7_role'] ?? ''), array('module-bg', 'static-slide'), true)) {
+            return 400;
+        }
+
+        $role = (string) ($candidate['sr7_role'] ?? '');
+        if ('sr7-image-tag' === $role) {
+            return 300;
+        }
+        if ('sr7-structured-context' === $role) {
+            return 200;
+        }
+        if ('raw-block-fallback' === $role) {
+            return 100;
+        }
+
+        return !empty($candidate['is_sr7']) ? 50 : 0;
+    }
+
+private function compare_sr7_lcp_candidates_by_contract($left, $right)
+    {
+        $left_priority = $this->get_sr7_lcp_candidate_contract_priority(is_array($left) ? $left : array());
+        $right_priority = $this->get_sr7_lcp_candidate_contract_priority(is_array($right) ? $right : array());
+        if ($left_priority !== $right_priority) {
+            return $right_priority <=> $left_priority;
+        }
+
+        return $this->compare_lcp_candidates_by_area_then_score($left, $right);
+    }
+
+private function sort_sr7_lcp_candidates_by_contract(array $candidates)
+    {
+        usort($candidates, function ($left, $right) {
+            return $this->compare_sr7_lcp_candidates_by_contract($left, $right);
+        });
+        return $candidates;
+    }
+
 private function find_best_sr7_lcp_candidate($html)
     {
         $html = (string) $html;
@@ -1419,10 +1714,11 @@ private function find_best_sr7_lcp_candidate($html)
             $candidates[] = $static_slide_candidate;
         }
 
-        if (preg_match_all('/<sr7-img\b[^>]*>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
-            foreach ($matches[0] as $match) {
-                $tag_html = (string) $match[0];
-                $offset = isset($match[1]) ? (int) $match[1] : 0;
+        $matches = $this->get_sr7_scanned_opening_tags($html, array('sr7-img'));
+        if (!empty($matches)) {
+            foreach ($matches as $match) {
+                $tag_html = isset($match['raw']) ? (string) $match['raw'] : '';
+                $offset = isset($match['offset']) ? (int) $match['offset'] : 0;
                 $context = array(
                     'tag'        => 'SR7-IMG',
                     'class'      => $this->extract_attribute_from_html_tag($tag_html, 'class'),
@@ -1444,6 +1740,8 @@ private function find_best_sr7_lcp_candidate($html)
                     $candidate = $this->build_lcp_candidate_from_values($value, $context + array('attribute' => $attribute));
                     if (null !== $candidate) {
                         $candidate['is_sr7'] = true;
+                        $candidate['sr7_role'] = 'sr7-image-tag';
+                        $candidate['lcp_reason'] = 'sr7-image-tag';
                         $candidate['score'] += max(0, 120 - min(100, (int) floor($offset / 5000)));
                         $candidates[] = $candidate;
                     }
@@ -1454,6 +1752,8 @@ private function find_best_sr7_lcp_candidate($html)
                         $candidate = $this->build_lcp_candidate_from_values($srcset_url, $context + array('attribute' => $attribute));
                         if (null !== $candidate) {
                             $candidate['is_sr7'] = true;
+                            $candidate['sr7_role'] = 'sr7-image-tag';
+                            $candidate['lcp_reason'] = 'sr7-image-tag';
                             $candidate['score'] += max(0, 120 - min(100, (int) floor($offset / 5000)));
                             $candidates[] = $candidate;
                         }
@@ -1464,6 +1764,8 @@ private function find_best_sr7_lcp_candidate($html)
                     $candidate = $this->build_lcp_candidate_from_values($style_url, $context + array('attribute' => 'style'));
                     if (null !== $candidate) {
                         $candidate['is_sr7'] = true;
+                        $candidate['sr7_role'] = 'sr7-image-tag';
+                        $candidate['lcp_reason'] = 'sr7-image-tag';
                         $candidate['score'] += max(0, 120 - min(100, (int) floor($offset / 5000)));
                         $candidates[] = $candidate;
                     }
@@ -1477,20 +1779,22 @@ private function find_best_sr7_lcp_candidate($html)
             if ('' === $raw_url) {
                 continue;
             }
-            $context_slice = strtolower((string) substr($html, max(0, $offset - 240), 480));
+            $structured_context = $this->get_sr7_structured_raw_url_context($html, $offset, $raw_url);
             $candidate = $this->build_lcp_candidate_from_values($raw_url, array(
-                'tag' => false !== strpos($context_slice, 'sr7') ? 'SR7-IMG' : 'SCRIPT',
-                'attribute' => false !== strpos($context_slice, 'sr7') ? 'data-lazyload' : 'script',
-                'class' => $context_slice,
-                'id' => $context_slice,
-                'style' => $context_slice,
+                'tag' => isset($structured_context['tag']) ? (string) $structured_context['tag'] : 'SCRIPT',
+                'attribute' => isset($structured_context['attribute']) ? (string) $structured_context['attribute'] : 'script',
+                'class' => isset($structured_context['class']) ? (string) $structured_context['class'] : '',
+                'id' => isset($structured_context['id']) ? (string) $structured_context['id'] : '',
+                'style' => isset($structured_context['style']) ? (string) $structured_context['style'] : '',
             ));
             if (null !== $candidate) {
                 $candidate['is_sr7'] = true;
                 $candidate['score'] += max(0, 160 - min(120, (int) floor($offset / 4000)));
-                if (false !== strpos($context_slice, 'sr7_1') || false !== strpos($context_slice, '-1-')) {
+                if (!empty($structured_context['first_slide'])) {
                     $candidate['score'] += 80;
                 }
+                $candidate['sr7_role'] = isset($structured_context['origin']) ? (string) $structured_context['origin'] : 'raw-block-fallback';
+                $candidate['lcp_reason'] = $candidate['sr7_role'];
                 $candidates[] = $candidate;
             }
         }
@@ -1499,7 +1803,10 @@ private function find_best_sr7_lcp_candidate($html)
             return null;
         }
 
-        $candidates = $this->sort_lcp_candidates_by_area_then_score($candidates);
+        // Mixed SR7 fallback candidates are ordered by proven semantic origin
+        // before size. Within the same origin class, rendered area remains the
+        // primary signal, followed by score and DOM offset.
+        $candidates = $this->sort_sr7_lcp_candidates_by_contract($candidates);
 
         return $candidates[0];
     }
@@ -1541,12 +1848,13 @@ private function resolve_sr7_generated_image_list_source_url($generated_url, $ht
             $scan_html = implode("\n", $image_list_matches[0]);
         }
 
-        if (!preg_match_all('/<img\b[^>]*>/i', $scan_html, $tag_matches)) {
+        $tag_matches = $this->get_sr7_scanned_opening_tags($scan_html, array('img'));
+        if (empty($tag_matches)) {
             return '';
         }
 
-        foreach ($tag_matches[0] as $tag_html) {
-            $tag_html = (string) $tag_html;
+        foreach ($tag_matches as $tag_match) {
+            $tag_html = isset($tag_match['raw']) ? (string) $tag_match['raw'] : '';
             $dbsrc = $this->extract_attribute_from_html_tag($tag_html, 'data-dbsrc');
             if ('' === $dbsrc) {
                 continue;

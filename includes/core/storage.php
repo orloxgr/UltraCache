@@ -378,6 +378,69 @@ function ultracache_optimized_images_storage_url_path($format = '')
     return trailingslashit('/' . ltrim(str_replace('\\', '/', $path), '/'));
 }
 
+/**
+ * Return the filesystem root for non-upload local image derivatives.
+ *
+ * The root is derived from the canonical optimized-media storage location and
+ * remains separate from the established uploads-relative AVIF/WebP identity.
+ *
+ * @param string $format Optional image format: avif or webp.
+ * @return string
+ */
+function ultracache_local_asset_optimized_images_storage_dir($format = '')
+{
+    $format = strtolower(trim((string) $format));
+    if ('' !== $format && !in_array($format, array('avif', 'webp'), true)) {
+        return '';
+    }
+
+    $root = ultracache_optimized_images_storage_dir();
+    if ('' === $root) {
+        return '';
+    }
+
+    $relative = 'local-assets' . ('' !== $format ? '/' . $format : '');
+    return trailingslashit(ultracache_storage_join_path($root, $relative));
+}
+
+/**
+ * Return the public URL root for non-upload local image derivatives.
+ *
+ * @param string $format Optional image format: avif or webp.
+ * @return string
+ */
+function ultracache_local_asset_optimized_images_storage_url($format = '')
+{
+    $format = strtolower(trim((string) $format));
+    if ('' !== $format && !in_array($format, array('avif', 'webp'), true)) {
+        return '';
+    }
+
+    $root = ultracache_optimized_images_storage_url();
+    if ('' === $root) {
+        return '';
+    }
+
+    $relative = 'local-assets' . ('' !== $format ? '/' . $format : '');
+    return trailingslashit(ultracache_storage_join_url($root, $relative));
+}
+
+/**
+ * Return the root-relative public URL path for non-upload local derivatives.
+ *
+ * @param string $format Optional image format: avif or webp.
+ * @return string
+ */
+function ultracache_local_asset_optimized_images_storage_url_path($format = '')
+{
+    $path = (string) wp_parse_url(ultracache_local_asset_optimized_images_storage_url($format), PHP_URL_PATH);
+    if ('' === $path) {
+        return '';
+    }
+
+    return trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode($path)), '/'));
+}
+
 function ultracache_dropin_exists($basename)
 {
     $filesystem = ultracache_get_wp_filesystem();

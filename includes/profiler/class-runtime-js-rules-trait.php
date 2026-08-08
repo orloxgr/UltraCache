@@ -5,6 +5,9 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Runtime_JS_Rules_Trait
 {
+    /** @var array<int,array<string,mixed>> */
+    private $runtime_js_scan_current_scripts = array();
+
     private function runtime_js_scan_normalize_safeguard_lists(array $safeguards)
     {
         if (isset($safeguards['fallback']) || isset($safeguards['force'])) {
@@ -116,6 +119,1099 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         return false;
     }
 
+
+    private function runtime_js_scan_script_effective_strategy(array $script)
+    {
+        if (!empty($script['delayed'])) {
+            return 'delay';
+        }
+        if (!empty($script['async'])) {
+            return 'async';
+        }
+        $strategy = strtolower(trim((string) ($script['strategy'] ?? '')));
+        if (!empty($script['defer']) || 'defer' === $strategy) {
+            return 'defer';
+        }
+        return 'blocking';
+    }
+
+    private function runtime_js_scan_script_matches_candidate(array $script, $candidate)
+    {
+        $candidate = strtolower($this->runtime_js_scan_clean_console_candidate((string) $candidate));
+        if ('' === $candidate) {
+            return false;
+        }
+
+        foreach (array('src', 'handle', 'id') as $field) {
+            $value = strtolower($this->runtime_js_scan_clean_console_candidate((string) ($script[$field] ?? '')));
+            if ('' === $value) {
+                continue;
+            }
+            if ($value === $candidate || false !== strpos($value, $candidate) || (strlen($value) >= 4 && false !== strpos($candidate, $value))) {
+                return true;
+            }
+            $value_base = strtolower($this->runtime_js_scan_basename_from_source($value));
+            $candidate_base = strtolower($this->runtime_js_scan_basename_from_source($candidate));
+            if ('' !== $value_base && '' !== $candidate_base && $value_base === $candidate_base) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function runtime_js_scan_matching_inventory_scripts($candidate)
+    {
+        $matches = array();
+        foreach ((array) $this->runtime_js_scan_current_scripts as $index => $script) {
+            if (!is_array($script) || !$this->runtime_js_scan_script_matches_candidate($script, $candidate)) {
+                continue;
+            }
+            $script['_inventoryIndex'] = (int) $index;
+            $matches[] = $script;
+        }
+        return $matches;
+    }
+
+    private function runtime_js_scan_runtime_state_for_candidate($candidate)
+    {
+        $state = array(
+            'matched'    => false,
+            'matchCount' => 0,
+            'delayed'    => false,
+            'deferred'   => false,
+            'async'      => false,
+            'blocking'   => false,
+            'strategies' => array(),
+        );
+        foreach ($this->runtime_js_scan_matching_inventory_scripts($candidate) as $script) {
+            $strategy = $this->runtime_js_scan_script_effective_strategy($script);
+            $state['matched'] = true;
+            $state['matchCount']++;
+            $state['strategies'][$strategy] = true;
+            if ('delay' === $strategy) {
+                $state['delayed'] = true;
+            } elseif ('defer' === $strategy) {
+                $state['deferred'] = true;
+            } elseif ('async' === $strategy) {
+                $state['async'] = true;
+            } else {
+                $state['blocking'] = true;
+            }
+        }
+        $state['strategies'] = array_keys($state['strategies']);
+        return $state;
+    }
+
+    private function runtime_js_scan_candidate_matches_error_source($candidate, $source)
+    {
+        $source = $this->runtime_js_scan_sanitize_source((string) $source);
+        if ('' === $source) {
+            return false;
+        }
+
+        $candidate = $this->runtime_js_scan_clean_console_candidate((string) $candidate);
+        if ('' === $candidate) {
+            return false;
+        }
+
+        if ($this->runtime_js_scan_script_matches_candidate(array('src' => $source), $candidate)) {
+            return true;
+        }
+
+        foreach ($this->runtime_js_scan_matching_inventory_scripts($candidate) as $script) {
+            if ($this->runtime_js_scan_script_matches_candidate($script, $source)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function runtime_js_scan_find_inventory_script_by_handle($handle, array $scripts)
+    {
+        $handle = sanitize_key((string) $handle);
+        if ('' === $handle) {
+            return array();
+        }
+        foreach ($scripts as $index => $script) {
+            if (!is_array($script) || $handle !== sanitize_key((string) ($script['handle'] ?? ''))) {
+                continue;
+            }
+            $script['_inventoryIndex'] = (int) $index;
+            return $script;
+        }
+        return array();
+    }
+
+    private function runtime_js_scan_dependency_suggestion_for_script(array $script)
+    {
+        $src = (string) ($script['src'] ?? '');
+        if ('' !== $src) {
+            $fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($src, 5);
+            if ('' !== $fragment) {
+                return $fragment;
+            }
+        }
+        $handle = sanitize_key((string) ($script['handle'] ?? ''));
+        if ('' !== $handle) {
+            return $handle;
+        }
+        return sanitize_text_field((string) ($script['id'] ?? ''));
+    }
+
+    private function runtime_js_scan_strong_suggestion_for_script(array $script)
+    {
+        $handle = sanitize_key((string) ($script['handle'] ?? ''));
+        if ('' !== $handle && !$this->runtime_js_scan_is_generic_token($handle)) {
+            return $handle;
+        }
+        return $this->runtime_js_scan_dependency_suggestion_for_script($script);
+    }
+
+    private function runtime_js_scan_add_persistent_exact_error_source_suggestion(&$suggestions, &$seen, $source, $message, $detail, array $exclusions)
+    {
+        if (!$this->runtime_js_scan_is_explicit_runtime_error($message, $detail)) {
+            return false;
+        }
+
+        $source = $this->runtime_js_scan_sanitize_source((string) $source);
+        if ('' === $source) {
+            return false;
+        }
+
+        $safeguards = $this->runtime_js_scan_normalize_safeguard_lists($exclusions);
+        $candidates = array();
+        $candidate_seen = array();
+        $push = function ($candidate) use (&$candidates, &$candidate_seen) {
+            $candidate = $this->runtime_js_scan_clean_console_candidate((string) $candidate);
+            if ('' === $candidate || $this->runtime_js_scan_is_ultracache_runtime_helper_source($candidate) || $this->runtime_js_scan_is_generic_token($candidate)) {
+                return;
+            }
+            $key = strtolower($candidate);
+            if (isset($candidate_seen[$key])) {
+                return;
+            }
+            $candidate_seen[$key] = true;
+            $candidates[] = $candidate;
+        };
+
+        $fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($source, 6);
+        if ('' !== $fragment) {
+            $push($fragment);
+        }
+        foreach ($this->runtime_js_scan_matching_inventory_scripts($source) as $script) {
+            $push($this->runtime_js_scan_dependency_suggestion_for_script($script));
+            $push((string) ($script['handle'] ?? ''));
+            $push((string) ($script['id'] ?? ''));
+        }
+
+        foreach ($candidates as $candidate) {
+            if (!$this->runtime_js_scan_exclusion_already_matches($candidate, $safeguards['fallback'])) {
+                continue;
+            }
+            if (!$this->runtime_js_scan_candidate_matches_error_source($candidate, $source)) {
+                continue;
+            }
+            $this->runtime_js_scan_add_suggestion(
+                $suggestions,
+                $seen,
+                $candidate,
+                'persistent exact runtime source',
+                $source,
+                trim((string) $message . "\n" . (string) $detail),
+                'The same exact script still appears as the source of a browser runtime error even though the current Do Not Defer or Delay list already covers it. Keep this finding visible and use the scanned execution state plus dependency/file analysis to decide the next fix instead of treating the configured exclusion as proof that the error is resolved.',
+                $exclusions,
+                'recommended',
+                'exclusion'
+            );
+            return true;
+        }
+
+        return false;
+    }
+
+    private function runtime_js_scan_declared_dependency_preferred_target($provider_strategy, $consumer_strategy, $strong_only = false)
+    {
+        $provider_strategy = strtolower(trim((string) $provider_strategy));
+        $consumer_strategy = strtolower(trim((string) $consumer_strategy));
+
+        if ($strong_only) {
+            if ('delay' === $provider_strategy && in_array($consumer_strategy, array('blocking', 'defer'), true)) {
+                return 'force';
+            }
+            if ('defer' === $provider_strategy && 'blocking' === $consumer_strategy) {
+                return 'exclusion';
+            }
+            return '';
+        }
+
+        if ('delay' === $provider_strategy && 'delay' !== $consumer_strategy) {
+            return 'force';
+        }
+        if ('defer' === $provider_strategy && 'blocking' === $consumer_strategy) {
+            return 'exclusion';
+        }
+        if ('async' === $provider_strategy && 'delay' !== $consumer_strategy) {
+            return 'exclusion';
+        }
+        return '';
+    }
+
+    private function runtime_js_scan_add_declared_dependency_risk_suggestions(&$suggestions, &$seen, array $scripts, array $exclusions, $prefer_handle = false)
+    {
+        $added = false;
+        foreach ($scripts as $consumer) {
+            if (!is_array($consumer) || empty($consumer['deps'])) {
+                continue;
+            }
+            $consumer_strategy = $this->runtime_js_scan_script_effective_strategy($consumer);
+            foreach ((array) $consumer['deps'] as $dependency_handle) {
+                $provider = $this->runtime_js_scan_find_inventory_script_by_handle($dependency_handle, $scripts);
+                if (empty($provider)) {
+                    continue;
+                }
+                $provider_strategy = $this->runtime_js_scan_script_effective_strategy($provider);
+                $preferred_target = $this->runtime_js_scan_declared_dependency_preferred_target($provider_strategy, $consumer_strategy, $prefer_handle);
+                if ('' === $preferred_target) {
+                    continue;
+                }
+                $suggestion = $prefer_handle ? $this->runtime_js_scan_strong_suggestion_for_script($provider) : $this->runtime_js_scan_dependency_suggestion_for_script($provider);
+                if ('' === $suggestion || $this->runtime_js_scan_is_ultracache_runtime_helper_source($suggestion)) {
+                    continue;
+                }
+                $consumer_name = sanitize_text_field((string) ($consumer['handle'] ?? $consumer['id'] ?? $consumer['src'] ?? 'consumer script'));
+                $provider_name = sanitize_text_field((string) ($provider['handle'] ?? $dependency_handle));
+                $this->runtime_js_scan_add_suggestion(
+                    $suggestions,
+                    $seen,
+                    $suggestion,
+                    'declared dependency ' . $provider_name,
+                    (string) ($provider['src'] ?? ''),
+                    'Page dependency graph found an execution-order conflict for provider ' . $provider_name . ' required by ' . $consumer_name . '.',
+                    'WordPress registered "' . $provider_name . '" as a dependency of "' . $consumer_name . '", but the scanned page executes the provider as ' . $provider_strategy . ' while the consumer executes as ' . $consumer_strategy . '. The provider can therefore run too late for the declared dependency. Use the least-invasive earlier strategy proposed by this finding and rescan.',
+                    $exclusions,
+                    'recommended',
+                    $preferred_target
+                );
+                $added = true;
+                if (count($suggestions) >= 80) {
+                    return true;
+                }
+            }
+        }
+        return $added;
+    }
+
+    private function runtime_js_scan_normalize_lifecycle_event($event)
+    {
+        $event = strtolower(trim(html_entity_decode((string) $event, ENT_QUOTES, 'UTF-8')));
+        if ('' === $event || strlen($event) > 120) {
+            return '';
+        }
+        $event = preg_split('/\\s+/', $event)[0] ?? '';
+        $event = trim((string) $event);
+        if ('' === $event) {
+            return '';
+        }
+        if (false !== strpos($event, '.')) {
+            $event = (string) strstr($event, '.', true);
+        }
+        if ('' === $event || in_array($event, array(
+            'click', 'dblclick', 'mousedown', 'mouseup', 'mousemove', 'mouseover', 'mouseout', 'mouseenter', 'mouseleave',
+            'touchstart', 'touchmove', 'touchend', 'pointerdown', 'pointerup', 'pointermove', 'keydown', 'keyup', 'keypress',
+            'scroll', 'resize', 'focus', 'blur', 'change', 'input', 'submit', 'load', 'error'
+        ), true)) {
+            return '';
+        }
+        if (false === strpos($event, '/') && false === strpos($event, ':') && false === strpos($event, '-') && !preg_match('/(?:init|ready|loaded|render|mount|frontend|elementor|woocommerce|wc_)/', $event)) {
+            return '';
+        }
+        return sanitize_text_field($event);
+    }
+
+    private function runtime_js_scan_is_strong_lifecycle_event($event)
+    {
+        $event = strtolower(trim((string) $event));
+        if ('' === $event) {
+            return false;
+        }
+
+        return (bool) preg_match('/(?:^|[\/_:.-])(?:init|initialize|initialized|ready|loaded|mount|mounted|bootstrap|boot)(?:$|[\/_:.-])|element_ready|components?:init/', $event);
+    }
+
+    private function runtime_js_scan_extract_js_call_arguments($content, $open_paren_offset, $max_chars = 1600)
+    {
+        $content = (string) $content;
+        $length = strlen($content);
+        $open_paren_offset = (int) $open_paren_offset;
+        if ($open_paren_offset < 0 || $open_paren_offset >= $length || '(' !== $content[$open_paren_offset]) {
+            return array();
+        }
+
+        $limit = min($length, $open_paren_offset + max(64, (int) $max_chars));
+        $args = array();
+        $current = '';
+        $paren_depth = 1;
+        $bracket_depth = 0;
+        $brace_depth = 0;
+        $quote = '';
+        $escape = false;
+
+        for ($i = $open_paren_offset + 1; $i < $limit; $i++) {
+            $char = $content[$i];
+            if ('' !== $quote) {
+                $current .= $char;
+                if ($escape) {
+                    $escape = false;
+                    continue;
+                }
+                if ('\\' === $char) {
+                    $escape = true;
+                    continue;
+                }
+                if ($char === $quote) {
+                    $quote = '';
+                }
+                continue;
+            }
+
+            if (in_array($char, array("'", '"', '`'), true)) {
+                $quote = $char;
+                $current .= $char;
+                continue;
+            }
+            if ('(' === $char) {
+                $paren_depth++;
+                $current .= $char;
+                continue;
+            }
+            if (')' === $char) {
+                $paren_depth--;
+                if (0 === $paren_depth) {
+                    $args[] = trim($current);
+                    return $args;
+                }
+                $current .= $char;
+                continue;
+            }
+            if ('[' === $char) {
+                $bracket_depth++;
+                $current .= $char;
+                continue;
+            }
+            if (']' === $char) {
+                $bracket_depth = max(0, $bracket_depth - 1);
+                $current .= $char;
+                continue;
+            }
+            if ('{' === $char) {
+                $brace_depth++;
+                $current .= $char;
+                continue;
+            }
+            if ('}' === $char) {
+                $brace_depth = max(0, $brace_depth - 1);
+                $current .= $char;
+                continue;
+            }
+            if (',' === $char && 1 === $paren_depth && 0 === $bracket_depth && 0 === $brace_depth) {
+                $args[] = trim($current);
+                $current = '';
+                continue;
+            }
+            $current .= $char;
+        }
+
+        return array();
+    }
+
+    private function runtime_js_scan_extract_js_brace_block($content, $open_brace_offset, $max_chars = 6000)
+    {
+        $content = (string) $content;
+        $length = strlen($content);
+        $open_brace_offset = (int) $open_brace_offset;
+        if ($open_brace_offset < 0 || $open_brace_offset >= $length || '{' !== $content[$open_brace_offset]) {
+            return '';
+        }
+
+        $limit = min($length, $open_brace_offset + max(128, (int) $max_chars));
+        $depth = 1;
+        $quote = '';
+        $escape = false;
+        for ($i = $open_brace_offset + 1; $i < $limit; $i++) {
+            $char = $content[$i];
+            if ('' !== $quote) {
+                if ($escape) {
+                    $escape = false;
+                    continue;
+                }
+                if ('\\' === $char) {
+                    $escape = true;
+                    continue;
+                }
+                if ($char === $quote) {
+                    $quote = '';
+                }
+                continue;
+            }
+            if (in_array($char, array("'", '"', '`'), true)) {
+                $quote = $char;
+                continue;
+            }
+            if ('{' === $char) {
+                $depth++;
+                continue;
+            }
+            if ('}' === $char) {
+                $depth--;
+                if (0 === $depth) {
+                    return substr($content, $open_brace_offset, ($i - $open_brace_offset) + 1);
+                }
+            }
+        }
+        return '';
+    }
+
+    private function runtime_js_scan_extract_literal_js_string($value)
+    {
+        $value = trim((string) $value);
+        if (strlen($value) < 2) {
+            return '';
+        }
+        $quote = $value[0];
+        if (($quote !== "'" && $quote !== '"') || substr($value, -1) !== $quote) {
+            return '';
+        }
+        $literal = substr($value, 1, -1);
+        if (false !== strpos($literal, '\\')) {
+            $literal = stripcslashes($literal);
+        }
+        return (string) $literal;
+    }
+
+    private function runtime_js_scan_find_js_brace_close_offset($content, $open_brace_offset)
+    {
+        $content = (string) $content;
+        $length = strlen($content);
+        $open_brace_offset = (int) $open_brace_offset;
+        if ($open_brace_offset < 0 || $open_brace_offset >= $length || '{' !== $content[$open_brace_offset]) {
+            return -1;
+        }
+
+        $depth = 1;
+        $quote = '';
+        $escape = false;
+        for ($i = $open_brace_offset + 1; $i < $length; $i++) {
+            $char = $content[$i];
+            if ('' !== $quote) {
+                if ($escape) {
+                    $escape = false;
+                    continue;
+                }
+                if ('\\' === $char) {
+                    $escape = true;
+                    continue;
+                }
+                if ($char === $quote) {
+                    $quote = '';
+                }
+                continue;
+            }
+            if (in_array($char, array("'", '"', '`'), true)) {
+                $quote = $char;
+                continue;
+            }
+            if ('{' === $char) {
+                $depth++;
+            } elseif ('}' === $char) {
+                $depth--;
+                if (0 === $depth) {
+                    return $i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private function runtime_js_scan_offset_inside_callback_pattern($content, $offset, $pattern)
+    {
+        $content = (string) $content;
+        $offset = max(0, (int) $offset);
+        if (!preg_match_all($pattern, $content, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            return false;
+        }
+        foreach ($matches as $match) {
+            $full = (string) ($match[0][0] ?? '');
+            $start = (int) ($match[0][1] ?? -1);
+            if ($start < 0 || $start > $offset) {
+                continue;
+            }
+            $relative_brace = strrpos($full, '{');
+            if (false === $relative_brace) {
+                continue;
+            }
+            $open = $start + $relative_brace;
+            $close = $this->runtime_js_scan_find_js_brace_close_offset($content, $open);
+            if ($close > $offset) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function runtime_js_scan_direct_scheduling_context_for_offset($content, $offset)
+    {
+        $content = (string) $content;
+        $offset = max(0, (int) $offset);
+        $callback = '(?:function\\s*\\([^)]*\\)|(?:\\([^)]*\\)|[A-Za-z_$][A-Za-z0-9_$]*)\\s*=>)\\s*\\{';
+
+        $dom_ready_patterns = array(
+            '/(?:jQuery|\\$)\\s*\\(\\s*' . $callback . '/i',
+            '/\\.ready\\s*\\(\\s*' . $callback . '/i',
+            '/addEventListener\\s*\\(\\s*([\\\'\"])DOMContentLoaded\\1\\s*,\\s*' . $callback . '/i',
+        );
+        foreach ($dom_ready_patterns as $pattern) {
+            if ($this->runtime_js_scan_offset_inside_callback_pattern($content, $offset, $pattern)) {
+                return 'dom_ready';
+            }
+        }
+
+        $window_load_patterns = array(
+            '/addEventListener\\s*\\(\\s*([\\\'\"])load\\1\\s*,\\s*' . $callback . '/i',
+            '/(?:jQuery|\\$)\\s*\\(\\s*window\\s*\\)\\s*\\.(?:on|one)\\s*\\(\\s*([\\\'\"])load\\1\\s*,\\s*' . $callback . '/i',
+        );
+        foreach ($window_load_patterns as $pattern) {
+            if ($this->runtime_js_scan_offset_inside_callback_pattern($content, $offset, $pattern)) {
+                return 'window_load';
+            }
+        }
+
+        $deferred_callback_patterns = array(
+            '/\\bset(?:Timeout|Interval)\\s*\\(\\s*' . $callback . '/i',
+            '/\\.(?:then|catch|finally|done|fail|always|success|complete)\\s*\\(\\s*' . $callback . '/i',
+            '/\\.(?:on|one)\\s*\\(\\s*([\\\'\"])[^\\\'\"]{1,120}\\1\\s*,\\s*' . $callback . '/i',
+            '/addEventListener\\s*\\(\\s*([\\\'\"])[^\\\'\"]{1,120}\\1\\s*,\\s*' . $callback . '/i',
+        );
+        foreach ($deferred_callback_patterns as $pattern) {
+            if ($this->runtime_js_scan_offset_inside_callback_pattern($content, $offset, $pattern)) {
+                return 'callback';
+            }
+        }
+
+        $prefix = substr($content, max(0, $offset - 900), min(900, $offset));
+        if (preg_match('/(?:jQuery|\\$)\\s*\\(\\s*(?:\\([^)]*\\)|[A-Za-z_$][A-Za-z0-9_$]*)?\\s*=>\\s*[^;{}]{0,700}$/s', $prefix)
+            || preg_match('/\\.ready\\s*\\(\\s*(?:\\([^)]*\\)|[A-Za-z_$][A-Za-z0-9_$]*)?\\s*=>\\s*[^;{}]{0,700}$/s', $prefix)) {
+            return 'dom_ready';
+        }
+        if (preg_match('/\\bset(?:Timeout|Interval)\\s*\\(\\s*(?:\\([^)]*\\)|[A-Za-z_$][A-Za-z0-9_$]*)?\\s*=>\\s*[^;{}]{0,700}$/s', $prefix)
+            || preg_match('/\\.(?:then|catch|finally|done|fail|always|success|complete)\\s*\\(\\s*(?:\\([^)]*\\)|[A-Za-z_$][A-Za-z0-9_$]*)?\\s*=>\\s*[^;{}]{0,700}$/s', $prefix)) {
+            return 'callback';
+        }
+
+        return '';
+    }
+
+    private function runtime_js_scan_containing_callable_descriptor($content, $offset)
+    {
+        $content = (string) $content;
+        $offset = max(0, (int) $offset);
+        $patterns = array(
+            array('type' => 'function', 'pattern' => '/\\bfunction\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\([^)]*\\)\\s*\\{/'),
+            array('type' => 'function', 'pattern' => '/\\b([A-Za-z_$][A-Za-z0-9_$]*)\\s*[:=]\\s*function\\s*\\([^)]*\\)\\s*\\{/'),
+            array('type' => 'function', 'pattern' => '/\\b(?:const|let|var)\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*=\\s*(?:async\\s*)?(?:\\([^)]*\\)|[A-Za-z_$][A-Za-z0-9_$]*)\\s*=>\\s*\\{/'),
+            array('type' => 'method', 'pattern' => '/\\b([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\([^;{}]{0,320}\\)\\s*\\{/'),
+        );
+        $reserved = array('if', 'for', 'while', 'switch', 'catch', 'with', 'function');
+        $best = array();
+        $best_open = -1;
+
+        foreach ($patterns as $entry) {
+            if (!preg_match_all($entry['pattern'], $content, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+            foreach ($matches as $match) {
+                $name = (string) ($match[1][0] ?? '');
+                if ('' === $name || in_array(strtolower($name), $reserved, true)) {
+                    continue;
+                }
+                $full = (string) ($match[0][0] ?? '');
+                $start = (int) ($match[0][1] ?? -1);
+                if ($start < 0 || $start > $offset) {
+                    continue;
+                }
+                $relative_brace = strrpos($full, '{');
+                if (false === $relative_brace) {
+                    continue;
+                }
+                $open = $start + $relative_brace;
+                if ($open <= $best_open || $open >= $offset) {
+                    continue;
+                }
+                $close = $this->runtime_js_scan_find_js_brace_close_offset($content, $open);
+                if ($close <= $offset) {
+                    continue;
+                }
+                $best = array(
+                    'type' => (string) $entry['type'],
+                    'name' => $name,
+                    'start' => $start,
+                    'open' => $open,
+                    'close' => $close,
+                );
+                $best_open = $open;
+            }
+        }
+
+        if (empty($best) || 'method' !== ($best['type'] ?? '')) {
+            return $best;
+        }
+
+        if (preg_match_all('/\\bclass\\s+([A-Za-z_$][A-Za-z0-9_$]*)[^\\{]*\\{/', $content, $classes, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            $class_best_open = -1;
+            foreach ($classes as $class_match) {
+                $full = (string) ($class_match[0][0] ?? '');
+                $start = (int) ($class_match[0][1] ?? -1);
+                if ($start < 0 || $start > $best['open']) {
+                    continue;
+                }
+                $relative_brace = strrpos($full, '{');
+                if (false === $relative_brace) {
+                    continue;
+                }
+                $open = $start + $relative_brace;
+                $close = $this->runtime_js_scan_find_js_brace_close_offset($content, $open);
+                if ($open > $class_best_open && $close > $best['close']) {
+                    $best['class'] = (string) ($class_match[1][0] ?? '');
+                    $class_best_open = $open;
+                }
+            }
+        }
+
+        return $best;
+    }
+
+    private function runtime_js_scan_callable_scheduled_timing($content, array $descriptor)
+    {
+        $content = (string) $content;
+        $name = (string) ($descriptor['name'] ?? '');
+        if ('' === $name) {
+            return 'unknown';
+        }
+
+        $call_patterns = array();
+        if ('method' === ($descriptor['type'] ?? '') && !empty($descriptor['class'])) {
+            $instances = array();
+            $class_pattern = preg_quote((string) $descriptor['class'], '/');
+            if (preg_match_all('/\\b((?:window\\.)?[A-Za-z_$][A-Za-z0-9_$]*)\\s*=\\s*new\\s+' . $class_pattern . '\\b/', $content, $instance_matches, PREG_SET_ORDER)) {
+                foreach ($instance_matches as $instance_match) {
+                    $instance = (string) ($instance_match[1] ?? '');
+                    if ('' === $instance) {
+                        continue;
+                    }
+                    $instances[$instance] = true;
+                    if (false !== strpos($instance, '.')) {
+                        $instances[substr($instance, strrpos($instance, '.') + 1)] = true;
+                    }
+                }
+            }
+            foreach (array_keys($instances) as $instance) {
+                $call_patterns[] = '/\\b' . preg_quote($instance, '/') . '\\s*\\.\\s*' . preg_quote($name, '/') . '\\s*\\(/';
+            }
+        } elseif ('function' === ($descriptor['type'] ?? '')) {
+            $call_patterns[] = '/\\b' . preg_quote($name, '/') . '\\s*\\(/';
+        }
+
+        if (empty($call_patterns)) {
+            return 'unknown';
+        }
+
+        $timings = array();
+        foreach ($call_patterns as $pattern) {
+            if (!preg_match_all($pattern, $content, $calls, PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+            foreach ((array) ($calls[0] ?? array()) as $call) {
+                $call_offset = (int) ($call[1] ?? -1);
+                if ($call_offset < 0 || abs($call_offset - (int) ($descriptor['start'] ?? -99999)) < 8) {
+                    continue;
+                }
+                $timing = $this->runtime_js_scan_direct_scheduling_context_for_offset($content, $call_offset);
+                if ('' === $timing) {
+                    $outer = $this->runtime_js_scan_containing_callable_descriptor($content, $call_offset);
+                    $timing = empty($outer) ? 'immediate' : 'unknown';
+                }
+                $timings[$timing] = true;
+            }
+        }
+
+        if (empty($timings)) {
+            return 'unknown';
+        }
+        if (1 === count($timings)) {
+            return (string) array_key_first($timings);
+        }
+        return 'mixed';
+    }
+
+    private function runtime_js_scan_emit_timing_for_offset($content, $offset)
+    {
+        $timing = $this->runtime_js_scan_direct_scheduling_context_for_offset($content, $offset);
+        if ('' !== $timing) {
+            return $timing;
+        }
+
+        $descriptor = $this->runtime_js_scan_containing_callable_descriptor($content, $offset);
+        if (empty($descriptor)) {
+            return 'immediate';
+        }
+
+        return $this->runtime_js_scan_callable_scheduled_timing($content, $descriptor);
+    }
+
+    private function runtime_js_scan_merge_emitter_timing(array &$timings, $event, $timing)
+    {
+        $event = trim((string) $event);
+        $timing = strtolower(trim((string) $timing));
+        if ('' === $event) {
+            return;
+        }
+        if (!in_array($timing, array('immediate', 'dom_ready', 'window_load', 'callback', 'unknown', 'mixed'), true)) {
+            $timing = 'unknown';
+        }
+        if (!isset($timings[$event])) {
+            $timings[$event] = $timing;
+            return;
+        }
+        if ($timings[$event] !== $timing) {
+            $timings[$event] = 'mixed';
+        }
+    }
+
+    private function runtime_js_scan_extract_wrapped_lifecycle_emit_records($content)
+    {
+        $content = (string) $content;
+        if ('' === $content) {
+            return array();
+        }
+        if (false === strpos($content, 'dispatchEvent') || (false === strpos($content, 'CustomEvent') && false === strpos($content, 'new Event'))) {
+            return array();
+        }
+
+        $wrapper_indexes = array();
+        $definition_pattern = '/\\b([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(([^()]{1,320})\\)\\s*\\{/';
+        if (preg_match_all($definition_pattern, $content, $definitions, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            foreach ($definitions as $definition) {
+                $name = (string) ($definition[1][0] ?? '');
+                if ('' === $name || in_array(strtolower($name), array('if', 'for', 'while', 'switch', 'catch', 'with'), true)) {
+                    continue;
+                }
+                $params_raw = (string) ($definition[2][0] ?? '');
+                $params = array_values(array_filter(array_map('trim', explode(',', $params_raw)), 'strlen'));
+                if (empty($params)) {
+                    continue;
+                }
+                $definition_text = (string) ($definition[0][0] ?? '');
+                $definition_offset = (int) ($definition[0][1] ?? 0);
+                $relative_brace = strrpos($definition_text, '{');
+                if (false === $relative_brace) {
+                    continue;
+                }
+                $body_probe = $this->runtime_js_scan_extract_js_brace_block($content, $definition_offset + $relative_brace);
+                if ('' === $body_probe) {
+                    continue;
+                }
+                foreach ($params as $index => $param) {
+                    if (!preg_match('/^[A-Za-z_$][A-Za-z0-9_$]*$/', $param)) {
+                        continue;
+                    }
+                    $param_pattern = preg_quote($param, '/');
+                    if (!preg_match('/\\bdispatchEvent\\s*\\(\\s*new\\s+(?:CustomEvent|Event)\\s*\\(\\s*' . $param_pattern . '\\b/', $body_probe)) {
+                        continue;
+                    }
+                    if (!isset($wrapper_indexes[$name])) {
+                        $wrapper_indexes[$name] = array();
+                    }
+                    $wrapper_indexes[$name][(int) $index] = true;
+                }
+            }
+        }
+
+        if (empty($wrapper_indexes)) {
+            return array();
+        }
+
+        $records = array();
+        foreach ($wrapper_indexes as $wrapper_name => $indexes) {
+            $call_pattern = '/(?:\\.|\\b)' . preg_quote((string) $wrapper_name, '/') . '\\s*\\(/';
+            if (!preg_match_all($call_pattern, $content, $calls, PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+            foreach ((array) ($calls[0] ?? array()) as $call) {
+                $call_text = (string) ($call[0] ?? '');
+                $call_offset = (int) ($call[1] ?? -1);
+                if ($call_offset < 0) {
+                    continue;
+                }
+                $relative_open = strrpos($call_text, '(');
+                if (false === $relative_open) {
+                    continue;
+                }
+                $args = $this->runtime_js_scan_extract_js_call_arguments($content, $call_offset + $relative_open);
+                if (empty($args)) {
+                    continue;
+                }
+                foreach (array_keys($indexes) as $index) {
+                    if (!isset($args[$index])) {
+                        continue;
+                    }
+                    $literal = $this->runtime_js_scan_extract_literal_js_string($args[$index]);
+                    $event = $this->runtime_js_scan_normalize_lifecycle_event($literal);
+                    if ('' !== $event) {
+                        $records[] = array('event' => $event, 'offset' => $call_offset);
+                    }
+                }
+            }
+        }
+
+        return $records;
+    }
+
+    private function runtime_js_scan_extract_wrapped_lifecycle_emit_events($content)
+    {
+        $events = array();
+        foreach ($this->runtime_js_scan_extract_wrapped_lifecycle_emit_records($content) as $record) {
+            $event = (string) ($record['event'] ?? '');
+            if ('' !== $event) {
+                $events[$event] = true;
+            }
+        }
+        return array_keys($events);
+    }
+
+    private function runtime_js_scan_extract_lifecycle_emitter_evidence($content)
+    {
+        $content = (string) $content;
+        $timings = array();
+        $records = array();
+        $patterns = array(
+            '/\\.(?:trigger|triggerHandler)\\s*\\(\\s*([\\\'\"])([^\\\'\"]{2,120})\\1/i',
+            '/\\bdispatchEvent\\s*\\(\\s*new\\s+(?:CustomEvent|Event)\\s*\\(\\s*([\\\'\"])([^\\\'\"]{2,120})\\1/i',
+        );
+        foreach ($patterns as $pattern) {
+            if (!preg_match_all($pattern, $content, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+            foreach ($matches as $match) {
+                $event = $this->runtime_js_scan_normalize_lifecycle_event((string) ($match[2][0] ?? ''));
+                $offset = (int) ($match[0][1] ?? -1);
+                if ('' !== $event && $offset >= 0) {
+                    $records[] = array('event' => $event, 'offset' => $offset);
+                }
+            }
+        }
+        foreach ($this->runtime_js_scan_extract_wrapped_lifecycle_emit_records($content) as $record) {
+            $records[] = $record;
+        }
+
+        foreach ($records as $record) {
+            $event = (string) ($record['event'] ?? '');
+            $offset = (int) ($record['offset'] ?? -1);
+            if ('' === $event || $offset < 0) {
+                continue;
+            }
+            $timing = $this->runtime_js_scan_is_strong_lifecycle_event($event)
+                ? $this->runtime_js_scan_emit_timing_for_offset($content, $offset)
+                : 'unknown';
+            $this->runtime_js_scan_merge_emitter_timing($timings, $event, $timing);
+        }
+
+        return $timings;
+    }
+
+    private function runtime_js_scan_extract_lifecycle_events($content, $mode)
+    {
+        $content = (string) $content;
+        $mode = 'emit' === $mode ? 'emit' : 'listen';
+        if ('' === $content) {
+            return array();
+        }
+        if ('emit' === $mode) {
+            return array_keys($this->runtime_js_scan_extract_lifecycle_emitter_evidence($content));
+        }
+
+        $patterns = array(
+            '/\\.(?:on|one)\\s*\\(\\s*([\\\'\"])([^\\\'\"]{2,120})\\1/i',
+            '/\\baddEventListener\\s*\\(\\s*([\\\'\"])([^\\\'\"]{2,120})\\1/i',
+        );
+        $events = array();
+        foreach ($patterns as $pattern) {
+            if (!preg_match_all($pattern, $content, $matches, PREG_SET_ORDER)) {
+                continue;
+            }
+            foreach ($matches as $match) {
+                $event = $this->runtime_js_scan_normalize_lifecycle_event((string) ($match[2] ?? ''));
+                if ('' !== $event) {
+                    $events[$event] = true;
+                }
+            }
+        }
+        return array_keys($events);
+    }
+
+    private function runtime_js_scan_lifecycle_preferred_target($listener_strategy, $emitter_strategy, $strong_only = false, $emitter_timing = 'unknown')
+    {
+        $listener_strategy = strtolower(trim((string) $listener_strategy));
+        $emitter_strategy = strtolower(trim((string) $emitter_strategy));
+        $emitter_timing = strtolower(trim((string) $emitter_timing));
+
+        if ($strong_only) {
+            if ('async' === $emitter_strategy || in_array($emitter_timing, array('callback', 'unknown', 'mixed', ''), true)) {
+                return '';
+            }
+            if ('delay' === $listener_strategy) {
+                if ('immediate' === $emitter_timing && 'blocking' === $emitter_strategy) {
+                    return 'exclusion';
+                }
+                if (in_array($emitter_timing, array('dom_ready', 'window_load'), true) && in_array($emitter_strategy, array('blocking', 'defer'), true)) {
+                    return 'force';
+                }
+                if ('immediate' === $emitter_timing && 'defer' === $emitter_strategy) {
+                    return 'force';
+                }
+            }
+            if ('defer' === $listener_strategy && 'immediate' === $emitter_timing && 'blocking' === $emitter_strategy) {
+                return 'exclusion';
+            }
+            return '';
+        }
+
+        if ('delay' === $listener_strategy && 'delay' !== $emitter_strategy) {
+            return 'force';
+        }
+        if ('defer' === $listener_strategy && 'blocking' === $emitter_strategy) {
+            return 'exclusion';
+        }
+        if ('async' === $listener_strategy && in_array($emitter_strategy, array('blocking', 'defer'), true)) {
+            return 'exclusion';
+        }
+        return '';
+    }
+
+    private function runtime_js_scan_same_inventory_script(array $left, array $right)
+    {
+        $left_handle = sanitize_key((string) ($left['handle'] ?? ''));
+        $right_handle = sanitize_key((string) ($right['handle'] ?? ''));
+        if ('' !== $left_handle && '' !== $right_handle && $left_handle === $right_handle) {
+            return true;
+        }
+
+        $left_src = strtolower($this->runtime_js_scan_clean_console_candidate((string) ($left['src'] ?? '')));
+        $right_src = strtolower($this->runtime_js_scan_clean_console_candidate((string) ($right['src'] ?? '')));
+        if ('' === $left_src || '' === $right_src) {
+            return false;
+        }
+        $left_src = preg_replace('/[?#].*$/', '', $left_src);
+        $right_src = preg_replace('/[?#].*$/', '', $right_src);
+        return '' !== $left_src && $left_src === $right_src;
+    }
+
+    private function runtime_js_scan_add_lifecycle_dependency_risk_suggestions_from_evidence(&$suggestions, &$seen, array $scripts, array $exclusions, array $listeners, array $emitters, $prefer_handle = false, array $emitter_timings = array())
+    {
+        $added = false;
+        foreach ($listeners as $event => $listener_indexes) {
+            if (empty($emitters[$event])) {
+                continue;
+            }
+            foreach ((array) $listener_indexes as $listener_index) {
+                $listener_index = (int) $listener_index;
+                if (!isset($scripts[$listener_index]) || !is_array($scripts[$listener_index])) {
+                    continue;
+                }
+                $listener_script = $scripts[$listener_index];
+                $listener_strategy = $this->runtime_js_scan_script_effective_strategy($listener_script);
+                foreach ((array) $emitters[$event] as $emitter_index) {
+                    $emitter_index = (int) $emitter_index;
+                    if (!isset($scripts[$emitter_index]) || !is_array($scripts[$emitter_index])) {
+                        continue;
+                    }
+                    $emitter_script = $scripts[$emitter_index];
+                    if ($this->runtime_js_scan_same_inventory_script($listener_script, $emitter_script)) {
+                        continue;
+                    }
+                    $emitter_strategy = $this->runtime_js_scan_script_effective_strategy($emitter_script);
+                    $emitter_timing = strtolower(trim((string) ($emitter_timings[$event][$emitter_index] ?? 'unknown')));
+                    $preferred_target = $this->runtime_js_scan_lifecycle_preferred_target($listener_strategy, $emitter_strategy, $prefer_handle, $emitter_timing);
+                    if ('' === $preferred_target) {
+                        continue;
+                    }
+                    $suggestion = $prefer_handle ? $this->runtime_js_scan_strong_suggestion_for_script($listener_script) : $this->runtime_js_scan_dependency_suggestion_for_script($listener_script);
+                    if ('' === $suggestion) {
+                        continue;
+                    }
+                    $listener_name = sanitize_text_field((string) (!empty($listener_script['handle']) ? $listener_script['handle'] : (!empty($listener_script['id']) ? $listener_script['id'] : basename((string) ($listener_script['src'] ?? 'listener')))));
+                    $emitter_name = sanitize_text_field((string) (!empty($emitter_script['handle']) ? $emitter_script['handle'] : (!empty($emitter_script['id']) ? $emitter_script['id'] : basename((string) ($emitter_script['src'] ?? 'emitter')))));
+                    $this->runtime_js_scan_add_suggestion(
+                        $suggestions,
+                        $seen,
+                        $suggestion,
+                        'lifecycle listener ' . $event,
+                        (string) ($listener_script['src'] ?? ''),
+                        'Static JS scan found a lifecycle listener/emitter execution-order conflict for event "' . $event . '".',
+                        'Local JS inspection found "' . $listener_name . '" registering lifecycle event "' . $event . '" with strategy ' . $listener_strategy . ', while "' . $emitter_name . '" emits the same event with strategy ' . $emitter_strategy . ($prefer_handle ? ' and timing ' . str_replace('_', ' ', $emitter_timing) : '') . '. The listener can miss a one-time initialization event without producing a console error. Use the least-invasive earlier strategy proposed by this finding and rescan.',
+                        $exclusions,
+                        'recommended',
+                        $preferred_target
+                    );
+                    $added = true;
+                    break;
+                }
+                if (count($suggestions) >= 80) {
+                    return true;
+                }
+            }
+        }
+        return $added;
+    }
+
+    private function runtime_js_scan_add_lifecycle_dependency_risk_suggestions(&$suggestions, &$seen, array $scripts, array $exclusions, $prefer_handle = false)
+    {
+        $listeners = array();
+        $emitters = array();
+        $emitter_timings = array();
+        $scanned = 0;
+        foreach ($scripts as $index => $script) {
+            if (!is_array($script) || empty($script['src']) || $this->runtime_js_scan_is_ultracache_runtime_helper_source((string) $script['src'])) {
+                continue;
+            }
+            $content = $this->runtime_js_scan_script_content($script);
+            if ('' === $content) {
+                continue;
+            }
+            $scanned++;
+            foreach ($this->runtime_js_scan_extract_lifecycle_events($content, 'listen') as $event) {
+                $listeners[$event][] = (int) $index;
+            }
+            $script_emitter_timings = $this->runtime_js_scan_extract_lifecycle_emitter_evidence($content);
+            foreach (array_keys($script_emitter_timings) as $event) {
+                $emitters[$event][] = (int) $index;
+                $emitter_timings[$event][(int) $index] = (string) ($script_emitter_timings[$event] ?? 'unknown');
+            }
+            if ($scanned >= 80) {
+                break;
+            }
+        }
+
+        return $this->runtime_js_scan_add_lifecycle_dependency_risk_suggestions_from_evidence(
+            $suggestions,
+            $seen,
+            $scripts,
+            $exclusions,
+            $listeners,
+            $emitters,
+            $prefer_handle,
+            $emitter_timings
+        );
+    }
+
     private function runtime_js_scan_add_suggestion(&$suggestions, &$seen, $suggested_exclusion, $symbol, $source, $message, $reason, array $exclusions, $confidence = 'high', $preferred_target = '')
     {
         $suggested_exclusion = $this->runtime_js_scan_clean_console_candidate($suggested_exclusion);
@@ -138,6 +1234,20 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             $is_targeted_local_asset = !empty($owner['slug'])
                 || (function_exists('ultracache_public_path_contains') && function_exists('ultracache_plugins_public_path') && ultracache_public_path_contains($suggested_lc, ultracache_plugins_public_path()))
                 || (function_exists('ultracache_public_path_contains_any') && function_exists('ultracache_themes_public_paths') && ultracache_public_path_contains_any($suggested_lc, ultracache_themes_public_paths()));
+            if (!$is_targeted_local_asset && $has_path_context) {
+                $parts = array_values(array_filter(explode('/', trim($suggested_lc, '/')), 'strlen'));
+                $owner_slug = !empty($parts) ? sanitize_key((string) $parts[0]) : '';
+                if ('' !== $owner_slug && function_exists('is_multisite') && in_array($owner_slug, $this->runtime_js_scan_active_plugin_slugs(), true)) {
+                    $is_targeted_local_asset = true;
+                } elseif ('' !== $owner_slug) {
+                    foreach ($this->runtime_js_scan_theme_stage_roots() as $theme_root) {
+                        if (!empty($theme_root['slug']) && sanitize_key((string) $theme_root['slug']) === $owner_slug) {
+                            $is_targeted_local_asset = true;
+                            break;
+                        }
+                    }
+                }
+            }
             if (!$has_path_context || (!$is_confirmed_provider_path && !$is_targeted_local_asset)) {
                 return;
             }
@@ -152,9 +1262,18 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         }
         $ignored = 'ignored' === $confidence;
         $not_fixable = 'not-fixable' === $confidence;
+        $symbol_lc_for_source = strtolower(trim((string) $symbol));
+        $is_dependency_analysis = 0 === strpos($symbol_lc_for_source, 'declared dependency ')
+            || 0 === strpos($symbol_lc_for_source, 'lifecycle listener ');
         $safeguards = $this->runtime_js_scan_normalize_safeguard_lists($exclusions);
         $already_excluded = $this->runtime_js_scan_exclusion_already_matches($suggested_exclusion, $safeguards['fallback']);
         $already_force_deferred = !$already_excluded && $this->runtime_js_scan_exclusion_already_matches($suggested_exclusion, $safeguards['force']);
+        $runtime_state = $this->runtime_js_scan_runtime_state_for_candidate($suggested_exclusion);
+        $direct_runtime_failure = $this->runtime_js_scan_is_explicit_runtime_error($message)
+            && $this->runtime_js_scan_candidate_matches_error_source($suggested_exclusion, $source);
+        $still_failing_while_listed = $already_excluded && $direct_runtime_failure;
+        $listed_but_ineffective = $still_failing_while_listed && !empty($runtime_state['matched'])
+            && (!empty($runtime_state['delayed']) || !empty($runtime_state['deferred']) || !empty($runtime_state['async']));
         $appendable = !$ignored && !$not_fixable && !$already_excluded;
         $key = strtolower($suggested_exclusion . '|' . (string) $source . '|' . (string) $symbol);
         if (isset($seen[$key])) {
@@ -162,11 +1281,21 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         }
         $seen[$key] = true;
         $fallback_recommended = ($already_force_deferred && !$already_excluded) || ('exclusion' === $preferred_target && !$already_excluded);
-        $category = $ignored ? 'ignored' : ($not_fixable ? 'not-fixable' : ($already_excluded ? 'already-listed' : ($fallback_recommended ? 'fallback-candidate' : 'appendable-fix')));
-        $category_label = $ignored ? 'Ignored' : ($not_fixable ? 'Not fixable by exclusion' : ($already_excluded ? 'Already listed in Do Not Defer or Delay' : ($fallback_recommended ? 'Do Not Defer or Delay candidate' : 'Appendable fixes')));
+        if ($still_failing_while_listed) {
+            $category = $listed_but_ineffective ? 'listed-but-ineffective' : 'listed-but-still-failing';
+            $category_label = $listed_but_ineffective ? 'Listed but still optimized on scanned page' : 'Listed but runtime error persists';
+            if ($listed_but_ineffective) {
+                $reason .= ' This exact script is already covered by Do Not Defer or Delay, but the scanned page still shows an optimized execution strategy (' . implode(', ', (array) $runtime_state['strategies']) . '). Keep the exclusion visible: purge cache and rescan; if the optimized state remains, the safeguard is not taking effect on the final HTML.';
+            } else {
+                $reason .= ' This exact script is already covered by Do Not Defer or Delay and the scanned page no longer shows it delayed/deferred, but the browser error still originates from the same script. Do not suppress this finding: inspect its providers, declared dependencies and lifecycle dependencies for the next minimal exclusion.';
+            }
+        } else {
+            $category = $ignored ? 'ignored' : ($not_fixable ? 'not-fixable' : ($already_excluded ? 'already-listed' : ($fallback_recommended ? 'fallback-candidate' : ($is_dependency_analysis ? 'dependency-risk' : 'appendable-fix'))));
+            $category_label = $ignored ? 'Ignored' : ($not_fixable ? 'Not fixable by exclusion' : ($already_excluded ? 'Already listed in Do Not Defer or Delay' : ($fallback_recommended ? 'Do Not Defer or Delay candidate' : ($is_dependency_analysis ? 'Dependency risk' : 'Appendable fixes'))));
+        }
         $suggestions[] = array(
             'symbol'             => (string) $symbol,
-            'source'             => 'browser-runtime-error',
+            'source'             => $is_dependency_analysis ? 'page-dependency-analysis' : 'browser-runtime-error',
             'category'           => $category,
             'categoryLabel'      => $category_label,
             'sample'             => substr((string) $message, 0, 500),
@@ -181,6 +1310,10 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             'fallbackRecommended' => $fallback_recommended,
             'preferredTarget'     => $preferred_target,
             'appendable'         => $appendable,
+            'stillFailingWhileListed' => $still_failing_while_listed,
+            'listedButIneffective' => $listed_but_ineffective,
+            'runtimeMatchCount'  => (int) ($runtime_state['matchCount'] ?? 0),
+            'runtimeStrategies'  => array_values((array) ($runtime_state['strategies'] ?? array())),
         );
     }
 
@@ -613,6 +1746,8 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             'wp.template',
             'wp.apifetch',
             'wp.domready',
+            'wp.element',
+            'wp.data',
         ), true);
     }
 
@@ -636,6 +1771,10 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             $symbol = 'wp.apifetch';
         } elseif (false !== strpos($symbol, 'wp.domready')) {
             $symbol = 'wp.domready';
+        } elseif (false !== strpos($symbol, 'wp.element')) {
+            $symbol = 'wp.element';
+        } elseif (false !== strpos($symbol, 'wp.data')) {
+            $symbol = 'wp.data';
         }
         if ('' === $path || '' === $symbol) {
             return false;
@@ -669,7 +1808,13 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         if ('wp.domready' === $symbol) {
             return false !== strpos($path, 'dist/dom-ready.js') || false !== strpos($path, 'dist/dom-ready.min.js') || false !== strpos($path, 'wp-dom-ready-js');
         }
-        if (in_array($symbol, array('wp', 'wp.template'), true)) {
+        if ('wp.element' === $symbol) {
+            return false !== strpos($path, 'dist/element.js') || false !== strpos($path, 'dist/element.min.js') || false !== strpos($path, 'wp-element-js');
+        }
+        if ('wp.data' === $symbol) {
+            return false !== strpos($path, 'dist/data.js') || false !== strpos($path, 'dist/data.min.js') || false !== strpos($path, 'wp-data-js');
+        }
+        if ('wp.template' === $symbol) {
             return false !== strpos($path, 'wp-util.js') || false !== strpos($path, 'wp-util.min.js') || false !== strpos($path, 'wp-util-js');
         }
         return false;
@@ -698,6 +1843,12 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         }
         if ('wp.domready' === $symbol) {
             return array('wp-dom-ready');
+        }
+        if ('wp.element' === $symbol) {
+            return array('wp-element');
+        }
+        if ('wp.data' === $symbol) {
+            return array('wp-data');
         }
         return array();
     }
@@ -838,7 +1989,7 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             $relative = 'js/jquery/jquery.min.js';
         } elseif ('jquery-migrate' === $symbol) {
             $relative = 'js/jquery/jquery-migrate.min.js';
-        } elseif ('wp.template' === $symbol || 'wp' === $symbol) {
+        } elseif ('wp.template' === $symbol) {
             $relative = 'js/wp-util.min.js';
         } elseif ('wp.i18n' === $symbol) {
             $relative = 'js/dist/i18n.min.js';
@@ -848,6 +1999,10 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             $relative = 'js/dist/api-fetch.min.js';
         } elseif ('wp.domready' === $symbol) {
             $relative = 'js/dist/dom-ready.min.js';
+        } elseif ('wp.element' === $symbol) {
+            $relative = 'js/dist/element.min.js';
+        } elseif ('wp.data' === $symbol) {
+            $relative = 'js/dist/data.min.js';
         }
 
         if ('' === $relative) {
@@ -885,6 +2040,12 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         }
         if (preg_match('/(?:ReferenceError:\s*)?wp\.domReady\s+is\s+not\s+defined/i', $text)) {
             $symbols['wp.domready'] = 'wp.domReady';
+        }
+        if (preg_match('/(?:ReferenceError:\s*)?wp\.element\s+is\s+not\s+defined/i', $text)) {
+            $symbols['wp.element'] = 'wp.element';
+        }
+        if (preg_match('/(?:ReferenceError:\s*)?wp\.data\s+is\s+not\s+defined/i', $text)) {
+            $symbols['wp.data'] = 'wp.data';
         }
 
         $added = false;
@@ -958,7 +2119,21 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         if ('' === $source || !$this->runtime_js_scan_provider_identity_matches_symbol($source, $symbol)) {
             return '';
         }
-        return $this->runtime_js_scan_targeted_source_fragment_from_source($source, 5);
+
+        // Exact provider resolution is intentionally allowed to return a
+        // WordPress core path. Generic stack-frame helpers reject wp-includes
+        // and generic basenames, but this path is reached only after the
+        // missing package and provider identity have matched explicitly.
+        $path = (string) wp_parse_url($source, PHP_URL_PATH);
+        if ('' === $path) {
+            $path = preg_replace('/[?#].*$/', '', $source);
+        }
+        $segments = array_values(array_filter(explode('/', strtolower(trim((string) $path, '/'))), 'strlen'));
+        if (empty($segments)) {
+            return '';
+        }
+
+        return sanitize_text_field(implode('/', array_slice($segments, -1 * min(5, count($segments)))));
     }
 
     private function runtime_js_scan_find_provider_scripts_for_missing_global($symbol, array $scripts)
@@ -1392,7 +2567,7 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
 
             $source = isset($item['definingScriptUrl']) ? strtolower(trim((string) $item['definingScriptUrl'])) : '';
             $is_handle_like = false === strpos($line, '/') && !preg_match('/^https?:/i', $line);
-            if ($is_handle_like) {
+            if ($is_handle_like && empty($item['stillFailingWhileListed'])) {
                 $token = $this->runtime_js_scan_suggestion_base_token($line);
                 foreach ($path_items as $path_item) {
                     $path_line = isset($path_item['line']) ? (string) $path_item['line'] : '';
@@ -1414,10 +2589,18 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             }
 
             $key = $this->runtime_js_scan_canonical_suggestion_identity((string) ($item['suggestedExclusion'] ?? ''));
-            if ('' === $key || isset($seen_final[$key])) {
+            if ('' === $key) {
                 continue;
             }
-            $seen_final[$key] = true;
+            if (isset($seen_final[$key])) {
+                $existing_index = (int) $seen_final[$key];
+                $existing = isset($out[$existing_index]) && is_array($out[$existing_index]) ? $out[$existing_index] : array();
+                if (!empty($item['stillFailingWhileListed']) && empty($existing['stillFailingWhileListed'])) {
+                    $out[$existing_index] = $item;
+                }
+                continue;
+            }
+            $seen_final[$key] = count($out);
             $out[] = $item;
         }
 
@@ -1720,6 +2903,53 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         return false;
     }
 
+    private function runtime_js_scan_jquery_file_defines_method($content, $method, $identity = '')
+    {
+        $method = trim((string) $method);
+        $content = (string) $content;
+        if ('' === $method) {
+            return false;
+        }
+
+        if ($this->runtime_js_scan_jquery_provider_identity_matches_method((string) $identity, $method)) {
+            return true;
+        }
+        if ('' === $content) {
+            return false;
+        }
+
+        $method_regex = preg_quote($method, '/');
+        $jquery_alias = '(?:jQuery|\\$|[A-Za-z_$][A-Za-z0-9_$]*)';
+        if (preg_match('/' . $jquery_alias . '\\s*\\.\\s*fn\\s*(?:\\.\\s*' . $method_regex . '|\\[\\s*["\\\']' . $method_regex . '["\\\']\\s*\\])\\s*=/i', $content)) {
+            return true;
+        }
+        if (preg_match('/' . $jquery_alias . '\\s*\\.\\s*fn\\s*\\.\\s*extend\\s*\\(\\s*\\{/i', $content)
+            && preg_match('/(?:^|[,{}])\\s*["\\\']?' . $method_regex . '["\\\']?\\s*:/i', $content)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function runtime_js_scan_jquery_file_uses_method($content, $method)
+    {
+        $method = trim((string) $method);
+        $content = (string) $content;
+        if ('' === $method || '' === $content) {
+            return false;
+        }
+
+        $method_regex = preg_quote($method, '/');
+        if (preg_match('/\\.\\s*' . $method_regex . '\\s*\\(/i', $content)) {
+            return true;
+        }
+        if (preg_match('/\\[\\s*["\\\']' . $method_regex . '["\\\']\\s*\\]\\s*\\(/i', $content)) {
+            return true;
+        }
+
+        return false;
+    }
+
     private function runtime_js_scan_find_jquery_plugin_provider_scripts($method, array $scripts)
     {
         $method = trim((string) $method);
@@ -1729,7 +2959,6 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
 
         $providers = array();
         $seen = array();
-        $method_regex = preg_quote($method, '/');
         foreach ($scripts as $script) {
             if (!is_array($script)) {
                 continue;
@@ -1737,17 +2966,7 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             $src = isset($script['src']) ? (string) $script['src'] : '';
             $id = isset($script['id']) ? (string) $script['id'] : '';
             $content = $this->runtime_js_scan_script_content($script);
-            $matched = $this->runtime_js_scan_jquery_provider_identity_matches_method($src . ' ' . $id, $method);
-
-            if (!$matched && '' !== $content && preg_match('/(?:jQuery|\\$)\\s*\\.\\s*fn\\s*\\.\\s*' . $method_regex . '\\s*=|(?:jQuery|\\$)\\s*\\.\\s*fn\\s*\\[\\s*["\\\']' . $method_regex . '["\\\']\\s*\\]\\s*=/i', $content)) {
-                $matched = true;
-            } elseif (!$matched && '' !== $content && preg_match('/(?:jQuery|\\$)\\s*\\.\\s*fn\\s*\\.\\s*extend\\s*\\(/i', $content) && preg_match('/["\\\']?' . $method_regex . '["\\\']?\\s*:/i', $content)) {
-                $matched = true;
-            } elseif (!$matched && '' !== $content && false !== stripos($content, $method) && preg_match('/(?:jQuery|\\$)\\s*\\.\\s*fn\\b|\\.fn\\b/i', $content)) {
-                $matched = true;
-            }
-
-            if (!$matched) {
+            if (!$this->runtime_js_scan_jquery_file_defines_method($content, $method, $src . ' ' . $id)) {
                 continue;
             }
 
@@ -1756,13 +2975,165 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
                 continue;
             }
             $seen[$key] = true;
-            $providers[] = array('src' => $src, 'id' => $id);
+            $providers[] = array('src' => $src, 'id' => $id, 'origin' => 'page-inventory');
             if (count($providers) >= 8) {
                 break;
             }
         }
 
         return $providers;
+    }
+
+    private function runtime_js_scan_jquery_filesystem_roots($source, $message, $detail)
+    {
+        $roots = array();
+        $seen = array();
+        $push = static function ($kind, array $root, $targeted = false) use (&$roots, &$seen) {
+            $dir = isset($root['dir']) ? (string) $root['dir'] : '';
+            $uri = isset($root['uri']) ? (string) $root['uri'] : '';
+            $slug = isset($root['slug']) ? sanitize_key((string) $root['slug']) : '';
+            if ('' === $dir || '' === $uri || '' === $slug) {
+                return;
+            }
+            $key = strtolower((string) $kind . '|' . $slug . '|' . $dir);
+            if (isset($seen[$key])) {
+                return;
+            }
+            $seen[$key] = true;
+            $root['kind'] = (string) $kind;
+            $root['targeted'] = (bool) $targeted;
+            $roots[] = $root;
+        };
+
+        foreach ($this->runtime_js_scan_plugin_stage_roots($source, $message, $detail) as $root) {
+            $stage = isset($root['stage']) ? strtolower((string) $root['stage']) : '';
+            $push('plugin', $root, false !== strpos($stage, 'targeted'));
+        }
+
+        $owner_slugs = array();
+        foreach ($this->runtime_js_scan_source_candidates_from_error($source, $message, $detail) as $candidate) {
+            $owner = $this->runtime_js_scan_owner_group_from_source($candidate);
+            if (!empty($owner['kind']) && 'theme' === $owner['kind'] && !empty($owner['slug'])) {
+                $owner_slugs[sanitize_key((string) $owner['slug'])] = true;
+            }
+        }
+        $theme_roots = $this->runtime_js_scan_theme_stage_roots();
+        foreach ($theme_roots as $root) {
+            $slug = isset($root['slug']) ? sanitize_key((string) $root['slug']) : '';
+            if ('' !== $slug && isset($owner_slugs[$slug])) {
+                $push('theme', $root, true);
+            }
+        }
+
+        // The direct consumer owner is searched first. If its provider is not
+        // there, continue through the bounded active-plugin/theme inventory.
+        foreach ($this->runtime_js_scan_plugin_stage_roots('', '', '') as $root) {
+            $push('plugin', $root);
+        }
+        foreach ($theme_roots as $root) {
+            $push('theme', $root);
+        }
+
+        return $roots;
+    }
+
+    private function runtime_js_scan_find_jquery_plugin_filesystem_context($method, $source, $message, $detail, $provider_already_found = false)
+    {
+        static $cache = array();
+
+        $method = trim((string) $method);
+        if ('' === $method) {
+            return array('providers' => array(), 'consumers' => array());
+        }
+
+        $cache_key = md5(strtolower($method) . '|' . (string) $source . '|' . (string) $message . '|' . (string) $detail . '|' . (!empty($provider_already_found) ? '1' : '0'));
+        if (isset($cache[$cache_key])) {
+            return $cache[$cache_key];
+        }
+
+        $context = array('providers' => array(), 'consumers' => array());
+        $seen = array('providers' => array(), 'consumers' => array());
+        $roots = $this->runtime_js_scan_jquery_filesystem_roots($source, $message, $detail);
+        $has_targeted_roots = false;
+        foreach ($roots as $candidate_root) {
+            if (!empty($candidate_root['targeted'])) {
+                $has_targeted_roots = true;
+                break;
+            }
+        }
+        foreach ($roots as $root) {
+            $kind = isset($root['kind']) ? (string) $root['kind'] : '';
+            $root_dir = isset($root['dir']) ? (string) $root['dir'] : '';
+            $root_uri = isset($root['uri']) ? (string) $root['uri'] : '';
+            $max_files = isset($root['max_files']) ? (int) $root['max_files'] : ('plugin' === $kind ? 35 : 80);
+            $max_depth = isset($root['max_depth']) ? (int) $root['max_depth'] : ('plugin' === $kind ? 4 : 6);
+            if ('' === $kind || '' === $root_dir || '' === $root_uri) {
+                continue;
+            }
+
+            $files = 'plugin' === $kind
+                ? $this->runtime_js_scan_plugin_stage_files($root_dir, $max_files, $max_depth)
+                : $this->runtime_js_scan_theme_stage_files($root_dir, $max_files, $max_depth);
+
+            foreach ($files as $file) {
+                $content = function_exists('ultracache_guarded_asset_file_get_contents')
+                    ? ultracache_guarded_asset_file_get_contents($file, 'js', 'runtime_js_jquery_dependency_scan', true)
+                    : false;
+                if (!is_string($content) || '' === $content) {
+                    continue;
+                }
+
+                $is_provider = empty($provider_already_found) && $this->runtime_js_scan_jquery_file_defines_method($content, $method, $file);
+                $scan_consumers_here = !$has_targeted_roots || !empty($root['targeted']);
+                $is_consumer = $scan_consumers_here && $this->runtime_js_scan_jquery_file_uses_method($content, $method);
+                if (!$is_provider && !$is_consumer) {
+                    continue;
+                }
+
+                $relative = $this->runtime_js_scan_theme_stage_relative_path($file, $root_dir);
+                if ('' === $relative) {
+                    continue;
+                }
+                $url = esc_url_raw(trailingslashit($root_uri) . ltrim($relative, '/'));
+                $fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($url, 5);
+                if ('' === $fragment) {
+                    continue;
+                }
+                $entry = array(
+                    'src'      => $url,
+                    'id'       => '',
+                    'fragment' => $fragment,
+                    'origin'   => $kind . '-filesystem',
+                );
+
+                if ($is_provider) {
+                    $key = strtolower($fragment . '|provider');
+                    if (!isset($seen['providers'][$key])) {
+                        $seen['providers'][$key] = true;
+                        $context['providers'][] = $entry;
+                    }
+                }
+                if ($is_consumer) {
+                    $key = strtolower($fragment . '|consumer');
+                    if (!isset($seen['consumers'][$key])) {
+                        $seen['consumers'][$key] = true;
+                        $context['consumers'][] = $entry;
+                    }
+                }
+
+                if (count($context['providers']) >= 12 && count($context['consumers']) >= 12) {
+                    break 2;
+                }
+            }
+            if ((!empty($provider_already_found) && !empty($context['consumers'])) || (!empty($context['providers']) && !empty($context['consumers']))) {
+                break;
+            }
+        }
+
+        $context['providers'] = array_slice($context['providers'], 0, 12);
+        $context['consumers'] = array_slice($context['consumers'], 0, 12);
+        $cache[$cache_key] = $context;
+        return $context;
     }
 
     private function runtime_js_scan_find_symbol_provider_scripts($symbol, array $scripts)
@@ -2236,17 +3607,110 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         }
     }
 
-    private function runtime_js_scan_add_jquery_plugin_dependency_suggestions(&$suggestions, &$seen, $method, $source, $message, $detail, array $exclusions, array $scripts = array())
+    private function runtime_js_scan_add_jquery_plugin_dependency_suggestions(&$suggestions, &$seen, $method, $source, $message, $detail, array $exclusions, array $scripts = array(), array $filesystem_context = array())
     {
         $method = trim((string) $method);
         if ('' === $method) {
-            return;
+            return false;
         }
 
+        $providers = array();
+        $provider_seen = array();
+        $add_provider = static function ($provider) use (&$providers, &$provider_seen) {
+            if (!is_array($provider)) {
+                return;
+            }
+            $src = isset($provider['src']) ? (string) $provider['src'] : '';
+            $id = isset($provider['id']) ? (string) $provider['id'] : '';
+            $fragment = isset($provider['fragment']) ? (string) $provider['fragment'] : '';
+            $key = strtolower($src . '|' . $id . '|' . $fragment);
+            if ('' === str_replace('|', '', $key) || isset($provider_seen[$key])) {
+                return;
+            }
+            $provider_seen[$key] = true;
+            $providers[] = $provider;
+        };
+
         foreach ($this->runtime_js_scan_find_jquery_plugin_provider_scripts($method, $scripts) as $provider) {
+            $add_provider($provider);
+        }
+        foreach ((array) ($filesystem_context['providers'] ?? array()) as $provider) {
+            $add_provider($provider);
+        }
+
+        $consumers = array();
+        $consumer_seen = array();
+        $add_consumer = function ($candidate, $origin = 'runtime-stack') use (&$consumers, &$consumer_seen) {
+            if (is_array($candidate)) {
+                $src = isset($candidate['src']) ? (string) $candidate['src'] : '';
+                $fragment = isset($candidate['fragment']) ? (string) $candidate['fragment'] : '';
+                $origin = isset($candidate['origin']) ? (string) $candidate['origin'] : (string) $origin;
+            } else {
+                $src = (string) $candidate;
+                $fragment = '';
+            }
+            $src = $this->runtime_js_scan_clean_console_candidate($src);
+            if ('' === $fragment && '' !== $src) {
+                $fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($src, 5);
+            }
+            if ('' === $fragment) {
+                return;
+            }
+            $key = strtolower($fragment);
+            if (isset($consumer_seen[$key])) {
+                return;
+            }
+            $consumer_seen[$key] = true;
+            $consumers[] = array(
+                'src'      => $src,
+                'fragment' => $fragment,
+                'origin'   => (string) $origin,
+            );
+        };
+
+        $source_candidates = $this->runtime_js_scan_source_candidates_from_error($source, $message, $detail);
+        foreach ($source_candidates as $candidate) {
+            $owner = $this->runtime_js_scan_owner_group_from_source($candidate);
+            if (!empty($owner)) {
+                $add_consumer($candidate, 'runtime-stack');
+            }
+            $matches = $this->runtime_js_scan_find_scripts_by_source_hint($candidate, $scripts);
+            $method_matches = array();
+            foreach ($matches as $matched_script) {
+                if ($this->runtime_js_scan_jquery_file_uses_method($this->runtime_js_scan_script_content($matched_script), $method)) {
+                    $method_matches[] = $matched_script;
+                }
+            }
+            if (empty($method_matches) && 1 === count($matches)) {
+                $method_matches = $matches;
+            }
+            foreach ($method_matches as $matched_script) {
+                if (!empty($matched_script['src'])) {
+                    $add_consumer((string) $matched_script['src'], 'page-inventory');
+                }
+            }
+        }
+
+        foreach ($scripts as $script) {
+            if (!is_array($script) || empty($script['src'])) {
+                continue;
+            }
+            if ($this->runtime_js_scan_jquery_file_uses_method($this->runtime_js_scan_script_content($script), $method)) {
+                $add_consumer((string) $script['src'], 'page-inventory');
+            }
+        }
+        foreach ((array) ($filesystem_context['consumers'] ?? array()) as $consumer) {
+            $add_consumer($consumer, 'filesystem');
+        }
+
+        $added = false;
+        foreach ($providers as $provider) {
             $provider_src = isset($provider['src']) ? (string) $provider['src'] : '';
             $provider_id = isset($provider['id']) ? (string) $provider['id'] : '';
-            $provider_fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($provider_src, 5);
+            $provider_fragment = isset($provider['fragment']) ? (string) $provider['fragment'] : '';
+            if ('' === $provider_fragment) {
+                $provider_fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($provider_src, 5);
+            }
             if ('' !== $provider_fragment) {
                 $this->runtime_js_scan_add_suggestion(
                     $suggestions,
@@ -2255,10 +3719,11 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
                     'jQuery plugin provider script',
                     $provider_src,
                     $message,
-                    'Runtime Scan resolved the exact script that registers jQuery.fn.' . sanitize_text_field($method) . '. Keep this provider available before the direct consumer.',
+                    'Runtime Scan found the exact active plugin/theme script that registers jQuery.fn.' . sanitize_text_field($method) . '. Keep this provider available before the direct consumer.',
                     $exclusions,
                     'recommended'
                 );
+                $added = true;
                 continue;
             }
             if ('' !== $provider_id) {
@@ -2273,31 +3738,35 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
                     $exclusions,
                     'recommended'
                 );
+                $added = true;
             }
         }
 
-        $consumer_source = $this->runtime_js_scan_clean_console_candidate((string) $source);
-        if ('' === $consumer_source || $this->runtime_js_scan_is_generic_script_basename($this->runtime_js_scan_basename_from_source($consumer_source))) {
-            $consumer_source = $this->runtime_js_scan_source_from_text((string) $detail . "\n" . (string) $message);
-        }
-        $matched = $this->runtime_js_scan_find_scripts_by_source_hint($consumer_source, $scripts);
-        if (!empty($matched) && !empty($matched[0]['src'])) {
-            $consumer_source = (string) $matched[0]['src'];
-        }
-        $consumer_fragment = $this->runtime_js_scan_targeted_source_fragment_from_source($consumer_source, 5);
-        if ('' !== $consumer_fragment) {
+        $provider_found = !empty($providers);
+        foreach (array_slice($consumers, 0, 12) as $consumer) {
+            $consumer_source = isset($consumer['src']) ? (string) $consumer['src'] : '';
+            $consumer_fragment = isset($consumer['fragment']) ? (string) $consumer['fragment'] : '';
+            if ('' === $consumer_fragment) {
+                continue;
+            }
+            $reason = $provider_found
+                ? 'This exact active plugin/theme script calls .' . sanitize_text_field($method) . '(). Keep it in the same execution strategy as the resolved jQuery plugin provider.'
+                : 'This exact active plugin/theme script calls .' . sanitize_text_field($method) . '(), but Runtime Scan did not find any active plugin/theme file that registers jQuery.fn.' . sanitize_text_field($method) . '. Keep this consumer unchanged and review whether its provider was not enqueued or was removed by another plugin.';
             $this->runtime_js_scan_add_suggestion(
                 $suggestions,
                 $seen,
                 $consumer_fragment,
-                'jQuery plugin direct consumer',
+                $provider_found ? 'jQuery plugin direct consumer' : 'jQuery plugin consumer — provider not found',
                 $consumer_source,
                 $message,
-                'This is the direct stack-frame script that called .' . sanitize_text_field($method) . '() before its jQuery plugin provider was registered. Keep it in the same execution strategy as the provider.',
+                $reason,
                 $exclusions,
                 'recommended'
             );
+            $added = true;
         }
+
+        return $added;
     }
 
     private function runtime_js_scan_add_known_dependency_suggestions(&$suggestions, &$seen, $source, $message, $detail, array $exclusions, array $scripts = array())
@@ -2915,11 +4384,507 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
         return $added;
     }
 
-    private function build_runtime_js_scan_suggestions(array $errors, array $scripts = array())
+    private function runtime_js_scan_aggregate_strong_suggestions(array $suggestions)
     {
+        $out = array();
+        $indexes = array();
+
+        foreach ($suggestions as $suggestion) {
+            if (!is_array($suggestion) || empty($suggestion['suggestedExclusion'])) {
+                continue;
+            }
+            $key = $this->runtime_js_scan_canonical_suggestion_identity((string) $suggestion['suggestedExclusion']);
+            if ('' === $key) {
+                continue;
+            }
+
+            $symbol = strtolower(trim((string) ($suggestion['symbol'] ?? '')));
+            $type = 0 === strpos($symbol, 'lifecycle listener ') ? 'lifecycle' : (0 === strpos($symbol, 'declared dependency ') ? 'declared-dependency' : '');
+            if ('' === $type) {
+                continue;
+            }
+            $evidence_key = $type . '|' . $symbol . '|' . strtolower(trim((string) ($suggestion['definingScriptUrl'] ?? '')));
+            $evidence = array(
+                'type' => $type,
+                'symbol' => (string) ($suggestion['symbol'] ?? ''),
+                'source' => (string) ($suggestion['definingScriptUrl'] ?? ''),
+                'preferredTarget' => (string) ($suggestion['preferredTarget'] ?? ''),
+            );
+
+            if (!isset($indexes[$key])) {
+                $suggestion['strongEvidence'] = array($evidence);
+                $suggestion['strongEvidenceCount'] = 1;
+                $suggestion['strongEvidenceTypes'] = array($type);
+                $suggestion['strongPrimaryEvidence'] = $type;
+                $suggestion['_strongEvidenceKeys'] = array($evidence_key => true);
+                $indexes[$key] = count($out);
+                $out[] = $suggestion;
+                continue;
+            }
+
+            $index = (int) $indexes[$key];
+            if (!isset($out[$index]) || !is_array($out[$index])) {
+                continue;
+            }
+            if (!isset($out[$index]['_strongEvidenceKeys']) || !is_array($out[$index]['_strongEvidenceKeys'])) {
+                $out[$index]['_strongEvidenceKeys'] = array();
+            }
+            if (!isset($out[$index]['_strongEvidenceKeys'][$evidence_key])) {
+                $out[$index]['_strongEvidenceKeys'][$evidence_key] = true;
+                $out[$index]['strongEvidence'][] = $evidence;
+            }
+            $out[$index]['strongEvidenceCount'] = count((array) ($out[$index]['strongEvidence'] ?? array()));
+            $types = array();
+            foreach ((array) ($out[$index]['strongEvidence'] ?? array()) as $entry) {
+                $entry_type = sanitize_key((string) ($entry['type'] ?? ''));
+                if ('' !== $entry_type) {
+                    $types[$entry_type] = true;
+                }
+            }
+            $out[$index]['strongEvidenceTypes'] = array_keys($types);
+
+            if ('exclusion' === (string) ($suggestion['preferredTarget'] ?? '') && 'exclusion' !== (string) ($out[$index]['preferredTarget'] ?? '')) {
+                $out[$index]['preferredTarget'] = 'exclusion';
+                $out[$index]['fallbackRecommended'] = empty($out[$index]['alreadyExcluded']);
+            }
+        }
+
+        foreach ($out as &$suggestion) {
+            unset($suggestion['_strongEvidenceKeys']);
+            $count = max(1, (int) ($suggestion['strongEvidenceCount'] ?? 1));
+            if ($count > 1) {
+                $suggestion['reason'] = rtrim((string) ($suggestion['reason'] ?? '')) . ' ' . $count . ' independent execution-order signals point to this same script; UltraCache combines them into one Strong Suggestion.';
+            }
+        }
+        unset($suggestion);
+
+        usort($out, function ($left, $right) {
+            $left_safe = !empty($left['alreadyExcluded']) || !empty($left['alreadyForceDeferred']);
+            $right_safe = !empty($right['alreadyExcluded']) || !empty($right['alreadyForceDeferred']);
+            if ($left_safe !== $right_safe) {
+                return $left_safe ? 1 : -1;
+            }
+            $left_count = (int) ($left['strongEvidenceCount'] ?? 1);
+            $right_count = (int) ($right['strongEvidenceCount'] ?? 1);
+            if ($left_count !== $right_count) {
+                return $right_count <=> $left_count;
+            }
+            $left_primary = (string) ($left['strongPrimaryEvidence'] ?? '');
+            $right_primary = (string) ($right['strongPrimaryEvidence'] ?? '');
+            $left_priority = 'lifecycle' === $left_primary ? 2 : 1;
+            $right_priority = 'lifecycle' === $right_primary ? 2 : 1;
+            if ($left_priority !== $right_priority) {
+                return $right_priority <=> $left_priority;
+            }
+            return strcmp((string) ($left['suggestedExclusion'] ?? ''), (string) ($right['suggestedExclusion'] ?? ''));
+        });
+
+        return $out;
+    }
+
+    private function runtime_js_scan_finalize_strong_silent_dependency_result(array $suggestions)
+    {
+        $strong = array();
+        foreach ($suggestions as $suggestion) {
+            if (!is_array($suggestion) || empty($suggestion['suggestedExclusion'])) {
+                continue;
+            }
+            $symbol = strtolower(trim((string) ($suggestion['symbol'] ?? '')));
+            $is_declared = 0 === strpos($symbol, 'declared dependency ');
+            $is_lifecycle = 0 === strpos($symbol, 'lifecycle listener ');
+            if (!$is_declared && !$is_lifecycle) {
+                continue;
+            }
+            if ($is_lifecycle) {
+                $event = trim(substr($symbol, strlen('lifecycle listener ')));
+                if (!$this->runtime_js_scan_is_strong_lifecycle_event($event)) {
+                    continue;
+                }
+            }
+            $suggestion['source'] = 'html-strong-dependency-analysis';
+            $suggestion['category'] = 'strong-suggestion';
+            $suggestion['categoryLabel'] = 'Strong suggestion';
+            $suggestion['strongSuggestion'] = true;
+            $strong[] = $suggestion;
+        }
+
+        $strong = $this->runtime_js_scan_aggregate_strong_suggestions($strong);
+        $strong = $this->runtime_js_scan_finalize_suggestions($strong);
+        if (count($strong) > 8) {
+            $strong = array_slice($strong, 0, 8);
+        }
+
+        $missing = 0;
+        $already_safeguarded = 0;
+        foreach ($strong as $suggestion) {
+            if (!empty($suggestion['alreadyExcluded']) || !empty($suggestion['alreadyForceDeferred'])) {
+                $already_safeguarded++;
+            } else {
+                $missing++;
+            }
+        }
+
+        $this->runtime_js_scan_current_scripts = array();
+
+        return array(
+            'available'                 => true,
+            'source'                    => 'html-strong-dependency-analysis',
+            'suggestion_count'          => count($strong),
+            'missing_count'             => (int) $missing,
+            'already_safeguarded_count' => (int) $already_safeguarded,
+            'suggestions'               => $strong,
+        );
+    }
+
+    private function build_runtime_js_strong_silent_dependency_suggestions_from_evidence(array $scripts, array $listeners, array $emitters, array $emitter_timings = array())
+    {
+        // The registry caller already supplies one normalized inventory. Do not
+        // normalize again here: persisted inline bodies are intentionally omitted
+        // from resumable state, and a second normalization could compact numeric
+        // indexes before lifecycle evidence is correlated.
+        $this->runtime_js_scan_current_scripts = $scripts;
         $exclusions = $this->get_runtime_js_scan_current_exclusions();
         $suggestions = array();
         $seen = array();
+
+        $this->runtime_js_scan_add_lifecycle_dependency_risk_suggestions_from_evidence($suggestions, $seen, $scripts, $exclusions, $listeners, $emitters, true, $emitter_timings);
+        $this->runtime_js_scan_add_declared_dependency_risk_suggestions($suggestions, $seen, $scripts, $exclusions, true);
+
+        $result = $this->runtime_js_scan_finalize_strong_silent_dependency_result($suggestions);
+        $this->runtime_js_scan_current_scripts = array();
+        return $result;
+    }
+
+    private function build_runtime_js_strong_silent_dependency_suggestions_from_registry(array $scripts, array $registry)
+    {
+        $scripts = $this->runtime_js_scan_normalize_script_inventory($scripts);
+        $identity_indexes = array();
+        foreach ($scripts as $script_index => $script) {
+            if (!is_array($script)) {
+                continue;
+            }
+            $identity = $this->runtime_js_scan_script_evidence_identity($script);
+            if ('' !== $identity && !isset($identity_indexes[$identity])) {
+                $identity_indexes[$identity] = (int) $script_index;
+            }
+        }
+
+        $listeners = array();
+        $emitters = array();
+        $emitter_timings = array();
+
+        foreach ($registry as $script_identity => $evidence) {
+            $script_identity = sanitize_text_field((string) $script_identity);
+            if ('' === $script_identity || !isset($identity_indexes[$script_identity]) || !is_array($evidence)) {
+                continue;
+            }
+            $script_index = (int) $identity_indexes[$script_identity];
+            foreach ((array) ($evidence['listeners'] ?? array()) as $event) {
+                $event = trim(sanitize_text_field((string) $event));
+                if ('' === $event) {
+                    continue;
+                }
+                if (!isset($listeners[$event])) {
+                    $listeners[$event] = array();
+                }
+                if (!in_array($script_index, $listeners[$event], true)) {
+                    $listeners[$event][] = $script_index;
+                }
+            }
+            foreach ((array) ($evidence['emitters'] ?? array()) as $event) {
+                $event = trim(sanitize_text_field((string) $event));
+                if ('' === $event) {
+                    continue;
+                }
+                if (!isset($emitters[$event])) {
+                    $emitters[$event] = array();
+                }
+                if (!in_array($script_index, $emitters[$event], true)) {
+                    $emitters[$event][] = $script_index;
+                }
+                $timing_map = isset($evidence['emitterTimings']) && is_array($evidence['emitterTimings']) ? $evidence['emitterTimings'] : array();
+                $emitter_timings[$event][$script_index] = strtolower(trim((string) ($timing_map[$event] ?? 'unknown')));
+            }
+        }
+
+        return $this->build_runtime_js_strong_silent_dependency_suggestions_from_evidence($scripts, $listeners, $emitters, $emitter_timings);
+    }
+
+    private function runtime_js_scan_script_evidence_identity(array $script)
+    {
+        $handle = sanitize_text_field(substr((string) ($script['handle'] ?? ''), 0, 160));
+        $src = $this->runtime_js_scan_sanitize_source((string) ($script['src'] ?? ''));
+        $id = sanitize_text_field(substr((string) ($script['id'] ?? ''), 0, 160));
+        if ('' === $handle && '' === $src && '' === $id) {
+            return '';
+        }
+
+        return 'js:' . hash('sha256', $handle . "\n" . $src . "\n" . $id);
+    }
+
+    private function runtime_js_scan_lifecycle_analysis_cache_parser_version()
+    {
+        return '2';
+    }
+
+    private function runtime_js_scan_lifecycle_analysis_cache_descriptor(array $script)
+    {
+        $src = trim((string) ($script['src'] ?? ''));
+        if ('' === $src) {
+            return array();
+        }
+
+        $path = $this->runtime_js_scan_local_file_path_from_script_src($src);
+        if ('' === $path || !is_file($path)) {
+            return array();
+        }
+
+        $normalized_path = function_exists('wp_normalize_path') ? wp_normalize_path($path) : str_replace('\\', '/', $path);
+        $mtime = function_exists('ultracache_safe_filemtime')
+            ? ultracache_safe_filemtime($path, 'runtime_js_lifecycle_cache_mtime')
+            : @filemtime($path);
+        $size = function_exists('ultracache_safe_filesize')
+            ? ultracache_safe_filesize($path, 'runtime_js_lifecycle_cache_size')
+            : @filesize($path);
+        if (false === $mtime || false === $size) {
+            return array();
+        }
+
+        $parser_version = $this->runtime_js_scan_lifecycle_analysis_cache_parser_version();
+        $path_key = hash('sha256', (string) $normalized_path);
+        $fingerprint = hash('sha256', implode('|', array(
+            $parser_version,
+            (string) $normalized_path,
+            (string) max(0, (int) $mtime),
+            (string) max(0, (int) $size),
+        )));
+
+        return array(
+            'state_name' => 'ultracache_state:js-analysis.' . $path_key,
+            'fingerprint' => $fingerprint,
+            'mtime' => max(0, (int) $mtime),
+            'size' => max(0, (int) $size),
+            'parser_version' => $parser_version,
+        );
+    }
+
+    private function runtime_js_scan_normalize_cached_lifecycle_events($events)
+    {
+        $normalized = array();
+        foreach (array_slice((array) $events, 0, 96) as $event) {
+            $event = trim(sanitize_text_field((string) $event));
+            if ('' === $event || isset($normalized[$event])) {
+                continue;
+            }
+            $normalized[$event] = true;
+        }
+        return array_keys($normalized);
+    }
+
+    private function runtime_js_scan_normalize_cached_emitter_timings($timings, array $events = array())
+    {
+        $allowed = array('immediate', 'dom_ready', 'window_load', 'callback', 'unknown', 'mixed');
+        $event_lookup = array_fill_keys($events, true);
+        $out = array();
+        foreach ((array) $timings as $event => $timing) {
+            $event = trim(sanitize_text_field((string) $event));
+            $timing = strtolower(trim(sanitize_text_field((string) $timing)));
+            if ('' === $event || (!empty($event_lookup) && !isset($event_lookup[$event]))) {
+                continue;
+            }
+            $out[$event] = in_array($timing, $allowed, true) ? $timing : 'unknown';
+        }
+        foreach ($events as $event) {
+            if (!isset($out[$event])) {
+                $out[$event] = 'unknown';
+            }
+        }
+        return $out;
+    }
+
+    private function runtime_js_scan_get_cached_lifecycle_analysis(array $script)
+    {
+        if (!function_exists('ultracache_get_state_record')) {
+            return array('hit' => false);
+        }
+
+        $descriptor = $this->runtime_js_scan_lifecycle_analysis_cache_descriptor($script);
+        if (empty($descriptor['state_name']) || empty($descriptor['fingerprint'])) {
+            return array('hit' => false);
+        }
+
+        $record = ultracache_get_state_record((string) $descriptor['state_name']);
+        $payload = isset($record['payload']) && is_array($record['payload']) ? $record['payload'] : array();
+        if (empty($payload) || !isset($payload['fingerprint']) || !hash_equals((string) $descriptor['fingerprint'], (string) $payload['fingerprint'])) {
+            return array('hit' => false, 'descriptor' => $descriptor);
+        }
+
+        if ((string) ($payload['parserVersion'] ?? '') !== (string) $descriptor['parser_version']) {
+            return array('hit' => false, 'descriptor' => $descriptor);
+        }
+
+        $emitters = $this->runtime_js_scan_normalize_cached_lifecycle_events($payload['emitters'] ?? array());
+        return array(
+            'hit' => true,
+            'descriptor' => $descriptor,
+            'listeners' => $this->runtime_js_scan_normalize_cached_lifecycle_events($payload['listeners'] ?? array()),
+            'emitters' => $emitters,
+            'emitterTimings' => $this->runtime_js_scan_normalize_cached_emitter_timings($payload['emitterTimings'] ?? array(), $emitters),
+        );
+    }
+
+    private function runtime_js_scan_store_cached_lifecycle_analysis(array $descriptor, array $listeners, array $emitters, array $emitter_timings = array())
+    {
+        if (empty($descriptor['state_name']) || empty($descriptor['fingerprint']) || !function_exists('ultracache_mutate_state_record')) {
+            return false;
+        }
+
+        $payload = array(
+            'fingerprint' => (string) $descriptor['fingerprint'],
+            'parserVersion' => (string) ($descriptor['parser_version'] ?? ''),
+            'mtime' => max(0, (int) ($descriptor['mtime'] ?? 0)),
+            'size' => max(0, (int) ($descriptor['size'] ?? 0)),
+            'listeners' => $this->runtime_js_scan_normalize_cached_lifecycle_events($listeners),
+            'emitters' => $this->runtime_js_scan_normalize_cached_lifecycle_events($emitters),
+            'emitterTimings' => $this->runtime_js_scan_normalize_cached_emitter_timings($emitter_timings, $this->runtime_js_scan_normalize_cached_lifecycle_events($emitters)),
+        );
+
+        $result = ultracache_mutate_state_record(
+            (string) $descriptor['state_name'],
+            static function () use ($payload) {
+                return $payload;
+            },
+            3,
+            $payload
+        );
+
+        return !empty($result['success']);
+    }
+
+    private function runtime_js_scan_local_lifecycle_analysis_indexes(array $scripts)
+    {
+        $indexes = array();
+        foreach ($scripts as $index => $script) {
+            if (!is_array($script) || empty($script['src']) || $this->runtime_js_scan_is_ultracache_runtime_helper_source((string) $script['src'])) {
+                continue;
+            }
+            if ('' === $this->runtime_js_scan_local_file_path_from_script_src((string) $script['src'])) {
+                continue;
+            }
+            $indexes[] = (int) $index;
+        }
+        return $indexes;
+    }
+
+    private function runtime_js_scan_analyze_lifecycle_batch(array $scripts, array $analysis_indexes, $cursor = 0, $max_files = 10, $time_budget_seconds = 1.8)
+    {
+        $cursor = max(0, (int) $cursor);
+        $max_files = max(1, min(12, (int) $max_files));
+        $time_budget_seconds = max(0.25, min(3.0, (float) $time_budget_seconds));
+        $started = microtime(true);
+        $evidence_registry = array();
+        $processed = 0;
+        $content_scanned = 0;
+        $cache_hits = 0;
+        $cache_misses = 0;
+        $cache_writes = 0;
+        $total = count($analysis_indexes);
+
+        while ($cursor < $total && $processed < $max_files) {
+            if ($processed > 0 && (microtime(true) - $started) >= $time_budget_seconds) {
+                break;
+            }
+
+            $script_index = (int) $analysis_indexes[$cursor];
+            $cursor++;
+            $processed++;
+            if (!isset($scripts[$script_index]) || !is_array($scripts[$script_index])) {
+                continue;
+            }
+
+            $cached = $this->runtime_js_scan_get_cached_lifecycle_analysis($scripts[$script_index]);
+            if (!empty($cached['hit'])) {
+                $cache_hits++;
+                $script_identity = $this->runtime_js_scan_script_evidence_identity($scripts[$script_index]);
+                if ('' !== $script_identity) {
+                    $evidence_registry[$script_identity] = array(
+                        'listeners' => array_values((array) ($cached['listeners'] ?? array())),
+                        'emitters'  => array_values((array) ($cached['emitters'] ?? array())),
+                        'emitterTimings' => (array) ($cached['emitterTimings'] ?? array()),
+                        'source'    => 'cache',
+                    );
+                }
+                continue;
+            }
+
+            $cache_misses++;
+            $content = $this->runtime_js_scan_script_content($scripts[$script_index]);
+            if ('' === $content) {
+                continue;
+            }
+            $content_scanned++;
+
+            $script_listeners = $this->runtime_js_scan_extract_lifecycle_events($content, 'listen');
+            $script_emitter_timings = $this->runtime_js_scan_extract_lifecycle_emitter_evidence($content);
+            $script_emitters = array_keys($script_emitter_timings);
+            $script_identity = $this->runtime_js_scan_script_evidence_identity($scripts[$script_index]);
+            if ('' !== $script_identity) {
+                $evidence_registry[$script_identity] = array(
+                    'listeners' => array_values($script_listeners),
+                    'emitters'  => array_values($script_emitters),
+                    'emitterTimings' => $script_emitter_timings,
+                    'source'    => 'scan',
+                );
+            }
+
+            $descriptor = isset($cached['descriptor']) && is_array($cached['descriptor'])
+                ? $cached['descriptor']
+                : $this->runtime_js_scan_lifecycle_analysis_cache_descriptor($scripts[$script_index]);
+            if ($this->runtime_js_scan_store_cached_lifecycle_analysis($descriptor, $script_listeners, $script_emitters, $script_emitter_timings)) {
+                $cache_writes++;
+            }
+        }
+
+        return array(
+            'next_cursor'     => $cursor,
+            'processed'       => $processed,
+            'content_scanned' => $content_scanned,
+            'cache_hits'      => $cache_hits,
+            'cache_misses'    => $cache_misses,
+            'cache_writes'    => $cache_writes,
+            'evidence'        => $evidence_registry,
+            'done'            => $cursor >= $total,
+        );
+    }
+
+    private function build_runtime_js_strong_silent_dependency_suggestions(array $scripts = array())
+    {
+        $scripts = $this->runtime_js_scan_normalize_script_inventory($scripts);
+        $this->runtime_js_scan_current_scripts = $scripts;
+        $exclusions = $this->get_runtime_js_scan_current_exclusions();
+        $suggestions = array();
+        $seen = array();
+
+        $this->runtime_js_scan_add_lifecycle_dependency_risk_suggestions($suggestions, $seen, $scripts, $exclusions, true);
+        $this->runtime_js_scan_add_declared_dependency_risk_suggestions($suggestions, $seen, $scripts, $exclusions, true);
+
+        $result = $this->runtime_js_scan_finalize_strong_silent_dependency_result($suggestions);
+        $this->runtime_js_scan_current_scripts = array();
+        return $result;
+    }
+
+    private function build_runtime_js_scan_suggestions(array $errors, array $scripts = array())
+    {
+        $scripts = $this->runtime_js_scan_normalize_script_inventory($scripts);
+        $this->runtime_js_scan_current_scripts = $scripts;
+        $exclusions = $this->get_runtime_js_scan_current_exclusions();
+        $suggestions = array();
+        $seen = array();
+
+        // Dependency analysis is page-scoped and can find silent execution-order
+        // risks even when the pasted/browser console contains no matching error.
+        $this->runtime_js_scan_add_declared_dependency_risk_suggestions($suggestions, $seen, $scripts, $exclusions);
+        $this->runtime_js_scan_add_lifecycle_dependency_risk_suggestions($suggestions, $seen, $scripts, $exclusions);
 
         $explicit_dependency_text = '';
         foreach ($errors as $error_for_dependency_pass) {
@@ -2956,6 +4921,17 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
                 continue;
             }
 
+            if ($is_explicit_runtime_error) {
+                $this->runtime_js_scan_add_persistent_exact_error_source_suggestion(
+                    $suggestions,
+                    $seen,
+                    $source,
+                    $message,
+                    $detail,
+                    $exclusions
+                );
+            }
+
             if ($this->runtime_js_scan_add_interrupted_navigation_suggestions($suggestions, $seen, $error, $scripts, $exclusions)) {
                 continue;
             }
@@ -2982,10 +4958,9 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             // expression (for example counter.appear) as a missing global.
             $jquery_plugin_provider_added = false;
             foreach ($this->runtime_js_scan_extract_missing_jquery_methods_from_error($message, $detail) as $method) {
-                if (empty($this->runtime_js_scan_find_jquery_plugin_provider_scripts($method, $scripts))) {
-                    continue;
-                }
-                $this->runtime_js_scan_add_jquery_plugin_dependency_suggestions(
+                $page_providers = $this->runtime_js_scan_find_jquery_plugin_provider_scripts($method, $scripts);
+                $filesystem_context = $this->runtime_js_scan_find_jquery_plugin_filesystem_context($method, $source, $message, $detail, !empty($page_providers));
+                if ($this->runtime_js_scan_add_jquery_plugin_dependency_suggestions(
                     $suggestions,
                     $seen,
                     $method,
@@ -2993,9 +4968,11 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
                     $message,
                     $detail,
                     $exclusions,
-                    $scripts
-                );
-                $jquery_plugin_provider_added = true;
+                    $scripts,
+                    $filesystem_context
+                )) {
+                    $jquery_plugin_provider_added = true;
+                }
             }
             if ($jquery_plugin_provider_added) {
                 continue;
@@ -3111,13 +5088,29 @@ trait Ultra_Cache_Runtime_JS_Rules_Trait
             }
         }
 
+        $persistent_listed_failures = 0;
+        $dependency_risks = 0;
+        foreach ($suggestions as $suggestion) {
+            if (!empty($suggestion['stillFailingWhileListed'])) {
+                $persistent_listed_failures++;
+            }
+            $symbol = strtolower((string) ($suggestion['symbol'] ?? ''));
+            if (0 === strpos($symbol, 'declared dependency ') || 0 === strpos($symbol, 'lifecycle listener ')) {
+                $dependency_risks++;
+            }
+        }
+
+        $this->runtime_js_scan_current_scripts = array();
+
         return array(
-            'available'              => true,
-            'source'                 => 'browser-runtime',
-            'suggestion_count'       => count($suggestions),
-            'missing_count'          => (int) $missing,
-            'already_excluded_count' => count($suggestions) - (int) $missing,
-            'suggestions'            => $suggestions,
+            'available'                        => true,
+            'source'                           => 'browser-runtime',
+            'suggestion_count'                 => count($suggestions),
+            'missing_count'                    => (int) $missing,
+            'already_excluded_count'           => count($suggestions) - (int) $missing,
+            'persistent_listed_failure_count'  => (int) $persistent_listed_failures,
+            'dependency_risk_count'            => (int) $dependency_risks,
+            'suggestions'                      => $suggestions,
         );
     }
 

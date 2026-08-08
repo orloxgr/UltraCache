@@ -285,7 +285,9 @@ trait Ultra_Cache_WP_Update_Cache_Invalidation_Trait
     {
         $settings = self::get_dashboard_settings();
 
-        if (!empty($settings['flushAllIncludeLiteSpeed'])) {
+        $native_litespeed_enabled = method_exists(__CLASS__, 'is_native_litespeed_html_cache_enabled')
+            && self::is_native_litespeed_html_cache_enabled();
+        if (!empty($settings['flushAllIncludeLiteSpeed']) && !$native_litespeed_enabled) {
             self::flush_litespeed_cache();
         }
 

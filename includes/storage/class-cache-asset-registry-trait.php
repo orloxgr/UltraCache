@@ -287,6 +287,143 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         return false !== $result;
     }
 
+    /**
+     * Return active CSS rewrite-map rows for one optimization type.
+     *
+     * The UltraCache-owned table is authoritative; callers may keep a
+     * request-local memoized copy but must not mirror the map into transients.
+     *
+     * @param string $optimization_type Optimization type.
+     * @param int    $limit             Maximum rows.
+     * @return array
+     */
+    public static function get_css_rewrite_maps_by_optimization_type($optimization_type, $limit = 5000)
+    {
+        global $wpdb;
+
+        $optimization_type = sanitize_key((string) $optimization_type);
+        $limit = max(1, min(5000, absint($limit)));
+        if ('' === $optimization_type || !($wpdb instanceof wpdb) || !self::ensure_css_rewrite_map_table()) {
+            return array();
+        }
+
+        $table = self::get_css_rewrite_map_table_name();
+        if ('' === $table) {
+            return array();
+        }
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded authoritative read from the UltraCache-owned CSS rewrite-map table; the engine memoizes the normalized result only for the current request.
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT source_url, source_path, generated_url, generated_path, optimization_type, content_hash, updated_at, last_seen FROM %i WHERE optimization_type = %s AND active = 1 ORDER BY last_seen DESC, id DESC LIMIT %d',
+                $table,
+                $optimization_type,
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * Mark one CSS rewrite-map entry inactive.
+     *
+     * @param string $source_url        Original stylesheet URL.
+     * @param string $optimization_type Optimization type.
+     * @return bool
+     */
+    public static function deactivate_css_rewrite_map($source_url, $optimization_type)
+    {
+        global $wpdb;
+
+        $source_url = self::normalize_css_rewrite_map_url($source_url);
+        $optimization_type = sanitize_key((string) $optimization_type);
+        if ('' === $source_url || '' === $optimization_type || !($wpdb instanceof wpdb) || !self::ensure_css_rewrite_map_table()) {
+            return false;
+        }
+
+        $table = self::get_css_rewrite_map_table_name();
+        if ('' === $table) {
+            return false;
+        }
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read the generated URL required to invalidate the precise object-cache key before mutating the authoritative row.
+        $generated_url = (string) $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT generated_url FROM %i WHERE source_url_hash = %s AND optimization_type = %s LIMIT 1',
+                $table,
+                sha1($source_url),
+                $optimization_type
+            )
+        );
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Authoritative mutation of one UltraCache-owned rewrite-map row; related object-cache keys are invalidated immediately below.
+        $updated = $wpdb->update(
+            $table,
+            array('active' => 0, 'updated_at' => current_time('mysql', true)),
+            array('source_url_hash' => sha1($source_url), 'optimization_type' => $optimization_type),
+            array('%d', '%s'),
+            array('%s', '%s')
+        );
+        self::clear_css_rewrite_map_cache_for_urls($source_url, $generated_url, $optimization_type);
+        return false !== $updated;
+    }
+
+    /**
+     * Mark every active CSS rewrite-map entry for one type inactive.
+     *
+     * @param string $optimization_type Optimization type.
+     * @return int
+     */
+    public static function deactivate_css_rewrite_maps_by_optimization_type($optimization_type)
+    {
+        global $wpdb;
+
+        $optimization_type = sanitize_key((string) $optimization_type);
+        if ('' === $optimization_type || !($wpdb instanceof wpdb) || !self::ensure_css_rewrite_map_table()) {
+            return 0;
+        }
+
+        $table = self::get_css_rewrite_map_table_name();
+        if ('' === $table) {
+            return 0;
+        }
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded cache-key inventory for authoritative rows that will be deactivated below.
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT source_url, generated_url FROM %i WHERE optimization_type = %s AND active = 1 LIMIT 5000',
+                $table,
+                $optimization_type
+            ),
+            ARRAY_A
+        );
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Authoritative cleanup in the UltraCache-owned rewrite-map table.
+        $updated = $wpdb->query(
+            $wpdb->prepare(
+                'UPDATE %i SET active = 0, updated_at = %s WHERE optimization_type = %s AND active = 1',
+                $table,
+                current_time('mysql', true),
+                $optimization_type
+            )
+        );
+        if (function_exists('wp_cache_flush_group')) {
+            wp_cache_flush_group(self::get_css_rewrite_map_cache_group());
+        } else {
+            foreach ((array) $rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                self::clear_css_rewrite_map_cache_for_urls(
+                    (string) ($row['source_url'] ?? ''),
+                    (string) ($row['generated_url'] ?? ''),
+                    $optimization_type
+                );
+            }
+        }
+        return is_numeric($updated) ? max(0, (int) $updated) : 0;
+    }
+
     public static function get_css_rewrite_map_by_generated_url($generated_url)
     {
         global $wpdb;
@@ -352,7 +489,7 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
     {
         $settings = self::get_settings();
         $css_grace_hours = isset($settings['css_bundle_cleanup_grace_hours']) ? (int) $settings['css_bundle_cleanup_grace_hours'] : 48;
-        $stale_minutes = isset($settings['cache_max_stale_minutes']) ? (int) $settings['cache_max_stale_minutes'] : 720;
+        $stale_minutes = isset($settings['cache_max_stale_minutes']) ? (int) $settings['cache_max_stale_minutes'] : 2880;
         $default = max(48 * HOUR_IN_SECONDS, $css_grace_hours * HOUR_IN_SECONDS, $stale_minutes * MINUTE_IN_SECONDS);
         $seconds = (int) apply_filters('ultracache_cache_asset_ref_protection_seconds', $default);
         return max(HOUR_IN_SECONDS, min(30 * DAY_IN_SECONDS, $seconds));

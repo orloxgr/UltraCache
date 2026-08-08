@@ -6,6 +6,7 @@ Migrated helpers are kept as human-readable source files. They are not minified,
 
 ## Current migrated helpers
 
+- `async-css-runtime.js` — Strict-CSP-compatible activation runtime for UltraCache-managed async stylesheets, preserving each link's declared target media without inline event handlers.
 - `mailerlite-lazy-nonce.js` — Lazy MailerLite nonce refresh helper enqueued through `wp_enqueue_scripts` with WordPress-native script APIs.
 - `runtime-js-scan-collector.js` — Runtime JavaScript scanner collector enqueued only for verified scan requests through `wp_enqueue_scripts` with configuration passed by `wp_add_inline_script()`.
 - `delayed-js-loader.js` — Delayed JavaScript release loader enqueued through `wp_enqueue_scripts` when delayed JS features are active, with runtime configuration passed by `wp_add_inline_script()`.
@@ -16,4 +17,4 @@ Additional frontend helpers will be migrated in separate staged versions as they
 - `font-display-cssom-patch.js` — Runtime CSSOM font-display patch helper enqueued through `wp_enqueue_scripts`.
 - `dynamic-icon-font-delay.js` — Intercepts matching same-origin dynamically inserted icon-font stylesheets before activation, adds `font-display: swap` through CSSOM, and exposes aggregate timing in `window.ultracacheIconFontDelayTiming`.
 - `woocommerce-cart-fragments-delay.js` — Optional WooCommerce cart-fragments AJAX delay helper enqueued through `wp_enqueue_scripts`, with timing configuration passed by `wp_add_inline_script()`.
-- `lcp-observer.js` — Lightweight frontend LCP discovery helper. It sends one page-scoped observation per eligible visit, skips query-string URLs, expired discovery periods, and locked page/viewport mappings, and supports public or administrator-only discovery periods.
+- `lcp-observer.js` — Lightweight frontend LCP discovery helper with optional slider-safe runtime image request-credentials learning. It sends one page-scoped observation per eligible visit, skips query-string URLs, expired discovery periods, and locked page/viewport mappings, and supports public or administrator-only discovery periods.

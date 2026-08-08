@@ -20,43 +20,9 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
 
         private function get_hard_security_excluded_query_args()
         {
-            return array(
-                '_wpnonce',
-                '_ajax_nonce',
-                'nonce',
-                'security',
-                'token',
-                'auth',
-                'auth_token',
-                'access_token',
-                'key',
-                'order_key',
-                'password',
-                'pass',
-                'pwd',
-                'redirect_to',
-                'rest_route',
-                'customer-logout',
-                'logout',
-                'pay_for_order',
-                'cancel_order',
-                'download_file',
-                'ultracache_revalidate',
-                'ultracache_rt',
-                'ultracache_rv',
-                'ultracache_bucket',
-                'ultracache_store_profile',
-                'ultracache_callback_profile',
-                'ultracache_store_profile_verbose',
-                'ultracache_store_profile_verbose_settings',
-                'ultracache_profile_bypass',
-                'ultracache_profile_run',
-                'ultracache_runtime_js_scan',
-                'ultracache_runtime_js_scan_id',
-                'ultracache_runtime_js_scan_nonce',
-                'ultracache_probe_compression',
-                'ultracache_sqlite_exposure_probe',
-            );
+            return function_exists('ultracache_get_query_cache_hard_blocked_defaults')
+                ? ultracache_get_query_cache_hard_blocked_defaults()
+                : array();
         }
 
         private function get_hard_security_excluded_paths()
@@ -76,6 +42,7 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 '/order-received/',
                 '/add-payment-method/',
                 '/lost-password/',
+                '/ultracache-varnishtest/',
             )));
         }
 
@@ -254,6 +221,18 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
                 return false;
             }
 
+            // Authenticated warm and CSS loopbacks carry the runtime-control
+            // token without pretending to be revalidation/profile requests.
+            // Treat the existing context-specific contract as authoritative.
+            if (function_exists('ultracache_is_authenticated_internal_request')) {
+                if (
+                    ultracache_is_authenticated_internal_request('warm') ||
+                    ultracache_is_authenticated_internal_request('css')
+                ) {
+                    return false;
+                }
+            }
+
             if (function_exists('ultracache_request_profiler_enabled') && ultracache_request_profiler_enabled()) {
                 return false;
             }
@@ -263,6 +242,11 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
 
         private function merge_hard_security_excluded_query_args(array $excluded_query_args)
         {
+            if (function_exists('ultracache_build_query_cache_policy')) {
+                $policy = ultracache_build_query_cache_policy(false, array(), $excluded_query_args);
+                return (array) ($policy['hard_blocked_keys'] ?? array());
+            }
+
             return array_values(array_unique(array_merge($excluded_query_args, $this->get_hard_security_excluded_query_args())));
         }
 
@@ -299,6 +283,11 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
         {
             if (empty($settings)) {
                 $settings = $this->get_settings();
+            }
+
+            if (function_exists('ultracache_get_query_cache_policy')) {
+                $policy = ultracache_get_query_cache_policy($settings);
+                return (array) ($policy['allowlist'] ?? array());
             }
 
             if (empty($settings['cache_query_allowlist']) || !is_array($settings['cache_query_allowlist'])) {
@@ -895,7 +884,12 @@ trait Ultra_Cache_Engine_Cache_Decision_Trait
             $allowlist = $this->get_query_allowlist($settings);
 
             $scheme = !empty($parts['scheme']) ? strtolower((string) $parts['scheme']) : 'http';
-            $host = strtolower((string) $parts['host']);
+            $host = function_exists('ultracache_normalize_host')
+                ? ultracache_normalize_host((string) $parts['host'])
+                : strtolower(rtrim(trim((string) $parts['host']), '.'));
+            if ('' === $host) {
+                return '';
+            }
             $port = isset($parts['port']) ? ':' . (int) $parts['port'] : '';
             $path = isset($parts['path']) ? '/' . ltrim((string) $parts['path'], '/') : '/';
             $query = '';

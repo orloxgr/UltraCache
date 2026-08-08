@@ -366,7 +366,7 @@ function ultracache_read_context_allows_wp_config($context)
 function ultracache_read_context_allows_root_server_config($context)
 {
     $context = strtolower((string) $context);
-    foreach (array('sync_browser_cache_rules', 'sync_apache_static_html_delivery_rules', 'browser_cache', 'apache_static_html_delivery', 'dashboard diagnostics', 'dashboard path diagnostic', 'path_diagnostic') as $token) {
+    foreach (array('sync_browser_cache_rules', 'sync_apache_static_html_delivery_rules', 'sync_litespeed_cache_rules', 'browser_cache', 'apache_static_html_delivery', 'litespeed_cache', 'dashboard diagnostics', 'dashboard path diagnostic', 'path_diagnostic') as $token) {
         if (false !== strpos($context, $token)) {
             return true;
         }
@@ -424,11 +424,106 @@ function ultracache_is_allowed_readable_path($path, $context = '', $allowed_root
 }
 
 
+/**
+ * Return whether a media-converter path is a narrowly managed AVIF/WebP file
+ * inside the WordPress uploads tree.
+ *
+ * Upload conversion commits beside the real Media Library attachment rather
+ * than below uploads/ultracache. Only the exact converter storage contexts are
+ * admitted here, and temporary cleanup remains restricted to the generated
+ * hidden .uc-tmp-* filename contract.
+ */
+function ultracache_is_media_converter_upload_path($path, $context = '')
+{
+    $normalized = ultracache_normalize_filesystem_path_for_guard($path);
+    $context = (string) $context;
+    if ('' === $normalized) {
+        return false;
+    }
+
+    $allowed_contexts = array(
+        'media_converter_atomic_commit',
+        'media_converter_atomic_temp_cleanup',
+        'media_converter_invalid_atomic_final_cleanup',
+        'media_converter_unverifiable_freshness_cleanup',
+        'media_converter_unaligned_freshness_cleanup',
+        'media_converter_stale_output_cleanup',
+        'media_converter_align_output_freshness',
+        'media_replacement_atomic_commit',
+        'media_replacement_atomic_temp_cleanup',
+        'media_replacement_invalid_atomic_final_cleanup',
+        'media_replacement_restart_created_final_cleanup',
+    );
+    if (!in_array($context, $allowed_contexts, true)) {
+        return false;
+    }
+
+    $uploads = function_exists('ultracache_uploads_base_info') ? ultracache_uploads_base_info() : array();
+    $uploads_base = isset($uploads['basedir']) && is_string($uploads['basedir'])
+        ? ultracache_normalize_filesystem_path_for_guard($uploads['basedir'])
+        : '';
+    if ('' === $uploads_base || !ultracache_path_has_dir_prefix($normalized, $uploads_base)) {
+        return false;
+    }
+
+    $extension = strtolower((string) pathinfo($normalized, PATHINFO_EXTENSION));
+    if (!in_array($extension, array('avif', 'webp'), true)) {
+        return false;
+    }
+
+    $basename = basename($normalized);
+    $is_atomic_temp = 1 === preg_match('/^\.[A-Za-z0-9._-]+\.uc-tmp-[A-Za-z0-9_-]+\.(?:avif|webp)$/', $basename);
+
+    if (in_array($context, array('media_converter_atomic_temp_cleanup', 'media_replacement_atomic_temp_cleanup'), true)) {
+        return $is_atomic_temp;
+    }
+
+    if (in_array($context, array('media_converter_atomic_commit', 'media_replacement_atomic_commit'), true)) {
+        return $is_atomic_temp || false === strpos($basename, '.uc-tmp-');
+    }
+
+    return !$is_atomic_temp;
+}
+
+/**
+ * Validate the complete same-directory temporary-to-final media commit pair.
+ */
+function ultracache_media_converter_atomic_commit_paths_match($from, $to, $context = '')
+{
+    if (!in_array((string) $context, array('media_converter_atomic_commit', 'media_replacement_atomic_commit'), true)) {
+        return true;
+    }
+
+    $from = ultracache_normalize_filesystem_path_for_guard($from);
+    $to = ultracache_normalize_filesystem_path_for_guard($to);
+    if ('' === $from || '' === $to
+        || !ultracache_is_media_converter_upload_path($from, $context)
+        || !ultracache_is_media_converter_upload_path($to, $context)
+        || dirname($from) !== dirname($to)) {
+        return false;
+    }
+
+    $from_extension = strtolower((string) pathinfo($from, PATHINFO_EXTENSION));
+    $to_extension = strtolower((string) pathinfo($to, PATHINFO_EXTENSION));
+    if ($from_extension !== $to_extension) {
+        return false;
+    }
+
+    $from_basename = basename($from);
+    $to_basename = basename($to);
+    return 1 === preg_match('/^\.[A-Za-z0-9._-]+\.uc-tmp-[A-Za-z0-9_-]+\.(?:avif|webp)$/', $from_basename)
+        && false === strpos($to_basename, '.uc-tmp-');
+}
+
 function ultracache_is_allowed_destructive_path($path, $context = '')
 {
     $normalized = ultracache_normalize_filesystem_path_for_guard($path);
     if ('' === $normalized) {
         return false;
+    }
+
+    if (ultracache_is_media_converter_upload_path($normalized, $context)) {
+        return true;
     }
 
     $allowed_dirs = array();
@@ -485,6 +580,10 @@ function ultracache_is_allowed_writable_path($path, $context = '')
         return false;
     }
 
+    if (ultracache_is_media_converter_upload_path($normalized, $context)) {
+        return true;
+    }
+
     $allowed_dirs = array();
     foreach (array('ULTRACACHE_CACHE_DIR', 'ULTRACACHE_OPTIMIZED_IMAGES_DIR', 'ULTRACACHE_AVIF_DIR', 'ULTRACACHE_WEBP_DIR', 'ULTRACACHE_OBJECT_CACHE_DIR') as $constant) {
         if (defined($constant)) {
@@ -522,7 +621,7 @@ function ultracache_is_allowed_writable_path($path, $context = '')
     }
 
 
-    if (false !== strpos($context, 'sync_browser_cache_rules') || false !== strpos($context, 'sync_apache_static_html_delivery_rules')) {
+    if (false !== strpos($context, 'sync_browser_cache_rules') || false !== strpos($context, 'sync_apache_static_html_delivery_rules') || false !== strpos($context, 'sync_litespeed_cache_rules')) {
         $root = wp_normalize_path(ultracache_get_wordpress_home_path());
         if (ultracache_path_has_dir_prefix($normalized, $root) && '.htaccess' === $base) {
             return true;
@@ -599,6 +698,11 @@ function ultracache_safe_rename($from, $to, $context = '')
         return false;
     }
 
+    if (!ultracache_media_converter_atomic_commit_paths_match($from, $to, $context)) {
+        ultracache_debug_log('rename blocked: invalid media converter atomic commit pair', array('from' => $from, 'to' => $to, 'context' => (string) $context));
+        return false;
+    }
+
     if (!ultracache_is_allowed_writable_path($from, $context) || !ultracache_is_allowed_writable_path($to, $context)) {
         ultracache_debug_log('rename blocked: path outside allowed write roots', array('from' => $from, 'to' => $to, 'context' => (string) $context));
         return false;
@@ -612,12 +716,41 @@ function ultracache_safe_rename($from, $to, $context = '')
         return $already_moved;
     }
 
-    $result = $filesystem->move($from, $to, true);
+    $target_existed = $filesystem->exists($to);
+    $native_error = '';
+    // A same-filesystem native rename replaces an existing file atomically on supported hosts.
+    // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- Scoped handler captures rename warnings and is restored immediately.
+    set_error_handler(static function($severity, $message) use (&$native_error) {
+        unset($severity);
+        $native_error = (string) $message;
+        return true;
+    });
+    try {
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- Native same-filesystem replacement is required for atomic publication.
+        $native_result = rename($from, $to);
+    } finally {
+        restore_error_handler();
+    }
+
+    clearstatcache(true, $from);
+    clearstatcache(true, $to);
+    if ($native_result || ($filesystem->exists($to) && !$filesystem->exists($from))) {
+        return true;
+    }
+
+    // WP_Filesystem overwrite may delete the existing target before moving the source.
+    // Do not use that fallback when an existing valid target must survive a failed commit.
+    if ($target_existed) {
+        ultracache_debug_log('rename failed: existing target preserved', array('from' => $from, 'to' => $to, 'context' => (string) $context, 'native_error' => $native_error));
+        return false;
+    }
+
+    $result = $filesystem->move($from, $to, false);
     if ($result || ($filesystem->exists($to) && !$filesystem->exists($from))) {
         return true;
     }
 
-    ultracache_debug_log('rename failed', array('from' => $from, 'to' => $to, 'context' => (string) $context));
+    ultracache_debug_log('rename failed', array('from' => $from, 'to' => $to, 'context' => (string) $context, 'native_error' => $native_error));
     return false;
 }
 
@@ -730,6 +863,40 @@ function ultracache_safe_filemtime($path, $context = '')
     }
 
     return $result;
+}
+
+function ultracache_safe_touch($path, $mtime = 0, $context = '')
+{
+    $path = (string) $path;
+    $mtime = max(0, (int) $mtime);
+    if ('' === $path || !ultracache_is_allowed_writable_path($path, $context)) {
+        ultracache_debug_log('touch blocked: path outside allowed writable roots', array('path' => $path, 'context' => (string) $context));
+        return false;
+    }
+
+    $filesystem = ultracache_get_wp_filesystem();
+    if (!$filesystem || !$filesystem->exists($path) || !$filesystem->is_file($path)) {
+        return false;
+    }
+
+    if ($mtime <= 0) {
+        $mtime = time();
+    }
+
+    if (method_exists($filesystem, 'touch')) {
+        $result = $filesystem->touch($path, $mtime, $mtime);
+    } else {
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_touch -- Guarded fallback for filesystem transports without touch().
+        $result = @touch($path, $mtime, $mtime);
+    }
+
+    if (!$result) {
+        ultracache_debug_log('touch failed', array('path' => $path, 'mtime' => $mtime, 'context' => (string) $context));
+        return false;
+    }
+
+    clearstatcache(true, $path);
+    return true;
 }
 
 function ultracache_safe_filesize($path, $context = '')

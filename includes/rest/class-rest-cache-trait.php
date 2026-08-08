@@ -215,7 +215,7 @@ trait Ultra_Cache_Rest_Cache_Trait
             array(
                 'success' => false,
                 'code'    => 'ultracache_infrastructure_permission_denied',
-                'message' => __('Configuring, testing, or flushing Redis or Varnish requires manage_options plus plugin activation or network plugin management permission.', 'ultracache'),
+                'message' => __('Configuring, testing, or flushing Redis, LiteSpeed, or Varnish requires manage_options plus plugin activation or network plugin management permission.', 'ultracache'),
             ),
             403
         );
@@ -237,28 +237,33 @@ trait Ultra_Cache_Rest_Cache_Trait
             'redisConnectTimeoutMs',
             'redisReadTimeoutMs',
         );
+        $litespeed_keys = array(
+            'liteSpeedCacheEnabled',
+            'liteSpeedRefillAfterTargetedInvalidation',
+            'liteSpeedWarmDuringSiteWarmup',
+            'liteSpeedStalePurgeEnabled',
+            'liteSpeedRefreshAheadEnabled',
+            'liteSpeedRefreshAheadThresholdPercent',
+            'liteSpeedRefreshAheadMaxPages',
+            'liteSpeedRefreshAheadPinnedUrls',
+            'flushAllIncludeLiteSpeed',
+        );
         $varnish_keys = array(
             'varnishCliEnabled',
+            'configureVarnishConnection',
             'varnishCliMode',
             'varnishCliServers',
             'varnishCliKey',
             'clearVarnishCliKey',
             'varnishCliTimeoutSeconds',
+            'varnishInvalidationsPerMinute',
             'varnishCliMethod',
             'varnishInvalidationStrategy',
             'varnishFlushScope',
-            'varnishHtmlTtlMinutes',
-            'varnishStaleWhileRevalidateSeconds',
-            'varnishRefillAfterTargetedInvalidation',
-            'varnishWarmDuringManualWarmup',
-            'varnishRefreshAheadEnabled',
-            'varnishRefreshAheadThresholdPercent',
-            'varnishRefreshAheadMaxPages',
-            'varnishRefreshAheadPinnedUrls',
             'flushAllIncludeVarnish',
         );
 
-        foreach (array_merge($redis_keys, $varnish_keys) as $key) {
+        foreach (array_merge($redis_keys, $litespeed_keys, $varnish_keys) as $key) {
             if (array_key_exists($key, $patch)) {
                 return true;
             }
@@ -287,10 +292,15 @@ trait Ultra_Cache_Rest_Cache_Trait
     {
         $allowed_keys = array_keys($this->get_settings_update_args());
         $patch = $this->get_explicit_settings_patch($request, $allowed_keys);
+        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'normalize_page_delivery_mode_patch')) {
+            $patch = Ultra_Cache_WP::normalize_page_delivery_mode_patch($patch);
+        }
 
         $stored = get_option(ULTRACACHE_SETTINGS_KEY, array());
         $stored = is_array($stored) ? $stored : array();
-        $current = $stored;
+        $current = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')
+            ? Ultra_Cache_WP::get_dashboard_settings()
+            : $stored;
 
         if ($this->request_may_manage_infrastructure($stored, $patch) && !$this->check_infrastructure_permission($request)) {
             return $this->infrastructure_forbidden_response();
@@ -383,6 +393,10 @@ trait Ultra_Cache_Rest_Cache_Trait
             $result = Ultra_Cache_WP::pause_manual_warmup_session($token);
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 409);
         }
+        if ('cancel' === $action && method_exists('Ultra_Cache_WP', 'cancel_manual_warmup_session')) {
+            $result = Ultra_Cache_WP::cancel_manual_warmup_session($token);
+            return new WP_REST_Response($result, !empty($result['success']) ? 200 : 409);
+        }
         if ('end' === $action && method_exists('Ultra_Cache_WP', 'end_manual_warmup_session')) {
             $result = Ultra_Cache_WP::end_manual_warmup_session($token);
             return new WP_REST_Response($result, !empty($result['success']) ? 200 : 409);
@@ -433,14 +447,43 @@ trait Ultra_Cache_Rest_Cache_Trait
     }
 
 
-    public function varnish_test()
+    public function varnish_discover()
+    {
+        if (!$this->check_infrastructure_permission()) {
+            return $this->infrastructure_forbidden_response();
+        }
+
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'run_varnish_discovery')) {
+            return new WP_REST_Response(array(
+                'success' => false,
+                'verified' => false,
+                'message' => __('Varnish discovery helper is not available.', 'ultracache'),
+            ), 500);
+        }
+
+        if (method_exists('Ultra_Cache_WP', 'reset_settings_cache')) {
+            Ultra_Cache_WP::reset_settings_cache();
+        }
+
+        $result = Ultra_Cache_WP::run_varnish_discovery();
+        if (method_exists('Ultra_Cache_WP', 'reset_settings_cache')) {
+            Ultra_Cache_WP::reset_settings_cache();
+        }
+        if (method_exists('Ultra_Cache_WP', 'refresh_reverse_proxy_status')) {
+            $result['reverseProxy'] = Ultra_Cache_WP::refresh_reverse_proxy_status();
+        }
+        return new WP_REST_Response($result, 200);
+    }
+
+
+    private function run_varnish_exact_url_test_response()
     {
         if (!$this->check_infrastructure_permission()) {
             return $this->infrastructure_forbidden_response();
         }
 
         if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'run_varnish_basic_test')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Varnish helper not available.', 'ultracache')), 500);
+            return new WP_REST_Response(array('success' => false, 'message' => __('Varnish exact URL test helper not available.', 'ultracache')), 500);
         }
 
         if (method_exists('Ultra_Cache_WP', 'reset_settings_cache')) {
@@ -460,27 +503,40 @@ trait Ultra_Cache_Rest_Cache_Trait
         return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
     }
 
+    public function varnish_test()
+    {
+        return $this->run_varnish_exact_url_test_response();
+    }
+
     public function varnish_test_behavior()
+    {
+        return $this->run_varnish_exact_url_test_response();
+    }
+
+    public function varnish_performance_snapshot()
     {
         if (!$this->check_infrastructure_permission()) {
             return $this->infrastructure_forbidden_response();
         }
 
-        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'run_varnish_basic_test')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Varnish behavior test helper not available.', 'ultracache')), 500);
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'run_varnish_performance_snapshot')) {
+            return new WP_REST_Response(array(
+                'success' => false,
+                'message' => __('Varnish performance measurement helper is not available.', 'ultracache'),
+            ), 500);
         }
 
         if (method_exists('Ultra_Cache_WP', 'reset_settings_cache')) {
             Ultra_Cache_WP::reset_settings_cache();
         }
-        $result = Ultra_Cache_WP::run_varnish_basic_test();
-        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
+        $result = Ultra_Cache_WP::run_varnish_performance_snapshot();
+        if (method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
             $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
         }
-        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
+        if (method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
             $result['settings'] = Ultra_Cache_WP::get_dashboard_settings_for_client();
         }
-        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
+        if (method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
             $result['stats'] = Ultra_Cache_WP::get_engine_stats();
         }
 
@@ -510,7 +566,18 @@ trait Ultra_Cache_Rest_Cache_Trait
         } else {
             $result = Ultra_Cache_WP::varnish_flush_all_current_host();
         }
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+        $runtime_outcome = sanitize_key((string) ($result['runtimeOutcome'] ?? ''));
+        if ('partial' === $runtime_outcome) {
+            $status = 207;
+        } elseif ('unsupported' === $runtime_outcome) {
+            $status = 409;
+        } elseif (in_array($runtime_outcome, array('complete', 'degraded'), true)) {
+            $status = 200;
+        } else {
+            $status = !empty($result['success']) ? 200 : 500;
+        }
+
+        return new WP_REST_Response($result, $status);
     }
 
     public function opcache_flush()
@@ -664,6 +731,19 @@ trait Ultra_Cache_Rest_Cache_Trait
     public function object_cache_full_count()
     {
         $stats = $this->resolve_engine_stats(true);
+        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'persist_dashboard_stats_snapshot')) {
+            $stats['objectCacheStatsMeasured'] = true;
+            $stats['objectCacheStatsState'] = 'current';
+            $stats['dashboardStatsSnapshotCached'] = false;
+            $stats['dashboardStatsSnapshotPersistent'] = true;
+            $stats['dashboardStatsSnapshotAge'] = 0;
+            $stats['dashboardStatsSnapshotState'] = 'current';
+            $persistence = Ultra_Cache_WP::persist_dashboard_stats_snapshot($stats, time());
+            if (empty($persistence['success'])) {
+                $stats['dashboardStatsSnapshotPersistent'] = false;
+                $stats['dashboardStatsSnapshotPersistenceError'] = (string) ($persistence['reason'] ?? 'write_failed');
+            }
+        }
 
         return new WP_REST_Response(array(
             'success' => true,
@@ -712,7 +792,7 @@ trait Ultra_Cache_Rest_Cache_Trait
         $scope = sanitize_text_field((string) $request->get_param('scope'));
 
         if (!$engine || !method_exists($engine, 'get_crawl_urls')) {
-            return new WP_REST_Response($this->format_batch_response(array(), 0, $offset, $limit), 200);
+            return new WP_REST_Response($this->paginate_complete_item_set(array(), $offset, $limit), 200);
         }
 
         if (method_exists($engine, 'get_crawl_urls_cursor_batch')) {
@@ -724,7 +804,7 @@ trait Ultra_Cache_Rest_Cache_Trait
         }
 
         $all_urls = (array) $engine->get_crawl_urls($scope);
-        return new WP_REST_Response($this->format_batch_response($all_urls, count($all_urls), $offset, $limit), 200);
+        return new WP_REST_Response($this->paginate_complete_item_set($all_urls, $offset, $limit), 200);
     }
 
     /**
@@ -748,6 +828,27 @@ trait Ultra_Cache_Rest_Cache_Trait
         return $result;
     }
 
+    /**
+     * Attach a LiteSpeed public refill result to a successful dashboard warm action.
+     *
+     * @param array  $result Warm result.
+     * @param string $url    Public local URL.
+     * @return array
+     */
+    private function maybe_refill_litespeed_after_dashboard_warm(array $result, $url)
+    {
+        if (
+            !empty($result['success'])
+            && class_exists('Ultra_Cache_WP')
+            && method_exists('Ultra_Cache_WP', 'refill_litespeed_after_manual_warm')
+        ) {
+            $result['liteSpeedRefill'] = Ultra_Cache_WP::refill_litespeed_after_manual_warm($url, $result);
+            unset($result['forceRefreshDetails']);
+        }
+
+        return $result;
+    }
+
     public function crawl_page(WP_REST_Request $request)
     {
         $url = esc_url_raw((string) $request->get_param('url'));
@@ -756,10 +857,27 @@ trait Ultra_Cache_Rest_Cache_Trait
         }
 
         $manual_token = sanitize_text_field((string) $request->get_param('manualToken'));
-        if ('' !== $manual_token && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'renew_manual_warmup_session')) {
-            $manual_state = Ultra_Cache_WP::renew_manual_warmup_session($manual_token);
-            if (empty($manual_state['success'])) {
-                return new WP_REST_Response($manual_state, 409);
+        $manual_heartbeat = null;
+        if ('' !== $manual_token && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'renew_foreground_warmup_session')) {
+            $manual_generation = 0;
+            $initial_renewal = Ultra_Cache_WP::renew_foreground_warmup_session($manual_token, 'ui', 'page-pipeline-start', $url);
+            if (!empty($initial_renewal['success'])) {
+                $manual_generation = max(0, (int) ($initial_renewal['generation'] ?? 0));
+            }
+            $manual_heartbeat = static function ($stage = '') use ($manual_token, $manual_generation, $url) {
+                $manual_state = Ultra_Cache_WP::renew_foreground_warmup_session($manual_token, 'ui', $stage, $url, $manual_generation);
+                return !empty($manual_state['success']);
+            };
+            if (empty($initial_renewal['success']) || $manual_generation < 1) {
+                $manual_state = method_exists('Ultra_Cache_WP', 'get_manual_warm_status')
+                    ? Ultra_Cache_WP::get_manual_warm_status()
+                    : array();
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'ownershipLost' => true,
+                    'message' => __('Foreground warm-up ownership could not be verified.', 'ultracache'),
+                    'state' => $manual_state,
+                ), 409);
             }
         }
 
@@ -798,69 +916,17 @@ trait Ultra_Cache_Rest_Cache_Trait
 
         if ('' !== $manual_token && method_exists($engine, 'warm_page_pipeline')) {
             $warm_args['include_varnish'] = true;
+            $warm_args['include_litespeed'] = true;
+            $warm_args['warm_context'] = 'manual';
+            $warm_args['_queue_lease_heartbeat'] = $manual_heartbeat;
             $result = $engine->warm_page_pipeline($url, $warm_args);
         } else {
             $result = $engine->warm_url($url, $warm_args);
         }
-        $status = !empty($result['success']) || !empty($result['skipped']) ? 200 : 500;
+        $status = !empty($result['ownershipLost'])
+            ? 409
+            : (!empty($result['success']) || !empty($result['skipped']) ? 200 : 500);
         return new WP_REST_Response($result, $status);
-    }
-
-    public function manual_warm_page_stage(WP_REST_Request $request)
-    {
-        $url = esc_url_raw((string) $request->get_param('url'));
-        $stage = sanitize_key((string) $request->get_param('stage'));
-        $manual_token = sanitize_text_field((string) $request->get_param('manualToken'));
-
-        if ('' !== $manual_token && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'renew_manual_warmup_session')) {
-            $manual_state = Ultra_Cache_WP::renew_manual_warmup_session($manual_token);
-            if (empty($manual_state['success'])) {
-                return new WP_REST_Response($manual_state, 409);
-            }
-        }
-
-        $guard = $this->guard_page_cache_enabled();
-        if ($guard instanceof WP_REST_Response) {
-            return $guard;
-        }
-
-        $engine = $this->get_engine();
-        if (!$engine || !method_exists($engine, 'is_cacheable_local_url') || !$engine->is_cacheable_local_url($url)) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Only local site URLs can be warmed.', 'ultracache')), 400);
-        }
-
-        if (in_array($stage, array('html', 'css'), true)) {
-            if ('css' === $stage && (bool) $request->get_param('buildCssBundle')) {
-                $guard = $this->guard_css_bundle_enabled();
-                if ($guard instanceof WP_REST_Response) {
-                    return $guard;
-                }
-            }
-            if (!method_exists($engine, 'warm_page_pipeline_stage')) {
-                return new WP_REST_Response(array('success' => false, 'message' => __('Manual warm-up stage engine is unavailable.', 'ultracache')), 500);
-            }
-
-            $result = $engine->warm_page_pipeline_stage($url, $stage, array(
-                'build_css_bundle' => (bool) $request->get_param('buildCssBundle'),
-                'force_refresh' => true,
-                'ignore_runtime_bypass' => true,
-            ));
-            if ('html' === $stage && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_manual_varnish_warm_plan')) {
-                $result['varnishPlan'] = Ultra_Cache_WP::get_manual_varnish_warm_plan();
-            }
-            return new WP_REST_Response($result, !empty($result['success']) || !empty($result['skipped']) ? 200 : 500);
-        }
-
-        if (!class_exists('Ultra_Cache_WP')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Varnish integration is unavailable.', 'ultracache')), 500);
-        }
-
-        if ('varnish' === $stage && method_exists('Ultra_Cache_WP', 'refill_varnish_manual_bucket')) {
-            $result = Ultra_Cache_WP::refill_varnish_manual_bucket($url, sanitize_key((string) $request->get_param('bucket')));
-            return new WP_REST_Response($result, !empty($result['success']) || !empty($result['skipped']) ? 200 : 500);
-        }
-
-        return new WP_REST_Response(array('success' => false, 'message' => __('Unknown manual warm-up stage.', 'ultracache')), 400);
     }
 
     public function inspect_url(WP_REST_Request $request)
@@ -898,6 +964,61 @@ trait Ultra_Cache_Rest_Cache_Trait
         return new WP_REST_Response($result, !empty($result['success']) ? 200 : (!empty($result['skipped']) ? 200 : 500));
     }
 
+    private function begin_dashboard_warm_priority_session($job_type, $url)
+    {
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'begin_foreground_warmup_session')) {
+            return array('success' => true, 'token' => '', 'heartbeat' => null);
+        }
+
+        $session = Ultra_Cache_WP::begin_foreground_warmup_session('ui', $job_type);
+        if (empty($session['success']) || empty($session['token'])) {
+            return array(
+                'success' => false,
+                'message' => !empty($session['message']) ? (string) $session['message'] : __('Dashboard warm-up ownership could not be acquired.', 'ultracache'),
+            );
+        }
+
+        $token = (string) $session['token'];
+        $generation = max(0, (int) ($session['generation'] ?? 0));
+        $url = esc_url_raw((string) $url);
+        $heartbeat = static function ($stage = '') use ($token, $generation, $url) {
+            if (!method_exists('Ultra_Cache_WP', 'renew_foreground_warmup_session')) {
+                return false;
+            }
+            $renewed = Ultra_Cache_WP::renew_foreground_warmup_session($token, 'ui', $stage, $url, $generation);
+            return !empty($renewed['success']);
+        };
+
+        return array('success' => true, 'token' => $token, 'generation' => $generation, 'heartbeat' => $heartbeat);
+    }
+
+    private function end_dashboard_warm_priority_session($token)
+    {
+        $token = sanitize_text_field((string) $token);
+        if ('' !== $token && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'end_foreground_warmup_session')) {
+            Ultra_Cache_WP::end_foreground_warmup_session($token, 'ui', 'completed');
+        }
+    }
+
+    private function run_dashboard_warm_pipeline_with_lock_retry($engine, $url, array $args)
+    {
+        $max_retries = max(0, min(5, (int) apply_filters('ultracache_dashboard_warm_lock_retries', 2)));
+        $attempt = 0;
+
+        do {
+            $result = $engine->warm_page_pipeline($url, $args);
+            if (empty($result['coalesced']) || $attempt >= $max_retries) {
+                return is_array($result) ? $result : array(
+                    'success' => false,
+                    'message' => __('Warm pipeline returned an invalid result.', 'ultracache'),
+                );
+            }
+
+            sleep(min(2, $attempt + 1));
+            ++$attempt;
+        } while (true);
+    }
+
     public function warm_frontpage_html()
     {
         $guard = $this->guard_page_cache_enabled();
@@ -910,22 +1031,38 @@ trait Ultra_Cache_Rest_Cache_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
         }
 
-        if (method_exists($engine, 'warm_page_pipeline')) {
-            $result = $engine->warm_page_pipeline(home_url('/'), array(
-                'force_refresh'         => true,
-                'ignore_runtime_bypass' => true,
-                'skip_css_bundle'       => true,
-                'include_varnish'       => true,
-            ));
-        } else {
-            $result = $engine->warm_frontpage_html(array(
-                'force_refresh'         => true,
-                'ignore_runtime_bypass' => true,
-                'skip_css_bundle'       => true,
-            ));
-            $result = $this->maybe_refill_varnish_after_dashboard_warm($result, home_url('/'));
+        $frontpage_url = home_url('/');
+        $priority = $this->begin_dashboard_warm_priority_session('warm', $frontpage_url);
+        if (empty($priority['success'])) {
+            return new WP_REST_Response($priority, 409);
         }
-        return new WP_REST_Response($result, !empty($result['success']) || !empty($result['skipped']) ? 200 : 500);
+
+        try {
+            if (method_exists($engine, 'warm_page_pipeline')) {
+                $result = $this->run_dashboard_warm_pipeline_with_lock_retry($engine, $frontpage_url, array(
+                    'force_refresh'         => true,
+                    'ignore_runtime_bypass' => true,
+                    'skip_css_bundle'       => true,
+                    'include_varnish'       => true,
+                    'include_litespeed'     => true,
+                    'warm_context'          => 'ui',
+                    '_queue_lease_heartbeat' => $priority['heartbeat'],
+                ));
+            } else {
+                $result = $engine->warm_frontpage_html(array(
+                    'force_refresh'         => true,
+                    'ignore_runtime_bypass' => true,
+                    'skip_css_bundle'       => true,
+                ));
+                $result = $this->maybe_refill_varnish_after_dashboard_warm($result, $frontpage_url);
+                $result = $this->maybe_refill_litespeed_after_dashboard_warm($result, $frontpage_url);
+            }
+        } finally {
+            $this->end_dashboard_warm_priority_session($priority['token'] ?? '');
+        }
+
+        $status = !empty($result['ownershipLost']) ? 409 : (!empty($result['success']) || !empty($result['skipped']) ? 200 : 500);
+        return new WP_REST_Response($result, $status);
     }
 
     public function warm_frontpage_html_css()
@@ -945,20 +1082,36 @@ trait Ultra_Cache_Rest_Cache_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
         }
 
-        if (method_exists($engine, 'warm_page_pipeline')) {
-            $result = $engine->warm_page_pipeline(home_url('/'), array(
-                'build_css_bundle'      => true,
-                'force_refresh'         => true,
-                'ignore_runtime_bypass' => true,
-                'include_varnish'       => true,
-            ));
-        } else {
-            $result = $engine->warm_frontpage_html_with_css(array(
-                'ignore_runtime_bypass' => true,
-            ));
-            $result = $this->maybe_refill_varnish_after_dashboard_warm($result, home_url('/'));
+        $frontpage_url = home_url('/');
+        $priority = $this->begin_dashboard_warm_priority_session('warm_css_homepage', $frontpage_url);
+        if (empty($priority['success'])) {
+            return new WP_REST_Response($priority, 409);
         }
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : (!empty($result['skipped']) ? 200 : 500));
+
+        try {
+            if (method_exists($engine, 'warm_page_pipeline')) {
+                $result = $this->run_dashboard_warm_pipeline_with_lock_retry($engine, $frontpage_url, array(
+                    'build_css_bundle'       => true,
+                    'force_refresh'          => true,
+                    'ignore_runtime_bypass'  => true,
+                    'include_varnish'        => true,
+                    'include_litespeed'      => true,
+                    'warm_context'           => 'ui',
+                    '_queue_lease_heartbeat' => $priority['heartbeat'],
+                ));
+            } else {
+                $result = $engine->warm_frontpage_html_with_css(array(
+                    'ignore_runtime_bypass' => true,
+                ));
+                $result = $this->maybe_refill_varnish_after_dashboard_warm($result, $frontpage_url);
+                $result = $this->maybe_refill_litespeed_after_dashboard_warm($result, $frontpage_url);
+            }
+        } finally {
+            $this->end_dashboard_warm_priority_session($priority['token'] ?? '');
+        }
+
+        $status = !empty($result['ownershipLost']) ? 409 : (!empty($result['success']) || !empty($result['skipped']) ? 200 : 500);
+        return new WP_REST_Response($result, $status);
     }
 
 }

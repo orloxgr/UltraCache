@@ -64,10 +64,71 @@ private function normalize_manual_lcp_hero_selector($selector)
         return $selector;
     }
 
-private function has_manual_lcp_selector_configuration()
+private function lcp_manual_entry_is_image($entry)
+    {
+        $entry = trim((string) $entry);
+        if ('' === $entry) {
+            return false;
+        }
+
+        if (preg_match('/^image\s+\S+/i', $entry)) {
+            return true;
+        }
+
+        if (preg_match('#^(?:https?:)?//#i', $entry) || preg_match('#^/#', $entry)) {
+            return true;
+        }
+
+        return (bool) preg_match('/\.(?:avif|webp|png|jpe?g|gif|svg)(?:[?#].*)?$/i', $entry);
+    }
+
+private function split_lcp_manual_entry($entry)
+    {
+        $entry = trim((string) $entry);
+        if ('' === $entry) {
+            return array('selectors' => array(), 'images' => array());
+        }
+
+        if ($this->lcp_manual_entry_is_image($entry)) {
+            if (preg_match('/^image\s+(.+)$/i', $entry, $matches)) {
+                $entry = trim((string) ($matches[1] ?? ''));
+            }
+            return array('selectors' => array(), 'images' => '' === $entry ? array() : array($entry));
+        }
+
+        return array('selectors' => array($entry), 'images' => array());
+    }
+
+private function get_effective_manual_lcp_configuration($page_url = '')
     {
         $settings = $this->get_settings();
-        return !empty($settings['manual_lcp_hero_selector_list']) && is_array($settings['manual_lcp_hero_selector_list']);
+        if (!empty($settings['lcp_frontend_discovery'])) {
+            if ('' === (string) $page_url && method_exists($this, 'get_current_request_url')) {
+                $page_url = $this->get_current_request_url();
+            }
+            $page_url = method_exists($this, 'normalize_lcp_observation_page_url')
+                ? $this->normalize_lcp_observation_page_url($page_url)
+                : esc_url_raw((string) $page_url);
+            $entry = '' !== $page_url && method_exists($this, 'get_lcp_page_manual_selector_for_url')
+                ? $this->get_lcp_page_manual_selector_for_url($page_url)
+                : '';
+            return $this->split_lcp_manual_entry($entry);
+        }
+
+        return array(
+            'selectors' => isset($settings['manual_lcp_hero_selector_list']) && is_array($settings['manual_lcp_hero_selector_list'])
+                ? array_values($settings['manual_lcp_hero_selector_list'])
+                : array(),
+            'images' => isset($settings['lcp_image_priority_override_list']) && is_array($settings['lcp_image_priority_override_list'])
+                ? array_values($settings['lcp_image_priority_override_list'])
+                : array(),
+        );
+    }
+
+private function has_manual_lcp_selector_configuration()
+    {
+        $configuration = $this->get_effective_manual_lcp_configuration();
+        return !empty($configuration['selectors']);
     }
 
 private function find_manual_lcp_selector_target($html)
@@ -77,8 +138,8 @@ private function find_manual_lcp_selector_target($html)
             return array();
         }
 
-        $settings = $this->get_settings();
-        $selectors = isset($settings['manual_lcp_hero_selector_list']) && is_array($settings['manual_lcp_hero_selector_list']) ? $settings['manual_lcp_hero_selector_list'] : array();
+        $configuration = $this->get_effective_manual_lcp_configuration();
+        $selectors = isset($configuration['selectors']) && is_array($configuration['selectors']) ? $configuration['selectors'] : array();
         foreach ($selectors as $selector) {
             $selector = $this->normalize_manual_lcp_hero_selector($selector);
             if ('' === $selector) {
@@ -138,6 +199,16 @@ private function find_manual_lcp_selector_target($html)
                     $resource_url = $poster;
                     $attribute = 'poster';
                     $resource_type = 'poster';
+                } else {
+                    foreach (array('src', 'data-src', 'data-lazy-src') as $candidate_attribute) {
+                        $value = $this->extract_attribute_from_html_tag($tag_html, $candidate_attribute);
+                        if ('' !== $value && $this->is_lcp_candidate_video_url($value)) {
+                            $resource_url = $value;
+                            $attribute = $candidate_attribute;
+                            $resource_type = 'video';
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -451,38 +522,57 @@ private function find_lcp_candidates_in_manual_hero_block($block, $selector)
         }
 
         // In a manually scoped hero/slider, prefer a specifically marked SR7 LCP image when present.
-        if (preg_match_all('/<(?:sr7-img|img)\b[^>]*\bdata-ultracache-sr7-lcp\s*=\s*(["\'])1\1[^>]*>/i', $block, $matches)) {
-            foreach ($matches[0] as $index => $tag_html) {
-                $candidate = $this->extract_lcp_candidate_from_html_tag($tag_html, array(
-                    'manual_lcp_hero_selector' => $selector,
-                    'manual_lcp_order' => $index,
-                    'prefer_dom_order' => true,
-                ));
-                if (null !== $candidate) {
-                    $candidate['is_sr7'] = true;
-                    $candidate['sr7_markup_candidate'] = true;
-                    $candidate['sr7_verified_first_slide'] = true;
-                    $candidate['score'] = 2000000 - ((int) $index * 10);
-                    $candidates[] = $candidate;
-                }
+        $marked_tags = function_exists('ultracache_scan_raw_html_tags')
+            ? ultracache_scan_raw_html_tags($block, array('sr7-img', 'img'))
+            : array();
+        $marked_index = 0;
+        foreach ($marked_tags as $tag_record) {
+            if (!empty($tag_record['closing'])) {
+                continue;
             }
+            $tag_html = isset($tag_record['raw']) ? (string) $tag_record['raw'] : '';
+            if ('1' !== trim($this->extract_attribute_from_html_tag($tag_html, 'data-ultracache-sr7-lcp'))) {
+                continue;
+            }
+            $candidate = $this->extract_lcp_candidate_from_html_tag($tag_html, array(
+                'manual_lcp_hero_selector' => $selector,
+                'manual_lcp_order' => $marked_index,
+                'prefer_dom_order' => true,
+            ));
+            if (null !== $candidate) {
+                $candidate['is_sr7'] = true;
+                $candidate['sr7_markup_candidate'] = true;
+                $candidate['sr7_verified_first_slide'] = true;
+                $candidate['sr7_role'] = 'marked-sr7-image';
+                $candidate['lcp_reason'] = 'sr7-marked-image';
+                $candidate['score'] = 2000000 - ((int) $marked_index * 10);
+                $candidates[] = $candidate;
+            }
+            ++$marked_index;
         }
 
         if (!empty($candidates)) {
             return $candidates;
         }
 
-        if (preg_match_all('/<(img|sr7-img|div|section|figure|picture|sr7-slide|sr7-content|sr7-module)\b[^>]*>/i', $block, $matches)) {
-            foreach ($matches[0] as $index => $tag_html) {
-                $candidate = $this->extract_lcp_candidate_from_html_tag($tag_html, array(
-                    'manual_lcp_hero_selector' => $selector,
-                    'manual_lcp_order' => $index,
-                ));
-                if (null !== $candidate) {
-                    $candidate['score'] += 5000 - ((int) $index * 10);
-                    $candidates[] = $candidate;
-                }
+        $candidate_tags = function_exists('ultracache_scan_raw_html_tags')
+            ? ultracache_scan_raw_html_tags($block, array('img', 'sr7-img', 'div', 'section', 'figure', 'picture', 'sr7-slide', 'sr7-content', 'sr7-module'))
+            : array();
+        $candidate_index = 0;
+        foreach ($candidate_tags as $tag_record) {
+            if (!empty($tag_record['closing'])) {
+                continue;
             }
+            $tag_html = isset($tag_record['raw']) ? (string) $tag_record['raw'] : '';
+            $candidate = $this->extract_lcp_candidate_from_html_tag($tag_html, array(
+                'manual_lcp_hero_selector' => $selector,
+                'manual_lcp_order' => $candidate_index,
+            ));
+            if (null !== $candidate) {
+                $candidate['score'] += 5000 - ((int) $candidate_index * 10);
+                $candidates[] = $candidate;
+            }
+            ++$candidate_index;
         }
 
         if (empty($candidates)) {
@@ -570,8 +660,8 @@ private function dedupe_lcp_candidates_by_url(array $candidates, $limit = 1)
 
 private function find_manual_lcp_candidate($html)
     {
-        $settings = $this->get_settings();
-        $entries = isset($settings['lcp_image_priority_override_list']) && is_array($settings['lcp_image_priority_override_list']) ? $settings['lcp_image_priority_override_list'] : array();
+        $configuration = $this->get_effective_manual_lcp_configuration();
+        $entries = isset($configuration['images']) && is_array($configuration['images']) ? $configuration['images'] : array();
         if (empty($entries) || !is_string($html) || '' === $html) {
             return null;
         }
@@ -840,7 +930,11 @@ private function find_best_lcp_candidate_with_tag_processor($html)
                 return null;
             }
 
-            $candidates = $this->sort_lcp_candidates_by_area_then_score($candidates);
+            // Whole-document heuristic selection is semantic-first. This mirrors
+            // the actual markup optimization path, where a visible hero/featured
+            // candidate must beat a larger logo, hidden image, or navigation asset.
+            // Area-first ordering remains available for homogeneous/manual scopes.
+            $candidates = $this->sort_lcp_candidates_by_score_then_area($candidates);
             return $candidates[0];
         } catch (\Throwable $e) {
             return null;
@@ -1122,7 +1216,7 @@ private function extract_lcp_primary_image_keys_from_metadata($html)
         $patterns = array(
             '/<meta\b[^>]+(?:property|name|itemprop)\s*=\s*(["\'])(?:og:image(?::url)?|twitter:image(?::src)?|image|thumbnailUrl)\1[^>]+content\s*=\s*(["\'])(.*?)\2[^>]*>/i',
             '/<meta\b[^>]+content\s*=\s*(["\'])(.*?)\1[^>]+(?:property|name|itemprop)\s*=\s*(["\'])(?:og:image(?::url)?|twitter:image(?::src)?|image|thumbnailUrl)\3[^>]*>/i',
-            '/"(?:url|contentUrl|thumbnailUrl|image)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*\.(?:jpe?g|png|webp|avif|svg)(?:[^"\\]*(?:\\.[^"\\]*)*)?)"/i',
+            '/"(?:url|contentUrl|thumbnailUrl|image)"\s*:\s*"([^"\\\\]*(?:\\\\.[^"\\\\]*)*\.(?:jpe?g|png|webp|avif|svg)(?:[^"\\\\]*(?:\\\\.[^"\\\\]*)*)?)"/i',
         );
 
         foreach ($patterns as $index => $pattern) {
@@ -1255,7 +1349,8 @@ private function find_first_wp_post_image_lcp_candidate($html)
             return null;
         }
 
-        if (!preg_match_all('/<img\b[^>]*>/i', $html, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        $image_tags = ultracache_scan_raw_html_tags($html, array('img'));
+        if (empty($image_tags)) {
             return null;
         }
 
@@ -1264,9 +1359,13 @@ private function find_first_wp_post_image_lcp_candidate($html)
         $checked = 0;
         $candidates = array();
 
-        foreach ($matches as $match) {
-            $tag_html = isset($match[0][0]) ? (string) $match[0][0] : '';
-            $offset = isset($match[0][1]) ? (int) $match[0][1] : 0;
+        foreach ($image_tags as $image_tag) {
+            if (!empty($image_tag['closing'])) {
+                continue;
+            }
+
+            $tag_html = isset($image_tag['raw']) ? (string) $image_tag['raw'] : '';
+            $offset = isset($image_tag['offset']) ? (int) $image_tag['offset'] : 0;
             if ('' === $tag_html) {
                 continue;
             }
@@ -1528,6 +1627,33 @@ private function hydrate_lcp_candidate_dimensions(array $candidate, $fallback_ur
         return $candidate;
     }
 
+private function compare_lcp_candidates_by_score_then_area($left, $right)
+    {
+        $left_score = isset($left['score']) ? (int) $left['score'] : 0;
+        $right_score = isset($right['score']) ? (int) $right['score'] : 0;
+        if ($left_score !== $right_score) {
+            return $right_score <=> $left_score;
+        }
+
+        $left_area = isset($left['area']) ? (int) $left['area'] : ((isset($left['width'], $left['height'])) ? ((int) $left['width'] * (int) $left['height']) : 0);
+        $right_area = isset($right['area']) ? (int) $right['area'] : ((isset($right['width'], $right['height'])) ? ((int) $right['width'] * (int) $right['height']) : 0);
+        if ($left_area !== $right_area) {
+            return $right_area <=> $left_area;
+        }
+
+        $left_offset = isset($left['tag_offset']) ? (int) $left['tag_offset'] : (isset($left['offset']) ? (int) $left['offset'] : 0);
+        $right_offset = isset($right['tag_offset']) ? (int) $right['tag_offset'] : (isset($right['offset']) ? (int) $right['offset'] : 0);
+        return $left_offset <=> $right_offset;
+    }
+
+private function sort_lcp_candidates_by_score_then_area(array $candidates)
+    {
+        usort($candidates, function ($left, $right) {
+            return $this->compare_lcp_candidates_by_score_then_area($left, $right);
+        });
+        return $candidates;
+    }
+
 private function compare_lcp_candidates_by_area_then_score($left, $right)
     {
         $left_area = isset($left['area']) ? (int) $left['area'] : ((isset($left['width'], $left['height'])) ? ((int) $left['width'] * (int) $left['height']) : 0);
@@ -1587,34 +1713,10 @@ private function prefer_existing_nextgen_public_image_url($url)
             return $this->prefer_existing_nextgen_revslider_url($url);
         }
 
-        $path = (string) wp_parse_url($url, PHP_URL_PATH);
-        $uploads_marker = $this->get_uploads_public_path_marker();
-        if ('' === $path || false === strpos($path, $uploads_marker)) {
-            return $url;
-        }
-
-        $relative = ltrim((string) substr($path, strpos($path, $uploads_marker) + strlen($uploads_marker)), '/');
-        if ('' === $relative || !preg_match('/\.(png|jpe?g|webp|avif)$/i', $relative)) {
-            return $url;
-        }
-
-        $relative_no_ext = preg_replace('/\.(png|jpe?g|webp|avif)$/i', '', $relative);
-        if (!is_string($relative_no_ext) || '' === $relative_no_ext) {
-            return $url;
-        }
-
-        if (defined('ULTRACACHE_AVIF_DIR') && defined('ULTRACACHE_AVIF_URL')) {
-            $avif_path = trailingslashit(ULTRACACHE_AVIF_DIR) . $relative_no_ext . '.avif';
-            if ($this->is_generated_image_fresh_for_source($avif_path, $url)) {
-                return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_AVIF_URL) . $relative_no_ext . '.avif');
-            }
-        }
-
-        if (defined('ULTRACACHE_WEBP_DIR') && defined('ULTRACACHE_WEBP_URL')) {
-            $webp_path = trailingslashit(ULTRACACHE_WEBP_DIR) . $relative_no_ext . '.webp';
-            if ($this->is_generated_image_fresh_for_source($webp_path, $url)) {
-                return $this->normalize_public_resource_url(trailingslashit(ULTRACACHE_WEBP_URL) . $relative_no_ext . '.webp');
-            }
+        if (function_exists('ultracache_prefer_existing_nextgen_public_image_url')) {
+            $preferred = ultracache_prefer_existing_nextgen_public_image_url($url);
+            $preferred = $this->normalize_public_resource_url($preferred);
+            return '' !== $preferred ? $preferred : $url;
         }
 
         return $url;
@@ -1637,23 +1739,7 @@ private function get_public_image_dimensions($url)
 
 private function extract_candidate_urls_from_srcset($srcset)
     {
-        $srcset = (string) $srcset;
-        if ('' === trim($srcset)) {
-            return array();
-        }
-
-        $urls = array();
-        foreach (array_map('trim', explode(',', $srcset)) as $part) {
-            if ('' === $part) {
-                continue;
-            }
-            $segments = preg_split('/\s+/', $part, 2);
-            if (!empty($segments[0])) {
-                $urls[] = $segments[0];
-            }
-        }
-
-        return array_values(array_unique($urls));
+        return ultracache_extract_srcset_urls((string) $srcset);
     }
 
 private function extract_candidate_urls_from_style($style)
@@ -1722,6 +1808,16 @@ private function lcp_candidate_attribute_value_matches($value, $attribute, $norm
         }
 
         return $this->normalize_public_resource_url($value) === $normalized_raw_url || ('' !== (string) $raw_url && (string) $value === (string) $raw_url);
+    }
+
+private function is_lcp_candidate_video_url($src)
+    {
+        $src = $this->normalize_public_resource_url($src);
+        if ('' === $src || 0 === strpos($src, 'data:')) {
+            return false;
+        }
+
+        return (bool) preg_match('/\.(mp4|m4v|webm|ogv|ogg|mov|qt|m3u8)(?:$|[?#])/i', $src);
     }
 
 private function is_lcp_candidate_image_url($src)

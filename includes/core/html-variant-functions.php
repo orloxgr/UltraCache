@@ -175,3 +175,56 @@ function ultracache_get_accept_header_for_html_bucket($bucket)
             return 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
     }
 }
+
+/**
+ * Return the stable LiteSpeed public-cache tag for this WordPress site.
+ *
+ * @return string
+ */
+function ultracache_get_litespeed_site_tag()
+{
+    $home = function_exists('home_url') ? (string) home_url('/') : '';
+    $blog_id = function_exists('get_current_blog_id') ? (int) get_current_blog_id() : 0;
+    $identity = strtolower(trim($home)) . '|' . (string) $blog_id;
+
+    return 'uc_s_' . substr(hash('sha256', $identity), 0, 20);
+}
+
+/**
+ * Return the stable LiteSpeed public-cache tag for one exact URL.
+ *
+ * @param string $url Public URL.
+ * @return string
+ */
+function ultracache_get_litespeed_url_tag($url)
+{
+    $url = trim((string) $url);
+    if (0 === strpos($url, '/') && 0 !== strpos($url, '//') && function_exists('home_url')) {
+        $url = (string) home_url($url);
+    }
+    $url = function_exists('ultracache_normalize_public_url')
+        ? ultracache_normalize_public_url($url, array('strip_query' => true, 'strip_fragment' => true))
+        : preg_replace('/[?#].*$/', '', $url);
+    $url = is_string($url) ? $url : '';
+    if ('' === $url) {
+        return '';
+    }
+
+    return 'uc_u_' . substr(hash('sha256', $url), 0, 24);
+}
+
+/**
+ * Return the LiteSpeed cache-vary environment value for one HTML bucket.
+ *
+ * @param string $bucket UltraCache HTML bucket.
+ * @return string
+ */
+function ultracache_get_litespeed_vary_value_for_bucket($bucket)
+{
+    $bucket = in_array((string) $bucket, array('orig', 'webp', 'avif'), true)
+        ? (string) $bucket
+        : 'orig';
+
+    return 'uc_' . $bucket;
+}
+

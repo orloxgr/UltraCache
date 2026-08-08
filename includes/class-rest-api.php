@@ -6,6 +6,7 @@ if (!defined('ABSPATH')) {
 require_once __DIR__ . '/rest/class-rest-schemas-trait.php';
 require_once __DIR__ . '/rest/class-rest-routes-trait.php';
 require_once __DIR__ . '/rest/class-rest-cache-trait.php';
+require_once __DIR__ . '/rest/class-rest-litespeed-trait.php';
 require_once __DIR__ . '/rest/class-rest-media-trait.php';
 require_once __DIR__ . '/rest/class-rest-action-queue-trait.php';
 require_once __DIR__ . '/rest/class-rest-profiler-trait.php';
@@ -17,6 +18,7 @@ class Ultra_Cache_Rest_API
     use Ultra_Cache_Rest_Schemas_Trait;
     use Ultra_Cache_Rest_Routes_Trait;
     use Ultra_Cache_Rest_Cache_Trait;
+    use Ultra_Cache_Rest_LiteSpeed_Trait;
     use Ultra_Cache_Rest_Media_Trait;
     use Ultra_Cache_Rest_Action_Queue_Trait;
     use Ultra_Cache_Rest_Profiler_Trait;

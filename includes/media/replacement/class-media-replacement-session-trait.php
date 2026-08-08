@@ -1,6 +1,6 @@
 <?php
 /**
- * UltraCache Media Library replacement jobs, locks, sessions, and recovery state.
+ * UltraCache Media Library replacement workflow locks, sessions, and recovery state.
  */
 
 if (!defined('ABSPATH')) {
@@ -9,55 +9,27 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Media_Replacement_Session_Trait
 {
-    private function get_media_replacement_active_job_option_name()
+    private function get_media_replacement_workflow_state_option_name()
     {
-        return 'ultracache_media_replacement_active_job_v2';
-    }
-
-    private function get_media_replacement_job_id($target_format, $fallback_format, $force_new = false)
-    {
-        $target_format   = in_array($target_format, array('avif', 'webp'), true) ? $target_format : 'webp';
-        $fallback_format = ('avif' === $target_format && 'webp' === $fallback_format) ? 'webp' : 'original';
-        $option_name     = $this->get_media_replacement_active_job_option_name();
-        $saved           = get_option($option_name, array());
-
-        if (!$force_new
-            && is_array($saved)
-            && !empty($saved['job_id'])
-            && isset($saved['target_format'], $saved['fallback_format'])
-            && $target_format === (string) $saved['target_format']
-            && $fallback_format === (string) $saved['fallback_format']
-        ) {
-            return sanitize_key((string) $saved['job_id']);
-        }
-
-        $suffix = strtolower((string) wp_generate_password(5, false, false));
-        $job_id = sanitize_key('media-' . $target_format . '-' . gmdate('Ymd-His') . '-' . $suffix);
-
-        update_option($option_name, array(
-            'job_id'          => $job_id,
-            'target_format'   => $target_format,
-            'fallback_format' => $fallback_format,
-            'created_at'      => current_time('mysql', true),
-        ), false);
-
-        return $job_id;
+        return 'ultracache_media_replacement_workflow_state_v1';
     }
 
     private function get_media_replacement_current_output_policy()
     {
-        $target_format = method_exists($this, 'get_media_output_mode') ? $this->get_media_output_mode() : 'webp';
+        $target_format = method_exists($this, 'get_media_replacement_format') ? $this->get_media_replacement_format() : 'webp';
         $target_format = in_array($target_format, array('avif', 'webp'), true) ? $target_format : 'webp';
 
-        $fallback_format = method_exists($this, 'get_media_fallback_format') ? $this->get_media_fallback_format() : 'original';
-        $fallback_format = ('avif' === $target_format && 'webp' === $fallback_format) ? 'webp' : 'original';
+        $fallback_format = 'original';
+        $saved = $this->get_media_replacement_workflow_state();
+        $format_lock = $this->get_media_replacement_format_lock_state($saved);
+        if (!empty($format_lock['locked'])) {
+            $target_format = (string) $format_lock['targetFormat'];
+        }
+        if ('' !== (string) ($saved['created_at'] ?? '') && $target_format === (string) ($saved['target_format'] ?? '')) {
+            $fallback_format = ('avif' === $target_format && 'webp' === (string) ($saved['fallback_format'] ?? '')) ? 'webp' : 'original';
+        }
 
         return array($target_format, $fallback_format);
-    }
-
-    private function get_media_replacement_readiness_option_name()
-    {
-        return 'ultracache_media_replacement_readiness_v1';
     }
 
     private function acquire_media_replacement_readiness_lock($target_format, $ttl = 45)
@@ -196,12 +168,28 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
     }
 
 
+
+    private function media_replacement_workflow_exists(array $state)
+    {
+        $state = $this->normalize_media_replacement_workflow_state($state);
+        if ($this->media_replacement_has_registry_rows()) {
+            return true;
+        }
+
+        return '' !== (string) $state['active_step']
+            || !in_array((string) $state['run_status'], array('', 'idle'), true)
+            || '' !== (string) $state['prepare_started_at']
+            || '' !== (string) $state['do_started_at']
+            || '' !== (string) $state['verify_started_at']
+            || '' !== (string) $state['delete_started_at'];
+    }
+
     private function get_media_replacement_resume_stage(array $state, array $readiness = array())
     {
-        $state = $this->normalize_media_replacement_job_state($state);
+        $state = $this->normalize_media_replacement_workflow_state($state);
         $active_step = sanitize_key((string) $state['active_step']);
 
-        if ('' === $state['job_id']) {
+        if (!$this->media_replacement_workflow_exists($state)) {
             $readiness_status = sanitize_key((string) ($readiness['status'] ?? ''));
             return in_array($readiness_status, array('scanning', 'paused'), true) ? 'readiness' : '';
         }
@@ -220,7 +208,7 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
         ), true)) {
             return 'prepare';
         }
-        if (in_array($active_step, array('metadata_apply', 'database_apply', 'theme_css_apply'), true)) {
+        if (in_array($active_step, array('metadata_apply', 'database_recovery_scan', 'database_recovery_match', 'database_recovery_preview', 'database_apply', 'theme_css_apply'), true)) {
             return 'do';
         }
         if (in_array($active_step, array('destination_verify', 'metadata_verify', 'database_verify', 'theme_css_verify', 'cleanup_preview', 'verify_failed'), true)) {
@@ -235,13 +223,16 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
 
     private function media_replacement_has_destructive_progress(array $state)
     {
-        $state = $this->normalize_media_replacement_job_state($state);
+        $state = $this->normalize_media_replacement_workflow_state($state);
         if ('' !== $state['do_started_at'] || '' !== $state['do_completed_at'] || '' !== $state['verify_started_at'] || '' !== $state['delete_started_at']) {
             return true;
         }
 
         return in_array($state['active_step'], array(
             'metadata_apply',
+            'database_recovery_scan',
+            'database_recovery_match',
+            'database_recovery_preview',
             'database_apply',
             'theme_css_apply',
             'do_complete',
@@ -259,6 +250,21 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
         ), true);
     }
 
+    private function get_media_replacement_format_lock_state(array $state)
+    {
+        $state = $this->normalize_media_replacement_workflow_state($state);
+        $completed = 'complete' === $state['workflow_stage'] || 'delete_complete' === $state['active_step'];
+        $locked = $this->media_replacement_workflow_exists($state) && !$completed && $this->media_replacement_has_destructive_progress($state);
+
+        return array(
+            'locked'       => $locked,
+            'targetFormat' => $locked ? $state['target_format'] : '',
+            'message'      => $locked
+                ? __('Image replacement format is locked because the destructive Do stage has started. Complete the current workflow or use the existing recovery path before changing it.', 'ultracache')
+                : '',
+        );
+    }
+
     private function reconcile_media_replacement_recovery_state()
     {
         $session = $this->get_media_library_replacement_session_status();
@@ -273,8 +279,8 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             $this->update_media_replacement_readiness_state($readiness);
         }
 
-        $state = $this->normalize_media_replacement_job_state($this->get_media_replacement_active_job_data());
-        if ('' === $state['job_id'] || 'running' !== $state['run_status']) {
+        $state = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
+        if (!$this->media_replacement_workflow_exists($state) || 'running' !== $state['run_status']) {
             return;
         }
 
@@ -293,28 +299,28 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             ucfirst($resume_stage)
         );
         $state['workflow_updated_at'] = $now;
-        $this->update_media_replacement_active_job_state($state);
+        $this->update_media_replacement_workflow_state($state);
     }
 
     private function get_media_replacement_recovery_status(array $state = array())
     {
         $state = empty($state)
-            ? $this->normalize_media_replacement_job_state($this->get_media_replacement_active_job_data())
-            : $this->normalize_media_replacement_job_state($state);
+            ? $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state())
+            : $this->normalize_media_replacement_workflow_state($state);
         $readiness = $this->get_media_library_replacement_readiness_status();
         $session = $this->get_media_library_replacement_session_status();
         $resume_stage = $this->get_media_replacement_resume_stage($state, $readiness);
         $resumable = '' !== $resume_stage && empty($session['active']) && ('paused' === $state['run_status'] || ('readiness' === $resume_stage && 'paused' === (string) ($readiness['status'] ?? '')));
-        $has_job = '' !== $state['job_id'];
+        $has_workflow = $this->media_replacement_workflow_exists($state);
         $destructive_progress = $this->media_replacement_has_destructive_progress($state);
-        $can_restart = $has_job && !$destructive_progress && empty($session['active']);
+        $can_restart = $has_workflow && !$destructive_progress && empty($session['active']);
         $restart_reason = '';
-        if (!$has_job) {
-            $restart_reason = __('There is no replacement plan to restart.', 'ultracache');
+        if (!$has_workflow) {
+            $restart_reason = __('There is no Media Library replacement workflow to restart.', 'ultracache');
         } elseif (!empty($session['active'])) {
-            $restart_reason = __('Pause the active replacement job before restarting the plan.', 'ultracache');
+            $restart_reason = __('Pause the active replacement workflow before restarting the plan.', 'ultracache');
         } elseif ($destructive_progress) {
-            $restart_reason = __('Restart is blocked after Do has started. Resume the current job or use the explicit rollback/uninstall recovery path.', 'ultracache');
+            $restart_reason = __('Restart is blocked after Do has started. Resume the current workflow or use the explicit rollback/uninstall recovery path.', 'ultracache');
         }
 
         return array(
@@ -336,30 +342,38 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             return array_merge($this->get_media_library_replacement_workflow_status(), array(
                 'success' => false,
                 'blocked' => true,
-                'message' => __('Pause the active Media Library replacement job before restarting the plan.', 'ultracache'),
+                'message' => __('Pause the active Media Library replacement workflow before restarting the plan.', 'ultracache'),
             ));
         }
 
-        $state = $this->normalize_media_replacement_job_state($this->get_media_replacement_active_job_data());
-        if ('' === $state['job_id']) {
+        $state = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
+        if (!$this->media_replacement_workflow_exists($state)) {
             return array_merge($this->get_media_library_replacement_workflow_status(), array(
                 'success' => true,
-                'message' => __('There is no active replacement plan to restart.', 'ultracache'),
+                'message' => __('There is no Media Library replacement workflow to restart.', 'ultracache'),
             ));
         }
         if ($this->media_replacement_has_destructive_progress($state)) {
             return array_merge($this->get_media_library_replacement_workflow_status(), array(
                 'success' => false,
                 'blocked' => true,
-                'message' => __('Restart is blocked because Do has already started. Resume the current job or use the explicit rollback/uninstall recovery path.', 'ultracache'),
+                'message' => __('Restart is blocked because Do has already started. Resume the current workflow or use the explicit rollback/uninstall recovery path.', 'ultracache'),
             ));
         }
 
-        $this->reset_media_replacement_active_job_for_restart($state);
+        $reset = $this->reset_media_replacement_workflow_for_restart($state);
+        if (empty($reset['success'])) {
+            return array_merge($this->get_media_library_replacement_workflow_status(), array(
+                'success' => false,
+                'blocked' => true,
+                'message' => (string) ($reset['message'] ?? __('The Media Library replacement workflow could not be restarted.', 'ultracache')),
+            ));
+        }
+
         return array_merge($this->get_media_library_replacement_workflow_status(), array(
             'success' => true,
             'restarted' => true,
-            'message' => __('The replacement plan was cleared. The completed readiness inventory was preserved; Prepare will create a new job only when you start it explicitly.', 'ultracache'),
+            'message' => __('The Media Library replacement workflow was cleared. Start Prepare to build the singleton plan again from the beginning.', 'ultracache'),
         ));
     }
 
@@ -377,8 +391,8 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
 
     private function update_media_replacement_prepare_run_status($run_status, $active_step = 'prepare')
     {
-        $saved = $this->normalize_media_replacement_job_state($this->get_media_replacement_active_job_data());
-        if ('' === $saved['job_id']) {
+        $saved = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
+        if (!$this->media_replacement_workflow_exists($saved)) {
             return;
         }
 
@@ -413,17 +427,17 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             $saved['paused_at'] = current_time('mysql', true);
         }
         $saved['updated_at'] = current_time('mysql', true);
-        $this->update_media_replacement_active_job_state($saved);
+        $this->update_media_replacement_workflow_state($saved);
     }
 
     private function update_media_replacement_do_run_status($run_status, $active_step = 'do')
     {
-        $saved = $this->normalize_media_replacement_job_state($this->get_media_replacement_active_job_data());
-        if ('' === $saved['job_id']) {
+        $saved = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
+        if (!$this->media_replacement_workflow_exists($saved)) {
             return;
         }
 
-        $do_steps = array('metadata_apply', 'database_apply', 'theme_css_apply');
+        $do_steps = array('metadata_apply', 'database_recovery_scan', 'database_recovery_match', 'database_recovery_preview', 'database_apply', 'theme_css_apply');
         $run_status = in_array((string) $run_status, array('running', 'paused', 'failed', 'completed'), true) ? (string) $run_status : 'idle';
 
         // Acquiring a Do lease must never bypass the hard pre-Do guard by advancing
@@ -432,7 +446,7 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             if ('running' === $run_status) {
                 $saved['heartbeat_at'] = current_time('mysql', true);
                 $saved['updated_at'] = current_time('mysql', true);
-                $this->update_media_replacement_active_job_state($saved);
+                $this->update_media_replacement_workflow_state($saved);
             }
             return;
         }
@@ -453,26 +467,26 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             $saved['paused_at'] = current_time('mysql', true);
         }
         $saved['updated_at'] = current_time('mysql', true);
-        $this->update_media_replacement_active_job_state($saved);
+        $this->update_media_replacement_workflow_state($saved);
     }
 
     private function update_media_replacement_verify_run_status($run_status)
     {
-        $saved = $this->normalize_media_replacement_job_state($this->get_media_replacement_active_job_data());
-        if ('' === $saved['job_id']) {
+        $saved = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
+        if (!$this->media_replacement_workflow_exists($saved)) {
             return;
         }
 
         $verify_steps = array('destination_verify', 'metadata_verify', 'database_verify', 'theme_css_verify', 'cleanup_preview');
         $run_status = in_array((string) $run_status, array('running', 'paused', 'failed', 'completed'), true) ? (string) $run_status : 'idle';
 
-        // Acquiring the Verify lease must not advance a completed Do job before the
+        // Acquiring the Verify lease must not advance a completed Do phase before the
         // first Verify chunk validates the actual server state.
         if ('do_complete' === $saved['active_step']) {
             if ('running' === $run_status) {
                 $saved['heartbeat_at'] = current_time('mysql', true);
                 $saved['updated_at'] = current_time('mysql', true);
-                $this->update_media_replacement_active_job_state($saved);
+                $this->update_media_replacement_workflow_state($saved);
             }
             return;
         }
@@ -495,26 +509,26 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             $saved['paused_at'] = current_time('mysql', true);
         }
         $saved['updated_at'] = current_time('mysql', true);
-        $this->update_media_replacement_active_job_state($saved);
+        $this->update_media_replacement_workflow_state($saved);
     }
 
     private function update_media_replacement_delete_run_status($run_status)
     {
-        $saved = $this->normalize_media_replacement_job_state($this->get_media_replacement_active_job_data());
-        if ('' === $saved['job_id']) {
+        $saved = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
+        if (!$this->media_replacement_workflow_exists($saved)) {
             return;
         }
 
         $run_status = in_array((string) $run_status, array('running', 'paused', 'failed', 'completed'), true) ? (string) $run_status : 'idle';
 
-        // Acquiring the Delete lease must not advance a verified job before the
-        // first destructive chunk revalidates generation, policy, verification,
-        // cleanup facts, and the fresh confirmation token.
+        // Acquiring the Delete lease must not advance a verified workflow before the
+        // first destructive chunk revalidates policy, verification,
+        // cleanup facts, and the fresh one-time start-confirmation token.
         if ('verify_complete' === $saved['active_step']) {
             if ('running' === $run_status) {
                 $saved['heartbeat_at'] = current_time('mysql', true);
                 $saved['updated_at'] = current_time('mysql', true);
-                $this->update_media_replacement_active_job_state($saved);
+                $this->update_media_replacement_workflow_state($saved);
             }
             return;
         }
@@ -534,7 +548,7 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             $saved['paused_at'] = current_time('mysql', true);
         }
         $saved['updated_at'] = current_time('mysql', true);
-        $this->update_media_replacement_active_job_state($saved);
+        $this->update_media_replacement_workflow_state($saved);
     }
 
     private function update_media_replacement_session_run_status($run_status, $active_step)
@@ -627,7 +641,7 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
                     'success' => false,
                     'blocked' => true,
                     'reason'  => 'replacement_session_active',
-                    'message' => __('Another Media Library replacement job is already running.', 'ultracache'),
+                    'message' => __('The Media Library replacement workflow is already running in another dashboard.', 'ultracache'),
                 ), $state);
             }
 
@@ -648,7 +662,7 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
                     'success' => false,
                     'blocked' => true,
                     'reason'  => 'replacement_session_active',
-                    'message' => __('Another Media Library replacement job acquired the lease first.', 'ultracache'),
+                    'message' => __('The Media Library replacement workflow acquired the dashboard lease elsewhere first.', 'ultracache'),
                 ), $this->get_media_library_replacement_session_status());
             }
             $this->update_media_replacement_session_run_status('running', $active_step);
